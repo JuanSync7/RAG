@@ -1,0 +1,30 @@
+# Weaviate data
+.weaviate_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Processed data (regenerable)
+processed/*.json
+processed/*.md
+!processed/README.md
+
+# Knowledge graph (regenerable)
+.knowledge_graph.json
+
+# Logs
+logs/*.log
+!logs/README.md
+
+# Context cache
+.context/
+
+# Environment
+.env
