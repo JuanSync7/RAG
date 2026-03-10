@@ -56,28 +56,34 @@ The spec defines 7 explicit assumptions (Section 1.6) that bound the operating e
 
 ## 3) Pipeline Overview (13 Stages)
 
-```mermaid
-flowchart TD
-    S([Source Document]) --> A[1. Document Ingestion]
-    A --> B[2. Structure Detection]
-    B --> C[3. Multimodal Processing]:::opt
-    C --> D[4. Text Cleaning]
-    D --> E[5. Document Refactoring]:::opt
-    E --> F[6. Chunking]
-    F --> G[7. Chunk Enrichment]
-    G --> H[8. Metadata Generation]
-    H --> I[9. Cross-Reference Extraction]:::opt
-    I --> J[10. KG Extraction]:::opt
-    J --> K[11. Quality Validation]
-    K --> L[12. Embedding & Storage]
-    L --> M[13. KG Storage]:::opt
-    M --> V[(Vector DB)]
-    M -.-> KG[(Graph Store)]
+```
+    Source Document (filesystem path)
+              │
+              ▼
+    ┌────────────────────────────────────┐
+    │  [1]  Document Ingestion           │
+    │  [2]  Structure Detection          │
+    │  [3]  Multimodal Processing    *   │
+    │  [4]  Text Cleaning                │
+    │  [5]  Document Refactoring     *   │
+    │  [6]  Chunking                     │
+    │  [7]  Chunk Enrichment             │
+    │  [8]  Metadata Generation          │
+    │  [9]  Cross-Reference Extr.    *   │
+    │  [10] KG Extraction            *   │
+    │  [11] Quality Validation           │
+    │  [12] Embedding & Storage          │
+    │  [13] KG Storage               *   │
+    └───────────────┬────────────────────┘
+                    │
+           ┌────────┴────────┐
+           ▼                 ▼
+      Vector DB        Graph Store
 
-    classDef opt stroke-dasharray: 5 5
+      * = optional / configurable
 ```
 
-*Dashed stages are optional/configurable. All stages share a common state object (`PipelineDocument`), write bounded outputs, and support fail-safe fallback behavior to avoid batch-halting failures.*
+All stages share a common state object (`PipelineDocument`), write bounded outputs, and support fail-safe fallback behavior to avoid batch-halting failures.
 
 ---
 
