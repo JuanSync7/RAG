@@ -10,6 +10,7 @@
 import { byId } from "./dom";
 import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
+import { refreshJob } from "./ingest-stream";
 
 export interface JobSummary {
     job_id: string;
@@ -90,12 +91,21 @@ export function renderJob(job: JobSummary): void {
 }
 
 export async function cancelJob(jobId: string): Promise<void> {
+    const meta = jobMeta.get(jobId);
+    if (meta) {
+        renderJob({ ...meta, status: "cancelling" });
+    }
+    showToast("Cancelling job…");
     try {
-        await fetch(apiBase() + `/api/v1/ingest/jobs/${jobId}/cancel`, {
+        const res = await fetch(apiBase() + `/api/v1/ingest/jobs/${jobId}/cancel`, {
             method: "POST",
             headers: authHeaders(),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await refreshJob(jobId);
+        showToast("Cancel sent");
     } catch (err) {
         showToast(`Cancel failed: ${String(err)}`);
+        if (meta) renderJob(meta);
     }
 }

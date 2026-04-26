@@ -167,17 +167,22 @@ export function renderTiming(timing: TimingPayload | null): void {
 export function rerankSourceLink(metadata: Record<string, unknown>): { label: string; href: string } {
     const source = String(metadata.source ?? "").trim();
     const sourceUri = String(metadata.source_uri ?? "").trim();
+    const sourceKey = String(metadata.source_key ?? "").trim();
     const chunkIdxRaw = Number(metadata.chunk_index);
     const chunkIdx = Number.isFinite(chunkIdxRaw) ? chunkIdxRaw : null;
     const start = Number(metadata.original_char_start);
     const end = Number(metadata.original_char_end);
     const params = new URLSearchParams();
+    if (!sourceKey && !sourceUri && !source) {
+        return { label: "unknown", href: "" };
+    }
+    if (sourceKey) {
+        params.set("source_key", sourceKey);
+    }
     if (sourceUri) {
         params.set("source_uri", sourceUri);
     } else if (source) {
         params.set("source", source);
-    } else {
-        return { label: "unknown", href: "" };
     }
     if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
         params.set("start", String(start));
@@ -186,7 +191,7 @@ export function rerankSourceLink(metadata: Record<string, unknown>): { label: st
     if (chunkIdx !== null && chunkIdx >= 0) {
         params.set("chunk", String(chunkIdx + 1));
     }
-    const display = sourceUri || source;
+    const display = sourceUri || source || sourceKey;
     return {
         label: display,
         href: `/console/source-document/view?${params.toString()}`,

@@ -6,6 +6,7 @@
 
 import { byId, escHtml } from "./dom";
 import { api } from "./api";
+import { formatApiPayload } from "./markdown";
 import { refs } from "./refs";
 import { state, setActiveConversation } from "./state";
 import {
@@ -194,18 +195,20 @@ export async function submitSlashCommand(text: string): Promise<void> {
             refs.thread.innerHTML = "";
             setEmptyState(true);
         } else if (action === "refresh_health") {
-            const h = result.data?.health as Record<string, unknown> | undefined;
-            const status = h ? JSON.stringify(h, null, 2) : "Health data unavailable";
-            appendSystemMsg("Health:\n```json\n" + status + "\n```");
+            const h = result.data?.health;
+            appendSystemMsg("**Health**\n\n" + (h ? formatApiPayload(h) : "_unavailable_"));
         } else if (action === "render_help") {
             const cmds = result.data?.commands as SlashCommand[] | undefined;
             if (cmds?.length) {
-                const lines = cmds.map((c) => `**/${c.name}** — ${c.description}`).join("\n");
-                appendSystemMsg("Available commands:\n\n" + lines);
+                const lines = cmds.map((c) => `- **/${c.name}** — ${c.description}`).join("\n");
+                appendSystemMsg("**Available commands**\n\n" + lines);
             }
+        } else if (result.message) {
+            appendSystemMsg(String(result.message));
+        } else if (result.data && Object.keys(result.data).length) {
+            appendSystemMsg(formatApiPayload(result.data));
         } else {
-            const msg = String(result.message ?? "Command executed.");
-            if (msg) appendSystemMsg(msg);
+            appendSystemMsg("Command executed.");
         }
     } catch (err) {
         appendErrorMsg("Command failed: " + String(err));

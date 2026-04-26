@@ -29,6 +29,7 @@ from server.schemas import (
     ConversationCreateRequest,
     ConversationHistoryResponse,
     ConversationMetaResponse,
+    ConversationTitleUpdateRequest,
 )
 from server.workflows import RAG_QUERY_TASK_QUEUE, RAGQueryWorkflow
 from src.platform import (
@@ -52,6 +53,40 @@ from src.platform.security import resolve_tenant_id
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json_mod.dumps(data).decode()}\n\n"
+
+
+def _derive_title_from_query(query: str, *, max_len: int = 60) -> str:
+    """Condense the user's first query into a short conversation title."""
+    text = " ".join(str(query or "").split())
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rsplit(" ", 1)[0] or text[:max_len]
+    return cut.rstrip(".,;:!?-") + "…"
+
+
+def _autotitle_if_new(memory, *, tenant_id: str, principal, conv, query: str):
+    """If the conversation is brand new, set its title from the first query.
+
+    Returns the (possibly updated) ConversationMeta. Safe no-op otherwise.
+    """
+    if conv.message_count != 0:
+        return conv
+    existing = (conv.title or "").strip()
+    if existing and existing != "New conversation":
+        return conv
+    derived = _derive_title_from_query(query)
+    if not derived:
+        return conv
+    updated = memory.update_conversation_title(
+        tenant_id=tenant_id,
+        subject=principal.subject,
+        project_id=principal.project_id,
+        conversation_id=conv.conversation_id,
+        title=derived,
+    )
+    return updated or conv
 
 
 def _source_refs(results: list) -> list[dict]:
@@ -185,6 +220,13 @@ async def run_query(
         )
         MEMORY_OP_MS.labels(operation="ensure_conversation").observe(
             (time.perf_counter() - mem_start) * 1000
+        )
+        conv = _autotitle_if_new(
+            memory,
+            tenant_id=tenant_id,
+            principal=principal,
+            conv=conv,
+            query=request.query,
         )
         payload = request.model_dump(exclude_none=True)
         payload["tenant_id"] = tenant_id
@@ -336,6 +378,13 @@ def create_query_router(
         )
         MEMORY_OP_MS.labels(operation="ensure_conversation").observe(
             (time.perf_counter() - mem_start) * 1000
+        )
+        conv = _autotitle_if_new(
+            memory,
+            tenant_id=tenant_id,
+            principal=principal,
+            conv=conv,
+            query=request.query,
         )
         mem_ctx_text = ""
         mem_recent_turns: list[dict] = []
@@ -690,6 +739,29 @@ def create_query_router(
             conversation_id=conversation_id,
         )
         return {"conversation_id": conversation_id, "deleted": deleted}
+
+    @router.patch(
+        "/conversations/{conversation_id}",
+        response_model=ConversationMetaResponse,
+        responses=standard_error_responses,
+    )
+    async def update_conversation(
+        conversation_id: str,
+        payload: ConversationTitleUpdateRequest,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        memory = get_conversation_memory()
+        meta = memory.update_conversation_title(
+            tenant_id=principal.tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conversation_id,
+            title=payload.title,
+        )
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return ConversationMetaResponse(**conversation_meta_to_dict(meta))
 
     @router.get("/metrics")
     async def metrics():

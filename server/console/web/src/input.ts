@@ -6,7 +6,7 @@
 import { byId } from "./dom";
 import { refs } from "./refs";
 import { state } from "./state";
-import { sendQuery } from "./streaming";
+import { sendQuery, cancelStream } from "./streaming";
 import {
     closeCmdPicker,
     closeDropdown,
@@ -32,8 +32,12 @@ function toggleCmdPicker(): void {
 }
 
 function triggerSend(): void {
+    if (state.isStreaming) {
+        cancelStream();
+        return;
+    }
     const text = refs.ta.value.trim();
-    if (!text || state.isStreaming) return;
+    if (!text) return;
     closeDropdown();
     refs.ta.value = "";
     refs.ta.style.height = "auto";
@@ -49,11 +53,28 @@ export function initInput(): void {
 
     refs.ta.addEventListener("input", () => {
         refs.ta.style.height = "auto";
-        refs.ta.style.height = Math.min(refs.ta.scrollHeight, 120) + "px";
+        refs.ta.style.height = Math.min(refs.ta.scrollHeight, 220) + "px";
         handleSlashInput();
     });
 
+    let lastEscAt = 0;
     refs.ta.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+            const now = Date.now();
+            if (refs.dropdown.classList.contains("open")) {
+                closeDropdown();
+                lastEscAt = 0;
+                return;
+            }
+            if (now - lastEscAt < 400 && refs.ta.value) {
+                refs.ta.value = "";
+                refs.ta.style.height = "auto";
+                lastEscAt = 0;
+            } else {
+                lastEscAt = now;
+            }
+            return;
+        }
         if (!refs.dropdown.classList.contains("open")) {
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -74,7 +95,6 @@ export function initInput(): void {
             const vis = state.allSlashItems.filter((x) => x.style.display !== "none");
             if (vis[state.slashSelIdx]) executeCmd(vis[state.slashSelIdx].dataset.cmd || "");
         }
-        if (e.key === "Escape") closeDropdown();
     });
 
     byId("sendBtn").addEventListener("click", triggerSend);

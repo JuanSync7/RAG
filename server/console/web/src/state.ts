@@ -24,6 +24,9 @@ export interface ConsoleState {
     attachments: AttachmentChip[];
     userScrolledUp: boolean;
     streamAbortCtrl: AbortController | null;
+    pendingUserGroup: HTMLElement | null;
+    pendingAssistantGroup: HTMLElement | null;
+    pendingQueryText: string;
     convMenuTargetId: string | null;
     convMenuTargetTitle: string;
     renameTargetId: string | null;
@@ -40,6 +43,9 @@ export const state: ConsoleState = {
     attachments: [],
     userScrolledUp: false,
     streamAbortCtrl: null,
+    pendingUserGroup: null,
+    pendingAssistantGroup: null,
+    pendingQueryText: "",
     convMenuTargetId: null,
     convMenuTargetTitle: "",
     renameTargetId: null,

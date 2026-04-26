@@ -199,6 +199,18 @@ class ConversationMemoryProvider:
         """Delete a conversation and its turns. Returns True if deleted, False if not found."""
         raise NotImplementedError
 
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        """Update a conversation's title. Returns updated meta, or None if not found."""
+        raise NotImplementedError
+
 
 class NoopConversationMemory(ConversationMemoryProvider):
     """No-op provider when memory is disabled."""
@@ -296,6 +308,17 @@ class NoopConversationMemory(ConversationMemoryProvider):
         conversation_id: str,
     ) -> bool:
         return False
+
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        return None
 
 
 class RedisConversationMemory(ConversationMemoryProvider):
@@ -611,6 +634,31 @@ class RedisConversationMemory(ConversationMemoryProvider):
         self._client.delete(turns_key)
         self._client.zrem(index_key, conversation_id)
         return True
+
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, conversation_id)
+        if not self._client.exists(meta_key):
+            return None
+        cleaned = (title or "").strip()[:200] or "New conversation"
+        now = self._now()
+        self._client.hset(
+            meta_key,
+            mapping={
+                "title": cleaned,
+                "updated_at_ms": now,
+            },
+        )
+        raw = self._client.hgetall(meta_key)
+        return self._meta_from_hash(raw, conversation_id)
 
 
 _MEMORY: ConversationMemoryProvider | None = None

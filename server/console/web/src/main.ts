@@ -12,6 +12,7 @@ import { byId } from "./admin-api.js";
 import { initSlashCommandHints, renderMarkdown, renderTiming } from "./admin-render.js";
 import {
     bindConversations,
+    bindRenameModal,
     loadConversationHistory,
     loadConversations,
 } from "./admin-conversations.js";
@@ -47,6 +48,7 @@ function initializeConsoleUi(): void {
     initTabs();
     bindQuery();
     bindConversations();
+    bindRenameModal();
     bindIngest();
     bindHealth();
     bindAdmin();

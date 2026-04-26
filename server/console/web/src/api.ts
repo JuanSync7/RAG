@@ -1,6 +1,7 @@
 // @summary
-// Auth + JSON API layer for the user console.
-// Reads the saved settings from localStorage to construct authenticated fetch calls.
+// JSON API layer for the user console. The console is served from the same
+// origin as the API, so requests are relative and unauthenticated by default
+// (backend dev mode falls back to anonymous when no API keys/JWT are required).
 // Exports: getSettings, authHeaders, apiBase, api
 // Deps: (none)
 // @end-summary
@@ -11,20 +12,11 @@ export function getSettings(): Record<string, unknown> {
 }
 
 export function authHeaders(): Record<string, string> {
-    const s = getSettings();
-    const token = (s.auth_token as string | undefined) || "";
-    const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) {
-        h["Authorization"] = `Bearer ${token}`;
-        h["x-api-key"] = token;
-    }
-    return h;
+    return { "Content-Type": "application/json" };
 }
 
 export function apiBase(): string {
-    const s = getSettings();
-    const ep = ((s.api_endpoint as string | undefined) || "").trim();
-    return ep ? ep.replace(/\/$/, "") : "";
+    return "";
 }
 
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {

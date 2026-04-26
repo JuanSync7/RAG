@@ -71,6 +71,48 @@ function splitInlineList(line: string): string {
     return subLines.length > 1 ? subLines.join("\n") : line;
 }
 
+const PIPE_ROW_RE = /^\s*\|.*\|\s*$/;
+const PIPE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/;
+
+function countPipeColumns(line: string): number {
+    const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return trimmed.split("|").length;
+}
+
+/**
+ * Inject a synthetic header separator when a chunk fragment contains a block
+ * of pipe-rows without the GFM `|---|---|` separator. Without this, retrieval
+ * chunks that begin mid-table render as one collapsed paragraph.
+ */
+function fixOrphanPipeTables(text: string): string {
+    const lines = text.split("\n");
+    const out: string[] = [];
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        if (PIPE_ROW_RE.test(line)) {
+            let j = i;
+            while (j < lines.length && PIPE_ROW_RE.test(lines[j])) j++;
+            const block = lines.slice(i, j);
+            const hasSep = block.length >= 2 && PIPE_SEP_RE.test(block[1]);
+            if (!hasSep && block.length >= 2) {
+                const cols = countPipeColumns(block[0]);
+                const sep = "|" + " --- |".repeat(cols);
+                out.push(block[0]);
+                out.push(sep);
+                for (let k = 1; k < block.length; k++) out.push(block[k]);
+            } else {
+                out.push(...block);
+            }
+            i = j;
+            continue;
+        }
+        out.push(line);
+        i++;
+    }
+    return out.join("\n");
+}
+
 /**
  * Pre-process LLM output so list items always start on their own line.
  * Code fences are split out first so their content is never modified.
@@ -79,7 +121,8 @@ export function normalizeMarkdown(raw: string): string {
     const segments = raw.split(/(```[\s\S]*?```)/);
     return segments.map((seg, i) => {
         if (i % 2 === 1) return seg;
-        return seg.split("\n").map(splitInlineList).join("\n");
+        const listFixed = seg.split("\n").map(splitInlineList).join("\n");
+        return fixOrphanPipeTables(listFixed);
     }).join("");
 }
 
@@ -89,4 +132,64 @@ export function normalizeMarkdown(raw: string): string {
  */
 export function parseMarkdown(raw: string): string {
     return DOMPurify.sanitize(marked.parse(normalizeMarkdown(raw)) as string);
+}
+
+function humanizeKey(key: string): string {
+    return key
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function isPrimitive(v: unknown): boolean {
+    return v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+}
+
+function formatPrimitive(v: unknown): string {
+    if (v == null) return "_—_";
+    if (typeof v === "string") return v.trim() || "_(empty)_";
+    return String(v);
+}
+
+function formatValue(value: unknown, depth: number): string {
+    if (depth > 4) return "_…_";
+    if (isPrimitive(value)) return formatPrimitive(value);
+
+    if (Array.isArray(value)) {
+        if (!value.length) return "_(empty list)_";
+        if (value.every(isPrimitive)) {
+            return "\n" + value.map((v) => `- ${formatPrimitive(v)}`).join("\n");
+        }
+        return "\n" + value.map((v) => {
+            const inner = formatValue(v, depth + 1).replace(/\n/g, "\n  ");
+            return `- ${inner.startsWith("\n") ? inner.trimStart() : inner}`;
+        }).join("\n");
+    }
+
+    if (typeof value === "object") {
+        const entries = Object.entries(value as Record<string, unknown>);
+        if (!entries.length) return "_(empty)_";
+        const lines = entries.map(([k, v]) => {
+            const label = `**${humanizeKey(k)}**`;
+            if (isPrimitive(v)) return `- ${label}: ${formatPrimitive(v)}`;
+            const inner = formatValue(v, depth + 1).replace(/\n/g, "\n  ");
+            return `- ${label}:${inner.startsWith("\n") ? inner : "\n  " + inner}`;
+        });
+        return (depth === 0 ? "" : "\n") + lines.join("\n");
+    }
+
+    return String(value);
+}
+
+/**
+ * Coerce arbitrary API payloads into a markdown-friendly string for display.
+ * Strings pass through (assumed to be markdown). Objects/arrays render as
+ * humanized bullet lists. null/undefined become empty.
+ */
+export function formatApiPayload(value: unknown): string {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return formatValue(value, 0);
 }

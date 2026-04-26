@@ -15,8 +15,10 @@ import { initSidebar } from "./sidebar";
 import { initSettings, loadSettings } from "./settings";
 import { initConversations, loadConversationHistory, loadConversations } from "./conversations";
 import { loadCommands } from "./slash";
+import { loadModelInfo } from "./modelBadge";
 import { initAttachments } from "./attachments";
 import { initInput } from "./input";
+import { initIngestView } from "./ingest";
 
 document.addEventListener("DOMContentLoaded", () => {
     populateRefs();
@@ -32,11 +34,13 @@ document.addEventListener("DOMContentLoaded", () => {
     initConversations();
     initAttachments();
     initInput();
+    initIngestView();
 
     // Restore persisted UI state.
     loadSettings();
 
     // Kick off parallel data loads.
+    void loadModelInfo();
     void Promise.all([loadCommands(), loadConversations()]).then(() => {
         if (state.activeConversationId) {
             void loadConversationHistory(state.activeConversationId);

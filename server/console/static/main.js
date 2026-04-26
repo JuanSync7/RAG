@@ -223,17 +223,22 @@ function renderTiming(timing) {
 function rerankSourceLink(metadata) {
   const source = String(metadata.source ?? "").trim();
   const sourceUri = String(metadata.source_uri ?? "").trim();
+  const sourceKey = String(metadata.source_key ?? "").trim();
   const chunkIdxRaw = Number(metadata.chunk_index);
   const chunkIdx = Number.isFinite(chunkIdxRaw) ? chunkIdxRaw : null;
   const start = Number(metadata.original_char_start);
   const end = Number(metadata.original_char_end);
   const params = new URLSearchParams();
+  if (!sourceKey && !sourceUri && !source) {
+    return { label: "unknown", href: "" };
+  }
+  if (sourceKey) {
+    params.set("source_key", sourceKey);
+  }
   if (sourceUri) {
     params.set("source_uri", sourceUri);
   } else if (source) {
     params.set("source", source);
-  } else {
-    return { label: "unknown", href: "" };
   }
   if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
     params.set("start", String(start));
@@ -242,7 +247,7 @@ function rerankSourceLink(metadata) {
   if (chunkIdx !== null && chunkIdx >= 0) {
     params.set("chunk", String(chunkIdx + 1));
   }
-  const display = sourceUri || source;
+  const display = sourceUri || source || sourceKey;
   return {
     label: display,
     href: `/console/source-document/view?${params.toString()}`
@@ -471,9 +476,73 @@ function hideConvContextMenu() {
     setConvMenuEscapeHandler(null);
   }
 }
+function startBlankConversation() {
+  setActiveConversation(null);
+  const input = byId("queryText");
+  input.value = "";
+  input.focus();
+  renderMarkdown("queryMarkdown", "");
+  byId("rerankDocsOut").innerHTML = "";
+  renderTiming(null);
+  byId("chatHistoryPane").textContent = "No history yet.";
+}
+var renameTargetId = null;
+function openRenameModal(conversationId, currentTitle) {
+  renameTargetId = conversationId;
+  const overlay = byId("renameModal");
+  const input = byId("renameInput");
+  input.value = currentTitle || "";
+  overlay.classList.add("open");
+  overlay.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 40);
+}
+function closeRenameModal() {
+  const overlay = byId("renameModal");
+  overlay.classList.remove("open");
+  overlay.setAttribute("aria-hidden", "true");
+  renameTargetId = null;
+}
+async function submitRenameModal() {
+  const id = renameTargetId;
+  if (!id) return;
+  const input = byId("renameInput");
+  const trimmed = input.value.trim();
+  if (!trimmed) {
+    input.focus();
+    return;
+  }
+  closeRenameModal();
+  try {
+    await api("PATCH", `/console/conversations/${encodeURIComponent(id)}`, {
+      title: trimmed
+    });
+    await loadConversations();
+  } catch (err) {
+    renderMarkdown("queryMarkdown", `**Rename error:** ${escapeHtml(String(err))}`);
+  }
+}
+function bindRenameModal() {
+  byId("renameCancel").addEventListener("click", closeRenameModal);
+  byId("renameSave").addEventListener("click", () => void submitRenameModal());
+  byId("renameInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void submitRenameModal();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeRenameModal();
+    }
+  });
+  byId("renameModal").addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closeRenameModal();
+  });
+}
 function bindConversations() {
-  byId("newConversationBtn").addEventListener("click", async () => {
-    await createConversation("New conversation");
+  byId("newConversationBtn").addEventListener("click", () => {
+    startBlankConversation();
   });
   byId("refreshConversationsBtn").addEventListener("click", async () => {
     await loadConversations();
@@ -496,6 +565,9 @@ function bindConversations() {
         await compactConversation(cid);
       } else if (btn.dataset.action === "delete") {
         await deleteConversationWithFeedback(cid);
+      } else if (btn.dataset.action === "rename") {
+        const existing = getConversationCache().find((c) => c.conversation_id === cid);
+        openRenameModal(cid, existing?.title || "");
       }
     });
   });
@@ -878,6 +950,7 @@ function initializeConsoleUi() {
   initTabs();
   bindQuery();
   bindConversations();
+  bindRenameModal();
   bindIngest();
   bindHealth();
   bindAdmin();

@@ -8,10 +8,12 @@ import { byId, escHtml, fmtTime } from "./dom";
 import { api, apiBase, authHeaders, getSettings } from "./api";
 import { parseMarkdown } from "./markdown";
 import { state, setActiveConversation } from "./state";
+import { refs } from "./refs";
 import { appendUserMsg, appendErrorMsg, appendPendingAssistant } from "./thread";
 import { scrollToBottom } from "./scrollFab";
 import { buildCitationsHtml, revealCitations } from "./citations";
-import { updateContextIndicator } from "./contextWindow";
+import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
+import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
 import type { ChunkResult, StreamEventData, TokenBudget } from "./user-types";
 
@@ -32,9 +34,18 @@ export async function streamQuery(queryText: string): Promise<void> {
     }
     state.isStreaming = true;
     state.streamAbortCtrl = new AbortController();
+    state.pendingQueryText = queryText;
 
-    appendUserMsg(queryText);
-    const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = appendPendingAssistant();
+    state.pendingUserGroup = appendUserMsg(queryText);
+    const pending = appendPendingAssistant();
+    const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = pending;
+    state.pendingAssistantGroup = pending.group;
+    attachFeedback(pending.fbUpBtn, pending.fbDownBtn, {
+        conversationId: state.activeConversationId,
+        query: queryText,
+        answer: () => bubbleEl.innerText,
+    });
+    setSendButtonStop(true);
 
     const url = apiBase() + "/query/stream";
     let response: Response;
@@ -51,15 +62,42 @@ export async function streamQuery(queryText: string): Promise<void> {
         bubbleEl.classList.add("error-bubble");
         bubbleEl.style.display = "block";
         state.isStreaming = false;
+        state.pendingUserGroup = null;
+        state.pendingAssistantGroup = null;
+        state.pendingQueryText = "";
+        setSendButtonStop(false);
         return;
     }
 
     if (!response.ok || !response.body) {
         typingEl.remove();
-        bubbleEl.innerHTML = `&#9888; Stream error (HTTP ${response.status})`;
+        let detail = "";
+        try {
+            const body = await response.text();
+            const parsed = JSON.parse(body) as { detail?: unknown };
+            const d = parsed.detail;
+            if (Array.isArray(d)) {
+                detail = d
+                    .map((e: { loc?: unknown[]; msg?: string }) =>
+                        `${(e.loc ?? []).slice(1).join(".")}: ${e.msg ?? ""}`,
+                    )
+                    .join("; ");
+            } else if (typeof d === "string") {
+                detail = d;
+            }
+        } catch {
+            /* ignore — fall through to status-only */
+        }
+        bubbleEl.innerHTML =
+            `&#9888; Stream error (HTTP ${response.status})` +
+            (detail ? ` — ${escHtml(detail)}` : "");
         bubbleEl.classList.add("error-bubble");
         bubbleEl.style.display = "block";
         state.isStreaming = false;
+        state.pendingUserGroup = null;
+        state.pendingAssistantGroup = null;
+        state.pendingQueryText = "";
+        setSendButtonStop(false);
         return;
     }
 
@@ -70,6 +108,12 @@ export async function streamQuery(queryText: string): Promise<void> {
     let started = false;
     let errorShown = false;
     let pendingClarification = "";
+    let firstTokenAt = 0;
+    let lastTokenAt = 0;
+    let tokenEventCount = 0;
+    let lastBudget: import("./user-types").TokenBudget | null = null;
+
+    clearLastTurnStats();
 
     let renderRaf = 0;
     const flushRender = () => {
@@ -112,7 +156,10 @@ export async function streamQuery(queryText: string): Promise<void> {
                         bubbleEl.style.display = "block";
                         bubbleEl.classList.add("streaming");
                         started = true;
+                        firstTokenAt = performance.now();
                     }
+                    lastTokenAt = performance.now();
+                    tokenEventCount++;
                     answer += data.token || "";
                     scheduleRender();
                     scrollToBottom();
@@ -123,15 +170,9 @@ export async function streamQuery(queryText: string): Promise<void> {
                     const clar = String(data.clarification_message ?? "").trim();
                     if (clar) pendingClarification = clar;
 
-                    const tb = data.token_budget;
-                    if (tb?.usage_percent !== undefined) {
-                        const bd = tb.breakdown ?? {};
-                        updateContextIndicator(tb.usage_percent * 100, {
-                            system: Number(bd.system_tokens ?? bd.system ?? 0),
-                            memory: Number(bd.memory_tokens ?? bd.memory ?? 0),
-                            chunks: Number(bd.chunk_tokens ?? bd.chunks ?? 0),
-                            query: Number(bd.query_tokens ?? bd.query ?? 0),
-                        });
+                    if (data.token_budget) {
+                        lastBudget = data.token_budget;
+                        updateContextIndicator(lastBudget);
                     }
 
                     const results = (data.results ?? []) as ChunkResult[];
@@ -151,6 +192,23 @@ export async function streamQuery(queryText: string): Promise<void> {
                 } else if (evtType === "done") {
                     const cid = String(data.conversation_id ?? "").trim();
                     if (cid) setActiveConversation(cid);
+
+                    if (data.token_budget) lastBudget = data.token_budget;
+                    const completionTokens =
+                        Number(lastBudget?.actual_completion_tokens) || tokenEventCount;
+                    const promptTokens =
+                        Number(lastBudget?.actual_prompt_tokens) ||
+                        Number(lastBudget?.input_tokens) || 0;
+                    const elapsedMs = lastTokenAt > firstTokenAt ? lastTokenAt - firstTokenAt : 0;
+                    const tokensPerSecond = elapsedMs > 0 && completionTokens > 0
+                        ? completionTokens / (elapsedMs / 1000)
+                        : 0;
+                    updateContextIndicator(lastBudget, {
+                        promptTokens,
+                        completionTokens,
+                        tokensPerSecond,
+                        costUsd: Number(lastBudget?.cost_usd ?? 0),
+                    });
 
                     cancelRender();
                     bubbleEl.classList.remove("streaming");
@@ -193,11 +251,50 @@ export async function streamQuery(queryText: string): Promise<void> {
     }
 
     state.isStreaming = false;
+    state.pendingUserGroup = null;
+    state.pendingAssistantGroup = null;
+    state.pendingQueryText = "";
+    setSendButtonStop(false);
+}
+
+export function setSendButtonStop(isStop: boolean): void {
+    const btn = byId<HTMLButtonElement>("sendBtn");
+    if (isStop) {
+        btn.classList.add("stop-mode");
+        btn.title = "Stop generation (cancel)";
+        btn.innerHTML = "&#9632;";
+    } else {
+        btn.classList.remove("stop-mode");
+        btn.title = "Send";
+        btn.innerHTML = "&#9650;";
+    }
+}
+
+/** Cancel the in-flight stream, remove the pending bubbles, restore the textarea. */
+export function cancelStream(): void {
+    if (!state.isStreaming) return;
+    state.streamAbortCtrl?.abort();
+
+    state.pendingUserGroup?.remove();
+    state.pendingAssistantGroup?.remove();
+    state.pendingUserGroup = null;
+    state.pendingAssistantGroup = null;
+
+    if (state.pendingQueryText && !refs.ta.value.trim()) {
+        refs.ta.value = state.pendingQueryText;
+        refs.ta.style.height = "auto";
+        refs.ta.style.height = Math.min(refs.ta.scrollHeight, 220) + "px";
+        refs.ta.focus();
+    }
+    state.pendingQueryText = "";
+    state.isStreaming = false;
+    setSendButtonStop(false);
 }
 
 export async function nonStreamQuery(queryText: string): Promise<void> {
     appendUserMsg(queryText);
-    const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = appendPendingAssistant();
+    const handles = appendPendingAssistant();
+    const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = handles;
     try {
         const data = await api<{
             generated_answer?: string;
@@ -210,19 +307,24 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
 
+        attachFeedback(handles.fbUpBtn, handles.fbDownBtn, {
+            conversationId: state.activeConversationId,
+            query: queryText,
+            answer: () => bubbleEl.innerText,
+        });
+
         typingEl.style.display = "none";
         const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
         bubbleEl.innerHTML = parseMarkdown(answer);
         bubbleEl.style.display = "block";
 
         const tb = data.token_budget;
-        if (tb?.usage_percent !== undefined) {
-            const bd = tb.breakdown ?? {};
-            updateContextIndicator(tb.usage_percent * 100, {
-                system: Number(bd.system_tokens ?? 0),
-                memory: Number(bd.memory_tokens ?? 0),
-                chunks: Number(bd.chunk_tokens ?? 0),
-                query: Number(bd.query_tokens ?? 0),
+        if (tb) {
+            updateContextIndicator(tb, {
+                promptTokens: Number(tb.actual_prompt_tokens) || Number(tb.input_tokens) || 0,
+                completionTokens: Number(tb.actual_completion_tokens) || 0,
+                tokensPerSecond: 0,
+                costUsd: Number(tb.cost_usd) || 0,
             });
         }
 

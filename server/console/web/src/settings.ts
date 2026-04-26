@@ -61,8 +61,6 @@ function saveSettings(): void {
         streaming: byId<HTMLInputElement>("streamingToggle").checked,
         memory_enabled: byId<HTMLInputElement>("memoryToggle").checked,
         citations: byId<HTMLInputElement>("citationsToggle").checked,
-        api_endpoint: byId<HTMLInputElement>("apiEndpoint").value.trim(),
-        auth_token: byId<HTMLInputElement>("apiToken").value.trim(),
     };
     localStorage.setItem("nc_settings", JSON.stringify(s));
     closeSettings();
@@ -85,8 +83,6 @@ export function loadSettings(): void {
     if (s.streaming !== undefined) byId<HTMLInputElement>("streamingToggle").checked = s.streaming as boolean;
     if (s.memory_enabled !== undefined) byId<HTMLInputElement>("memoryToggle").checked = s.memory_enabled as boolean;
     if (s.citations !== undefined) byId<HTMLInputElement>("citationsToggle").checked = s.citations as boolean;
-    if (s.api_endpoint) byId<HTMLInputElement>("apiEndpoint").value = s.api_endpoint as string;
-    if (s.auth_token) byId<HTMLInputElement>("apiToken").value = s.auth_token as string;
 }
 
 function resetSettings(): void {
@@ -98,8 +94,6 @@ function resetSettings(): void {
     byId<HTMLInputElement>("streamingToggle").checked = true;
     byId<HTMLInputElement>("memoryToggle").checked = true;
     byId<HTMLInputElement>("citationsToggle").checked = true;
-    byId<HTMLInputElement>("apiEndpoint").value = "";
-    byId<HTMLInputElement>("apiToken").value = "";
     showToast("Settings reset to defaults");
 }
 

@@ -24,7 +24,7 @@ import {
     setConvMenuEscapeHandler,
 } from "./admin-state.js";
 import { api, byId } from "./admin-api.js";
-import { escapeHtml, renderMarkdown } from "./admin-render.js";
+import { escapeHtml, renderMarkdown, renderTiming } from "./admin-render.js";
 
 export function setActiveConversation(id: string | null): void {
     setActiveConversationIdRaw(id);
@@ -197,9 +197,79 @@ export function hideConvContextMenu(): void {
     }
 }
 
+export function startBlankConversation(): void {
+    setActiveConversation(null);
+    const input = byId<HTMLTextAreaElement>("queryText");
+    input.value = "";
+    input.focus();
+    renderMarkdown("queryMarkdown", "");
+    byId("rerankDocsOut").innerHTML = "";
+    renderTiming(null);
+    byId("chatHistoryPane").textContent = "No history yet.";
+}
+
+let renameTargetId: string | null = null;
+
+function openRenameModal(conversationId: string, currentTitle: string): void {
+    renameTargetId = conversationId;
+    const overlay = byId("renameModal");
+    const input = byId<HTMLInputElement>("renameInput");
+    input.value = currentTitle || "";
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 40);
+}
+
+function closeRenameModal(): void {
+    const overlay = byId("renameModal");
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden", "true");
+    renameTargetId = null;
+}
+
+async function submitRenameModal(): Promise<void> {
+    const id = renameTargetId;
+    if (!id) return;
+    const input = byId<HTMLInputElement>("renameInput");
+    const trimmed = input.value.trim();
+    if (!trimmed) {
+        input.focus();
+        return;
+    }
+    closeRenameModal();
+    try {
+        await api("PATCH", `/console/conversations/${encodeURIComponent(id)}`, {
+            title: trimmed,
+        });
+        await loadConversations();
+    } catch (err) {
+        renderMarkdown("queryMarkdown", `**Rename error:** ${escapeHtml(String(err))}`);
+    }
+}
+
+export function bindRenameModal(): void {
+    byId("renameCancel").addEventListener("click", closeRenameModal);
+    byId("renameSave").addEventListener("click", () => void submitRenameModal());
+    byId("renameInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            void submitRenameModal();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            closeRenameModal();
+        }
+    });
+    byId("renameModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) closeRenameModal();
+    });
+}
+
 export function bindConversations(): void {
-    byId("newConversationBtn").addEventListener("click", async () => {
-        await createConversation("New conversation");
+    byId("newConversationBtn").addEventListener("click", () => {
+        startBlankConversation();
     });
     byId("refreshConversationsBtn").addEventListener("click", async () => {
         await loadConversations();
@@ -223,6 +293,9 @@ export function bindConversations(): void {
                 await compactConversation(cid);
             } else if (btn.dataset.action === "delete") {
                 await deleteConversationWithFeedback(cid);
+            } else if (btn.dataset.action === "rename") {
+                const existing = getConversationCache().find((c) => c.conversation_id === cid);
+                openRenameModal(cid, existing?.title || "");
             }
         });
     });

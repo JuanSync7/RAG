@@ -5,6 +5,7 @@
 // @end-summary
 
 import { escHtml, fmtTime } from "./dom";
+import { parseMarkdown } from "./markdown";
 import { refs } from "./refs";
 import { copyMsg } from "./toast";
 import { scrollToBottom } from "./scrollFab";
@@ -14,7 +15,7 @@ export function setEmptyState(visible: boolean): void {
     if (el) el.style.display = visible ? "" : "none";
 }
 
-export function appendUserMsg(text: string): void {
+export function appendUserMsg(text: string): HTMLElement {
     setEmptyState(false);
     const ts = fmtTime(Date.now());
     const group = document.createElement("div");
@@ -32,6 +33,7 @@ export function appendUserMsg(text: string): void {
         </div>`;
     refs.thread.appendChild(group);
     scrollToBottom();
+    return group;
 }
 
 export interface PendingAssistantHandles {
@@ -41,6 +43,8 @@ export interface PendingAssistantHandles {
     citationsEl: HTMLElement;
     actionsEl: HTMLElement;
     metaEl: HTMLElement;
+    fbUpBtn: HTMLButtonElement;
+    fbDownBtn: HTMLButtonElement;
 }
 
 /** Creates a pending assistant bubble with typing indicator. */
@@ -62,6 +66,8 @@ export function appendPendingAssistant(): PendingAssistantHandles {
             <div class="msg-actions" style="display:none">
               <button class="msg-action-btn">&#128203; Copy</button>
               <button class="msg-action-btn">&#128257; Regenerate</button>
+              <button class="msg-action-btn fb-btn fb-up" title="Helpful" data-rating="up">&#128077;</button>
+              <button class="msg-action-btn fb-btn fb-down" title="Not helpful" data-rating="down">&#128078;</button>
             </div>
             <div class="msg-meta" style="display:none"></div>
           </div>
@@ -78,13 +84,15 @@ export function appendPendingAssistant(): PendingAssistantHandles {
     if (copyBtn) {
         copyBtn.addEventListener("click", () => copyMsg(copyBtn, bubbleEl.innerText));
     }
-    return { group, bubbleEl, typingEl, citationsEl, actionsEl, metaEl };
+    const fbUpBtn = actionsEl.querySelector<HTMLButtonElement>(".fb-up")!;
+    const fbDownBtn = actionsEl.querySelector<HTMLButtonElement>(".fb-down")!;
+    return { group, bubbleEl, typingEl, citationsEl, actionsEl, metaEl, fbUpBtn, fbDownBtn };
 }
 
 export function appendSystemMsg(text: string): void {
     const div = document.createElement("div");
     div.className = "msg-group";
-    div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${escHtml(text)}</div></div></div>`;
+    div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${parseMarkdown(text)}</div></div></div>`;
     refs.thread.appendChild(div);
     scrollToBottom();
 }
