@@ -15,7 +15,7 @@ This package owns the dual web console backend:
 - `static/console.html`: Admin Console (tabbed debug/ops interface) served at `/console/admin`.
 - `web/src/user-console.ts`: TypeScript source for the User Console.
 - `web/src/main.ts`: TypeScript source for the Admin Console.
-- `web/tsconfig.json` + `web/package.json`: TypeScript build config.
+- `web/build.mjs` + `web/package.json` + `web/tsconfig.json`: esbuild bundler driver and TypeScript config.
 
 ## Console URLs
 
@@ -31,8 +31,12 @@ npm --prefix server/console/web install
 npm --prefix server/console/web run build
 ```
 
-Build output is emitted to `server/console/static/main.js` and served via
-`GET /console/static/{asset_path}`.
+The build emits two ES-module bundles into `server/console/static/`:
+
+- `main.js` — Admin Console (entry: `web/src/main.ts`)
+- `user-console.js` — User Console (entry: `web/src/user-console.ts`)
+
+Both are served via `GET /console/static/{asset_path}` (mounted in `routes.py`).
 
 Equivalent root shortcuts:
 
@@ -76,12 +80,36 @@ The Query tab includes a left chat pane with:
 Query requests pass `conversation_id` and `memory_enabled` so the backend can
 apply tenant-persistent memory and return `conversation_id` on each response.
 
-## TypeScript Scalability Guidance
+## Architecture Overview
 
-For long-term UI growth, TypeScript is recommended (type-safe payloads, easier
-refactors, and better editor/tooling support). Keep current HTML/JS for speed
-while scope is small, then migrate incrementally:
+The console exposes two HTML surfaces, each backed by its own TypeScript bundle:
 
-1. introduce a typed frontend build (`ui/` with TS + lightweight framework),
-2. generate/derive API types from server schemas where possible,
-3. preserve `/console` and `/console/admin` route behavior while swapping static asset build output.
+| Surface | HTML | Bundle | TS entry |
+| --- | --- | --- | --- |
+| Admin / operator | `static/console.html` | `static/main.js` | `web/src/main.ts` |
+| End user | `static/user/index.html` | `static/user-console.js` | `web/src/user-console.ts` |
+
+Both bundles are produced by the esbuild driver at `web/build.mjs`, which emits
+native ES modules (`format: "esm"`, `target: "es2021"`) with sourcemaps directly
+into `static/`. The TypeScript migration is complete; `tsc` is retained only for
+type-checking (`npm run check`).
+
+Two libraries — `marked` (Markdown rendering) and `dompurify` (HTML sanitization)
+— are kept **external** to the bundles. The browser resolves their bare specifiers
+at runtime:
+
+- `static/user/index.html` declares an `<script type="importmap">` that maps
+  `marked` and `dompurify` to jsdelivr CDN ESM builds.
+- `static/console.html` loads them via classic `<script src="...">` tags from
+  jsdelivr before the module entry point.
+
+This keeps bundle size small and avoids vendoring third-party Markdown code.
+
+FastAPI wiring lives in `routes.py`:
+
+- `GET /console` → serves `static/user/index.html`
+- `GET /console/admin` → serves `static/console.html`
+- `GET /console/static/{asset_path}` → serves any compiled bundle / asset under `static/`
+
+See `web/README.md` for the build workspace and `static/README.md` for the
+emitted asset layout.
