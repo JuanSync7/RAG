@@ -24,6 +24,7 @@ from config.settings import (
     MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE,
     MEMORY_MAX_RECENT_TURNS,
     MEMORY_PROVIDER,
+    MEMORY_REDIS_CONNECT_TIMEOUT_S,
     MEMORY_REDIS_PREFIX,
     MEMORY_REDIS_URL,
     MEMORY_SUMMARY_MAX_SOURCE_TURNS,
@@ -301,16 +302,29 @@ class NoopConversationMemory(ConversationMemoryProvider):
 class RedisConversationMemory(ConversationMemoryProvider):
     """Redis-backed canonical conversation memory."""
 
-    def __init__(self, redis_url: str, key_prefix: str) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        key_prefix: str,
+        *,
+        connect_timeout_s: float = MEMORY_REDIS_CONNECT_TIMEOUT_S,
+    ) -> None:
         """Create a Redis-backed memory provider.
 
         Args:
             redis_url: Redis connection URL.
             key_prefix: Key prefix namespace for stored data.
+            connect_timeout_s: Socket connect/read timeout used for both the
+                eager connectivity ping in the factory and subsequent
+                operations. Configurable via ``RAG_MEMORY_REDIS_CONNECT_TIMEOUT_S``.
         """
         import redis  # type: ignore
 
-        self._client = redis.from_url(redis_url, decode_responses=True)
+        self._client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=connect_timeout_s,
+        )
         self._prefix = key_prefix.strip() or "rag:memory"
         self._llm_provider = get_llm_provider()
 
@@ -632,7 +646,12 @@ def get_conversation_memory() -> ConversationMemoryProvider:
     provider = MEMORY_PROVIDER.strip().lower()
     if provider == "redis":
         try:
-            _MEMORY = RedisConversationMemory(MEMORY_REDIS_URL, MEMORY_REDIS_PREFIX)
+            candidate = RedisConversationMemory(MEMORY_REDIS_URL, MEMORY_REDIS_PREFIX)
+            # `redis.from_url()` is lazy — connection errors only surface on
+            # first command. Eagerly ping so we can fall back to the no-op
+            # provider here rather than 500ing later inside a request handler.
+            candidate._client.ping()
+            _MEMORY = candidate
             return _MEMORY
         except Exception as exc:
             logger.warning("Memory Redis unavailable, falling back to no-op memory: %s", exc)
