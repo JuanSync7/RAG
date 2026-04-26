@@ -48,6 +48,29 @@ from src.platform.llm import get_llm_provider
 logger = logging.getLogger("rag.memory")
 
 
+def _decode_id_list(raw: Any) -> list[str]:
+    """Parse a JSON-encoded id list stored on the conversation meta hash.
+
+    Tolerates missing/empty values so older conversations created before the
+    relevant/ignored fields existed continue to load cleanly.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    try:
+        parsed = orjson.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(x) for x in parsed]
+
+
+def _encode_id_list(values: list[str]) -> str:
+    return orjson.dumps(list(values)).decode("utf-8")
+
+
 class ConversationMemoryProvider:
     """Abstract memory operations."""
 
@@ -200,6 +223,62 @@ class ConversationMemoryProvider:
         """Delete a conversation and its turns. Returns True if deleted, False if not found."""
         raise NotImplementedError
 
+    def mark_retrieved(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_ids: list[str],
+    ) -> ConversationMeta:
+        """Add doc_ids to the conversation's relevant list (set-union, idempotent).
+
+        New doc ids land in `relevant_doc_ids`. Doc ids already on `ignored_doc_ids`
+        are left there unchanged — `mark_retrieved` only touches docs that have
+        not been seen at all yet.
+        """
+        raise NotImplementedError
+
+    def move_to_ignored(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        """Move a single doc_id from relevant → ignored. Idempotent."""
+        raise NotImplementedError
+
+    def restore_to_relevant(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        """Move a single doc_id from ignored → relevant. Idempotent."""
+        raise NotImplementedError
+
+    def get_seen_doc_ids(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+    ) -> list[str]:
+        """Return the union of relevant + ignored doc ids for the conversation.
+
+        This is the hard-suppression list passed to the retrieval filter so
+        previously-served documents do not surface again.
+        """
+        raise NotImplementedError
+
 
 class NoopConversationMemory(ConversationMemoryProvider):
     """No-op provider when memory is disabled."""
@@ -298,6 +377,64 @@ class NoopConversationMemory(ConversationMemoryProvider):
     ) -> bool:
         return False
 
+    def mark_retrieved(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_ids: list[str],
+    ) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id or "",
+        )
+
+    def move_to_ignored(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id or "",
+        )
+
+    def restore_to_relevant(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id or "",
+        )
+
+    def get_seen_doc_ids(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+    ) -> list[str]:
+        return []
+
 
 class RedisConversationMemory(ConversationMemoryProvider):
     """Redis-backed canonical conversation memory."""
@@ -378,6 +515,8 @@ class RedisConversationMemory(ConversationMemoryProvider):
             updated_at_ms=int(raw.get("updated_at_ms", "0") or 0),
             message_count=int(raw.get("message_count", "0") or 0),
             summary=summary,
+            relevant_doc_ids=_decode_id_list(raw.get("relevant_doc_ids")),
+            ignored_doc_ids=_decode_id_list(raw.get("ignored_doc_ids")),
         )
 
     def ensure_conversation(
@@ -407,6 +546,8 @@ class RedisConversationMemory(ConversationMemoryProvider):
             "summary_text": "",
             "summary_updated_at_ms": 0,
             "summary_turns_compacted": 0,
+            "relevant_doc_ids": _encode_id_list([]),
+            "ignored_doc_ids": _encode_id_list([]),
         }
         self._client.hset(meta_key, mapping=payload)
         self._client.zadd(self._index_key(scope), {cid: now})
@@ -625,6 +766,140 @@ class RedisConversationMemory(ConversationMemoryProvider):
         self._client.delete(turns_key)
         self._client.zrem(index_key, conversation_id)
         return True
+
+    def _load_doc_lists(self, meta_key: str) -> tuple[list[str], list[str]]:
+        raw = self._client.hgetall(meta_key)
+        return (
+            _decode_id_list(raw.get("relevant_doc_ids")),
+            _decode_id_list(raw.get("ignored_doc_ids")),
+        )
+
+    def _persist_doc_lists(
+        self,
+        meta_key: str,
+        relevant: list[str],
+        ignored: list[str],
+    ) -> None:
+        self._client.hset(
+            meta_key,
+            mapping={
+                "relevant_doc_ids": _encode_id_list(relevant),
+                "ignored_doc_ids": _encode_id_list(ignored),
+                "updated_at_ms": self._now(),
+            },
+        )
+
+    def mark_retrieved(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_ids: list[str],
+    ) -> ConversationMeta:
+        meta = self.ensure_conversation(
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        if not doc_ids:
+            return meta
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, meta.conversation_id)
+        relevant, ignored = self._load_doc_lists(meta_key)
+        seen = set(relevant) | set(ignored)
+        new_relevant = list(relevant)
+        for did in doc_ids:
+            if did and did not in seen:
+                new_relevant.append(did)
+                seen.add(did)
+        if new_relevant != relevant:
+            self._persist_doc_lists(meta_key, new_relevant, ignored)
+        meta.relevant_doc_ids = new_relevant
+        meta.ignored_doc_ids = ignored
+        return meta
+
+    def move_to_ignored(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        meta = self.ensure_conversation(
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, meta.conversation_id)
+        relevant, ignored = self._load_doc_lists(meta_key)
+        new_relevant = [d for d in relevant if d != doc_id]
+        if doc_id and doc_id not in ignored:
+            new_ignored = ignored + [doc_id]
+        else:
+            new_ignored = ignored
+        if new_relevant != relevant or new_ignored != ignored:
+            self._persist_doc_lists(meta_key, new_relevant, new_ignored)
+        meta.relevant_doc_ids = new_relevant
+        meta.ignored_doc_ids = new_ignored
+        return meta
+
+    def restore_to_relevant(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        meta = self.ensure_conversation(
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, meta.conversation_id)
+        relevant, ignored = self._load_doc_lists(meta_key)
+        new_ignored = [d for d in ignored if d != doc_id]
+        if doc_id and doc_id not in relevant:
+            new_relevant = relevant + [doc_id]
+        else:
+            new_relevant = relevant
+        if new_relevant != relevant or new_ignored != ignored:
+            self._persist_doc_lists(meta_key, new_relevant, new_ignored)
+        meta.relevant_doc_ids = new_relevant
+        meta.ignored_doc_ids = new_ignored
+        return meta
+
+    def get_seen_doc_ids(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+    ) -> list[str]:
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, conversation_id)
+        if not self._client.exists(meta_key):
+            return []
+        relevant, ignored = self._load_doc_lists(meta_key)
+        # Preserve relative ordering: relevant first, then ignored, dedup.
+        seen: list[str] = []
+        seen_set: set[str] = set()
+        for d in (*relevant, *ignored):
+            if d and d not in seen_set:
+                seen.append(d)
+                seen_set.add(d)
+        return seen
 
 
 _MEMORY: ConversationMemoryProvider | None = None

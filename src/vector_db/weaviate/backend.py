@@ -236,6 +236,9 @@ class WeaviateBackend(VectorBackend):
         if not filters:
             return None
         clauses = [self._single_filter(f) for f in filters]
+        clauses = [c for c in clauses if c is not None]
+        if not clauses:
+            return None
         result = clauses[0]
         for clause in clauses[1:]:
             result = result & clause
@@ -244,6 +247,20 @@ class WeaviateBackend(VectorBackend):
     @staticmethod
     def _single_filter(f: SearchFilter) -> Any:
         from weaviate.classes.query import Filter as WeaviateFilter
+
+        op = f.operator.lower()
+        if op == "not_in":
+            values = list(f.value or [])
+            if not values:
+                return None
+            # AND-chain of not_equal clauses. Reliable across weaviate-client
+            # versions and explicit in query plans. Filter is `prop != v1 AND
+            # prop != v2 AND ...`, i.e. "prop is not in [...]".
+            chain = WeaviateFilter.by_property(f.property).not_equal(values[0])
+            for v in values[1:]:
+                chain = chain & WeaviateFilter.by_property(f.property).not_equal(v)
+            return chain
+
         prop = WeaviateFilter.by_property(f.property)
         ops = {
             "eq": prop.equal,
@@ -254,10 +271,10 @@ class WeaviateBackend(VectorBackend):
             "gte": prop.greater_or_equal,
             "lte": prop.less_or_equal,
         }
-        fn = ops.get(f.operator.lower())
+        fn = ops.get(op)
         if fn is None:
             raise ValueError(
                 f"Unsupported filter operator: {f.operator!r}. "
-                f"Valid operators: {sorted(ops)}"
+                f"Valid operators: {sorted([*ops, 'not_in'])}"
             )
         return fn(f.value)

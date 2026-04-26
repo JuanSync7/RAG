@@ -420,6 +420,10 @@ class RAGChain:
         memory_recent_turns: Optional[list[dict[str, str]]] = None,
         conversation_id: Optional[str] = None,
         retry_count: int = 0,
+        ignored_doc_ids: Optional[list[str]] = None,
+        mode: str = "query",
+        retrieval_sub_mode: str = "auto",
+        extra_processing: bool = False,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -478,6 +482,9 @@ class RAGChain:
             rerank_top_k = validate_positive_int("rerank_top_k", rerank_top_k)
             source_filter = validate_filter_value("source_filter", source_filter)
             heading_filter = validate_filter_value("heading_filter", heading_filter)
+            # Retrieval mode never generates an answer regardless of caller intent.
+            if mode == "retrieval":
+                skip_generation = True
 
             # Stage 1: Query processing (+ input rails in parallel if NeMo enabled)
             t0 = time.perf_counter()
@@ -534,6 +541,8 @@ class RAGChain:
                             RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
                             memory_context,
                             query,
+                            mode,
+                            retrieval_sub_mode,
                         )
                         rail_future: _Fut = stage1_pool.submit(
                             run_input_rails,
@@ -550,6 +559,8 @@ class RAGChain:
                         fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
                         memory_context=memory_context,
                         user_query=query,
+                        mode=mode,
+                        retrieval_sub_mode=retrieval_sub_mode,
                     )
             tp.record("query_processing", "retrieval", started_at=t0)
             if tp.check_stage_budget("query_processing"):
@@ -718,6 +729,14 @@ class RAGChain:
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
             filters = []
+            if ignored_doc_ids:
+                filters.append(
+                    SearchFilter(
+                        property="document_id",
+                        operator="not_in",
+                        value=list(ignored_doc_ids),
+                    )
+                )
             if source_filter:
                 filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
             if heading_filter:
@@ -1266,6 +1285,8 @@ class RAGChain:
                 visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
+                history_decision=query_result.history_decision,
+                history_turns_used=query_result.history_turns_used,
             )
 
 
