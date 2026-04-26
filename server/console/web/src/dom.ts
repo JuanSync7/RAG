@@ -15,7 +15,9 @@ export function escHtml(s: string): string {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/\//g, "&#x2F;");
 }
 
 export function fmtTime(ms: number): string {

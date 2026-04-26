@@ -1,10 +1,17 @@
 // @summary
-// Shared TypeScript type definitions for the User Console.
+// TypeScript type definitions for the operator console.
+//
+// Cross-console shapes (ConversationMeta, SlashCommand, CommandResult) live
+// in `./shared-types` and are re-exported here so existing import sites
+// continue to work.
+//
 // Exports: ConsoleEnvelope, MessageRole, CitationSource, ChatMessage, ConversationMeta,
 //          ConversationTurn, QueryParams, QueryResult, StreamEventData, ContextBreakdown,
 //          SlashCommand, CommandResult, ContextAttachment, UserSettings, HealthSummary, SidebarNavItem
-// Deps: none
+// Deps: ./shared-types
 // @end-summary
+
+export type { ConversationMeta, SlashCommand, CommandResult } from "./shared-types";
 
 /** Standard console API response envelope. */
 export type ConsoleEnvelope<T = Record<string, unknown>> = {
@@ -36,13 +43,6 @@ export type ChatMessage = {
 };
 
 // -- Conversations --
-
-export type ConversationMeta = {
-  conversation_id: string;
-  title?: string;
-  updated_at_ms?: number;
-  message_count?: number;
-};
 
 export type ConversationTurn = {
   role: MessageRole;
@@ -81,23 +81,6 @@ export type ContextBreakdown = {
   chunk_tokens?: number;
   query_tokens?: number;
   system_tokens?: number;
-};
-
-// -- Commands --
-
-export type SlashCommand = {
-  name: string;
-  description: string;
-  args_hint?: string;
-  intent?: string;
-  category?: string;
-};
-
-export type CommandResult = {
-  intent?: string;
-  action?: string;
-  message?: string;
-  data?: Record<string, unknown>;
 };
 
 // -- Context Attachments --
