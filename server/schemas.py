@@ -166,6 +166,7 @@ class HealthResponse(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
 
 
 class CreateApiKeyRequest(BaseModel):
@@ -362,6 +363,7 @@ class ConsoleHealthSummary(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
     ollama_reachable: bool
 
 

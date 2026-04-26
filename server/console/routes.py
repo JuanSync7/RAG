@@ -204,6 +204,7 @@ def create_console_router(
             status=base.status,
             temporal_connected=base.temporal_connected,
             worker_available=base.worker_available,
+            ingest_worker_available=base.ingest_worker_available,
             ollama_reachable=is_ollama_reachable(),
         )
         return console_ok(request, summary.model_dump())
@@ -350,7 +351,7 @@ def create_console_router(
                 # ping it here, so just report it's configured.
                 generation_state = "configured"
 
-            jobs_ok = base.temporal_connected and base.worker_available
+            jobs_ok = base.temporal_connected and base.ingest_worker_available
             jobs_state = "ready" if jobs_ok else (
                 "no worker" if base.temporal_connected else "offline"
             )

@@ -45,6 +45,12 @@ _MAX_RECENT_JOBS = 50
 _JOB_RETENTION_SECONDS = 3600
 _SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md", ".html", ".htm"}
 
+# Stale-job sweeper: jobs that haven't emitted any event in this window while
+# still in pending/running are assumed dead (worker crashed, lost cancel, etc.)
+# and flipped to failed so the UI doesn't lie about ghost in-flight work.
+_STALE_JOB_SECONDS = 1800  # 30 minutes
+_SWEEP_INTERVAL_SECONDS = 60
+
 
 @dataclass
 class JobEvent:
@@ -146,6 +152,54 @@ class JobRegistry:
 
 
 _registry = JobRegistry()
+
+
+def _last_activity_ts(job: Job) -> float:
+    """Most recent timestamp we have for a job — used to detect stalls."""
+    candidates = [job.created_at]
+    if job.started_at is not None:
+        candidates.append(job.started_at)
+    if job.events:
+        candidates.append(job.events[-1].timestamp)
+    return max(candidates)
+
+
+async def _sweep_stale_jobs() -> int:
+    """Mark jobs stuck in pending/running with no recent activity as failed.
+
+    Returns the number of jobs flipped. Called by the periodic sweeper task.
+    """
+    now = time.time()
+    flipped = 0
+    for job in list(_registry.list()):
+        if job.status not in {"pending", "running"}:
+            continue
+        if (now - _last_activity_ts(job)) <= _STALE_JOB_SECONDS:
+            continue
+        job.status = "failed"
+        job.error = "job stalled — no worker activity"
+        job.finished_at = now
+        job.emit("error", job.error, {"stalled": True})
+        flipped += 1
+        logger.warning("Stale ingest job %s flipped to failed", job.job_id)
+    return flipped
+
+
+async def _job_sweeper_loop() -> None:
+    """Background coroutine: periodically sweep stale jobs."""
+    while True:
+        try:
+            await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
+            await _sweep_stale_jobs()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("Stale-job sweeper iteration failed")
+
+
+def start_job_sweeper() -> asyncio.Task:
+    """Start the stale-job sweeper. Returns the task so callers can cancel it."""
+    return asyncio.create_task(_job_sweeper_loop(), name="ingest-job-sweeper")
 
 
 def _config_from_options(opts: dict[str, Any]) -> IngestionConfig:
@@ -521,4 +575,4 @@ def _summarize(job: Job, include_events: bool = False) -> dict[str, Any]:
     return out
 
 
-__all__ = ["create_ingest_router"]
+__all__ = ["create_ingest_router", "start_job_sweeper"]

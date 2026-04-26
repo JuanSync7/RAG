@@ -298,6 +298,10 @@ def _install_stub_modules() -> None:
         service_mod = types.ModuleType("temporalio.service")
         service_mod.RPCError = type("RPCError", (Exception,), {})
 
+        exceptions_mod = types.ModuleType("temporalio.exceptions")
+        exceptions_mod.CancelledError = type("CancelledError", (Exception,), {})
+        exceptions_mod.WorkflowFailureError = type("WorkflowFailureError", (Exception,), {})
+
         api_mod = types.ModuleType("temporalio.api")
         enums_mod = types.ModuleType("temporalio.api.enums")
         enums_v1_mod = types.ModuleType("temporalio.api.enums.v1")
@@ -318,6 +322,7 @@ def _install_stub_modules() -> None:
         temporalio.client = client_mod
         temporalio.worker = worker_mod
         temporalio.service = service_mod
+        temporalio.exceptions = exceptions_mod
         temporalio.api = api_mod
         sys.modules["temporalio"] = temporalio
         sys.modules["temporalio.activity"] = activity_mod
@@ -326,6 +331,7 @@ def _install_stub_modules() -> None:
         sys.modules["temporalio.client"] = client_mod
         sys.modules["temporalio.worker"] = worker_mod
         sys.modules["temporalio.service"] = service_mod
+        sys.modules["temporalio.exceptions"] = exceptions_mod
         sys.modules["temporalio.api"] = api_mod
         sys.modules["temporalio.api.enums"] = enums_mod
         sys.modules["temporalio.api.enums.v1"] = enums_v1_mod

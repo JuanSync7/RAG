@@ -111,6 +111,7 @@ export type HealthSummary = {
   status: string;
   temporal_connected?: boolean;
   worker_available?: boolean;
+  ingest_worker_available?: boolean;
   ollama_reachable?: boolean;
 };
 

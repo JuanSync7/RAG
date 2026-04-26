@@ -8,7 +8,7 @@
 
 from server.routes.admin import create_admin_router
 from server.routes.documents import create_documents_router
-from server.routes.ingest import create_ingest_router
+from server.routes.ingest import create_ingest_router, start_job_sweeper
 from server.routes.query import create_query_router, run_query
 from server.routes.system import build_health_response, create_system_router
 
@@ -20,6 +20,7 @@ __all__ = [
     "build_health_response",
     "create_documents_router",
     "create_ingest_router",
+    "start_job_sweeper",
 ]
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---

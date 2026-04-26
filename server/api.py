@@ -56,6 +56,7 @@ from server.routes import (
     create_admin_router,
     create_documents_router,
     create_ingest_router,
+    start_job_sweeper,
     create_query_router,
     create_system_router,
 )
@@ -158,9 +159,15 @@ async def lifespan(app: FastAPI):
     logger.info("Connecting to Temporal at %s", TEMPORAL_TARGET_HOST)
     _temporal_client = await Client.connect(TEMPORAL_TARGET_HOST)
     logger.info("API server ready — queries route through Temporal to preloaded workers")
+    sweeper_task = start_job_sweeper()
     try:
         yield
     finally:
+        sweeper_task.cancel()
+        try:
+            await sweeper_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if _temporal_client is not None:
             await _temporal_client.close()
             _temporal_client = None
