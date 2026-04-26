@@ -90,10 +90,15 @@ class TEIEmbeddings(Embeddings):
         base_url: str = TEI_EMBED_URL,
         model: str = TEI_EMBEDDING_MODEL,
         timeout: int = TEI_TIMEOUT_SECONDS,
+        tier: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self._client = httpx.Client(timeout=timeout)
+        # tier="ingest" sets X-RagWeave-Tier so rag-nginx routes to the CPU
+        # pool (rag-embed-cpu), keeping the GPU free for latency-sensitive
+        # query embedding. Default (None) hits the GPU pool with CPU fallback.
+        headers = {"X-RagWeave-Tier": tier} if tier else None
+        self._client = httpx.Client(timeout=timeout, headers=headers)
         self.tracer = get_tracer()
 
     def _embed(self, inputs: list[str]) -> list[list[float]]:
@@ -130,14 +135,20 @@ class TEIEmbeddings(Embeddings):
         return np.array(self._embed(sentences))
 
 
-def get_embedding_provider() -> Embeddings:
+def get_embedding_provider(tier: str | None = None) -> Embeddings:
     """Return the configured embedding provider.
 
     Reads ``INFERENCE_BACKEND`` from settings:
-      - ``"tei"``   → :class:`TEIEmbeddings` (direct HTTP to rag-embed container)
+      - ``"tei"``   → :class:`TEIEmbeddings` (HTTP to rag-nginx → rag-embed pool)
       - anything else → :class:`LocalBGEEmbeddings` (in-process sentence-transformers;
                          dev venv path — requires the `local-embed` pyproject extra)
+
+    Args:
+        tier: Optional rag-nginx routing hint. Pass ``"ingest"`` from ingestion
+            paths to pin embedding traffic to the CPU pool (rag-embed-cpu),
+            leaving the GPU free for latency-sensitive query embedding.
+            Ignored by ``LocalBGEEmbeddings`` (no LB layer in dev).
     """
     if INFERENCE_BACKEND == "tei":
-        return TEIEmbeddings()
+        return TEIEmbeddings(tier=tier)
     return LocalBGEEmbeddings()

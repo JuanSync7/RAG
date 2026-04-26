@@ -752,9 +752,11 @@ if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     )
 
 # TEI service URLs — used when INFERENCE_BACKEND="tei".
-# Inside the compose network these resolve to rag-embed / rag-rerank.
-TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-embed:80")
-TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-rerank:80")
+# Default routes through rag-nginx so replicas can be scaled horizontally
+# (`docker compose up -d --scale rag-embed=N`). Override to direct service DNS
+# (http://rag-embed:80) for single-replica dev or to bypass the LB.
+TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-nginx:8081")
+TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-nginx:8082")
 
 # Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
 # mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.

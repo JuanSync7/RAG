@@ -141,7 +141,7 @@ else
     printf "%sSome checks failed — see ✗ above.%s\n" "$_RED" "$_RESET"
     echo ""
     echo "Common remediations:"
-    echo "  - Start infra:         docker compose up -d rag-embed rag-rerank rag-weaviate"
+    echo "  - Start infra:         docker compose up -d rag-embed rag-rerank rag-nginx rag-weaviate"
     echo "  - Install dev extras:  uv sync --extra local-embed"
     echo "  - Set TEI image tag:   export RAG_TEI_IMAGE_TAG=${TEI_TAG}"
 fi

@@ -38,7 +38,7 @@ class TestPrewarmWorkerResources:
 
         monkeypatch.setattr("src.ingest.temporal.activities._embedder", None)
         monkeypatch.setattr("src.ingest.temporal.activities._db_client", None)
-        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda: fake_embedder)
+        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda **kw: fake_embedder)
         monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda: fake_db_client)
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_ENABLED", False)
 
@@ -51,8 +51,8 @@ class TestPrewarmWorkerResources:
         """prewarm should skip docling warmup when RAG_INGESTION_DOCLING_ENABLED=False."""
         acts = _import_activities()
 
-        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda: MagicMock())
-        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda **kw: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda **kw: MagicMock())
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_ENABLED", False)
 
         ensure_called = []
@@ -71,8 +71,8 @@ class TestPrewarmWorkerResources:
         """prewarm should log warning when docling setup raises RuntimeError."""
         acts = _import_activities()
 
-        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda: MagicMock())
-        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda **kw: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda **kw: MagicMock())
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_ENABLED", True)
         monkeypatch.setattr(
             "src.ingest.temporal.activities.ensure_docling_ready",
@@ -130,7 +130,7 @@ class TestLazyInit:
 
         fake_embedder = MagicMock()
         monkeypatch.setattr("src.ingest.temporal.activities._embedder", None)
-        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda: fake_embedder)
+        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda **kw: fake_embedder)
 
         result = acts._get_embedder()
         assert result is fake_embedder
@@ -193,8 +193,8 @@ class TestPrewarmDoclingEnabled:
         """prewarm should call ensure_docling_ready when RAG_INGESTION_DOCLING_ENABLED=True."""
         acts = _import_activities()
 
-        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda: MagicMock())
-        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.get_embedding_provider", lambda **kw: MagicMock())
+        monkeypatch.setattr("src.ingest.temporal.activities.db.create_persistent_client", lambda **kw: MagicMock())
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_ENABLED", True)
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_MODEL", "some-model")
         monkeypatch.setattr("src.ingest.temporal.activities.RAG_INGESTION_DOCLING_ARTIFACTS_PATH", "/tmp")
