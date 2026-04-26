@@ -339,6 +339,12 @@ MEMORY_ENABLED = os.environ.get("RAG_MEMORY_ENABLED", "true").lower() in ("true"
 MEMORY_PROVIDER = os.environ.get("RAG_MEMORY_PROVIDER", "redis").strip().lower()
 MEMORY_REDIS_URL = os.environ.get("RAG_MEMORY_REDIS_URL", CACHE_REDIS_URL)
 MEMORY_REDIS_PREFIX = os.environ.get("RAG_MEMORY_REDIS_PREFIX", "rag:memory")
+# Timeout (seconds) for the connectivity ping issued when constructing the
+# Redis-backed memory provider. If the ping fails or times out, the factory
+# falls back to the no-op provider so request handlers do not 500.
+MEMORY_REDIS_CONNECT_TIMEOUT_S = float(
+    os.environ.get("RAG_MEMORY_REDIS_CONNECT_TIMEOUT_S", "1.0")
+)
 MEMORY_MAX_RECENT_TURNS = int(os.environ.get("RAG_MEMORY_MAX_RECENT_TURNS", "8"))
 MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE = int(
     os.environ.get("RAG_MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE", "1400")
