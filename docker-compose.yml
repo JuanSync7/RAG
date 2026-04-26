@@ -682,8 +682,15 @@ services:
       # The 443 / lane will 502 until rag-api is up — acceptable.
       rag-embed:
         condition: service_healthy
+      # CPU pool is fallback/burst — only needs the container started, not
+      # healthy. Hard-dep on service_healthy here would gate the whole stack
+      # (rag-api, rag-worker → rag-nginx → rag-embed-cpu) on CPU model load
+      # (~180s + first-boot download), which contradicts its fallback role.
+      # If a fallback request lands while CPU is still warming, it 502s — same
+      # behavior as a transient backend failure, which the client already
+      # handles.
       rag-embed-cpu:
-        condition: service_healthy
+        condition: service_started
       rag-rerank:
         condition: service_healthy
     healthcheck:
