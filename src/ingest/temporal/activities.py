@@ -62,7 +62,8 @@ def prewarm_worker_resources() -> None:
     pay the model-load penalty.
     """
     global _embedder, _db_client
-    _embedder = get_embedding_provider()
+    # tier="ingest" routes ingest embedding to the CPU pool via rag-nginx.
+    _embedder = get_embedding_provider(tier="ingest")
     _db_client = db.create_persistent_client()
     logger.info("worker resources prewarmed: embedder + db client ready")
 
@@ -88,7 +89,7 @@ def prewarm_worker_resources() -> None:
 def _get_embedder() -> Embeddings:
     global _embedder
     if _embedder is None:
-        _embedder = get_embedding_provider()
+        _embedder = get_embedding_provider(tier="ingest")
     return _embedder
 
 

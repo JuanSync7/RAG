@@ -788,7 +788,7 @@ def ingest_directory(
 
         runtime = Runtime(
             config=config,
-            embedder=get_embedding_provider(),
+            embedder=get_embedding_provider(tier="ingest"),
             weaviate_client=client,
             kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
             if config.build_kg
