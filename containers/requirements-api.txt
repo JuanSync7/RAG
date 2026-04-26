@@ -16,3 +16,13 @@ mcp>=1.26.0
 langdetect
 # server/routes/documents.py → src.vector_db → weaviate (needed at import time)
 weaviate-client
+# Streaming /query/stream endpoint executes the rag-chain graph in-process,
+# which uses langgraph + langchain-core. Without these, generation fails
+# with "No module named 'langgraph'" even though retrieval still works.
+langgraph
+langchain-core
+langchain-text-splitters
+httpx
+networkx
+numpy
+nemoguardrails>=0.21.0

@@ -69,6 +69,8 @@ from config.settings import (
     RAG_INGESTION_VLM_MODE,
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
+    RAG_INGESTION_STORE_FIGURES_IN_DB,
+    RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
     RAG_INGESTION_VISUAL_TARGET_COLLECTION,
     RAG_INGESTION_COLQWEN_MODEL,
@@ -173,6 +175,15 @@ class IngestionConfig:
     """Max tokens per HybridChunker chunk. Default: 512 (bge-m3 limit)."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
+    use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN
+    """If True, .md/.html/.rst use Docling HybridChunker (structure-aware) for
+    chunking — preserves lists, tables, requirement blocks. Default: True.
+    The parse step stays on the lightweight PlainTextParser path."""
+    store_figures_in_db: bool = RAG_INGESTION_STORE_FIGURES_IN_DB
+    """If True, upload markdown image bytes to the document store (backend-
+    agnostic) and record a ``store_key`` in chunk metadata. Default: False —
+    chunks carry only the relative ``src``; citation UI resolves against the
+    original source location."""
 
     # -- Visual embedding pipeline (FR-101 through FR-109) --
     enable_visual_embedding: bool = RAG_INGESTION_ENABLE_VISUAL_EMBEDDING

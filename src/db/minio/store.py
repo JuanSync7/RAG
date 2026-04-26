@@ -294,6 +294,59 @@ def get_page_image_url(
     return url
 
 
+def store_figure_image(
+    client: Minio,
+    source_key: str,
+    figure_label: str,
+    image_bytes: bytes,
+    mime_type: str,
+    bucket: str = MINIO_BUCKET,
+) -> str | None:
+    """Store a single figure image (markdown image ref) in MinIO.
+
+    Companion to ``store_page_images`` — that one stores PDF page screenshots
+    for visual retrieval; this one stores standalone figure images referenced
+    in markdown so citation UIs can render them via presigned URL.
+
+    Key pattern: ``figures/{safe_source_key}/{safe_figure_label}.{ext}``
+
+    Args:
+        client: MinIO client handle.
+        source_key: Stable source identity (sanitised internally).
+        figure_label: Human label like ``"Figure 1"``.
+        image_bytes: Raw image bytes.
+        mime_type: MIME type, used to derive the file extension.
+        bucket: Target bucket (defaults to ``MINIO_BUCKET``).
+
+    Returns:
+        The MinIO object key on success, or ``None`` if the upload failed
+        (failure is logged; never raises).
+    """
+    safe_source = source_key.replace("/", "_").replace(":", "_").replace("..", "__")
+    safe_label = figure_label.replace("/", "_").replace(" ", "_").lower()
+    ext = mime_type.split("/", 1)[-1] if "/" in mime_type else "bin"
+    if ext == "jpeg":
+        ext = "jpg"
+    key = f"figures/{safe_source}/{safe_label}.{ext}"
+    try:
+        client.put_object(
+            bucket,
+            key,
+            io.BytesIO(image_bytes),
+            length=len(image_bytes),
+            content_type=mime_type or "application/octet-stream",
+        )
+        return key
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "store_figure_image: failed to upload %s for %r: %s",
+            figure_label,
+            source_key,
+            exc,
+        )
+        return None
+
+
 def store_page_images(
     client: Minio,
     document_id: str,

@@ -7,10 +7,10 @@
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check import-check-tracked \
         all-check precommit-check setup restart restart-all \
-        start start-inference dev worker tunnel restart-worker scale-workers restart-vllm vllm-pull-models \
+        start start-all dev worker tunnel restart-worker scale-workers \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
-        container-build-podman container-probe container-probe-worker container-probe-vllm \
+        container-build-podman container-probe container-probe-worker \
         container-sizes container-clean \
         smoke-test container-build-and-test
 
@@ -64,21 +64,16 @@ help:
 	@echo "  smoke-test                  Full integration check: build + stack + tunnel + checks"
 	@echo "  container-build-and-test    Build images then immediately run smoke-test (SKIP_BUILD=1)"
 	@echo ""
-	@echo "Inference backend (vLLM — requires --profile inference)"
-	@echo "  start-inference        Start vLLM embed + rerank containers (first time)"
-	@echo "  restart-vllm           Restart rag-vllm-embed + rag-vllm-rerank (after config change)"
-	@echo "  container-probe-vllm   Health-check both vLLM containers on localhost"
-	@echo "  vllm-pull-models       Pre-warm Qwen3 model caches (first-time inference setup)"
-	@echo ""
 	@echo "Daily dev startup (cold start after WSL2 restart)"
 	@echo "  restart-worker     Rebuild + restart rag-worker (use after .env or code changes)"
 	@echo "  start              Bring up infra + workers (no rebuild)"
+	@echo "  start-all          Bring up FULL stack (all profiles incl. monitoring/langfuse)"
 	@echo "  dev                Start uvicorn with hot-reload (run in its own terminal)"
 	@echo "  worker             Start Temporal worker locally (run in its own terminal)"
 	@echo "  scale-workers      Scale containerised workers: make scale-workers N=3"
 	@echo "  tunnel             Start Cloudflare trycloudflare.com tunnel (run in its own terminal)"
 	@echo ""
-	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
+	@echo "Stack restart (uses scripts/stack.sh — auto-detects docker/podman)"
 	@echo "  restart            Restart app + workers with rebuild"
 	@echo "  restart-all        Restart all profiles with rebuild"
 	@echo ""
@@ -131,21 +126,30 @@ venv-doctor:
 
 # Silent version used as a hidden dep of setup/install. Nukes and rebuilds
 # .venv ONLY when a stale shebang is detected — no-op on a healthy venv.
+# Detects via the python3 wrapper script (uv sync may not install pip), with
+# pip as a secondary check for legacy venvs.
 _venv-auto-heal:
-	@if [ -d .venv ] && [ -f .venv/bin/pip ]; then \
+	@if [ -d .venv ]; then \
 		expected="$$(pwd)/.venv/bin/python3"; \
-		actual="$$(head -n 1 .venv/bin/pip | sed 's|^#!||')"; \
-		if [ "$$actual" != "$$expected" ]; then \
-			echo ">>> Stale venv detected (shebang points to $$actual)"; \
-			echo ">>> Removing .venv/ so it can be recreated at $$expected"; \
-			rm -rf .venv; \
+		probe=""; \
+		for f in .venv/bin/pip .venv/bin/pytest; do \
+			if [ -f "$$f" ] && [ "$$(head -c 2 $$f)" = "#!" ]; then probe="$$f"; break; fi; \
+		done; \
+		if [ -n "$$probe" ]; then \
+			actual="$$(head -n 1 $$probe | sed 's|^#!||')"; \
+			if [ "$$actual" != "$$expected" ]; then \
+				echo ">>> Stale venv detected ($$probe shebang $$actual)"; \
+				echo ">>> Removing .venv/ so it can be recreated at $$expected"; \
+				rm -rf .venv; \
+			fi; \
 		fi; \
 	fi
 
 # Full project setup (Python + TypeScript). Auto-heals a stale venv first.
+# Uses `uv sync --extra dev` so installs respect uv.lock (reproducible) and
+# auto-create the venv. Plain pip is banned — the project is uv-only.
 setup: _venv-auto-heal
-	uv venv
-	uv pip install -e ".[dev]"
+	uv sync --extra dev
 	$(MAKE) console-install
 	$(MAKE) console-build
 	@echo "\n✓ Setup complete. Activate with: source .venv/bin/activate"
@@ -153,8 +157,7 @@ setup: _venv-auto-heal
 # (Re)install Python deps into the active env. Auto-heals a stale venv
 # first so `make install` after a directory rename Just Works.
 install: _venv-auto-heal
-	@if [ ! -d .venv ]; then uv venv; fi
-	uv pip install -e ".[dev]"
+	uv sync --extra dev
 
 console-install:
 	npm --prefix server/console/web install
@@ -272,19 +275,11 @@ scale-workers:
 start:
 	./scripts/compose.sh up -d
 	./scripts/compose.sh --profile workers up -d
-	@# Start the Ollama host proxy so containers can reach Ollama on the host.
-	@# Ports come from .env (RAG_OLLAMA_PORT / RAG_OLLAMA_PROXY_PORT), defaulting to 11434/11435.
-	@# No-op if already running on the proxy port. Logs to /tmp/ollama_proxy.log.
-	@proxy_port=$$(grep -s '^RAG_OLLAMA_PROXY_PORT=' .env | cut -d= -f2); \
-	proxy_port=$${proxy_port:-11435}; \
-	if ! ss -tlnp 2>/dev/null | grep -q ":$$proxy_port "; then \
-		nohup env $$(grep -s '^RAG_OLLAMA' .env | xargs) \
-			$(shell pwd)/.venv/bin/python scripts/ollama_host_proxy.py \
-			> /tmp/ollama_proxy.log 2>&1 & \
-		echo ">>> Ollama proxy started on :$$proxy_port (pid $$!)"; \
-	else \
-		echo ">>> Ollama proxy already running on :$$proxy_port"; \
-	fi
+
+# Bring up the full stack: every profile (app, workers, monitoring,
+# observability, gateway, temporal). Equivalent to `./scripts/stack.sh up`.
+start-all:
+	./scripts/stack.sh up
 
 dev:
 	uv run uvicorn server.api:app --host 0.0.0.0 --port 8000 --reload
@@ -295,11 +290,13 @@ worker:
 tunnel:
 	cloudflared tunnel --url http://localhost:8000
 
+# Mirrors `make start` (base + workers) but rebuilds images and force-recreates.
 restart: console-build
-	./scripts/restart_stack.sh --temporal --app --workers --build
+	./scripts/stack.sh restart
 
+# Mirrors `make start-all` (every profile) but rebuilds images and force-recreates.
 restart-all: console-build
-	./scripts/restart_stack.sh --all --build
+	./scripts/stack.sh restart-all
 
 # ---------------------------------------------------------------------------
 # Container images
@@ -360,42 +357,6 @@ container-probe-worker:
 	else \
 		echo "neither docker nor podman found"; exit 1; \
 	fi
-
-# Health-check the running vLLM inference containers (requires --profile inference).
-container-probe-vllm:
-	@curl -sf http://localhost:$${RAG_VLLM_EMBED_PORT:-8001}/health \
-		&& echo "[probe] vLLM embed OK" || echo "[probe] vLLM embed FAIL"
-	@curl -sf http://localhost:$${RAG_VLLM_RERANK_PORT:-8002}/health \
-		&& echo "[probe] vLLM rerank OK" || echo "[probe] vLLM rerank FAIL"
-
-# Start the inference containers for the first time (or after they've been stopped).
-# For subsequent config changes, use restart-vllm instead.
-start-inference:
-	./scripts/compose.sh --profile inference up -d
-
-# Restart the inference containers (force-recreate picks up model/config changes).
-restart-vllm:
-	./scripts/compose.sh --profile inference up -d --force-recreate rag-vllm-embed rag-vllm-rerank
-
-# Pre-warm the vLLM model caches (first-time setup — avoids cold-start timeout on container boot).
-# Reads RAG_VLLM_EMBEDDING_MODEL and RAG_VLLM_RERANKER_MODEL from the environment (or .env defaults).
-vllm-pull-models:
-	@embed_model=$$(grep -s '^RAG_VLLM_EMBEDDING_MODEL=' .env | cut -d= -f2); \
-	embed_model=$${embed_model:-Qwen/Qwen3-Embedding-0.6B}; \
-	echo "Pre-warming embed model cache: $$embed_model"; \
-	docker run --rm \
-		-e HUGGING_FACE_HUB_TOKEN=$${HUGGING_FACE_HUB_TOKEN:-} \
-		-v vllm-embed-cache:/root/.cache/huggingface \
-		vllm/vllm-openai:latest python -c \
-		"from huggingface_hub import snapshot_download; snapshot_download('$$embed_model')"
-	@rerank_model=$$(grep -s '^RAG_VLLM_RERANKER_MODEL=' .env | cut -d= -f2); \
-	rerank_model=$${rerank_model:-Qwen/Qwen3-Reranker-0.6B}; \
-	echo "Pre-warming rerank model cache: $$rerank_model"; \
-	docker run --rm \
-		-e HUGGING_FACE_HUB_TOKEN=$${HUGGING_FACE_HUB_TOKEN:-} \
-		-v vllm-rerank-cache:/root/.cache/huggingface \
-		vllm/vllm-openai:latest python -c \
-		"from huggingface_hub import snapshot_download; snapshot_download('$$rerank_model')"
 
 # Print current image sizes (podman reports actual disk usage, docker
 # underreports via .Size but shows true sum via 'images').

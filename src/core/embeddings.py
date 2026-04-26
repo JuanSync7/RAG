@@ -1,26 +1,34 @@
 # @summary
-# Embedding providers: local BAAI/bge-m3 (in-process) and LiteLLM-backed vLLM.
-# Exports: LocalBGEEmbeddings, LiteLLMEmbeddings, get_embedding_provider
-# Deps: sentence-transformers (local path only), litellm, numpy, langchain_core, config.settings
+# Embedding providers: local BAAI/bge-m3 (in-process) and TEI over HTTP.
+# Exports: LocalBGEEmbeddings, TEIEmbeddings, get_embedding_provider
+# Deps: sentence-transformers (local path only), httpx, numpy, langchain_core, config.settings
 # @end-summary
 """Embedding provider implementations and factory.
 
 Two backends:
-  local  — BAAI/bge-m3 loaded in-process via sentence-transformers (default)
-  vllm   — Qwen3-Embedding served by a separate vLLM container via LiteLLM
+  local — BAAI/bge-m3 loaded in-process via sentence-transformers (dev venv only;
+          requires the `local-embed` pyproject extra).
+  tei   — BAAI/bge-m3 served by a separate TEI container (rag-embed) over HTTP.
 """
 from __future__ import annotations
 
 
+import httpx
 import numpy as np
 from langchain_core.embeddings import Embeddings
 
-from config.settings import EMBEDDING_MODEL_PATH, INFERENCE_BACKEND, VLLM_TIMEOUT_SECONDS
+from config.settings import (
+    EMBEDDING_MODEL_PATH,
+    INFERENCE_BACKEND,
+    TEI_EMBED_URL,
+    TEI_EMBEDDING_MODEL,
+    TEI_TIMEOUT_SECONDS,
+)
 from src.platform.observability import get_tracer
 
 
 def _load_sentence_transformer(model_path: str):
-    """Lazy import so the worker image can run without sentence-transformers when using vLLM."""
+    """Lazy import so the worker image can run without sentence-transformers when using TEI."""
     from sentence_transformers import SentenceTransformer  # noqa: PLC0415
     return SentenceTransformer(model_path)
 
@@ -68,52 +76,68 @@ class LocalBGEEmbeddings(Embeddings):
         )
 
 
-class LiteLLMEmbeddings(Embeddings):
-    """LangChain-compatible embedding provider backed by litellm.embedding().
+class TEIEmbeddings(Embeddings):
+    """LangChain-compatible embeddings backed by a TEI container over HTTP.
 
-    Routes to any OpenAI-compatible /v1/embeddings endpoint (e.g., a vLLM
-    container).  The ``model`` name is resolved by the LiteLLM router config
-    (``RAG_LLM_ROUTER_CONFIG``) to the actual backend URL.
+    Calls TEI's OpenAI-compatible ``/v1/embeddings`` endpoint. TEI normalizes
+    outputs for sentence-transformer-family models (including BGE-M3), so the
+    vectors returned are already L2-unit and match the contract of
+    :class:`LocalBGEEmbeddings`.
     """
 
-    def __init__(self, model: str = "embedding", timeout: int = VLLM_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        base_url: str = TEI_EMBED_URL,
+        model: str = TEI_EMBEDDING_MODEL,
+        timeout: int = TEI_TIMEOUT_SECONDS,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
         self.model = model
-        self.timeout = timeout
+        self._client = httpx.Client(timeout=timeout)
         self.tracer = get_tracer()
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of documents via LiteLLM."""
-        import litellm  # noqa: PLC0415 — deferred so API container never imports it
+    def _embed(self, inputs: list[str]) -> list[list[float]]:
+        resp = self._client.post(
+            f"{self.base_url}/v1/embeddings",
+            json={"model": self.model, "input": inputs},
+        )
+        resp.raise_for_status()
+        return [d["embedding"] for d in resp.json()["data"]]
 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of documents via TEI."""
         span = self.tracer.start_span("embeddings.embed_documents", {"batch_size": len(texts)})
-        resp = litellm.embedding(model=self.model, input=texts, timeout=self.timeout)
-        span.end(status="ok")
-        return [d["embedding"] for d in resp.data]
+        try:
+            vectors = self._embed(texts)
+        finally:
+            span.end(status="ok")
+        return vectors
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a single query text via LiteLLM."""
-        return self.embed_documents([text])[0]
+        """Embed a single query text via TEI."""
+        span = self.tracer.start_span("embeddings.embed_query", {"text_len": len(text)})
+        try:
+            vectors = self._embed([text])
+        finally:
+            span.end(status="ok")
+        return vectors[0]
 
     def encode_sentences(self, sentences: list[str]) -> np.ndarray:
         """Return L2-normalized embeddings as a numpy array for semantic chunking.
 
-        Callers compute cosine similarity as a raw dot product, which requires
-        unit-norm vectors.  vLLM's /v1/embeddings endpoint does not normalize
-        by default, so we do it here to match the contract of LocalBGEEmbeddings.
+        TEI normalizes BGE-family embeddings by default, so no post-hoc norm needed.
         """
-        vecs = np.array(self.embed_documents(sentences))
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1.0, norms)
-        return vecs / norms
+        return np.array(self._embed(sentences))
 
 
 def get_embedding_provider() -> Embeddings:
     """Return the configured embedding provider.
 
     Reads ``INFERENCE_BACKEND`` from settings:
-      - ``"vllm"``  → :class:`LiteLLMEmbeddings` (routes via LiteLLM to vLLM)
-      - anything else → :class:`LocalBGEEmbeddings` (in-process sentence-transformers)
+      - ``"tei"``   → :class:`TEIEmbeddings` (direct HTTP to rag-embed container)
+      - anything else → :class:`LocalBGEEmbeddings` (in-process sentence-transformers;
+                         dev venv path — requires the `local-embed` pyproject extra)
     """
-    if INFERENCE_BACKEND == "vllm":
-        return LiteLLMEmbeddings(timeout=VLLM_TIMEOUT_SECONDS)
+    if INFERENCE_BACKEND == "tei":
+        return TEIEmbeddings()
     return LocalBGEEmbeddings()

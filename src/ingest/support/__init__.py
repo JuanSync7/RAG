@@ -59,6 +59,7 @@ from src.ingest.support.vision import (
     _IMAGE_REF_PATTERN,
     _describe_image,
     _extract_image_candidates,
+    caption_markdown_images_inline,
     ensure_vision_ready,
     generate_vision_notes,
 )

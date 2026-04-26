@@ -16,6 +16,7 @@ logger = logging.getLogger("rag.ingest.embedding.chunk_enrichment")
 
 from src.vector_db import build_chunk_id
 from src.ingest.common import (
+    EditLog,
     append_processing_log,
     map_chunk_provenance,
 )
@@ -40,6 +41,9 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     original_text = state.get("raw_text", "")
     refactored_text = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
     origin_label = "refactored" if config.enable_document_refactoring else "original"
+    # Build the edit log once per document so each chunk's offsets can be
+    # projected exactly between refactored and original coordinate systems.
+    edit_log = EditLog.from_diff(original_text, refactored_text)
     original_cursor = 0
     refactored_cursor = 0
     for index, chunk in enumerate(state["chunks"]):
@@ -49,6 +53,7 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             refactored_text=refactored_text,
             original_cursor=original_cursor,
             refactored_cursor=refactored_cursor,
+            edit_log=edit_log,
         )
         # Keep source display/filter field explicit even if upstream metadata changes.
         chunk.metadata["source"] = state["source_name"]

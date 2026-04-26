@@ -121,7 +121,7 @@ services:
       - RAG_API_PORT=${RAG_API_PORT:-8000}
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # API stream-generation needs Ollama access too.
-      - RAG_OLLAMA_URL=http://host.docker.internal:${RAG_OLLAMA_PROXY_PORT:-11435}
+      - RAG_OLLAMA_URL=http://rag-ollama:11434
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -138,12 +138,29 @@ services:
       - RAG_AUTH_OIDC_JWKS_URL=${RAG_AUTH_OIDC_JWKS_URL:-}
       - RAG_AUTH_API_KEYS_STORE_PATH=/app/.runtime/security/api_keys.json
       - RAG_AUTH_QUOTAS_STORE_PATH=/app/.runtime/security/quotas.json
+      # Shared Weaviate container (see rag-weaviate service below).
+      - RAG_WEAVIATE_MODE=networked
+      - RAG_WEAVIATE_HOST=rag-weaviate
+      - RAG_WEAVIATE_HTTP_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
+      # TEI-backed embed + rerank (see rag-embed / rag-rerank services below).
+      - RAG_INFERENCE_BACKEND=tei
+      - RAG_TEI_EMBED_URL=http://rag-embed:80
+      - RAG_TEI_RERANK_URL=http://rag-rerank:80
     depends_on:
       temporal:
         condition: service_started
       rag-redis:
         condition: service_started
       rag-postgres:
+        condition: service_healthy
+      rag-weaviate:
+        condition: service_healthy
+      rag-embed:
+        condition: service_healthy
+      rag-rerank:
+        condition: service_healthy
+      rag-ollama:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -163,22 +180,19 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
-    command: >
-      sh -lc '
-      WORKER_WV_DIR="/tmp/rag-weaviate-$${HOSTNAME}" &&
-      if [ -d "/seed_weaviate" ] && [ ! -d "$${WORKER_WV_DIR}" ]; then
-        cp -a /seed_weaviate "$${WORKER_WV_DIR}";
-      fi &&
-      export RAG_WEAVIATE_DATA_DIR="$${WORKER_WV_DIR}" &&
-      python -m server.worker
-      '
+    command: python -m server.worker
     environment:
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # Ollama is expected to run on the host in this setup.
       # The proxy port forwards to the actual Ollama port on 127.0.0.1.
-      - RAG_OLLAMA_URL=http://host.docker.internal:${RAG_OLLAMA_PROXY_PORT:-11435}
-      - RAG_EMBEDDING_MODEL=/models/baai/bge-m3
-      - RAG_RERANKER_MODEL=/models/baai/bge-reranker-v2-m3
+      - RAG_OLLAMA_URL=http://rag-ollama:11434
+      # Embed + rerank are served by TEI containers, not in-process. The worker
+      # image ships without torch/transformers; hitting the local path here would
+      # raise ImportError (by design — install the `local-embed` extra in a venv
+      # if you need in-process models for dev iteration).
+      - RAG_INFERENCE_BACKEND=tei
+      - RAG_TEI_EMBED_URL=http://rag-embed:80
+      - RAG_TEI_RERANK_URL=http://rag-rerank:80
       - RAG_WORKER_CONCURRENCY=4
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
@@ -188,31 +202,48 @@ services:
       - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
       - RAG_STAGE_BUDGET_EMBEDDING_MS=${RAG_STAGE_BUDGET_EMBEDDING_MS:-8000}
+      - RAG_STAGE_BUDGET_RERANKING_MS=${RAG_STAGE_BUDGET_RERANKING_MS:-15000}
+      # Shared Weaviate container (see rag-weaviate service above).
+      - RAG_WEAVIATE_MODE=networked
+      - RAG_WEAVIATE_HOST=rag-weaviate
+      - RAG_WEAVIATE_HTTP_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
     depends_on:
-      - temporal
-      - rag-redis
+      temporal:
+        condition: service_started
+      rag-redis:
+        condition: service_started
+      rag-weaviate:
+        condition: service_healthy
+      rag-embed:
+        condition: service_healthy
+      rag-rerank:
+        condition: service_healthy
+      rag-ollama:
+        condition: service_healthy
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Seed embedded Weaviate data from local ingestion output (read-only).
-      - ./.weaviate_data:/seed_weaviate:ro
-      # Host model cache (read-only) for containerized worker startup.
-      - ${RAG_MODEL_ROOT:-./models}:/models:ro
-    # GPU note: if needed, run with NVIDIA container runtime enabled.
-    # Example: set `gpus: all` here when your Docker setup supports it.
+      # Ad-hoc ingest source: host-cloned OpenTitan repo visible inside worker
+      # so `ingest_directory(/app/opentitan_data/...)` finds the files.
+      - ./opentitan_data:/app/opentitan_data:ro
 
   dozzle:
-    profiles: ["monitoring"]
+    # Always-on: web UI for container visibility + start/stop/restart actions.
+    # Companion to scripts/stack.sh (CLI). Browse to http://localhost:9999.
     image: amir20/dozzle:latest
     container_name: rag-monitor
+    environment:
+      # Enable start/stop/restart buttons in the UI. Requires writable socket below.
+      DOZZLE_ENABLE_ACTIONS: "true"
     ports:
       - "${DOZZLE_HOST_PORT:-9999}:8080"
     volumes:
-      # Use CONTAINER_SOCK env var for Docker/Podman compatibility.
+      # Writable socket (no :ro) so Dozzle actions can control containers.
       # Docker default: /var/run/docker.sock
       # Podman: set CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock in .env
-      - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     restart: unless-stopped
 
   rag-minio:
@@ -232,6 +263,32 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  rag-weaviate:
+    # Shared Weaviate vector store. Replaces the per-worker embedded instances that
+    # previously ran inside each rag-worker (they could not share state).
+    image: semitechnologies/weaviate:1.28.0
+    container_name: rag-weaviate
+    ports:
+      - "${RAG_WEAVIATE_HTTP_HOST_PORT:-8090}:8080"
+      - "${RAG_WEAVIATE_GRPC_HOST_PORT:-50051}:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: "node1"
+    volumes:
+      # Existing on-disk data from the previous embedded setup is mounted directly
+      # so no re-ingest is needed on first boot.
+      - ./.weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/.well-known/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   rag-redis:
@@ -462,28 +519,38 @@ services:
       - "${LANGFUSE_PORT:-3000}:3000"
     restart: unless-stopped
 
-  rag-vllm-embed:
-    profiles: ["inference"]
-    image: vllm/vllm-openai:latest
-    container_name: rag-vllm-embed
+  rag-embed:
+    # TEI image variant is SM-arch specific. turing-1.5 covers SM 7.5 (RTX 20xx, T4).
+    # For SM 8.0/8.6 use `86-1.5`; SM 8.9 use `89-1.5`; SM 9.0+ use `latest`;
+    # no GPU / debugging use `cpu-1.5`. See scripts/check_env.sh for auto-detect.
+    image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_IMAGE_TAG:-turing-1.5}
+    container_name: rag-embed
     ports:
-      - "${RAG_VLLM_EMBED_PORT:-8001}:8001"
+      - "${RAG_TEI_EMBED_PORT:-8081}:80"
     environment:
+      - MODEL_ID=${RAG_TEI_EMBEDDING_MODEL:-BAAI/bge-m3}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # hf-hub 0.3.x (bundled in turing-1.5) crashes with
+      # "relative URL without a base" if HF_ENDPOINT is unset.
+      - HF_ENDPOINT=https://huggingface.co
+    # Batch caps bound peak activation VRAM on the 6 GB RTX 2060. TEI's
+    # warmup pass preallocates activation memory at max-batch-tokens, so
+    # 8192 spikes to ~5 GB — too tight when Windows is co-tenant on the card.
+    # 2048 keeps peak ~2 GB (weights ~1.1 GB + activations ~800 MB + CUDA
+    # ctx ~400 MB). Raise on dedicated GPUs. Auto-truncate avoids 413s.
     command: >
-      --host 0.0.0.0
-      --port 8001
-      --model ${RAG_VLLM_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
-      --served-model-name embedding
-      --dtype ${RAG_VLLM_DTYPE:-auto}
+      --max-batch-tokens 2048
+      --max-concurrent-requests 8
+      --auto-truncate
     volumes:
-      - vllm-embed-cache:/root/.cache/huggingface
+      - ./.tei_cache:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health"]
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s
       timeout: 5s
       retries: 20
-      start_period: 120s
+      # First boot downloads ~2.3 GB (BGE-M3). Subsequent boots are instant (cached).
+      start_period: 300s
     restart: unless-stopped
     deploy:
       resources:
@@ -493,24 +560,65 @@ services:
               count: all
               capabilities: [gpu]
 
-  rag-vllm-rerank:
-    profiles: ["inference"]
-    image: vllm/vllm-openai:latest
-    container_name: rag-vllm-rerank
+  rag-rerank:
+    # CPU image by default — the RTX 2060 6 GB can't fit both bge-m3 and
+    # bge-reranker-v2-m3 on GPU simultaneously (OOM on warmup). Reranker on
+    # CPU costs ~100 ms/pair (top-10 rerank ≈ 1 s), acceptable for queries.
+    # Override with RAG_TEI_RERANK_IMAGE_TAG=turing-1.8 on a ≥12 GB card.
+    image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_RERANK_IMAGE_TAG:-turing-1.8}
+    container_name: rag-rerank
     ports:
-      - "${RAG_VLLM_RERANK_PORT:-8002}:8002"
+      - "${RAG_TEI_RERANK_PORT:-8082}:80"
     environment:
+      - MODEL_ID=${RAG_TEI_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - HF_ENDPOINT=https://huggingface.co
+    # GPU TEI reranker. Batch cap matches embed (2048) so peak activation
+    # VRAM stays bounded when both share the 6 GB card with Ollama.
+    # Fall back to cpu-1.8 + remove deploy block if VRAM contention OOMs.
     command: >
-      --host 0.0.0.0
-      --port 8002
-      --model ${RAG_VLLM_RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      --served-model-name reranking
-      --dtype ${RAG_VLLM_DTYPE:-auto}
+      --max-batch-tokens 2048
+      --max-concurrent-requests 4
+      --auto-truncate
     volumes:
-      - vllm-rerank-cache:/root/.cache/huggingface
+      - ./.tei_cache:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8002/health"]
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  rag-ollama:
+    # Ollama serves generative LLMs (qwen2.5:3b for "default"/"query",
+    # qwen2.5vl:3b for "vision"). Bind-mounts the host's pre-pulled
+    # model dir so we don't re-download ~3 GB per clean stack.
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    # Host systemd ollama was removed and .ollama_data migrated into the repo,
+    # so publishing 11434 to 127.0.0.1 is safe. Lets host-side dev workers
+    # (venv) reach Ollama via http://localhost:11434 per RAG_LLM_API_BASE.
+    # In-network containers still resolve rag-ollama:11434 via compose DNS.
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      # Keep models loaded longer to avoid cold-start jitter on first query.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+    volumes:
+      # Repo-local model cache. Migrated from host /usr/share/ollama/.ollama
+      # after removing the host systemd Ollama; no host trail.
+      - ./.ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -556,5 +664,3 @@ volumes:
   langfuse-minio-data:
   prometheus-data:
   grafana-data:
-  vllm-embed-cache:
-  vllm-rerank-cache:

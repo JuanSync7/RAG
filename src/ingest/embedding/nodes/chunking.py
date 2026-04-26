@@ -111,6 +111,16 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                 processing_log = append_processing_log(state, "chunking:markdown_override")
             else:
                 # config.chunker == "native" (default)
+                # Optionally hand the parser a doc-store client + source identity
+                # so figure-image uploads (when config.store_figures_in_db=True)
+                # land at a stable backend key. No-op when the parser doesn't
+                # implement configure_storage or when either dep is missing.
+                configure_storage = getattr(parser_instance, "configure_storage", None)
+                if callable(configure_storage):
+                    configure_storage(
+                        source_key=state.get("source_key", ""),
+                        doc_store_client=getattr(state["runtime"], "db_client", None),
+                    )
                 try:
                     raw_parser_chunks = parser_instance.chunk(parse_result)
                     processing_log = append_processing_log(state, "chunking:native_ok")

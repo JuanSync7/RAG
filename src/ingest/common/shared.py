@@ -1,7 +1,7 @@
 # @summary
 # Ingestion pipeline shared helpers for keyword fallback, stage logging, and provenance mapping.
 # Exports: extract_keywords_fallback, cross_refs, quality_score, append_processing_log, map_chunk_provenance
-# Deps: difflib, logging, re, src.ingest.common.types
+# Deps: difflib, logging, re, src.ingest.common.types, src.ingest.common.edit_log
 # @end-summary
 
 """Shared helpers for ingestion pipeline nodes.
@@ -16,7 +16,9 @@ import logging
 import re
 import difflib
 
-from typing import Any
+from typing import Any, Optional
+
+from src.ingest.common.edit_log import EditLog
 
 logger = logging.getLogger("rag.ingest.common.shared")
 
@@ -178,11 +180,17 @@ def map_chunk_provenance(
     refactored_text: str,
     original_cursor: int,
     refactored_cursor: int,
+    edit_log: Optional[EditLog] = None,
 ) -> tuple[dict[str, object], int, int]:
     """Map a chunk to refactored and original text spans with confidence.
 
     This function attempts exact matching first and falls back to weaker
     heuristics (e.g., paragraph similarity) when exact mapping fails.
+
+    When ``edit_log`` is supplied and the chunk is exactly located in the
+    refactored text, the original-side offsets are projected via the edit log
+    instead of substring-searched in the original — this is deterministic and
+    avoids the fuzzy fallback for chunks the LLM rewrote.
 
     Args:
         chunk_text: The chunk text to map.
@@ -191,6 +199,9 @@ def map_chunk_provenance(
         original_cursor: Cursor offset hint for original text to speed up search.
         refactored_cursor: Cursor offset hint for refactored text to speed up
             search.
+        edit_log: Optional pre-built diff between original and refactored. When
+            provided, takes precedence over substring/fuzzy original-side
+            mapping for any chunk found in refactored text.
 
     Returns:
         Tuple of ``(provenance, next_original_cursor, next_refactored_cursor)``
@@ -203,8 +214,24 @@ def map_chunk_provenance(
     )
     next_ref_cursor = ref_end if ref_start >= 0 else refactored_cursor
 
-    orig_start, orig_end, orig_method = _locate_span(original_text, chunk_text, original_cursor)
-    confidence = 1.0 if orig_start >= 0 else 0.0
+    orig_start = orig_end = -1
+    orig_method = "unmapped"
+    confidence = 0.0
+
+    # Edit-log path: exact projection from refactored offsets to original offsets.
+    if edit_log is not None and ref_start >= 0:
+        proj_start, proj_end, proj_conf = edit_log.map_ref_to_orig(ref_start, ref_end)
+        if proj_start >= 0:
+            orig_start, orig_end = proj_start, proj_end
+            orig_method = "edit_log"
+            confidence = proj_conf
+
+    # Substring fallback when no edit log or projection failed.
+    if orig_start < 0:
+        orig_start, orig_end, orig_method = _locate_span(original_text, chunk_text, original_cursor)
+        if orig_start >= 0:
+            confidence = 1.0
+
     if orig_start < 0 and ref_start >= 0:
         ref_slice = refactored_text[ref_start:ref_end]
         orig_start, orig_end, orig_method = _locate_span(original_text, ref_slice, original_cursor)

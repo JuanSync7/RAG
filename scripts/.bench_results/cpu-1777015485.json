@@ -1,0 +1,17 @@
+{
+  "device_label": "cpu",
+  "cuda_available": false,
+  "device_name": "cpu",
+  "file_count": 5,
+  "total_bytes": 244860,
+  "total_kb": 239.1,
+  "elapsed_sec": 532.406,
+  "docs_per_sec": 0.009,
+  "kb_per_sec": 0.449,
+  "processed": 5,
+  "skipped": 0,
+  "failed": 0,
+  "stored_chunks": 619,
+  "chunks_per_sec": 1.163,
+  "errors": []
+}

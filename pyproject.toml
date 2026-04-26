@@ -8,10 +8,8 @@ version = "0.1.0"
 description = "Multi-modal RAG platform with pipeline-first ingestion, visual+text embeddings, and graph-based orchestration."
 requires-python = ">=3.10"
 dependencies = [
-  "weaviate-client",
-  "sentence-transformers",
-  "transformers",
-  "torch",
+  "weaviate-client>=4.9,<5",
+  "httpx",
   "networkx",
   "langchain-core",
   "langchain-text-splitters",
@@ -22,7 +20,6 @@ dependencies = [
   "fastapi",
   "uvicorn[standard]",
   "pydantic>=2.0",
-  "accelerate",
   "prometheus-client",
   "redis",
   "pyjwt[crypto]",
@@ -71,6 +68,15 @@ visual = [
   "colpali-engine>=0.3.0",
   "bitsandbytes>=0.43.0",
 ]
+local-embed = [
+  # In-process embedding + reranker stack. Only needed when running with
+  # RAG_INFERENCE_BACKEND=local (dev venv without a TEI container up).
+  # The containerized worker image does NOT install this — it hits TEI over HTTP.
+  "torch",
+  "sentence-transformers",
+  "transformers",
+  "accelerate",
+]
 kg = [
   # Knowledge-graph feature (src/knowledge_graph/). Mirrors the deps in
   # containers/requirements-worker.txt so the containerized worker and local
@@ -90,6 +96,7 @@ all = [
   "ragweave[qdrant]",
   "ragweave[visual]",
   "ragweave[kg]",
+  "ragweave[local-embed]",
 ]
 
 [tool.deptry]
@@ -171,3 +178,13 @@ markers = [
 dev = [
     "libcst>=1.8.6",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+triton = { index = "pytorch-cu124" }

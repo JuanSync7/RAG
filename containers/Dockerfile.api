@@ -2,12 +2,15 @@
 # --- Builder stage: installs deps with gcc available ---
 FROM python:3.11-slim-bookworm AS builder
 
-# PIP_NO_CACHE_DIR intentionally omitted — the BuildKit cache mount below
-# persists pip's wheel cache across rebuilds (speeds up dep-change rebuilds)
+# uv cache lives at /root/.cache/uv; the BuildKit mount below persists it.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+# uv: 10–100× faster than pip, honors pyproject.toml [tool.uv.sources] pins,
+# matches the project-wide tooling (see memory: prefer uv over pip).
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -16,8 +19,8 @@ RUN apt-get update \
 
 COPY pyproject.toml /app/pyproject.toml
 COPY containers/requirements-api.txt /app/requirements-api.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-api.txt \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --prefix=/install -r /app/requirements-api.txt \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \

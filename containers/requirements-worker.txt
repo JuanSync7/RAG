@@ -1,8 +1,17 @@
-# Temporal worker dependencies — ML models, ingestion, embedding, KG.
+# Temporal worker dependencies — ingestion, retrieval, KG. Embed + rerank
+# are served by separate TEI containers over HTTP (see rag-embed / rag-rerank
+# in docker-compose.yml); sentence-transformers is NOT installed here. For
+# the in-process fallback used by dev venvs, install the `local-embed`
+# pyproject extra instead: `uv sync --extra local-embed`.
+#
+# NOTE: docling (our PDF parser) transitively requires torch + torchvision.
+# The Dockerfile pre-installs the CPU-only wheels from the pytorch.org CPU
+# index BEFORE running `uv pip install -r` against this file, so the
+# resolver finds torch already satisfied and docling doesn't pull the CUDA
+# build from PyPI (which adds ~2.7 GB of nvidia/* + ~640 MB triton we never
+# touch in this container — no GPU code runs here).
 # API server deps are in requirements-api.txt.
-torch
-transformers
-accelerate
+httpx
 numpy
 docling>=2.82.0
 weaviate-client

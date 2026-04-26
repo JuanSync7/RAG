@@ -1,9 +1,10 @@
 # Sandbox policy for the RAG Temporal worker.
 #
-# The worker loads BAAI embedding/reranker models into GPU memory at startup,
-# connects to Temporal for task scheduling, and processes user queries against
-# an embedded Weaviate instance. It also calls Ollama for LLM inference and
-# optionally reports traces to Langfuse.
+# The worker is a thin HTTP client — it delegates embedding to the rag-embed TEI
+# container and reranking to the rag-rerank TEI container (no torch / models in
+# the worker image), connects to Temporal for task scheduling, and processes
+# user queries against the shared rag-weaviate container. It also calls Ollama
+# for LLM inference and optionally reports traces to Langfuse.
 #
 # This policy restricts the worker to only the resources it needs.
 
@@ -25,21 +26,9 @@ spec:
           access: read-only
           description: "Application source code and config"
 
-        - path: /models
-          access: read-only
-          description: "BAAI BGE-M3 embedding and BGE-Reranker-v2-M3 models"
-
-        - path: /seed_weaviate
-          access: read-only
-          description: "Seed Weaviate data from host ingestion output"
-
-        - path: /tmp/rag-weaviate-*
-          access: read-write
-          description: "Per-worker Weaviate embedded data directory"
-
         - path: /tmp
           access: read-write
-          description: "Python tempfiles, Weaviate runtime files"
+          description: "Python tempfiles"
 
         - path: /usr/local/lib/python*
           access: read-only
@@ -64,6 +53,26 @@ spec:
           protocol: tcp
           description: "Redis — query cache and conversation memory"
 
+        - host: rag-weaviate
+          port: 8080
+          protocol: tcp
+          description: "Weaviate REST — schema and CRUD"
+
+        - host: rag-weaviate
+          port: 50051
+          protocol: tcp
+          description: "Weaviate gRPC — hybrid search and batch operations"
+
+        - host: rag-embed
+          port: 80
+          protocol: tcp
+          description: "TEI embed — /v1/embeddings HTTP endpoint"
+
+        - host: rag-rerank
+          port: 80
+          protocol: tcp
+          description: "TEI rerank — /rerank HTTP endpoint"
+
         - host: host.docker.internal
           port: 11435
           protocol: tcp
@@ -82,12 +91,8 @@ spec:
       allow:
         - binary: /usr/local/bin/python*
           description: "Python interpreter for worker process"
-        - binary: /bin/sh
-          description: "Shell for startup command"
-        - binary: /bin/cp
-          description: "Copy seed Weaviate data"
-      max_processes: 25  # Main + ThreadPoolExecutor(4) + Weaviate embedded threads
-      deny_exec: false   # Needed for startup sh -lc wrapper; tighten after startup
+      max_processes: 15  # Main + ThreadPoolExecutor(4); Weaviate now runs out-of-process
+      deny_exec: true    # Worker no longer needs to shell out; Weaviate is a separate service
 
   # ── Credentials ─────────────────────────────────────────────
   credentials:

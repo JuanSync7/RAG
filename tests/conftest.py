@@ -464,7 +464,11 @@ def _install_stub_modules() -> None:
         def connect_to_embedded(**kwargs):
             return WeaviateClient()
 
+        def connect_to_local(**kwargs):
+            return WeaviateClient()
+
         weaviate.connect_to_embedded = connect_to_embedded
+        weaviate.connect_to_local = connect_to_local
         weaviate.WeaviateClient = WeaviateClient
         sys.modules["weaviate"] = weaviate
 
@@ -600,6 +604,73 @@ def _install_stub_modules() -> None:
         prom.Histogram = _MetricBase
         prom.Summary = _MetricBase
         sys.modules["prometheus_client"] = prom
+
+    # httpx: prefer the real package if it's installed (litellm + openai depend
+    # on it internally, so stubbing over the top breaks their imports). The
+    # stub is only installed when real httpx is unavailable (minimal CI
+    # environments that skip the core deps).
+    try:
+        import httpx as _real_httpx  # noqa: F401
+        _has_real_httpx = True
+    except Exception:
+        _has_real_httpx = False
+    if not _has_real_httpx and "httpx" not in sys.modules:
+        # Shape-compatible stub for TEI (TEIEmbeddings / TEIReranker).
+        # /v1/embeddings  → {"data": [{"embedding": [...]}, ...]}
+        # /rerank         → [{"index": i, "score": s}, ...]  (sorted desc)
+        # Deterministic small vectors so tests can assert on dimensions.
+        httpx_stub = types.ModuleType("httpx")
+
+        class _StubResponse:
+            def __init__(self, payload):
+                self._payload = payload
+                self.status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._payload
+
+        class _StubClient:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            def post(self, url, *, json=None, **_kw):
+                json = json or {}
+                if "/rerank" in url:
+                    texts = json.get("texts", []) or []
+                    # TEI returns sorted desc; produce stable decreasing scores.
+                    return _StubResponse(
+                        [{"index": i, "score": 1.0 - i * 0.01} for i in range(len(texts))]
+                    )
+                # Embeddings path — accept a str or list under "input".
+                inputs = json.get("input", [])
+                if isinstance(inputs, str):
+                    inputs = [inputs]
+                return _StubResponse(
+                    {"data": [{"embedding": [0.1, 0.2, 0.3]} for _ in inputs]}
+                )
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        class _HTTPError(Exception):
+            pass
+
+        httpx_stub.Client = _StubClient
+        httpx_stub.AsyncClient = _StubClient  # close-enough for tests
+        httpx_stub.HTTPError = _HTTPError
+        httpx_stub.HTTPStatusError = _HTTPError
+        httpx_stub.RequestError = _HTTPError
+        httpx_stub.Response = _StubResponse
+        sys.modules["httpx"] = httpx_stub
 
 
 _install_stub_modules()

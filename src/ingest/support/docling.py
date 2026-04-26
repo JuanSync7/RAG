@@ -386,6 +386,99 @@ def parse_with_docling(
     )
 
 
+def chunk_markdown_via_docling(
+    markdown_text: str,
+    *,
+    max_tokens: int = 512,
+    source_path: Path | None = None,
+    config: Any = None,
+    source_key: str | None = None,
+    doc_store_client: Any = None,
+) -> list:
+    """Caption images inline (if enabled), build a DoclingDocument, chunk via HybridChunker.
+
+    Pipeline:
+      1. (optional) VLM-caption every ``![alt](src)`` in-place. Local files and
+         data-URLs are sent to the configured VLM; HTTP URLs are skipped with a
+         warning (alt text preserved). On VLM failure, alt text stands in.
+      2. Build a DoclingDocument from the rewritten markdown via the MD backend
+         (~0.2s, no models).
+      3. Run HybridChunker — preserves lists, tables, and requirement blocks
+         as atomic units.
+
+    Captioning runs only when both ``source_path`` and ``config`` are provided
+    AND ``config.enable_vision_processing`` is True. Without those, the function
+    behaves as a pure structural chunker (no VLM calls).
+
+    Each returned Chunk carries a ``figures`` list in ``extra_metadata`` with
+    one entry per image reference encountered (label, src, alt, caption, …)
+    so citation UIs can link the chunk back to the original image.
+
+    Returns a list of Chunk objects (the existing parser_base contract).
+    Raises any exception from Docling — callers should catch and fall back.
+    """
+    from io import BytesIO
+
+    from docling.datamodel.base_models import DocumentStream, InputFormat
+    from docling.document_converter import DocumentConverter
+    from docling_core.transforms.chunker import HybridChunker
+
+    from src.ingest.support.parser_base import Chunk
+
+    figures: list[dict] = []
+    text_for_chunking = markdown_text
+    enable_vision = bool(getattr(config, "enable_vision_processing", False))
+    if source_path is not None and config is not None and enable_vision:
+        from src.ingest.support.vision import caption_markdown_images_inline
+
+        text_for_chunking, figures = caption_markdown_images_inline(
+            markdown_text,
+            source_path=source_path,
+            config=config,
+            source_key=source_key,
+            doc_store_client=doc_store_client,
+        )
+
+    converter = DocumentConverter(allowed_formats=[InputFormat.MD])
+    conv_result = converter.convert(
+        source=DocumentStream(
+            name="input.md", stream=BytesIO(text_for_chunking.encode("utf-8"))
+        )
+    )
+    docling_document = conv_result.document
+
+    chunker = HybridChunker(max_tokens=max_tokens, merge_peers=True)
+    raw_chunks = list(chunker.chunk(dl_doc=docling_document))
+
+    figures_payload = figures if figures else []
+    chunks: list = []
+    for idx, raw in enumerate(raw_chunks):
+        headings: list[str] = []
+        meta = getattr(raw, "meta", None)
+        if meta is not None:
+            headings = list(getattr(meta, "headings", None) or [])
+        # Only attach figures whose label appears in this chunk's text. Cheap
+        # substring check — keeps the citation linkback specific to chunks
+        # that actually reference a figure.
+        chunk_figures = [
+            fig for fig in figures_payload if fig.get("label", "") in raw.text
+        ]
+        extra: dict = {}
+        if chunk_figures:
+            extra["figures"] = chunk_figures
+        chunks.append(
+            Chunk(
+                text=raw.text,
+                section_path=" > ".join(headings),
+                heading=headings[-1] if headings else "",
+                heading_level=len(headings),
+                chunk_index=idx,
+                extra_metadata=extra,
+            )
+        )
+    return chunks
+
+
 # ---------------------------------------------------------------------------
 # DoclingParser — DocumentParser protocol implementation (FR-3221–FR-3224)
 # ---------------------------------------------------------------------------

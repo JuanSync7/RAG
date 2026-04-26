@@ -16,7 +16,7 @@ Cross-cutting infrastructure used by both the ingestion and retrieval pipelines.
 
 The inference backend subsystem provides pluggable embedding and reranking providers. A single `RAG_INFERENCE_BACKEND` env var switches between:
 
-- **`local`** (default) — BGE models run in-process inside `rag-worker`
-- **`vllm`** — Qwen3 models served by `rag-vllm-embed` and `rag-vllm-rerank` containers, routed through LiteLLM
+- **`local`** (default) — BGE models run in-process inside the dev venv (requires the `local-embed` extra)
+- **`tei`** — BGE models served by the always-on `rag-embed` and `rag-rerank` containers (HuggingFace TEI) over HTTP
 
 See the [engineering guide](INFERENCE_BACKEND_ENGINEERING_GUIDE.md) for architecture, configuration reference, operational runbook, and extension instructions.

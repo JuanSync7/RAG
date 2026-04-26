@@ -1,8 +1,12 @@
 # Claude
 .claude/
 
-# Weaviate data
+# Brainstorm scratch (local-only ideation memos)
+.brainstorms/
+
+# Weaviate data (live + archived snapshots)
 .weaviate_data/
+.weaviate_data.archived-*/
 
 # Python
 __pycache__/
@@ -17,9 +21,8 @@ venv/
 # Node
 node_modules/
 
-# Processed data (regenerable)
-processed/*.json
-processed/*.md
+# Processed data (regenerable: ingestion manifest, refactor mirror, etc.)
+processed/
 !processed/README.md
 
 # Clean document store (regenerable via ingestion)
@@ -50,7 +53,8 @@ logs/*.log
 # User documents (keep sample docs, ignore user-added files)
 # documents/
 
-# Model cache
+# Model cache (incl. host symlink at repo root pointing to ~/models)
+models
 models/
 
 # TLS certs (generated locally via mkcert)
@@ -71,3 +75,22 @@ auto-research
 
 # Tooling binaries downloaded ad-hoc (not project source)
 git-filter-repo
+
+# Coverage output
+.coverage
+.coverage.*
+htmlcov/
+
+# Local container data dirs (regenerated on stack up)
+.ollama_data/
+.tei_cache/
+
+# Ad-hoc ingest corpora (cloned beside the repo, not source)
+opentitan_data/
+
+# Per-iteration bench result JSONs — ignore everything new; the tracked
+# baselines (cpu-1777015485.json, gpu-1777015578.json, baseline_report.md)
+# remain tracked because git ignores only affect untracked files.
+scripts/.bench_results/*.json
+!scripts/.bench_results/cpu-1777015485.json
+!scripts/.bench_results/gpu-1777015578.json
