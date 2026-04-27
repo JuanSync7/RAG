@@ -61,6 +61,7 @@ function setActiveConversation(id) {
   state.activeConversationId = id;
   if (id) localStorage.setItem("nc_active_conv", id);
   else localStorage.removeItem("nc_active_conv");
+  document.dispatchEvent(new CustomEvent("conversation-changed", { detail: { id } }));
 }
 
 // src/toast.ts
@@ -269,7 +270,7 @@ function buildCitationsHtml(results) {
     const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
     const section = escHtml(String(meta.section ?? meta.heading ?? ""));
     const score = Math.round(r.score * 100);
-    const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
+    const scoreClass2 = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
     const chunkHtml = parseMarkdown(r.text || "");
     const chunkId = `chunk-${i}-${Date.now()}`;
     const sourceUri = String(meta.source_uri ?? "").trim();
@@ -299,8 +300,8 @@ function buildCitationsHtml(results) {
                 ${section ? `<div class="citation-section">${section}</div>` : ""}
               </div>
               <div class="relevance-bar-wrap">
-                <span class="relevance-pct ${scoreClass}">${score}%</span>
-                <div class="relevance-bar"><div class="relevance-fill ${scoreClass}" style="width:${score}%"></div></div>
+                <span class="relevance-pct ${scoreClass2}">${score}%</span>
+                <div class="relevance-bar"><div class="relevance-fill ${scoreClass2}" style="width:${score}%"></div></div>
               </div>
               <span class="citation-chevron">&#8964;</span>
             </div>
@@ -990,10 +991,10 @@ function initConversations() {
   });
   byId("newChatBtn").addEventListener("click", createNewConversation);
   document.getElementById("convSearch")?.addEventListener("input", (e) => {
-    const q = e.target.value.toLowerCase();
+    const q2 = e.target.value.toLowerCase();
     byId("convList").querySelectorAll(".conv-item-wrap").forEach((wrap) => {
       const text = wrap.querySelector(".conv-item")?.textContent?.toLowerCase() || "";
-      wrap.style.display = text.includes(q) ? "" : "none";
+      wrap.style.display = text.includes(q2) ? "" : "none";
     });
   });
 }
@@ -1439,13 +1440,13 @@ function handleSlashInput() {
     closeDropdown();
     return;
   }
-  const q = val.slice(1).toLowerCase();
+  const q2 = val.slice(1).toLowerCase();
   let vis = 0;
   state.allSlashItems.forEach((item) => {
     const cmdAttr = (item.dataset.cmd || "").toLowerCase();
     const descEl = item.querySelector(".slash-desc");
     const descText = descEl ? descEl.textContent?.toLowerCase() || "" : "";
-    const match = cmdAttr.includes(q) || descText.includes(q);
+    const match = cmdAttr.includes(q2) || descText.includes(q2);
     item.style.display = match ? "" : "none";
     if (match) vis++;
   });
@@ -1649,10 +1650,10 @@ function attachWebUrl() {
   refs.webInputPanel.classList.remove("open");
   showToast("Web page added to context");
 }
-function filterKB(q) {
+function filterKB(q2) {
   document.querySelectorAll(".kb-item").forEach((el) => {
     const name = el.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
-    el.style.display = name.includes(q.toLowerCase()) ? "" : "none";
+    el.style.display = name.includes(q2.toLowerCase()) ? "" : "none";
   });
 }
 function attachKBDocs() {
@@ -2232,6 +2233,291 @@ function initIngestView() {
   });
 }
 
+// src/retrieval.ts
+var rs = {
+  results: [],
+  ignoredDocIds: /* @__PURE__ */ new Set(),
+  lastConversationId: null
+};
+function q(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing #${id}`);
+  return el;
+}
+function getActiveConvTitle() {
+  const activeItem = document.querySelector(".conv-item.active");
+  if (!activeItem) return "";
+  return activeItem.textContent?.trim().replace(/^●/, "").trim() ?? "";
+}
+function renderConvPill() {
+  const pill = q("retrievalConvPill");
+  const noConvNote = q("retrievalNoConvNote");
+  const convId = state.activeConversationId;
+  if (convId) {
+    const title = getActiveConvTitle() || convId;
+    pill.style.display = "inline-flex";
+    noConvNote.style.display = "none";
+    const labelEl = pill.querySelector(".retrieval-conv-label");
+    if (labelEl) labelEl.textContent = title;
+  } else {
+    pill.style.display = "none";
+    noConvNote.style.display = "block";
+  }
+}
+function scoreClass(score) {
+  if (score >= 0.75) return "high";
+  if (score >= 0.45) return "mid";
+  return "low";
+}
+function scorePct(score) {
+  return `${Math.round(score * 100)}%`;
+}
+function buildResultCard(item, idx) {
+  const docId = String(
+    item.metadata.doc_id || item.metadata.document_id || `result-${idx}`
+  );
+  const sourceName = String(item.metadata.source_name || item.metadata.source || "Unknown source");
+  const sourceUri = String(item.metadata.source_uri || "");
+  const excerpt = item.text ? item.text.slice(0, 200) : "";
+  const cls = scoreClass(item.score);
+  const card = document.createElement("div");
+  card.className = "retrieval-card";
+  card.dataset.docId = docId;
+  const badge = document.createElement("span");
+  badge.className = `retrieval-score-badge ${cls}`;
+  badge.textContent = scorePct(item.score);
+  const nameEl = sourceUri ? document.createElement("a") : document.createElement("span");
+  nameEl.className = "retrieval-source-name";
+  nameEl.textContent = sourceName;
+  if (nameEl instanceof HTMLAnchorElement && sourceUri) {
+    nameEl.href = sourceUri;
+    nameEl.target = "_blank";
+    nameEl.rel = "noopener noreferrer";
+  }
+  const header = document.createElement("div");
+  header.className = "retrieval-card-header";
+  header.appendChild(nameEl);
+  header.appendChild(badge);
+  const excerptEl = document.createElement("p");
+  excerptEl.className = "retrieval-card-excerpt";
+  excerptEl.textContent = excerpt;
+  const hideBtn = document.createElement("button");
+  hideBtn.className = "retrieval-hide-btn";
+  hideBtn.title = "Hide from this conversation";
+  hideBtn.textContent = "Hide";
+  hideBtn.addEventListener("click", () => void hideDoc(docId, sourceName, card));
+  const footer = document.createElement("div");
+  footer.className = "retrieval-card-footer";
+  footer.appendChild(excerptEl);
+  footer.appendChild(hideBtn);
+  card.appendChild(header);
+  card.appendChild(footer);
+  return card;
+}
+function buildHiddenItem(docId) {
+  const item = document.createElement("div");
+  item.className = "retrieval-hidden-item";
+  item.dataset.docId = docId;
+  const label = document.createElement("span");
+  label.className = "retrieval-hidden-label";
+  label.textContent = docId;
+  const restoreBtn = document.createElement("button");
+  restoreBtn.className = "retrieval-restore-btn";
+  restoreBtn.textContent = "Restore";
+  restoreBtn.addEventListener("click", () => void restoreDoc(docId, item));
+  item.appendChild(label);
+  item.appendChild(restoreBtn);
+  return item;
+}
+function renderHiddenSection() {
+  const section = q("retrievalHiddenSection");
+  const list = q("retrievalHiddenList");
+  const countEl = q("retrievalHiddenCount");
+  const count = rs.ignoredDocIds.size;
+  countEl.textContent = String(count);
+  list.innerHTML = "";
+  rs.ignoredDocIds.forEach((docId) => {
+    list.appendChild(buildHiddenItem(docId));
+  });
+  if (count > 0) {
+    section.style.display = "block";
+  } else {
+    section.style.display = "none";
+    const details = section.querySelector("details");
+    if (details) details.removeAttribute("open");
+  }
+}
+function renderResults() {
+  const list = q("retrievalResultsList");
+  const emptyState = q("retrievalEmptyState");
+  list.innerHTML = "";
+  const visible = rs.results.filter((r) => {
+    const docId = String(r.metadata.doc_id || r.metadata.document_id || "");
+    return !docId || !rs.ignoredDocIds.has(docId);
+  });
+  if (visible.length === 0) {
+    emptyState.style.display = "block";
+    return;
+  }
+  emptyState.style.display = "none";
+  visible.forEach((item, idx) => {
+    list.appendChild(buildResultCard(item, idx));
+  });
+}
+function setStatus(msg) {
+  q("retrievalStatus").textContent = msg;
+}
+async function fetchDocState(conversationId) {
+  try {
+    const data = await api(
+      "GET",
+      `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
+    );
+    rs.ignoredDocIds = new Set(data.ignored_doc_ids ?? []);
+    renderHiddenSection();
+    renderResults();
+  } catch {
+  }
+}
+async function hideDoc(docId, sourceName, card) {
+  if (!state.activeConversationId) {
+    showToast("Select a conversation first");
+    return;
+  }
+  rs.ignoredDocIds.add(docId);
+  card.remove();
+  renderHiddenSection();
+  try {
+    await api(
+      "POST",
+      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore`,
+      { doc_id: docId }
+    );
+    showToast(`Hidden: ${sourceName}`);
+  } catch (err) {
+    rs.ignoredDocIds.delete(docId);
+    renderResults();
+    renderHiddenSection();
+    showToast("Failed to hide document: " + String(err));
+  }
+}
+async function restoreDoc(docId, item) {
+  if (!state.activeConversationId) {
+    showToast("Select a conversation first");
+    return;
+  }
+  rs.ignoredDocIds.delete(docId);
+  item.remove();
+  renderHiddenSection();
+  renderResults();
+  try {
+    await api(
+      "DELETE",
+      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore/${encodeURIComponent(docId)}`
+    );
+    showToast("Document restored");
+  } catch (err) {
+    rs.ignoredDocIds.add(docId);
+    renderHiddenSection();
+    renderResults();
+    showToast("Failed to restore document: " + String(err));
+  }
+}
+async function submitQuery() {
+  const textarea = q("retrievalQueryInput");
+  const findBtn = q("retrievalFindBtn");
+  const modeSmartBtn = q("retrievalModeSmart");
+  const query = textarea.value.trim();
+  if (!query) {
+    textarea.focus();
+    return;
+  }
+  const mode = modeSmartBtn.classList.contains("active") ? "auto" : "hard";
+  const topNInput = q("retrievalTopN");
+  const searchLimit = Math.max(1, Math.min(50, parseInt(topNInput.value, 10) || 10));
+  findBtn.disabled = true;
+  setStatus("Searching\u2026");
+  try {
+    const body = {
+      query,
+      mode: "retrieval",
+      retrieval_sub_mode: mode,
+      search_limit: searchLimit,
+      rerank_top_k: Math.min(searchLimit, 10)
+    };
+    if (state.activeConversationId) {
+      body.conversation_id = state.activeConversationId;
+    }
+    const data = await api("POST", "/query", body);
+    rs.results = data.results ?? [];
+    if (data.ignored_doc_ids) {
+      rs.ignoredDocIds = new Set(data.ignored_doc_ids);
+    }
+    rs.lastConversationId = state.activeConversationId;
+    const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
+    setStatus(`Found ${rs.results.length} document${rs.results.length !== 1 ? "s" : ""}${latency}.`);
+    renderResults();
+    renderHiddenSection();
+  } catch (err) {
+    setStatus("Search failed.");
+    showToast("Retrieval error: " + String(err));
+  } finally {
+    findBtn.disabled = false;
+  }
+}
+function autoGrow(el) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+function initRetrievalView() {
+  const textarea = q("retrievalQueryInput");
+  const findBtn = q("retrievalFindBtn");
+  const modeSmartBtn = q("retrievalModeSmart");
+  const modeExactBtn = q("retrievalModeExact");
+  modeSmartBtn.addEventListener("click", () => {
+    modeSmartBtn.classList.add("active");
+    modeExactBtn.classList.remove("active");
+  });
+  modeExactBtn.addEventListener("click", () => {
+    modeExactBtn.classList.add("active");
+    modeSmartBtn.classList.remove("active");
+  });
+  textarea.addEventListener("input", () => autoGrow(textarea));
+  textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void submitQuery();
+    }
+  });
+  findBtn.addEventListener("click", () => void submitQuery());
+  document.addEventListener("conversation-changed", () => {
+    renderConvPill();
+    rs.results = [];
+    rs.ignoredDocIds = /* @__PURE__ */ new Set();
+    rs.lastConversationId = null;
+    setStatus("");
+    renderResults();
+    renderHiddenSection();
+    const pane = document.getElementById("view-retrieval");
+    if (pane?.classList.contains("active") && state.activeConversationId) {
+      void fetchDocState(state.activeConversationId);
+    }
+  });
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.view === "retrieval") {
+        renderConvPill();
+        if (state.activeConversationId && state.activeConversationId !== rs.lastConversationId) {
+          void fetchDocState(state.activeConversationId);
+        }
+      }
+    });
+  });
+  renderConvPill();
+  renderResults();
+  renderHiddenSection();
+}
+
 // src/user-console.ts
 document.addEventListener("DOMContentLoaded", () => {
   populateRefs();
@@ -2245,6 +2531,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initAttachments();
   initInput();
   initIngestView();
+  initRetrievalView();
   loadSettings();
   void loadModelInfo();
   void Promise.all([loadCommands(), loadConversations()]).then(() => {
