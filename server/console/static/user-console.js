@@ -2566,38 +2566,41 @@ function buildRailItem(docId, actionLabel, actionClass, onAction) {
   item.appendChild(btn);
   return item;
 }
+function renderRailList(listId, countId, ids, actionLabel, actionClass, emptyText, onAction) {
+  const list = q(listId);
+  const countEl = q(countId);
+  countEl.textContent = String(ids.size);
+  list.innerHTML = "";
+  if (ids.size === 0) {
+    const empty = document.createElement("div");
+    empty.className = "retrieval-rail-list-empty";
+    empty.textContent = emptyText;
+    list.appendChild(empty);
+    return;
+  }
+  ids.forEach((docId) => {
+    list.appendChild(buildRailItem(docId, actionLabel, actionClass, () => void onAction(docId)));
+  });
+}
 function renderRail() {
-  const relevantSection = qOpt("retrievalRelevantSection");
-  const hiddenSection = qOpt("retrievalHiddenSection");
-  const railEmpty = qOpt("retrievalRailEmpty");
-  if (relevantSection) {
-    const list = q("retrievalRelevantList");
-    const countEl = q("retrievalRelevantCount");
-    countEl.textContent = String(rs.relevantDocIds.size);
-    list.innerHTML = "";
-    rs.relevantDocIds.forEach((docId) => {
-      list.appendChild(
-        buildRailItem(docId, "Hide", "retrieval-hide-btn", () => void hideDocFromRail(docId))
-      );
-    });
-    relevantSection.style.display = rs.relevantDocIds.size > 0 ? "block" : "none";
-  }
-  if (hiddenSection) {
-    const list = q("retrievalHiddenList");
-    const countEl = q("retrievalHiddenCount");
-    countEl.textContent = String(rs.ignoredDocIds.size);
-    list.innerHTML = "";
-    rs.ignoredDocIds.forEach((docId) => {
-      list.appendChild(
-        buildRailItem(docId, "Restore", "retrieval-restore-btn", () => void restoreDoc(docId))
-      );
-    });
-    hiddenSection.style.display = rs.ignoredDocIds.size > 0 ? "block" : "none";
-  }
-  if (railEmpty) {
-    const isEmpty = rs.relevantDocIds.size === 0 && rs.ignoredDocIds.size === 0;
-    railEmpty.style.display = isEmpty ? "block" : "none";
-  }
+  renderRailList(
+    "retrievalRelevantList",
+    "retrievalRelevantCount",
+    rs.relevantDocIds,
+    "Hide",
+    "retrieval-hide-btn",
+    "No relevant documents yet \u2014 run a query to populate this list.",
+    hideDocFromRail
+  );
+  renderRailList(
+    "retrievalHiddenList",
+    "retrievalHiddenCount",
+    rs.ignoredDocIds,
+    "Restore",
+    "retrieval-restore-btn",
+    "No hidden documents.",
+    restoreDoc
+  );
 }
 async function fetchDocState(conversationId) {
   try {

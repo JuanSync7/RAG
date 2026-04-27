@@ -1536,3 +1536,7 @@
     .retrieval-rail-empty {
       font-size: 12px; color: var(--text-3); padding: 12px 4px; line-height: 1.5;
     }
+    .retrieval-rail-list-empty {
+      font-size: 11px; color: var(--text-3); padding: 8px 4px; line-height: 1.4;
+      font-style: italic;
+    }
