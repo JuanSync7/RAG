@@ -15,7 +15,7 @@ import { buildCitationsHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, appendSourcesTurn } from "./chatMode";
+import { getChatMode, appendSourcesTurn, applyDocState } from "./chatMode";
 import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
@@ -52,11 +52,16 @@ async function sourcesOnlyQuery(queryText: string): Promise<void> {
         const data = await api<{
             results?: ChunkResult[];
             conversation_id?: string;
+            relevant_doc_ids?: string[];
+            ignored_doc_ids?: string[];
         }>("POST", "/console/query", buildQueryBody(queryText));
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
         const sources = (data.results ?? []).map(chunkToSourceRef);
         appendSourcesTurn(refs.thread, sources);
+        if (data.relevant_doc_ids || data.ignored_doc_ids) {
+            applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+        }
         scrollToBottom();
         await loadConversations();
         updateConvTitle();

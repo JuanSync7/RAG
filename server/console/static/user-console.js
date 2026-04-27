@@ -294,7 +294,7 @@ function buildCitationsHtml(results) {
     const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
     const section = escHtml(String(meta.section ?? meta.heading ?? ""));
     const score = Math.round(r.score * 100);
-    const scoreClass2 = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
+    const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
     const chunkHtml = parseMarkdown(r.text || "");
     const chunkId = `chunk-${i}-${Date.now()}`;
     const sourceUri = String(meta.source_uri ?? "").trim();
@@ -324,8 +324,8 @@ function buildCitationsHtml(results) {
                 ${section ? `<div class="citation-section">${section}</div>` : ""}
               </div>
               <div class="relevance-bar-wrap">
-                <span class="relevance-pct ${scoreClass2}">${score}%</span>
-                <div class="relevance-bar"><div class="relevance-fill ${scoreClass2}" style="width:${score}%"></div></div>
+                <span class="relevance-pct ${scoreClass}">${score}%</span>
+                <div class="relevance-bar"><div class="relevance-fill ${scoreClass}" style="width:${score}%"></div></div>
               </div>
               <span class="citation-chevron">&#8964;</span>
             </div>
@@ -742,6 +742,9 @@ function sourceRefToChunkResult(ref) {
 // src/chatMode.ts
 var STORAGE_KEY = "rw_chat_mode";
 var _mode = localStorage.getItem(STORAGE_KEY) === "sources" ? "sources" : "answer";
+var _docCache = /* @__PURE__ */ new Map();
+var _ignoredDocIds = /* @__PURE__ */ new Set();
+var _relevantDocIds = /* @__PURE__ */ new Set();
 function getChatMode() {
   return _mode;
 }
@@ -749,6 +752,10 @@ function setChatMode(mode) {
   _mode = mode;
   localStorage.setItem(STORAGE_KEY, mode);
   syncToggleUI();
+  applyModeToView();
+  if (mode === "sources" && state.activeConversationId) {
+    void fetchAndRenderDocState(state.activeConversationId);
+  }
   document.dispatchEvent(new CustomEvent("chat-mode-changed", { detail: { mode } }));
 }
 function syncToggleUI() {
@@ -763,16 +770,31 @@ function syncToggleUI() {
     sourcesBtn.setAttribute("aria-selected", _mode === "sources" ? "true" : "false");
   }
 }
+function applyModeToView() {
+  const view = document.getElementById("view-chat");
+  if (view) view.dataset.chatMode = _mode;
+}
 function initChatMode() {
   const toggle = document.getElementById("chatModeToggle");
-  if (!toggle) return;
-  toggle.querySelectorAll("[data-mode]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const mode = btn.dataset.mode;
-      if (mode === "answer" || mode === "sources") setChatMode(mode);
+  if (toggle) {
+    toggle.querySelectorAll("[data-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode;
+        if (mode === "answer" || mode === "sources") setChatMode(mode);
+      });
     });
-  });
+  }
   syncToggleUI();
+  applyModeToView();
+  renderRail();
+  document.addEventListener("conversation-changed", () => {
+    _ignoredDocIds.clear();
+    _relevantDocIds.clear();
+    renderRail();
+    if (_mode === "sources" && state.activeConversationId) {
+      void fetchAndRenderDocState(state.activeConversationId);
+    }
+  });
 }
 function docKeyOf(ref) {
   return (ref.document_id || ref.source_key || ref.source_uri || ref.source || "").trim();
@@ -812,29 +834,24 @@ function groupSources(sources) {
   }
   return [...groups.values()].sort((a, b) => b.bestScore - a.bestScore);
 }
+function cacheDocs(groups) {
+  for (const g of groups) {
+    if (!g.docKey || g.docKey.startsWith("__synth_")) continue;
+    _docCache.set(g.docKey, {
+      name: g.name,
+      sourceUri: g.sourceUri,
+      sourceKey: g.sourceKey,
+      source: g.source
+    });
+  }
+}
 function appendSourcesTurn(thread, sources) {
   const group = document.createElement("div");
   group.className = "msg-group";
   const ts = fmtTime(Date.now());
   const docs = groupSources(sources);
-  const cardsHtml = docs.length ? docs.map((d) => {
-    const score = Math.round(d.bestScore * 100);
-    const excerptHtml = d.excerpt ? parseMarkdown(d.excerpt) : "";
-    const chunkCount = d.refs.length;
-    const meta = chunkCount > 1 ? `${chunkCount} chunks matched` : `1 chunk matched`;
-    const canView = !d.docKey.startsWith("__synth_");
-    const viewBtn = canView ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
-    return `
-                    <div class="sources-card" data-doc-key="${escHtml(d.docKey)}">
-                      <div class="sources-card-header">
-                        <span class="sources-card-name" title="${escHtml(d.name)}">${escHtml(d.name)}</span>
-                        <span class="sources-card-score">${score}%</span>
-                        ${viewBtn}
-                      </div>
-                      <div class="sources-card-excerpt markdown-body">${excerptHtml}</div>
-                      <div class="sources-card-meta">${meta}</div>
-                    </div>`;
-  }).join("") : `<div class="sources-empty">No sources matched.</div>`;
+  cacheDocs(docs);
+  const cardsHtml = docs.length ? docs.map((d) => renderCardHtml(d)).join("") : `<div class="sources-empty">No sources matched.</div>`;
   group.innerHTML = `
         <div class="msg-row assistant">
           <div class="avatar ai-av">AI</div>
@@ -846,6 +863,33 @@ function appendSourcesTurn(thread, sources) {
   thread.appendChild(group);
   wireCardActions(group, docs);
   return group;
+}
+function renderCardHtml(d) {
+  const score = Math.round(d.bestScore * 100);
+  const excerptHtml = d.excerpt ? parseMarkdown(d.excerpt) : "";
+  const chunkCount = d.refs.length;
+  const meta = chunkCount > 1 ? `${chunkCount} chunks matched` : `1 chunk matched`;
+  const synthetic = d.docKey.startsWith("__synth_");
+  const viewBtn = !synthetic ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
+  const isRelevant = _relevantDocIds.has(d.docKey);
+  const isHidden = _ignoredDocIds.has(d.docKey);
+  const actionsDisabled = synthetic ? "disabled" : "";
+  const relevantLabel = isRelevant ? "Relevant \u2713" : "Mark relevant";
+  const hideLabel = isHidden ? "Hidden" : "Hide";
+  return `
+      <div class="sources-card" data-doc-key="${escHtml(d.docKey)}">
+        <div class="sources-card-header">
+          <span class="sources-card-name" title="${escHtml(d.name)}">${escHtml(d.name)}</span>
+          <span class="sources-card-score">${score}%</span>
+          ${viewBtn}
+        </div>
+        <div class="sources-card-excerpt markdown-body">${excerptHtml}</div>
+        <div class="sources-card-meta">${meta}</div>
+        <div class="sources-card-actions">
+          <button class="sources-card-action" data-action="relevant" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isRelevant ? "disabled" : "")}>${relevantLabel}</button>
+          <button class="sources-card-action" data-action="hide" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isHidden ? "disabled" : "")}>${hideLabel}</button>
+        </div>
+      </div>`;
 }
 function wireCardActions(scope, docs) {
   const docMap = new Map(docs.map((d) => [d.docKey, d]));
@@ -870,6 +914,164 @@ function wireCardActions(scope, docs) {
   scope.querySelectorAll(".sources-card-excerpt").forEach((el) => {
     el.addEventListener("click", () => el.classList.toggle("expanded"));
   });
+  scope.querySelectorAll(".sources-card-action").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.action;
+      const key = btn.dataset.docKey;
+      if (!key) return;
+      const doc = docMap.get(key);
+      if (!doc) return;
+      if (action === "relevant") void markRelevant(doc);
+      else if (action === "hide") void hideDoc(doc);
+    });
+  });
+}
+async function markRelevant(doc) {
+  const cid = state.activeConversationId;
+  if (!cid) {
+    showToast("Select a conversation first");
+    return;
+  }
+  _relevantDocIds.add(doc.docKey);
+  _ignoredDocIds.delete(doc.docKey);
+  refreshCardActions(doc.docKey);
+  renderRail();
+  try {
+    await api(
+      "DELETE",
+      `/console/conversations/${encodeURIComponent(cid)}/ignore/${encodeURIComponent(doc.docKey)}`
+    );
+    showToast(`Marked relevant: ${doc.name}`);
+  } catch (err) {
+    _relevantDocIds.delete(doc.docKey);
+    renderRail();
+    refreshCardActions(doc.docKey);
+    showToast("Failed to mark relevant: " + String(err));
+  }
+}
+async function hideDoc(doc) {
+  const cid = state.activeConversationId;
+  if (!cid) {
+    showToast("Select a conversation first");
+    return;
+  }
+  _ignoredDocIds.add(doc.docKey);
+  _relevantDocIds.delete(doc.docKey);
+  refreshCardActions(doc.docKey);
+  renderRail();
+  try {
+    await api(
+      "POST",
+      `/console/conversations/${encodeURIComponent(cid)}/ignore`,
+      { doc_id: doc.docKey }
+    );
+    showToast(`Hidden: ${doc.name}`);
+  } catch (err) {
+    _ignoredDocIds.delete(doc.docKey);
+    renderRail();
+    refreshCardActions(doc.docKey);
+    showToast("Failed to hide document: " + String(err));
+  }
+}
+function refreshCardActions(docKey) {
+  document.querySelectorAll(`.sources-card[data-doc-key="${CSS.escape(docKey)}"]`).forEach((card) => {
+    const isRelevant = _relevantDocIds.has(docKey);
+    const isHidden = _ignoredDocIds.has(docKey);
+    const relBtn = card.querySelector('[data-action="relevant"]');
+    const hideBtn = card.querySelector('[data-action="hide"]');
+    if (relBtn) {
+      relBtn.textContent = isRelevant ? "Relevant \u2713" : "Mark relevant";
+      relBtn.disabled = isRelevant;
+    }
+    if (hideBtn) {
+      hideBtn.textContent = isHidden ? "Hidden" : "Hide";
+      hideBtn.disabled = isHidden;
+    }
+  });
+}
+function renderRail() {
+  renderRailList("chatRailRelevant", "chatRailRelevantCount", _relevantDocIds, "relevant");
+  renderRailList("chatRailHidden", "chatRailHiddenCount", _ignoredDocIds, "hidden");
+}
+function renderRailList(listId, countId, ids, kind) {
+  const list = document.getElementById(listId);
+  const count = document.getElementById(countId);
+  if (!list || !count) return;
+  count.textContent = String(ids.size);
+  if (!ids.size) {
+    list.innerHTML = `<div class="chat-rail-list-empty">${kind === "relevant" ? "No relevant docs yet." : "Nothing hidden."}</div>`;
+    return;
+  }
+  let html = "";
+  for (const docKey of ids) {
+    const cached = _docCache.get(docKey);
+    const name = escHtml(cached?.name || docKey);
+    const synthetic = !cached;
+    const viewBtn = !synthetic ? `<a href="#" class="chat-rail-item-view" data-doc-key="${escHtml(docKey)}">view</a>` : "";
+    const actionLabel = kind === "relevant" ? "hide" : "restore";
+    const actionAttr = kind === "relevant" ? "hide" : "relevant";
+    html += `
+          <div class="chat-rail-item" data-doc-key="${escHtml(docKey)}">
+            <span class="chat-rail-item-name" title="${name}">${name}</span>
+            ${viewBtn}
+            <button class="chat-rail-item-action" data-action="${actionAttr}" data-doc-key="${escHtml(docKey)}">${actionLabel}</button>
+          </div>`;
+  }
+  list.innerHTML = html;
+  wireRailActions(list);
+}
+function wireRailActions(scope) {
+  scope.querySelectorAll(".chat-rail-item-view").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const key = link.dataset.docKey;
+      const cached = key ? _docCache.get(key) : void 0;
+      if (!cached) return;
+      void openSourceDocument({
+        source: cached.source || void 0,
+        source_uri: cached.sourceUri || void 0,
+        source_key: cached.sourceKey || void 0
+      });
+    });
+  });
+  scope.querySelectorAll(".chat-rail-item-action").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.docKey;
+      const action = btn.dataset.action;
+      if (!key) return;
+      const cached = _docCache.get(key);
+      const docStub = {
+        docKey: key,
+        name: cached?.name || key,
+        bestScore: 0,
+        excerpt: "",
+        refs: [],
+        sourceUri: cached?.sourceUri || "",
+        sourceKey: cached?.sourceKey || "",
+        source: cached?.source || ""
+      };
+      if (action === "hide") void hideDoc(docStub);
+      else if (action === "relevant") void markRelevant(docStub);
+    });
+  });
+}
+function applyDocState(relevant, ignored) {
+  _relevantDocIds.clear();
+  _ignoredDocIds.clear();
+  relevant.forEach((id) => _relevantDocIds.add(id));
+  ignored.forEach((id) => _ignoredDocIds.add(id));
+  renderRail();
+  [..._relevantDocIds, ..._ignoredDocIds].forEach(refreshCardActions);
+}
+async function fetchAndRenderDocState(conversationId) {
+  try {
+    const data = await api(
+      "GET",
+      `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
+    );
+    applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+  } catch {
+  }
 }
 function isSourcesTurn(turn) {
   return !turn.content.trim() && !!turn.sources && turn.sources.length > 0;
@@ -1135,10 +1337,10 @@ function initConversations() {
   });
   byId("newChatBtn").addEventListener("click", createNewConversation);
   document.getElementById("convSearch")?.addEventListener("input", (e) => {
-    const q2 = e.target.value.toLowerCase();
+    const q = e.target.value.toLowerCase();
     byId("convList").querySelectorAll(".conv-item-wrap").forEach((wrap) => {
       const text = wrap.querySelector(".conv-item")?.textContent?.toLowerCase() || "";
-      wrap.style.display = text.includes(q2) ? "" : "none";
+      wrap.style.display = text.includes(q) ? "" : "none";
     });
   });
 }
@@ -1267,6 +1469,9 @@ async function sourcesOnlyQuery(queryText) {
     if (cid) setActiveConversation(cid);
     const sources = (data.results ?? []).map(chunkToSourceRef);
     appendSourcesTurn(refs.thread, sources);
+    if (data.relevant_doc_ids || data.ignored_doc_ids) {
+      applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+    }
     scrollToBottom();
     await loadConversations();
     updateConvTitle();
@@ -1619,13 +1824,13 @@ function handleSlashInput() {
     closeDropdown();
     return;
   }
-  const q2 = val.slice(1).toLowerCase();
+  const q = val.slice(1).toLowerCase();
   let vis = 0;
   state.allSlashItems.forEach((item) => {
     const cmdAttr = (item.dataset.cmd || "").toLowerCase();
     const descEl = item.querySelector(".slash-desc");
     const descText = descEl ? descEl.textContent?.toLowerCase() || "" : "";
-    const match = cmdAttr.includes(q2) || descText.includes(q2);
+    const match = cmdAttr.includes(q) || descText.includes(q);
     item.style.display = match ? "" : "none";
     if (match) vis++;
   });
@@ -1829,10 +2034,10 @@ function attachWebUrl() {
   refs.webInputPanel.classList.remove("open");
   showToast("Web page added to context");
 }
-function filterKB(q2) {
+function filterKB(q) {
   document.querySelectorAll(".kb-item").forEach((el) => {
     const name = el.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
-    el.style.display = name.includes(q2.toLowerCase()) ? "" : "none";
+    el.style.display = name.includes(q.toLowerCase()) ? "" : "none";
   });
 }
 function attachKBDocs() {
@@ -2412,410 +2617,6 @@ function initIngestView() {
   });
 }
 
-// src/retrieval.ts
-var rs = {
-  results: [],
-  ignoredDocIds: /* @__PURE__ */ new Set(),
-  relevantDocIds: /* @__PURE__ */ new Set(),
-  lastConversationId: null
-};
-function q(id) {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing #${id}`);
-  return el;
-}
-function qOpt(id) {
-  return document.getElementById(id);
-}
-function getActiveConvTitle() {
-  const activeItem = document.querySelector(".conv-item.active");
-  if (!activeItem) return "";
-  return activeItem.textContent?.trim().replace(/^●/, "").trim() ?? "";
-}
-function renderConvPill() {
-  const pill = q("retrievalConvPill");
-  const noConvNote = q("retrievalNoConvNote");
-  const convId = state.activeConversationId;
-  if (convId) {
-    const title = getActiveConvTitle() || convId;
-    pill.style.display = "inline-flex";
-    noConvNote.style.display = "none";
-    const labelEl = pill.querySelector(".retrieval-conv-label");
-    if (labelEl) labelEl.textContent = title;
-  } else {
-    pill.style.display = "none";
-    noConvNote.style.display = "block";
-  }
-}
-function scoreClass(score) {
-  if (score >= 0.75) return "high";
-  if (score >= 0.45) return "mid";
-  return "low";
-}
-function scorePct(score) {
-  return `${Math.round(score * 100)}%`;
-}
-function docIdOf(item, fallbackIdx) {
-  return String(item.metadata.doc_id || item.metadata.document_id || `result-${fallbackIdx}`);
-}
-function groupByDoc(items) {
-  const groups = /* @__PURE__ */ new Map();
-  items.forEach((item, idx) => {
-    const docId = docIdOf(item, idx);
-    const existing = groups.get(docId);
-    if (existing) {
-      existing.chunks.push(item);
-      if (item.score > existing.bestScore) existing.bestScore = item.score;
-    } else {
-      groups.set(docId, {
-        docId,
-        sourceName: String(item.metadata.source_name || item.metadata.source || "Unknown source"),
-        sourceUri: String(item.metadata.source_uri || ""),
-        bestScore: item.score,
-        chunks: [item]
-      });
-    }
-  });
-  return Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
-}
-function buildChunkExcerpt(item) {
-  const wrap = document.createElement("div");
-  wrap.className = "retrieval-chunk";
-  const score = document.createElement("span");
-  score.className = `retrieval-chunk-score ${scoreClass(item.score)}`;
-  score.textContent = scorePct(item.score);
-  const text = document.createElement("p");
-  text.className = "retrieval-chunk-text";
-  text.textContent = item.text ? item.text.slice(0, 400) : "";
-  wrap.appendChild(score);
-  wrap.appendChild(text);
-  return wrap;
-}
-function buildResultCard(group) {
-  const card = document.createElement("div");
-  card.className = "retrieval-card";
-  card.dataset.docId = group.docId;
-  const badge = document.createElement("span");
-  badge.className = `retrieval-score-badge ${scoreClass(group.bestScore)}`;
-  badge.textContent = scorePct(group.bestScore);
-  const chunkBadge = document.createElement("span");
-  chunkBadge.className = "retrieval-chunk-count";
-  const n = group.chunks.length;
-  chunkBadge.textContent = `${n} chunk${n === 1 ? "" : "s"}`;
-  const nameEl = group.sourceUri ? document.createElement("a") : document.createElement("span");
-  nameEl.className = "retrieval-source-name";
-  nameEl.textContent = group.sourceName;
-  if (nameEl instanceof HTMLAnchorElement && group.sourceUri) {
-    nameEl.href = group.sourceUri;
-    nameEl.target = "_blank";
-    nameEl.rel = "noopener noreferrer";
-  }
-  const header = document.createElement("div");
-  header.className = "retrieval-card-header";
-  header.appendChild(nameEl);
-  header.appendChild(chunkBadge);
-  header.appendChild(badge);
-  const topExcerpt = document.createElement("p");
-  topExcerpt.className = "retrieval-card-excerpt";
-  topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
-  const hideBtn = document.createElement("button");
-  hideBtn.className = "retrieval-hide-btn";
-  hideBtn.title = "Hide from this conversation";
-  hideBtn.textContent = "Hide";
-  hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
-  const footer = document.createElement("div");
-  footer.className = "retrieval-card-footer";
-  footer.appendChild(topExcerpt);
-  footer.appendChild(hideBtn);
-  card.appendChild(header);
-  card.appendChild(footer);
-  if (group.chunks.length > 1) {
-    const details = document.createElement("details");
-    details.className = "retrieval-chunks-details";
-    const summary = document.createElement("summary");
-    summary.textContent = `Show all ${group.chunks.length} chunks`;
-    details.appendChild(summary);
-    group.chunks.forEach((c) => details.appendChild(buildChunkExcerpt(c)));
-    card.appendChild(details);
-  }
-  return card;
-}
-function buildDocStateItem(docId, actionLabel, actionClass, onAction) {
-  const item = document.createElement("div");
-  item.className = "retrieval-hidden-item";
-  item.dataset.docId = docId;
-  const label = document.createElement("span");
-  label.className = "retrieval-hidden-label";
-  label.textContent = docId;
-  const btn = document.createElement("button");
-  btn.className = actionClass;
-  btn.textContent = actionLabel;
-  btn.addEventListener("click", () => onAction(item));
-  item.appendChild(label);
-  item.appendChild(btn);
-  return item;
-}
-function renderHiddenSection() {
-  const section = q("retrievalHiddenSection");
-  const list = q("retrievalHiddenList");
-  const countEl = q("retrievalHiddenCount");
-  const count = rs.ignoredDocIds.size;
-  countEl.textContent = String(count);
-  list.innerHTML = "";
-  rs.ignoredDocIds.forEach((docId) => {
-    list.appendChild(
-      buildDocStateItem(
-        docId,
-        "Restore",
-        "retrieval-restore-btn",
-        (item) => void restoreDoc(docId, item)
-      )
-    );
-  });
-  if (count > 0) {
-    section.style.display = "block";
-  } else {
-    section.style.display = "none";
-    const details = section.querySelector("details");
-    if (details) details.removeAttribute("open");
-  }
-}
-function renderRelevantSection() {
-  const section = qOpt("retrievalRelevantSection");
-  if (!section) return;
-  const list = q("retrievalRelevantList");
-  const countEl = q("retrievalRelevantCount");
-  const count = rs.relevantDocIds.size;
-  countEl.textContent = String(count);
-  list.innerHTML = "";
-  rs.relevantDocIds.forEach((docId) => {
-    list.appendChild(
-      buildDocStateItem(
-        docId,
-        "Hide",
-        "retrieval-hide-btn",
-        (item) => void hideDocFromList(docId, item)
-      )
-    );
-  });
-  if (count > 0) {
-    section.style.display = "block";
-  } else {
-    section.style.display = "none";
-    const details = section.querySelector("details");
-    if (details) details.removeAttribute("open");
-  }
-}
-function renderResults() {
-  const list = q("retrievalResultsList");
-  const emptyState = q("retrievalEmptyState");
-  list.innerHTML = "";
-  const visibleItems = rs.results.filter((r, idx) => {
-    const docId = docIdOf(r, idx);
-    return !rs.ignoredDocIds.has(docId);
-  });
-  const groups = groupByDoc(visibleItems);
-  if (groups.length === 0) {
-    emptyState.style.display = "block";
-    return;
-  }
-  emptyState.style.display = "none";
-  groups.forEach((g) => list.appendChild(buildResultCard(g)));
-}
-function setStatus(msg) {
-  q("retrievalStatus").textContent = msg;
-}
-async function fetchDocState(conversationId) {
-  try {
-    const data = await api(
-      "GET",
-      `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
-    );
-    rs.ignoredDocIds = new Set(data.ignored_doc_ids ?? []);
-    rs.relevantDocIds = new Set(data.relevant_doc_ids ?? []);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
-  } catch {
-  }
-}
-async function hideDoc(docId, sourceName, card) {
-  if (!state.activeConversationId) {
-    showToast("Select a conversation first");
-    return;
-  }
-  rs.ignoredDocIds.add(docId);
-  rs.relevantDocIds.delete(docId);
-  card.remove();
-  renderHiddenSection();
-  renderRelevantSection();
-  try {
-    await api(
-      "POST",
-      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore`,
-      { doc_id: docId }
-    );
-    showToast(`Hidden: ${sourceName}`);
-  } catch (err) {
-    rs.ignoredDocIds.delete(docId);
-    renderResults();
-    renderHiddenSection();
-    renderRelevantSection();
-    showToast("Failed to hide document: " + String(err));
-  }
-}
-async function hideDocFromList(docId, item) {
-  if (!state.activeConversationId) {
-    showToast("Select a conversation first");
-    return;
-  }
-  rs.ignoredDocIds.add(docId);
-  rs.relevantDocIds.delete(docId);
-  item.remove();
-  renderHiddenSection();
-  renderRelevantSection();
-  renderResults();
-  try {
-    await api(
-      "POST",
-      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore`,
-      { doc_id: docId }
-    );
-    showToast("Document hidden");
-  } catch (err) {
-    rs.ignoredDocIds.delete(docId);
-    rs.relevantDocIds.add(docId);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
-    showToast("Failed to hide document: " + String(err));
-  }
-}
-async function restoreDoc(docId, item) {
-  if (!state.activeConversationId) {
-    showToast("Select a conversation first");
-    return;
-  }
-  rs.ignoredDocIds.delete(docId);
-  rs.relevantDocIds.add(docId);
-  item.remove();
-  renderHiddenSection();
-  renderRelevantSection();
-  renderResults();
-  try {
-    await api(
-      "DELETE",
-      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore/${encodeURIComponent(docId)}`
-    );
-    showToast("Document restored");
-  } catch (err) {
-    rs.ignoredDocIds.add(docId);
-    rs.relevantDocIds.delete(docId);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
-    showToast("Failed to restore document: " + String(err));
-  }
-}
-async function submitQuery() {
-  const textarea = q("retrievalQueryInput");
-  const findBtn = q("retrievalFindBtn");
-  const modeSmartBtn = q("retrievalModeSmart");
-  const query = textarea.value.trim();
-  if (!query) {
-    textarea.focus();
-    return;
-  }
-  const mode = modeSmartBtn.classList.contains("active") ? "auto" : "hard";
-  const topNInput = q("retrievalTopN");
-  const searchLimit = Math.max(1, Math.min(50, parseInt(topNInput.value, 10) || 10));
-  findBtn.disabled = true;
-  setStatus("Searching\u2026");
-  try {
-    const body = {
-      query,
-      mode: "retrieval",
-      retrieval_sub_mode: mode,
-      search_limit: searchLimit,
-      rerank_top_k: Math.min(searchLimit, 10)
-    };
-    if (state.activeConversationId) {
-      body.conversation_id = state.activeConversationId;
-    }
-    const data = await api("POST", "/console/query", body);
-    rs.results = data.results ?? [];
-    if (data.ignored_doc_ids) rs.ignoredDocIds = new Set(data.ignored_doc_ids);
-    if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
-    rs.lastConversationId = state.activeConversationId;
-    const docCount = groupByDoc(rs.results).length;
-    const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
-    setStatus(
-      `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`
-    );
-    renderResults();
-    renderHiddenSection();
-    renderRelevantSection();
-  } catch (err) {
-    setStatus("Search failed.");
-    showToast("Retrieval error: " + String(err));
-  } finally {
-    findBtn.disabled = false;
-  }
-}
-function autoGrow(el) {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-}
-function initRetrievalView() {
-  const textarea = q("retrievalQueryInput");
-  const findBtn = q("retrievalFindBtn");
-  const modeSmartBtn = q("retrievalModeSmart");
-  const modeExactBtn = q("retrievalModeExact");
-  modeSmartBtn.addEventListener("click", () => {
-    modeSmartBtn.classList.add("active");
-    modeExactBtn.classList.remove("active");
-  });
-  modeExactBtn.addEventListener("click", () => {
-    modeExactBtn.classList.add("active");
-    modeSmartBtn.classList.remove("active");
-  });
-  textarea.addEventListener("input", () => autoGrow(textarea));
-  textarea.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void submitQuery();
-    }
-  });
-  findBtn.addEventListener("click", () => void submitQuery());
-  document.addEventListener("conversation-changed", () => {
-    renderConvPill();
-    if (state.activeConversationId) {
-      void fetchDocState(state.activeConversationId);
-    } else {
-      rs.ignoredDocIds = /* @__PURE__ */ new Set();
-      rs.relevantDocIds = /* @__PURE__ */ new Set();
-      renderHiddenSection();
-      renderRelevantSection();
-      renderResults();
-    }
-  });
-  document.querySelectorAll(".view-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.dataset.view === "retrieval") {
-        renderConvPill();
-        if (state.activeConversationId && state.activeConversationId !== rs.lastConversationId) {
-          void fetchDocState(state.activeConversationId);
-          rs.lastConversationId = state.activeConversationId;
-        }
-      }
-    });
-  });
-  renderConvPill();
-  renderResults();
-  renderHiddenSection();
-  renderRelevantSection();
-}
-
 // src/user-console.ts
 document.addEventListener("DOMContentLoaded", () => {
   populateRefs();
@@ -2829,7 +2630,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initAttachments();
   initInput();
   initIngestView();
-  initRetrievalView();
   initChatMode();
   loadSettings();
   void loadModelInfo();

@@ -89,7 +89,6 @@
     <div class="view-tabs" id="viewTabs">
       <button class="view-tab active" data-view="chat"><span class="view-tab-icon">&#128172;</span><span>Chat</span></button>
       <button class="view-tab" data-view="ingest"><span class="view-tab-icon">&#128229;</span><span>Ingest</span></button>
-      <button class="view-tab" data-view="retrieval"><span class="view-tab-icon">&#128269;</span><span>Retrieval</span></button>
     </div>
 
     <section class="view-pane active" id="view-chat">
@@ -123,6 +122,8 @@
 
     <button class="scroll-fab" id="scrollFab" title="Jump to bottom">&#8595;</button>
 
+    <div class="chat-body">
+    <div class="chat-main">
     <div class="message-thread" id="thread">
       <div class="thread-empty" id="threadEmpty">
         <div class="thread-empty-icon">&#9670;</div>
@@ -198,6 +199,18 @@
       </div>
       <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; Esc&nbsp;Esc&nbsp;to&nbsp;clear &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
     </div>
+    </div>
+    <aside class="chat-rail" id="chatRail" aria-label="Document state">
+      <div class="chat-rail-section">
+        <div class="chat-rail-title"><span>&#9989; Relevant</span><span class="chat-rail-count" id="chatRailRelevantCount">0</span></div>
+        <div class="chat-rail-list" id="chatRailRelevant"></div>
+      </div>
+      <div class="chat-rail-section">
+        <div class="chat-rail-title"><span>&#128683; Hidden</span><span class="chat-rail-count" id="chatRailHiddenCount">0</span></div>
+        <div class="chat-rail-list" id="chatRailHidden"></div>
+      </div>
+    </aside>
+    </div>
     </section>
 
     <section class="view-pane" id="view-ingest">
@@ -268,89 +281,6 @@
       </div>
     </section>
 
-    <section class="view-pane" id="view-retrieval">
-      <header class="retrieval-header">
-        <span class="retrieval-title">&#128269; Retrieval</span>
-        <span class="retrieval-sub">Find documents from your knowledge base.</span>
-      </header>
-
-      <div class="retrieval-body">
-        <div class="retrieval-main">
-
-          <!-- Active conversation indicator -->
-          <div class="retrieval-conv-row">
-            <span class="retrieval-conv-pill" id="retrievalConvPill" style="display:none">
-              <span class="retrieval-conv-dot"></span>
-              <span class="retrieval-conv-prefix">Filtering for: </span>
-              <span class="retrieval-conv-label"></span>
-            </span>
-            <span class="retrieval-no-conv" id="retrievalNoConvNote">
-              No conversation selected — results are not tied to a chat yet.
-            </span>
-          </div>
-
-          <!-- Query area -->
-          <div class="retrieval-query-wrap">
-            <textarea
-              class="retrieval-query-input"
-              id="retrievalQueryInput"
-              placeholder="What are you looking for?"
-              rows="2"
-            ></textarea>
-
-            <div class="retrieval-controls">
-              <div class="retrieval-mode-toggle" role="group" aria-label="Search mode">
-                <button class="retrieval-mode-btn active" id="retrievalModeSmart" title="Smart — the query rewriter may expand or rephrase your search">Smart</button>
-                <button class="retrieval-mode-btn" id="retrievalModeExact" title="Exact — runs your query as-is, no rewriting">Exact</button>
-              </div>
-
-              <label class="retrieval-topn-label">
-                Show top
-                <input
-                  class="retrieval-topn-input"
-                  id="retrievalTopN"
-                  type="number"
-                  value="10"
-                  min="1"
-                  max="50"
-                  aria-label="Number of results"
-                >
-              </label>
-
-              <button class="retrieval-find-btn" id="retrievalFindBtn">Find documents</button>
-            </div>
-          </div>
-
-          <!-- Status line -->
-          <div class="retrieval-status" id="retrievalStatus"></div>
-
-          <!-- Results list -->
-          <div class="retrieval-results" id="retrievalResultsList"></div>
-          <div class="retrieval-empty" id="retrievalEmptyState">No results yet — try a query above.</div>
-
-          <!-- Relevant documents accordion -->
-          <div class="retrieval-hidden-section" id="retrievalRelevantSection" style="display:none">
-            <details open>
-              <summary class="retrieval-hidden-summary">
-                Relevant documents (<span id="retrievalRelevantCount">0</span>)
-              </summary>
-              <div class="retrieval-hidden-list" id="retrievalRelevantList"></div>
-            </details>
-          </div>
-
-          <!-- Hidden documents accordion -->
-          <div class="retrieval-hidden-section" id="retrievalHiddenSection" style="display:none">
-            <details>
-              <summary class="retrieval-hidden-summary">
-                Hidden documents (<span id="retrievalHiddenCount">0</span>)
-              </summary>
-              <div class="retrieval-hidden-list" id="retrievalHiddenList"></div>
-            </details>
-          </div>
-
-        </div>
-      </div>
-    </section>
 
   </main>
 </div>
