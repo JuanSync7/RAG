@@ -49,7 +49,7 @@ from src.retrieval.common import (
     VisualPageResult,
 )
 from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
-from src.retrieval.generation.nodes import _get_system_prompt
+from src.retrieval.generation.nodes import get_system_prompt
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
     KG_PATH, KG_ENABLED, GENERATION_ENABLED,
@@ -1028,7 +1028,7 @@ class RAGChain:
             try:
                 context_texts = [r.text for r in reranked]
                 snapshot = calculate_budget(
-                    system_prompt=_get_system_prompt(),
+                    system_prompt=get_system_prompt(),
                     memory_context=memory_context,
                     chunks=context_texts,
                     query=processed_query,
@@ -1100,7 +1100,7 @@ class RAGChain:
                 from src.retrieval.generation.nodes import sanitize_answer
                 generated_answer = sanitize_answer(
                     generated_answer,
-                    system_prompt=_get_system_prompt(),
+                    system_prompt=get_system_prompt(),
                 )
 
             # Stage 7.5: Composite confidence scoring + routing (REQ-701, REQ-706)

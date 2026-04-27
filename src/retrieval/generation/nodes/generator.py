@@ -1,6 +1,6 @@
 # @summary
 # LLM generator for RAG answer synthesis, backed by LiteLLM Router.
-# Main exports: OllamaGenerator, _get_system_prompt, _render_graph_context_section.
+# Main exports: OllamaGenerator, get_system_prompt.
 # Deps: typing, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
@@ -38,12 +38,19 @@ def _load_system_prompt() -> str:
 _SYSTEM_PROMPT: Optional[str] = None
 
 
-def _get_system_prompt() -> str:
-    """Return the system prompt, loading it from disk on first call."""
+def get_system_prompt() -> str:
+    """Return the cached system prompt, loading it from disk on first call.
+
+    Public helper used by callers that need the canonical RAG system prompt
+    without instantiating an `OllamaGenerator` (e.g. token-budget calculation
+    and output sanitization in `rag_chain.py`).
+    """
     global _SYSTEM_PROMPT
     if _SYSTEM_PROMPT is None:
         _SYSTEM_PROMPT = _load_system_prompt()
     return _SYSTEM_PROMPT
+
+
 
 
 # Known confidence levels — the only valid values for the confidence field.
@@ -132,8 +139,14 @@ class OllamaGenerator:
         except Exception:
             self._response_format = _RAG_RESPONSE_FORMAT_BASIC
 
-    def _build_messages(
-        self,
+    @property
+    def system_prompt(self) -> str:
+        """Public accessor for the lazily-loaded system prompt."""
+        return get_system_prompt()
+
+    @classmethod
+    def build_messages(
+        cls,
         query: str,
         context_chunks: List[str],
         scores: Optional[List[float]] = None,
@@ -141,6 +154,12 @@ class OllamaGenerator:
         recent_turns: Optional[List[dict]] = None,
         graph_context: str = "",
     ) -> list[dict]:
+        """Assemble chat messages for the RAG generation prompt.
+
+        Public surface used by both `OllamaGenerator.generate()` /
+        `generate_stream()` and external streaming callers that need the
+        same prompt shape but call the LLM provider directly.
+        """
         if scores:
             doc_context = "\n\n".join(
                 f"[{i+1}] (relevance: {score:.0%}) {chunk}"
@@ -158,7 +177,7 @@ class OllamaGenerator:
         else:
             context = doc_context
         user_message = _build_user_prompt(context, query)
-        messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
+        messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
         if memory_context:
             messages.append(
                 {
@@ -206,7 +225,7 @@ class OllamaGenerator:
         if not context_chunks:
             return None
 
-        messages = self._build_messages(
+        messages = self.build_messages(
             query,
             context_chunks,
             scores,
@@ -306,7 +325,7 @@ class OllamaGenerator:
         if not context_chunks:
             return
 
-        messages = self._build_messages(
+        messages = self.build_messages(
             query,
             context_chunks,
             scores,

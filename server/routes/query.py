@@ -96,12 +96,14 @@ def _stream_llm(
     memory_context: str | None = None,
     memory_recent_turns: list[dict] | None = None,
 ):
-    """Stream generation tokens via LLMProvider (provider-agnostic)."""
+    """Stream generation tokens via LLMProvider (provider-agnostic).
+
+    Delegates prompt assembly to `OllamaGenerator.build_messages` so the
+    streaming and non-streaming paths share a single source of truth for
+    prompt shape (system prompt, doc-context layout, memory framing).
+    """
     from src.platform.llm import get_llm_provider
-    from src.retrieval.generation.nodes import (
-        _build_user_prompt,
-        _get_system_prompt,
-    )
+    from src.retrieval.generation.nodes import OllamaGenerator
 
     def _record_stage(stage: str, bucket: str, started_at: float) -> None:
         if stage_timings is None:
@@ -111,36 +113,15 @@ def _stream_llm(
         )
 
     prep_start = time.perf_counter()
-    if scores:
-        context = "\n\n".join(
-            f"[{i+1}] (relevance: {score:.0%}) {chunk}"
-            for i, (chunk, score) in enumerate(zip(context_chunks, scores))
-        )
-    else:
-        context = "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks))
-    user_message = _build_user_prompt(context=context, question=query)
-
-    messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
-    if memory_context:
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "Use this conversation context only to resolve follow-up references:\n"
-                    + memory_context
-                ),
-            }
-        )
-    for turn in memory_recent_turns or []:
-        role = str(turn.get("role", "user"))
-        if role not in {"user", "assistant", "system"}:
-            continue
-        content = str(turn.get("content", "")).strip()
-        if content:
-            messages.append({"role": role, "content": content})
-    messages.append({"role": "user", "content": user_message})
-
+    messages = OllamaGenerator.build_messages(
+        query=query,
+        context_chunks=context_chunks,
+        scores=scores,
+        memory_context=memory_context,
+        recent_turns=memory_recent_turns,
+    )
     _record_stage("prompt_prepare", "generation", prep_start)
+
     stream_start = time.perf_counter()
     provider = get_llm_provider()
     for token in provider.generate_stream(
