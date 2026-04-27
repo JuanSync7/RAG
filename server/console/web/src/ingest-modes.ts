@@ -6,14 +6,15 @@
  * Exports: PathCheckResult, addFiles, renderSelected, clearSelected,
  *          startFileIngestion, startUrlIngestion, checkDirectory,
  *          startDirectoryIngestion
- * Deps: api, dom, toast, ingest-jobs, ingest-stream
+ * Deps: api, dom, format, toast, ingest-jobs, ingest-stream
  * @end-summary
  */
 
 import { byId } from "./dom";
 import { apiBase, authHeaders } from "./api";
+import { fmtSize } from "./format";
 import { showToast } from "./toast";
-import { JobSummary, escapeHtml, fmtSize, jobMeta, renderJob } from "./ingest-jobs";
+import { JobSummary, escapeHtml, jobMeta, renderJob } from "./ingest-jobs";
 import { attachStream } from "./ingest-stream";
 
 export interface PathCheckResult {

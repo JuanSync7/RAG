@@ -1,12 +1,16 @@
 /**
  * @summary
  * Shared TypeScript type aliases used across the admin/operator console modules.
+ * `ConversationMeta` is re-exported from `./shared-types` so both consoles
+ * share one contract.
  * Exports: JsonObject, QueryResult, StreamEventData, TokenBudgetPayload, TimingPayload,
  *   ConsoleCommandSpec, CommandExecution, ConversationMeta, ConversationTurn,
  *   MarkedLike, DomPurifyLike
- * Deps: none
+ * Deps: shared-types
  * @end-summary
  */
+
+export { ConversationMeta } from "./shared-types";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -58,13 +62,6 @@ export type CommandExecution = {
     action?: string;
     message?: string;
     data?: JsonObject;
-};
-
-export type ConversationMeta = {
-    conversation_id: string;
-    title?: string;
-    updated_at_ms?: number;
-    message_count?: number;
 };
 
 export type ConversationTurn = {

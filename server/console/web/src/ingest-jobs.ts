@@ -1,14 +1,14 @@
 /** @summary
- * Ingest job-list rendering: job card HTML, formatting helpers, status pills,
- * and the in-memory stores (`_jobLog`, `_jobMeta`) shared with the stream module.
- * Exports: JobSummary, fmtSize, escapeHtml, renderJob, cancelJob,
- *          jobLog, jobMeta
- * Deps: api, dom, toast
+ * Ingest job-list rendering: job card HTML, status pills, and the in-memory
+ * stores (`_jobLog`, `_jobMeta`) shared with the stream module.
+ * Exports: JobSummary, escapeHtml, renderJob, cancelJob, jobLog, jobMeta
+ * Deps: api, dom, format, toast
  * @end-summary
  */
 
 import { byId } from "./dom";
 import { apiBase, authHeaders } from "./api";
+import { fmtSize } from "./format";
 import { showToast } from "./toast";
 import { refreshJob } from "./ingest-stream";
 
@@ -29,12 +29,6 @@ export interface JobSummary {
 // data backing the job list.
 export const jobLog = new Map<string, string[]>();
 export const jobMeta = new Map<string, JobSummary>();
-
-export function fmtSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-}
 
 export function escapeHtml(s: string): string {
     return s.replace(/[&<>"']/g, (c) =>
