@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from html import escape
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -23,6 +24,7 @@ from server.console.services import (
     USER_CONSOLE_HTML_PATH,
     build_source_preview_payload,
     is_ollama_reachable,
+    read_clean_document_from_minio,
     render_source_document_html,
     resolve_console_static_asset,
     resolve_console_source_path,
@@ -39,9 +41,13 @@ from server.schemas import (
     ConversationCompactRequest,
     ConversationCreateRequest,
     ConversationHistoryResponse,
+    ConversationTitleUpdateRequest,
     ConsoleCommandRequest,
     ConsoleEnvelope,
+    ConsoleFeedbackRequest,
     ConsoleHealthSummary,
+    ConsoleModelInfo,
+    ConsoleSourceViewRequest,
     ConsoleIngestionRequest,
     ConsoleQueryRequest,
     CreateApiKeyRequest,
@@ -64,6 +70,69 @@ from src.platform import (
     list_command_specs,
     to_payload,
 )
+
+
+_PROVENANCE_TRUST_THRESHOLD = 0.9
+
+
+def _resolve_highlight_range(
+    *,
+    text: str,
+    primary_start: int | None,
+    primary_end: int | None,
+    confidence: float,
+    chunk_text: str | None,
+) -> tuple[int | None, int | None]:
+    """Pick a highlight range in `text` for the cited chunk.
+
+    Order of preference:
+    1. Trust offsets when confidence >= threshold and they look valid.
+    2. Substring-locate `chunk_text` in `text` (always exact when it matches).
+    3. Give up — return (None, None); viewer will skip the highlight.
+    """
+    if (
+        primary_start is not None
+        and primary_end is not None
+        and primary_start >= 0
+        and primary_end > primary_start
+        and confidence >= _PROVENANCE_TRUST_THRESHOLD
+    ):
+        return primary_start, primary_end
+
+    if chunk_text:
+        needle = chunk_text.strip()
+        if needle:
+            idx = text.find(needle)
+            if idx >= 0:
+                return idx, idx + len(needle)
+            # Loose retry: collapse whitespace on both sides for resilience.
+            import re
+
+            normalised_text = re.sub(r"\s+", " ", text)
+            normalised_needle = re.sub(r"\s+", " ", needle)
+            idx = normalised_text.find(normalised_needle)
+            if idx >= 0:
+                # Map back to original-text indices by counting whitespace runs.
+                # Cheap approximation: walk text and count condensed chars.
+                target = idx
+                consumed = 0
+                start_in_text = 0
+                in_ws = False
+                for i, ch in enumerate(text):
+                    if consumed >= target:
+                        start_in_text = i
+                        break
+                    if ch.isspace():
+                        if not in_ws:
+                            consumed += 1
+                            in_ws = True
+                    else:
+                        consumed += 1
+                        in_ws = False
+                end_in_text = min(start_in_text + len(needle), len(text))
+                return start_in_text, end_in_text
+
+    return None, None
 
 
 def create_console_router(
@@ -135,9 +204,67 @@ def create_console_router(
             status=base.status,
             temporal_connected=base.temporal_connected,
             worker_available=base.worker_available,
+            ingest_worker_available=base.ingest_worker_available,
             ollama_reachable=is_ollama_reachable(),
         )
         return console_ok(request, summary.model_dump())
+
+    @router.get("/console/model-info", response_model=ConsoleEnvelope, responses=standard_error_responses)
+    async def console_model_info(request: Request, principal: Principal = Depends(authenticate_request)):
+        require_role(principal, "query")
+        from config import settings as _settings
+
+        gen_enabled = bool(getattr(_settings, "GENERATION_ENABLED", True))
+
+        raw_model = ""
+        try:
+            from src.platform.token_budget.provider import get_capabilities
+
+            caps = get_capabilities()
+            raw_model = str(caps.model_name or "")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("model-info: capabilities lookup failed: %s", exc)
+
+        if not raw_model:
+            raw_model = str(getattr(_settings, "LLM_MODEL", "") or "")
+
+        if "/" in raw_model:
+            provider, _, model_name = raw_model.partition("/")
+        else:
+            provider, model_name = ("", raw_model)
+        if not provider and model_name.startswith("claude"):
+            provider = "anthropic"
+        elif not provider and (model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3")):
+            provider = "openai"
+        display = model_name or raw_model or "unknown"
+        info = ConsoleModelInfo(
+            generation_enabled=gen_enabled,
+            provider=provider,
+            model=model_name or raw_model,
+            display=display,
+        )
+        return console_ok(request, info.model_dump())
+
+    @router.post("/console/feedback", response_model=ConsoleEnvelope, responses=standard_error_responses)
+    async def console_feedback(
+        request: Request,
+        payload: ConsoleFeedbackRequest,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        """Accept thumbs up/down feedback for an assistant turn.
+
+        Stub endpoint: validates and logs the rating; persistence is wired in a
+        follow-up. The frontend treats a 200 as acknowledgement.
+        """
+        require_role(principal, "query")
+        logger.info(
+            "console feedback: rating=%s conv=%s idx=%s principal=%s",
+            payload.rating,
+            payload.conversation_id or "-",
+            payload.message_index if payload.message_index is not None else "-",
+            getattr(principal, "name", "?"),
+        )
+        return console_ok(request, {"accepted": True, "rating": payload.rating})
 
     @router.get("/console/logs", response_model=ConsoleEnvelope, responses=standard_error_responses)
     async def console_logs(
@@ -208,12 +335,33 @@ def create_console_router(
         elif intent == "show_health":
             action = "refresh_health"
             base = await build_health_response(get_temporal_client(), logger)
+            from config import settings as _settings
+
+            ollama_ok = is_ollama_reachable()
+            llm_model = str(getattr(_settings, "LLM_MODEL", "") or "")
+            uses_ollama = llm_model.startswith("ollama/") or not llm_model
+            generation_enabled = bool(getattr(_settings, "GENERATION_ENABLED", True))
+
+            if not generation_enabled:
+                generation_state = "disabled"
+            elif uses_ollama:
+                generation_state = "ready" if ollama_ok else "unreachable"
+            else:
+                # Cloud provider (anthropic/openai/openrouter/...): we don't
+                # ping it here, so just report it's configured.
+                generation_state = "configured"
+
+            jobs_ok = base.temporal_connected and base.ingest_worker_available
+            jobs_state = "ready" if jobs_ok else (
+                "no worker" if base.temporal_connected else "offline"
+            )
+
             data = {
                 "health": {
                     "status": base.status,
-                    "temporal_connected": base.temporal_connected,
-                    "worker_available": base.worker_available,
-                    "ollama_reachable": is_ollama_reachable(),
+                    "server": "up",
+                    "generation": generation_state,
+                    "background_jobs": jobs_state,
                 }
             }
         elif intent == "clear_view":
@@ -343,20 +491,123 @@ def create_console_router(
         )
         return console_ok(request, payload)
 
-    @router.get("/console/source-document/view", response_class=HTMLResponse, responses=standard_error_responses)
+    @router.post("/console/source-document/view", response_class=HTMLResponse, responses=standard_error_responses)
     async def console_source_document_view(
-        source: str | None = None,
-        source_uri: str | None = None,
-        start: int | None = None,
-        end: int | None = None,
-        chunk: int | None = None,
+        payload: ConsoleSourceViewRequest,
         principal: Principal = Depends(authenticate_request),
     ):
+        """Render the source document with the cited chunk highlighted.
+
+        Coordinate strategy:
+        - When MinIO clean store serves the doc → use refactored offsets (exact).
+        - When the raw file serves the doc → use original offsets if confidence
+          is high; otherwise locate via substring search on chunk_text.
+        """
+        require_role(principal, "query")
+
+        source = payload.source
+        source_uri = payload.source_uri
+        source_key = payload.source_key
+        chunk_text = payload.chunk_text
+        chunk = payload.chunk
+        confidence = payload.provenance_confidence or 0.0
+
+        # Prefer MinIO clean store: works for any source type (incl. binary docx/pptx)
+        # because the worker writes a clean markdown rendering during ingest.
+        minio_error: HTTPException | None = None
+        if source_key:
+            try:
+                text, meta = read_clean_document_from_minio(source_key)
+                display_name = str(meta.get("source") or source or source_key)
+                start, end = _resolve_highlight_range(
+                    text=text,
+                    primary_start=payload.refactored_start,
+                    primary_end=payload.refactored_end,
+                    confidence=confidence,
+                    chunk_text=chunk_text,
+                )
+                html = render_source_document_html(
+                    target=Path(display_name),
+                    text=text,
+                    start=start,
+                    end=end,
+                    chunk=chunk,
+                    is_markdown=True,
+                    title=display_name,
+                    chunk_text=chunk_text,
+                )
+                return HTMLResponse(content=html)
+            except HTTPException as exc:
+                minio_error = exc
+
+        # Fallback: raw file from an allowed source root.
+        try:
+            target = resolve_console_source_path(source, source_uri)
+        except HTTPException as exc:
+            detail = exc.detail
+            if minio_error is not None:
+                detail = (
+                    f"{detail} | MinIO clean store: {minio_error.detail} "
+                    f"(source_key={source_key!r})"
+                )
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+        ext = target.suffix.lower()
+
+        if ext == ".pdf":
+            return FileResponse(path=str(target), media_type="application/pdf", filename=target.name)
+
+        if ext in {".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"}:
+            html = (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                "<title>Source unavailable</title>"
+                "<style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8e8ec;"
+                "padding:32px;line-height:1.6}code{background:#1a1d24;padding:2px 6px;border-radius:4px}</style>"
+                "</head><body>"
+                f"<h2>{escape(target.name)} is a binary office document</h2>"
+                "<p>This format can only be viewed via the MinIO clean-markdown rendering "
+                "produced during ingest. The clean store does not currently hold this document "
+                f"(<code>source_key={escape(str(source_key or ''))}</code>).</p>"
+                "<p>To fix: re-ingest this file with the worker (which writes the clean markdown to MinIO), "
+                "or open the original file directly.</p>"
+                "</body></html>"
+            )
+            return HTMLResponse(content=html)
+
+        text = target.read_text(encoding="utf-8", errors="replace")
+        is_md = ext in {".md", ".markdown", ".mdx"}
+        start, end = _resolve_highlight_range(
+            text=text,
+            primary_start=payload.original_start,
+            primary_end=payload.original_end,
+            confidence=confidence,
+            chunk_text=chunk_text,
+        )
+        html = render_source_document_html(
+            target=target, text=text, start=start, end=end, chunk=chunk,
+            is_markdown=is_md, chunk_text=chunk_text,
+        )
+        return HTMLResponse(content=html)
+
+    @router.get("/console/source-document/raw", responses=standard_error_responses)
+    async def console_source_document_raw(
+        source: str | None = None,
+        source_uri: str | None = None,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        """Stream raw bytes for a source document. Used by the PDF iframe preview."""
         require_role(principal, "query")
         target = resolve_console_source_path(source, source_uri)
-        text = target.read_text(encoding="utf-8", errors="replace")
-        html = render_source_document_html(target=target, text=text, start=start, end=end, chunk=chunk)
-        return HTMLResponse(content=html)
+        ext = target.suffix.lower()
+        media_type = {
+            ".pdf": "application/pdf",
+            ".md": "text/markdown; charset=utf-8",
+            ".txt": "text/plain; charset=utf-8",
+            ".json": "application/json",
+            ".html": "text/html; charset=utf-8",
+            ".csv": "text/csv; charset=utf-8",
+        }.get(ext, "application/octet-stream")
+        return FileResponse(path=str(target), media_type=media_type, filename=target.name)
 
     @router.post("/console/query", response_model=ConsoleEnvelope, responses=standard_error_responses)
     async def console_query(
@@ -497,6 +748,30 @@ def create_console_router(
             conversation_id=conversation_id,
         )
         return console_ok(request, {"conversation_id": conversation_id, "deleted": deleted})
+
+    @router.patch(
+        "/console/conversations/{conversation_id}",
+        response_model=ConsoleEnvelope,
+        responses=standard_error_responses,
+    )
+    async def console_conversation_update(
+        request: Request,
+        conversation_id: str,
+        payload: ConversationTitleUpdateRequest,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        memory = get_conversation_memory()
+        meta = memory.update_conversation_title(
+            tenant_id=principal.tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conversation_id,
+            title=payload.title,
+        )
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return console_ok(request, {"conversation": conversation_meta_to_dict(meta)})
 
     @router.get(
         "/console/conversations/{conversation_id}/doc-state",

@@ -195,6 +195,46 @@
     .conv-context-menu button:hover {
       background: #1d2330;
     }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(5, 8, 14, 0.6); z-index: 2000;
+      align-items: center; justify-content: center;
+      animation: modalFade 0.12s ease-out;
+    }
+    .modal-overlay.open { display: flex; }
+    @keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+    .modal-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 22px 22px 18px;
+      width: min(420px, calc(100vw - 32px));
+      box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+      animation: modalPop 0.14s ease-out;
+    }
+    @keyframes modalPop {
+      from { transform: translateY(6px) scale(0.98); opacity: 0; }
+      to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .modal-title {
+      font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 14px;
+    }
+    .modal-input {
+      width: 100%; padding: 10px 12px; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+      font-size: 14px; box-sizing: border-box; margin-bottom: 16px;
+      transition: border-color 0.12s;
+    }
+    .modal-input:focus { outline: none; border-color: var(--accent); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .modal-btn {
+      padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); transition: border-color 0.15s, background 0.15s, filter 0.15s;
+    }
+    .modal-btn:hover { border-color: var(--accent); background: #1d2330; }
+    .modal-btn.primary {
+      background: var(--accent); border-color: var(--accent); color: #06121f;
+    }
+    .modal-btn.primary:hover { filter: brightness(1.1); }
     .history-pane {
       margin-top: 10px;
       border: 1px solid var(--border);
@@ -286,6 +326,7 @@
           <div id="activeConversationLabel" class="muted">Active: (auto)</div>
           <div id="conversationList" class="conversation-list"></div>
           <div id="convContextMenu" class="conv-context-menu" aria-hidden="true">
+            <button type="button" data-action="rename">Rename conversation</button>
             <button type="button" data-action="compact">Compact conversation</button>
             <button type="button" data-action="delete">Delete conversation</button>
           </div>
@@ -513,6 +554,17 @@
         <div id="adminOut" class="mono"></div>
       </div>
     </section>
+  </div>
+
+  <div class="modal-overlay" id="renameModal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title" id="renameModalTitle">Rename conversation</div>
+      <input class="modal-input" id="renameInput" type="text" maxlength="200" placeholder="Conversation name" autocomplete="off" />
+      <div class="modal-actions">
+        <button type="button" class="modal-btn" id="renameCancel">Cancel</button>
+        <button type="button" class="modal-btn primary" id="renameSave">Save</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/console/static/main.js"></script>

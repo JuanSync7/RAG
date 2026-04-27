@@ -214,6 +214,7 @@ class HealthResponse(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
 
 
 class CreateApiKeyRequest(BaseModel):
@@ -413,7 +414,52 @@ class ConsoleHealthSummary(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
     ollama_reachable: bool
+
+
+class ConsoleModelInfo(BaseModel):
+    """Active generation model + provider exposed to the console UI."""
+
+    generation_enabled: bool
+    provider: str
+    model: str
+    display: str
+
+
+class ConsoleSourceViewRequest(BaseModel):
+    """Source-document view payload. Carries both coordinate systems plus the
+    exact chunk text so the viewer can land the highlight precisely regardless
+    of which storage path (MinIO clean store vs. raw file) serves the document.
+    """
+
+    source: Optional[str] = Field(default=None, max_length=2000)
+    source_uri: Optional[str] = Field(default=None, max_length=2000)
+    source_key: Optional[str] = Field(default=None, max_length=512)
+    chunk_text: Optional[str] = Field(default=None, max_length=32000)
+    chunk: Optional[int] = Field(default=None, ge=0)
+    original_start: Optional[int] = None
+    original_end: Optional[int] = None
+    refactored_start: Optional[int] = None
+    refactored_end: Optional[int] = None
+    provenance_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class ConsoleFeedbackTurn(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    text: str = Field(default="", max_length=32000)
+
+
+class ConsoleFeedbackRequest(BaseModel):
+    """User-supplied thumbs-up/down feedback for an assistant turn."""
+
+    rating: Literal["up", "down"]
+    conversation_id: Optional[str] = Field(default=None, max_length=128)
+    message_index: Optional[int] = Field(default=None, ge=0)
+    query: Optional[str] = Field(default=None, max_length=8000)
+    answer: Optional[str] = Field(default=None, max_length=32000)
+    comment: Optional[str] = Field(default=None, max_length=4000)
+    transcript: Optional[list[ConsoleFeedbackTurn]] = Field(default=None, max_length=200)
 
 
 class ConversationCreateRequest(BaseModel):
@@ -448,6 +494,10 @@ class ConversationHistoryResponse(BaseModel):
 
 class ConversationCompactRequest(BaseModel):
     conversation_id: str = Field(..., min_length=3, max_length=128)
+
+
+class ConversationTitleUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
 
 
 # ---------------------------------------------------------------------------

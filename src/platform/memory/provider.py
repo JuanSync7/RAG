@@ -223,6 +223,18 @@ class ConversationMemoryProvider:
         """Delete a conversation and its turns. Returns True if deleted, False if not found."""
         raise NotImplementedError
 
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        """Update a conversation's title. Returns updated meta, or None if not found."""
+        raise NotImplementedError
+
     def mark_retrieved(
         self,
         *,
@@ -376,6 +388,17 @@ class NoopConversationMemory(ConversationMemoryProvider):
         conversation_id: str,
     ) -> bool:
         return False
+
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        return None
 
     def mark_retrieved(
         self,
@@ -788,6 +811,31 @@ class RedisConversationMemory(ConversationMemoryProvider):
                 "updated_at_ms": self._now(),
             },
         )
+
+    def update_conversation_title(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationMeta | None:
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, conversation_id)
+        if not self._client.exists(meta_key):
+            return None
+        cleaned = (title or "").strip()[:200] or "New conversation"
+        now = self._now()
+        self._client.hset(
+            meta_key,
+            mapping={
+                "title": cleaned,
+                "updated_at_ms": now,
+            },
+        )
+        raw = self._client.hgetall(meta_key)
+        return self._meta_from_hash(raw, conversation_id)
 
     def mark_retrieved(
         self,
