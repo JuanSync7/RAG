@@ -99,9 +99,11 @@ def _source_refs(results: list) -> list[dict]:
         ref: dict = {
             "source": meta.get("source", ""),
             "source_uri": meta.get("source_uri", ""),
+            "source_key": meta.get("source_key", ""),
+            "document_id": meta.get("document_id", ""),
             "section": meta.get("section") or meta.get("heading", ""),
             "score": score,
-            "text": text[:200] if text else "",
+            "text": text[:400] if text else "",
         }
         start = meta.get("original_char_start")
         end = meta.get("original_char_end")
@@ -306,16 +308,17 @@ async def run_query(
         result["seen_doc_ids"] = list(
             dict.fromkeys([*meta_after.relevant_doc_ids, *meta_after.ignored_doc_ids])
         )
-        # Retrieval mode never writes turns to chat history — retrieval activity
-        # is captured entirely on the conversation's relevant/ignored doc lists.
-        # This keeps the auto-mode rewriter's view of "real" chat clean when the
-        # user later switches back to the Query tab.
-        if request.memory_enabled and request.mode != "retrieval":
+        # Retrieval and chat both write turns now — retrieval turns carry sources
+        # but empty assistant content, so a single conversation can be replayed
+        # under either renderer (citation strip vs doc cards) on the frontend.
+        if request.memory_enabled:
             user_text = request.query.strip()
             assistant_text = (
                 str(result.get("generated_answer", "")).strip()
                 or str(result.get("clarification_message", "")).strip()
             )
+            is_retrieval = request.mode == "retrieval"
+            source_refs = _source_refs(result.get("results", []))
             mem_start = time.perf_counter()
             memory.append_turn(
                 tenant_id=tenant_id,
@@ -329,7 +332,11 @@ async def run_query(
             # REQ-1207: Don't store BLOCK/FLAG responses in memory —
             # prevents error echo accumulation across turns.
             post_action = result.get("post_guardrail_action", "")
-            if assistant_text and post_action not in ("block", "flag"):
+            should_write_assistant = (
+                (assistant_text or (is_retrieval and source_refs))
+                and post_action not in ("block", "flag")
+            )
+            if should_write_assistant:
                 memory.append_turn(
                     tenant_id=tenant_id,
                     subject=principal.subject,
@@ -338,7 +345,7 @@ async def run_query(
                     role="assistant",
                     content=assistant_text,
                     query_id=workflow_id,
-                    sources=_source_refs(result.get("results", [])),
+                    sources=source_refs,
                 )
             MEMORY_OP_MS.labels(operation="append_turn").observe(
                 (time.perf_counter() - mem_start) * 1000
