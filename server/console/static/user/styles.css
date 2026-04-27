@@ -1468,6 +1468,14 @@
       background: var(--bg-elevated); border: 1px dashed var(--border);
       color: var(--text-3); font-size: 11px;
     }
+    .retrieval-new-btn {
+      margin-left: auto; padding: 6px 12px; border-radius: 8px;
+      background: var(--accent-bg); border: 1px solid var(--accent-brd);
+      color: var(--accent-2); font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: filter 0.12s, background 0.12s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .retrieval-new-btn:hover { background: var(--accent); color: #000; }
 
     /* Cards inside an assistant bubble */
     .retrieval-bubble-intro { margin: 0 0 10px; font-size: 13px; color: var(--text-2); }

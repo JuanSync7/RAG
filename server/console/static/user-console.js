@@ -2691,6 +2691,13 @@ function initRetrievalView() {
       document.body.classList.toggle("sidebar-collapsed");
     });
   }
+  const newConvBtn = qOpt("retrievalNewConvBtn");
+  if (newConvBtn) {
+    newConvBtn.addEventListener("click", () => {
+      createNewConversation();
+      qOpt("retrievalQueryInput")?.focus();
+    });
+  }
   document.addEventListener("conversation-changed", () => {
     renderConvPill();
     rs.turns = [];

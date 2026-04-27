@@ -11,6 +11,7 @@ import { api } from "./api";
 import { showToast } from "./toast";
 import { state } from "./state";
 import { openSourceDocument } from "./citations";
+import { createNewConversation } from "./conversations";
 import type { RetrievalResultItem, RetrievalResponse, DocStateResponse } from "./user-types";
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -591,6 +592,17 @@ export function initRetrievalView(): void {
     if (toggleBtn) {
         toggleBtn.addEventListener("click", () => {
             document.body.classList.toggle("sidebar-collapsed");
+        });
+    }
+
+    const newConvBtn = qOpt<HTMLButtonElement>("retrievalNewConvBtn");
+    if (newConvBtn) {
+        newConvBtn.addEventListener("click", () => {
+            createNewConversation();
+            // conversation-changed fires from setActiveConversation(null);
+            // its listener clears the retrieval thread and rail, so nothing
+            // extra is needed here. Focus the query box for the next search.
+            qOpt<HTMLTextAreaElement>("retrievalQueryInput")?.focus();
         });
     }
 
