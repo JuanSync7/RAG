@@ -1248,6 +1248,117 @@
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
 
+    /* Chat body: main column + optional right rail (sources mode only) */
+    .chat-body {
+      flex: 1; min-height: 0; display: flex; flex-direction: row;
+    }
+    .chat-main {
+      flex: 1; min-width: 0; display: flex; flex-direction: column;
+    }
+    .chat-rail {
+      width: 280px; border-left: 1px solid var(--border); padding: 12px;
+      overflow-y: auto; display: none; flex-direction: column; gap: 16px;
+      background: var(--bg);
+    }
+    #view-chat[data-chat-mode="sources"] .chat-rail { display: flex; }
+    .chat-rail-section {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .chat-rail-title {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      color: var(--text-2); letter-spacing: 0.04em;
+    }
+    .chat-rail-count {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1px 8px; font-size: 11px; color: var(--text-2);
+    }
+    .chat-rail-list {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .chat-rail-list-empty {
+      font-size: 12px; color: var(--text-3); font-style: italic; padding: 4px 0;
+    }
+    .chat-rail-item {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 8px; font-size: 12px;
+    }
+    .chat-rail-item-name {
+      flex: 1; min-width: 0; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .chat-rail-item-view, .chat-rail-item-action {
+      font-size: 11px; color: var(--accent); cursor: pointer; background: none;
+      border: none; padding: 2px 4px; text-decoration: none;
+    }
+    .chat-rail-item-view:hover, .chat-rail-item-action:hover { text-decoration: underline; }
+
+    /* Card actions row */
+    .sources-card-actions {
+      display: flex; gap: 8px; margin-top: 6px;
+    }
+    .sources-card-action {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text-2); cursor: pointer;
+    }
+    .sources-card-action:hover { color: var(--text); border-color: var(--text-2); }
+    .sources-card-action[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+    /* Chat-header renderer toggle (Answer / Sources) */
+    .chat-mode-toggle {
+      display: inline-flex; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 3px; gap: 2px; margin-left: 4px;
+    }
+    .chat-mode-btn {
+      padding: 4px 12px; border-radius: 6px; border: none; background: transparent;
+      color: var(--text-2); font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .chat-mode-btn:hover { color: var(--text); }
+    .chat-mode-btn.active {
+      background: var(--bg-elevated); color: var(--text); font-weight: 600;
+    }
+
+    /* Doc-cards turn (Sources mode) — rendered inside thread instead of bubble */
+    .sources-turn {
+      display: flex; gap: 12px; padding: 4px 0;
+    }
+    .sources-turn .sources-cards {
+      display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0;
+    }
+    .sources-card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .sources-card-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+    }
+    .sources-card-name {
+      font-weight: 600; color: var(--text); font-size: 13px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+    }
+    .sources-card-score {
+      font-size: 11px; color: var(--text-2); background: var(--bg-elevated);
+      border-radius: 4px; padding: 2px 6px;
+    }
+    .sources-card-view {
+      font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: none;
+    }
+    .sources-card-view:hover { text-decoration: underline; }
+    .sources-card-excerpt {
+      font-size: 12px; color: var(--text-2); line-height: 1.5;
+      max-height: 5.4em; overflow: hidden;
+    }
+    .sources-card-excerpt.expanded { max-height: none; }
+    .sources-card-meta {
+      font-size: 11px; color: var(--text-3); margin-top: 4px;
+    }
+    .sources-empty {
+      padding: 12px; color: var(--text-2); font-size: 13px; font-style: italic;
+    }
+
     /* Mode segmented toggle */
     .retrieval-mode-toggle {
       display: inline-flex; background: var(--bg-card); border: 1px solid var(--border);

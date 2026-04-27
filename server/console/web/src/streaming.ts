@@ -15,17 +15,59 @@ import { buildCitationsHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import type { ChunkResult, StreamEventData, TokenBudget } from "./user-types";
+import { getChatMode, appendSourcesTurn, applyDocState } from "./chatMode";
+import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
     const s = getSettings();
-    return {
+    const body: Record<string, unknown> = {
         query: queryText,
         search_limit: parseInt(String(s.searchLimit ?? "10"), 10),
         rerank_top_k: parseInt(String(s.rerankTopK ?? "5"), 10),
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
+    if (getChatMode() === "sources") body.mode = "retrieval";
+    return body;
+}
+
+function chunkToSourceRef(c: ChunkResult): SourceRef {
+    const m = c.metadata || {};
+    return {
+        source: String(m.source ?? ""),
+        source_uri: String(m.source_uri ?? ""),
+        source_key: String(m.source_key ?? ""),
+        document_id: String(m.document_id ?? ""),
+        section: String(m.section ?? m.heading ?? ""),
+        score: c.score,
+        text: c.text,
+        original_char_start: typeof m.original_char_start === "number" ? (m.original_char_start as number) : undefined,
+        original_char_end: typeof m.original_char_end === "number" ? (m.original_char_end as number) : undefined,
+    };
+}
+
+async function sourcesOnlyQuery(queryText: string): Promise<void> {
+    appendUserMsg(queryText);
+    try {
+        const data = await api<{
+            results?: ChunkResult[];
+            conversation_id?: string;
+            relevant_doc_ids?: string[];
+            ignored_doc_ids?: string[];
+        }>("POST", "/console/query", buildQueryBody(queryText));
+        const cid = String(data.conversation_id ?? "").trim();
+        if (cid) setActiveConversation(cid);
+        const sources = (data.results ?? []).map(chunkToSourceRef);
+        appendSourcesTurn(refs.thread, sources);
+        if (data.relevant_doc_ids || data.ignored_doc_ids) {
+            applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+        }
+        scrollToBottom();
+        await loadConversations();
+        updateConvTitle();
+    } catch (err) {
+        appendErrorMsg("Sources query failed: " + String(err));
+    }
 }
 
 export async function streamQuery(queryText: string): Promise<void> {
@@ -350,6 +392,10 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 }
 
 export async function sendQuery(text: string): Promise<void> {
+    if (getChatMode() === "sources") {
+        await sourcesOnlyQuery(text);
+        return;
+    }
     const s = getSettings();
     const useStreaming = s.streaming !== false;
     if (useStreaming) await streamQuery(text);

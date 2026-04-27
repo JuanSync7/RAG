@@ -13,6 +13,7 @@ import { showToast, copyMsg } from "./toast";
 import { appendUserMsg, appendErrorMsg, setEmptyState } from "./thread";
 import { buildCitationsHtml } from "./citations";
 import { sourceRefToChunkResult } from "./user-types";
+import { isSourcesTurn, appendSourcesTurn } from "./chatMode";
 import type { ConversationMeta, SourceRef } from "./user-types";
 
 export function renderConversationList(convs: ConversationMeta[]): void {
@@ -106,6 +107,9 @@ export async function loadConversationHistory(id?: string): Promise<void> {
         data.turns.forEach((turn) => {
             if (turn.role === "user") {
                 appendUserMsg(turn.content);
+            } else if (isSourcesTurn(turn)) {
+                setEmptyState(false);
+                appendSourcesTurn(refs.thread, turn.sources ?? []);
             } else {
                 setEmptyState(false);
                 const group = document.createElement("div");
