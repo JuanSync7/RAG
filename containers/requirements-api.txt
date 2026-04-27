@@ -3,7 +3,7 @@
 fastapi
 uvicorn[standard]
 pydantic>=2.0
-temporalio
+temporalio>=1.23,<2
 redis
 pyjwt[crypto]
 prometheus-client
