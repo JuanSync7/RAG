@@ -82,13 +82,7 @@ function numOrUndef(v: unknown): number | undefined {
     return Number.isFinite(n) ? n : undefined;
 }
 
-async function openSourceView(e: Event, viewKey: string): Promise<void> {
-    e.preventDefault();
-    const payload = _viewPayloads.get(viewKey);
-    if (!payload) {
-        showToast("Citation context lost — try re-running the query.");
-        return;
-    }
+export async function openSourceDocument(payload: ViewPayload): Promise<void> {
     const url = apiBase() + "/console/source-document/view";
     try {
         const res = await fetch(url, {
@@ -111,6 +105,16 @@ async function openSourceView(e: Event, viewKey: string): Promise<void> {
     } catch (err) {
         showToast("Could not open source: " + String(err));
     }
+}
+
+async function openSourceView(e: Event, viewKey: string): Promise<void> {
+    e.preventDefault();
+    const payload = _viewPayloads.get(viewKey);
+    if (!payload) {
+        showToast("Citation context lost — try re-running the query.");
+        return;
+    }
+    await openSourceDocument(payload);
 }
 
 function toggleCitation(card: HTMLElement): void {

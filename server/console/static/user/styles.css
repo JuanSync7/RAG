@@ -1395,3 +1395,13 @@
     .retrieval-chunk-text {
       flex: 1; font-size: 12px; color: var(--text-2); line-height: 1.5; margin: 0;
     }
+
+    /* View link */
+    .retrieval-view-link {
+      font-size: 11px; color: var(--accent); text-decoration: none;
+      flex-shrink: 0; padding: 2px 4px;
+    }
+    .retrieval-view-link:hover { text-decoration: underline; }
+    .retrieval-hide-btn:disabled {
+      opacity: 0.4; cursor: not-allowed;
+    }

@@ -317,13 +317,7 @@ function numOrUndef(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
 }
-async function openSourceView(e, viewKey) {
-  e.preventDefault();
-  const payload = _viewPayloads.get(viewKey);
-  if (!payload) {
-    showToast("Citation context lost \u2014 try re-running the query.");
-    return;
-  }
+async function openSourceDocument(payload) {
   const url = apiBase() + "/console/source-document/view";
   try {
     const res = await fetch(url, {
@@ -346,6 +340,15 @@ async function openSourceView(e, viewKey) {
   } catch (err) {
     showToast("Could not open source: " + String(err));
   }
+}
+async function openSourceView(e, viewKey) {
+  e.preventDefault();
+  const payload = _viewPayloads.get(viewKey);
+  if (!payload) {
+    showToast("Citation context lost \u2014 try re-running the query.");
+    return;
+  }
+  await openSourceDocument(payload);
 }
 function toggleCitation(card) {
   card.classList.toggle("expanded");
@@ -2238,6 +2241,7 @@ var rs = {
   results: [],
   ignoredDocIds: /* @__PURE__ */ new Set(),
   relevantDocIds: /* @__PURE__ */ new Set(),
+  docNames: /* @__PURE__ */ new Map(),
   lastConversationId: null
 };
 function q(id) {
@@ -2276,13 +2280,23 @@ function scoreClass(score) {
 function scorePct(score) {
   return `${Math.round(score * 100)}%`;
 }
+function numOrUndef2(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : void 0;
+}
 function docIdOf(item, fallbackIdx) {
-  return String(item.metadata.doc_id || item.metadata.document_id || `result-${fallbackIdx}`);
+  const m = item.metadata;
+  const candidates = [m.doc_id, m.document_id, m.source_key, m.source_uri, m.source_name, m.source];
+  for (const c of candidates) {
+    const s = c == null ? "" : String(c).trim();
+    if (s) return { id: s, isSynthetic: false };
+  }
+  return { id: `result-${fallbackIdx}`, isSynthetic: true };
 }
 function groupByDoc(items) {
   const groups = /* @__PURE__ */ new Map();
   items.forEach((item, idx) => {
-    const docId = docIdOf(item, idx);
+    const { id: docId } = docIdOf(item, idx);
     const existing = groups.get(docId);
     if (existing) {
       existing.chunks.push(item);
@@ -2312,7 +2326,7 @@ function buildChunkExcerpt(item) {
   wrap.appendChild(text);
   return wrap;
 }
-function buildResultCard(group) {
+function buildResultCard(group, isSynthetic) {
   const card = document.createElement("div");
   card.className = "retrieval-card";
   card.dataset.docId = group.docId;
@@ -2323,17 +2337,34 @@ function buildResultCard(group) {
   chunkBadge.className = "retrieval-chunk-count";
   const n = group.chunks.length;
   chunkBadge.textContent = `${n} chunk${n === 1 ? "" : "s"}`;
-  const nameEl = group.sourceUri ? document.createElement("a") : document.createElement("span");
+  const nameEl = document.createElement("span");
   nameEl.className = "retrieval-source-name";
   nameEl.textContent = group.sourceName;
-  if (nameEl instanceof HTMLAnchorElement && group.sourceUri) {
-    nameEl.href = group.sourceUri;
-    nameEl.target = "_blank";
-    nameEl.rel = "noopener noreferrer";
-  }
+  const viewLink = document.createElement("a");
+  viewLink.className = "retrieval-view-link";
+  viewLink.href = "#";
+  viewLink.textContent = "[view]";
+  viewLink.title = "Open document";
+  viewLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    const top = group.chunks[0];
+    const m = top?.metadata ?? {};
+    void openSourceDocument({
+      source: String(m.source ?? group.sourceName ?? "") || void 0,
+      source_uri: String(m.source_uri ?? group.sourceUri ?? "") || void 0,
+      source_key: m.source_key != null ? String(m.source_key) : void 0,
+      chunk_text: top?.text || void 0,
+      original_start: numOrUndef2(m.original_char_start),
+      original_end: numOrUndef2(m.original_char_end),
+      refactored_start: numOrUndef2(m.refactored_char_start),
+      refactored_end: numOrUndef2(m.refactored_char_end),
+      provenance_confidence: numOrUndef2(m.provenance_confidence)
+    });
+  });
   const header = document.createElement("div");
   header.className = "retrieval-card-header";
   header.appendChild(nameEl);
+  header.appendChild(viewLink);
   header.appendChild(chunkBadge);
   header.appendChild(badge);
   const topExcerpt = document.createElement("p");
@@ -2341,9 +2372,14 @@ function buildResultCard(group) {
   topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
   const hideBtn = document.createElement("button");
   hideBtn.className = "retrieval-hide-btn";
-  hideBtn.title = "Hide from this conversation";
+  if (isSynthetic) {
+    hideBtn.disabled = true;
+    hideBtn.title = "No document id \u2014 cannot hide";
+  } else {
+    hideBtn.title = "Hide from this conversation";
+    hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
+  }
   hideBtn.textContent = "Hide";
-  hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
   const footer = document.createElement("div");
   footer.className = "retrieval-card-footer";
   footer.appendChild(topExcerpt);
@@ -2361,13 +2397,17 @@ function buildResultCard(group) {
   }
   return card;
 }
+function labelForDocId(docId) {
+  return rs.docNames.get(docId) || docId;
+}
 function buildDocStateItem(docId, actionLabel, actionClass, onAction) {
   const item = document.createElement("div");
   item.className = "retrieval-hidden-item";
   item.dataset.docId = docId;
   const label = document.createElement("span");
   label.className = "retrieval-hidden-label";
-  label.textContent = docId;
+  label.textContent = labelForDocId(docId);
+  label.title = docId;
   const btn = document.createElement("button");
   btn.className = actionClass;
   btn.textContent = actionLabel;
@@ -2432,16 +2472,24 @@ function renderResults() {
   const emptyState = q("retrievalEmptyState");
   list.innerHTML = "";
   const visibleItems = rs.results.filter((r, idx) => {
-    const docId = docIdOf(r, idx);
-    return !rs.ignoredDocIds.has(docId);
+    const { id } = docIdOf(r, idx);
+    return !rs.ignoredDocIds.has(id);
   });
   const groups = groupByDoc(visibleItems);
+  groups.forEach((g) => {
+    if (g.sourceName && g.sourceName !== "Unknown source") {
+      rs.docNames.set(g.docId, g.sourceName);
+    }
+  });
   if (groups.length === 0) {
     emptyState.style.display = "block";
     return;
   }
   emptyState.style.display = "none";
-  groups.forEach((g) => list.appendChild(buildResultCard(g)));
+  groups.forEach((g) => {
+    const isSynthetic = g.docId.startsWith("result-");
+    list.appendChild(buildResultCard(g, isSynthetic));
+  });
 }
 function setStatus(msg) {
   q("retrievalStatus").textContent = msg;
@@ -2568,7 +2616,13 @@ async function submitQuery() {
     if (data.ignored_doc_ids) rs.ignoredDocIds = new Set(data.ignored_doc_ids);
     if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
     rs.lastConversationId = state.activeConversationId;
-    const docCount = groupByDoc(rs.results).length;
+    const groups = groupByDoc(rs.results);
+    groups.forEach((g) => {
+      if (g.sourceName && g.sourceName !== "Unknown source") {
+        rs.docNames.set(g.docId, g.sourceName);
+      }
+    });
+    const docCount = groups.length;
     const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
     setStatus(
       `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`

@@ -10,6 +10,7 @@
 import { api } from "./api";
 import { showToast } from "./toast";
 import { state } from "./state";
+import { openSourceDocument } from "./citations";
 import type { RetrievalResultItem, RetrievalResponse, DocStateResponse } from "./user-types";
 
 // ── In-memory state ──────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ interface RetrievalState {
     results: RetrievalResultItem[];
     ignoredDocIds: Set<string>;
     relevantDocIds: Set<string>;
+    docNames: Map<string, string>;  // docId → friendly source name (cached from queries)
     lastConversationId: string | null;
 }
 
@@ -25,6 +27,7 @@ const rs: RetrievalState = {
     results: [],
     ignoredDocIds: new Set(),
     relevantDocIds: new Set(),
+    docNames: new Map(),
     lastConversationId: null,
 };
 
@@ -85,16 +88,38 @@ function scorePct(score: number): string {
     return `${Math.round(score * 100)}%`;
 }
 
+function numOrUndef(v: unknown): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
 // ── Document grouping ─────────────────────────────────────────────────────────
 
-function docIdOf(item: RetrievalResultItem, fallbackIdx: number): string {
-    return String(item.metadata.doc_id || item.metadata.document_id || `result-${fallbackIdx}`);
+interface DocIdInfo {
+    id: string;
+    isSynthetic: boolean;
+}
+
+/**
+ * Resolve a stable per-document key for dedupe + hide/restore state.
+ * Walks doc_id → document_id → source_key → source_uri → source name. Two chunks
+ * from the same document share at least one of these, so they collapse into a
+ * single group even when the explicit document_id is missing.
+ */
+function docIdOf(item: RetrievalResultItem, fallbackIdx: number): DocIdInfo {
+    const m = item.metadata;
+    const candidates = [m.doc_id, m.document_id, m.source_key, m.source_uri, m.source_name, m.source];
+    for (const c of candidates) {
+        const s = c == null ? "" : String(c).trim();
+        if (s) return { id: s, isSynthetic: false };
+    }
+    return { id: `result-${fallbackIdx}`, isSynthetic: true };
 }
 
 function groupByDoc(items: RetrievalResultItem[]): DocGroup[] {
     const groups = new Map<string, DocGroup>();
     items.forEach((item, idx) => {
-        const docId = docIdOf(item, idx);
+        const { id: docId } = docIdOf(item, idx);
         const existing = groups.get(docId);
         if (existing) {
             existing.chunks.push(item);
@@ -128,52 +153,68 @@ function buildChunkExcerpt(item: RetrievalResultItem): HTMLElement {
     return wrap;
 }
 
-function buildResultCard(group: DocGroup): HTMLElement {
+function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
     const card = document.createElement("div");
     card.className = "retrieval-card";
     card.dataset.docId = group.docId;
 
-    // Score badge
     const badge = document.createElement("span");
     badge.className = `retrieval-score-badge ${scoreClass(group.bestScore)}`;
     badge.textContent = scorePct(group.bestScore);
 
-    // Chunk-count badge
     const chunkBadge = document.createElement("span");
     chunkBadge.className = "retrieval-chunk-count";
     const n = group.chunks.length;
     chunkBadge.textContent = `${n} chunk${n === 1 ? "" : "s"}`;
 
-    // Source name — link if URI available
-    const nameEl: HTMLElement = group.sourceUri
-        ? document.createElement("a")
-        : document.createElement("span");
+    const nameEl = document.createElement("span");
     nameEl.className = "retrieval-source-name";
     nameEl.textContent = group.sourceName;
-    if (nameEl instanceof HTMLAnchorElement && group.sourceUri) {
-        nameEl.href = group.sourceUri;
-        nameEl.target = "_blank";
-        nameEl.rel = "noopener noreferrer";
-    }
 
-    // Header row
+    // [view] link — opens the document just like chat citations do.
+    const viewLink = document.createElement("a");
+    viewLink.className = "retrieval-view-link";
+    viewLink.href = "#";
+    viewLink.textContent = "[view]";
+    viewLink.title = "Open document";
+    viewLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        const top = group.chunks[0];
+        const m = top?.metadata ?? {};
+        void openSourceDocument({
+            source: String(m.source ?? group.sourceName ?? "") || undefined,
+            source_uri: String(m.source_uri ?? group.sourceUri ?? "") || undefined,
+            source_key: m.source_key != null ? String(m.source_key) : undefined,
+            chunk_text: top?.text || undefined,
+            original_start: numOrUndef(m.original_char_start),
+            original_end: numOrUndef(m.original_char_end),
+            refactored_start: numOrUndef(m.refactored_char_start),
+            refactored_end: numOrUndef(m.refactored_char_end),
+            provenance_confidence: numOrUndef(m.provenance_confidence),
+        });
+    });
+
     const header = document.createElement("div");
     header.className = "retrieval-card-header";
     header.appendChild(nameEl);
+    header.appendChild(viewLink);
     header.appendChild(chunkBadge);
     header.appendChild(badge);
 
-    // Top excerpt (first/best chunk)
     const topExcerpt = document.createElement("p");
     topExcerpt.className = "retrieval-card-excerpt";
     topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
 
-    // Hide button
     const hideBtn = document.createElement("button");
     hideBtn.className = "retrieval-hide-btn";
-    hideBtn.title = "Hide from this conversation";
+    if (isSynthetic) {
+        hideBtn.disabled = true;
+        hideBtn.title = "No document id — cannot hide";
+    } else {
+        hideBtn.title = "Hide from this conversation";
+        hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
+    }
     hideBtn.textContent = "Hide";
-    hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
 
     const footer = document.createElement("div");
     footer.className = "retrieval-card-footer";
@@ -199,6 +240,10 @@ function buildResultCard(group: DocGroup): HTMLElement {
 
 // ── Doc-state list items ──────────────────────────────────────────────────────
 
+function labelForDocId(docId: string): string {
+    return rs.docNames.get(docId) || docId;
+}
+
 function buildDocStateItem(
     docId: string,
     actionLabel: string,
@@ -211,7 +256,8 @@ function buildDocStateItem(
 
     const label = document.createElement("span");
     label.className = "retrieval-hidden-label";
-    label.textContent = docId;
+    label.textContent = labelForDocId(docId);
+    label.title = docId;
 
     const btn = document.createElement("button");
     btn.className = actionClass;
@@ -283,11 +329,19 @@ function renderResults(): void {
     list.innerHTML = "";
 
     const visibleItems = rs.results.filter((r, idx) => {
-        const docId = docIdOf(r, idx);
-        return !rs.ignoredDocIds.has(docId);
+        const { id } = docIdOf(r, idx);
+        return !rs.ignoredDocIds.has(id);
     });
 
     const groups = groupByDoc(visibleItems);
+
+    // Cache id → friendly name so the Hidden/Relevant lists can show source
+    // names instead of raw doc-ids.
+    groups.forEach((g) => {
+        if (g.sourceName && g.sourceName !== "Unknown source") {
+            rs.docNames.set(g.docId, g.sourceName);
+        }
+    });
 
     if (groups.length === 0) {
         emptyState.style.display = "block";
@@ -295,7 +349,10 @@ function renderResults(): void {
     }
 
     emptyState.style.display = "none";
-    groups.forEach((g) => list.appendChild(buildResultCard(g)));
+    groups.forEach((g) => {
+        const isSynthetic = g.docId.startsWith("result-");
+        list.appendChild(buildResultCard(g, isSynthetic));
+    });
 }
 
 // ── Status line ───────────────────────────────────────────────────────────────
@@ -447,7 +504,13 @@ async function submitQuery(): Promise<void> {
         if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
         rs.lastConversationId = state.activeConversationId;
 
-        const docCount = groupByDoc(rs.results).length;
+        const groups = groupByDoc(rs.results);
+        groups.forEach((g) => {
+            if (g.sourceName && g.sourceName !== "Unknown source") {
+                rs.docNames.set(g.docId, g.sourceName);
+            }
+        });
+        const docCount = groups.length;
         const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
         setStatus(
             `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`,
