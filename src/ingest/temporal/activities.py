@@ -130,6 +130,9 @@ class ActivityArgs:
     """Full input for either ingestion activity."""
     source: SourceArgs
     config: dict[str, Any]  # IngestionConfig serialised via dataclasses.asdict()
+    # Per-document UUID minted at workflow entry. Persisted on every chunk so
+    # commit_node can roll back partial writes by filtering on this id.
+    staging_batch_id: str = ""
 
 
 @dataclass
@@ -250,13 +253,14 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
 
     store = CleanDocumentStore(Path(config.clean_store_dir))
     try:
-        clean_text, _meta = store.read(s.source_key)
+        clean_text, meta = store.read(s.source_key)
     except FileNotFoundError as exc:
         return EmbeddingResult(
             errors=[f"clean_store_read_failed: {exc}"],
             stored_count=0, metadata_summary="", metadata_keywords=[], processing_log=[],
         )
     clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+    source_hash = meta.get("source_hash", "") if isinstance(meta, dict) else ""
 
     with vector_db.get_client() as wv_client:
         vector_db.ensure_collection(wv_client, config.target_collection or None)
@@ -280,6 +284,8 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             source_version=s.source_version,
             clean_text=clean_text,
             clean_hash=clean_hash,
+            staging_batch_id=args.staging_batch_id,
+            source_hash=source_hash,
         )
 
     return EmbeddingResult(
