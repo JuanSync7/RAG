@@ -68,6 +68,10 @@ def prewarm_worker_resources() -> None:
     # tier="ingest" routes ingest embedding to the CPU pool via rag-nginx.
     _embedder = get_embedding_provider(tier="ingest")
     _db_client = db.create_persistent_client()
+    try:
+        db.ensure_bucket(_db_client)
+    except Exception:
+        logger.exception("ensure_bucket failed at prewarm — document_storage_node will fail until resolved")
     logger.info("worker resources prewarmed: embedder + db client ready")
 
     if RAG_INGESTION_DOCLING_ENABLED:
