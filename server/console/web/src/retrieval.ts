@@ -1,10 +1,10 @@
 // @summary
-// Retrieval view-tab for the user console. Lets users query the knowledge
-// base directly and manage per-conversation document visibility (hide/restore).
-// Results are deduped by document — multiple matching chunks for one document
-// collapse into a single card with an expandable chunk list.
+// Retrieval view-tab for the user console. Chat-like UX: each query becomes
+// a turn in a bubble thread, the assistant reply is "Here are your documents"
+// followed by deduplicated document cards. Right-side rail shows the
+// conversation's relevant + hidden document lists.
 // Exports: initRetrievalView
-// Deps: api, toast, state, user-types
+// Deps: api, toast, state, citations, user-types
 // @end-summary
 
 import { api } from "./api";
@@ -13,23 +13,7 @@ import { state } from "./state";
 import { openSourceDocument } from "./citations";
 import type { RetrievalResultItem, RetrievalResponse, DocStateResponse } from "./user-types";
 
-// ── In-memory state ──────────────────────────────────────────────────────────
-
-interface RetrievalState {
-    results: RetrievalResultItem[];
-    ignoredDocIds: Set<string>;
-    relevantDocIds: Set<string>;
-    docNames: Map<string, string>;  // docId → friendly source name (cached from queries)
-    lastConversationId: string | null;
-}
-
-const rs: RetrievalState = {
-    results: [],
-    ignoredDocIds: new Set(),
-    relevantDocIds: new Set(),
-    docNames: new Map(),
-    lastConversationId: null,
-};
+// ── State ─────────────────────────────────────────────────────────────────────
 
 interface DocGroup {
     docId: string;
@@ -37,7 +21,34 @@ interface DocGroup {
     sourceUri: string;
     bestScore: number;
     chunks: RetrievalResultItem[];
+    isSynthetic: boolean;
 }
+
+interface RetrievalTurn {
+    id: string;
+    query: string;
+    status: "pending" | "done" | "error";
+    groups: DocGroup[];
+    rawCount: number;
+    latencyMs: number | null;
+    errorMsg?: string;
+}
+
+interface RetrievalState {
+    turns: RetrievalTurn[];
+    ignoredDocIds: Set<string>;
+    relevantDocIds: Set<string>;
+    docNames: Map<string, string>;
+    lastConversationId: string | null;
+}
+
+const rs: RetrievalState = {
+    turns: [],
+    ignoredDocIds: new Set(),
+    relevantDocIds: new Set(),
+    docNames: new Map(),
+    lastConversationId: null,
+};
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
@@ -50,8 +61,6 @@ function q<T extends HTMLElement>(id: string): T {
 function qOpt<T extends HTMLElement>(id: string): T | null {
     return document.getElementById(id) as T | null;
 }
-
-// ── Conversation context pill ─────────────────────────────────────────────────
 
 function getActiveConvTitle(): string {
     const activeItem = document.querySelector<HTMLElement>(".conv-item.active");
@@ -72,7 +81,7 @@ function renderConvPill(): void {
         if (labelEl) labelEl.textContent = title;
     } else {
         pill.style.display = "none";
-        noConvNote.style.display = "block";
+        noConvNote.style.display = "inline-flex";
     }
 }
 
@@ -100,12 +109,6 @@ interface DocIdInfo {
     isSynthetic: boolean;
 }
 
-/**
- * Resolve a stable per-document key for dedupe + hide/restore state.
- * Walks doc_id → document_id → source_key → source_uri → source name. Two chunks
- * from the same document share at least one of these, so they collapse into a
- * single group even when the explicit document_id is missing.
- */
 function docIdOf(item: RetrievalResultItem, fallbackIdx: number): DocIdInfo {
     const m = item.metadata;
     const candidates = [m.doc_id, m.document_id, m.source_key, m.source_uri, m.source_name, m.source];
@@ -119,25 +122,31 @@ function docIdOf(item: RetrievalResultItem, fallbackIdx: number): DocIdInfo {
 function groupByDoc(items: RetrievalResultItem[]): DocGroup[] {
     const groups = new Map<string, DocGroup>();
     items.forEach((item, idx) => {
-        const { id: docId } = docIdOf(item, idx);
+        const { id: docId, isSynthetic } = docIdOf(item, idx);
         const existing = groups.get(docId);
         if (existing) {
             existing.chunks.push(item);
             if (item.score > existing.bestScore) existing.bestScore = item.score;
         } else {
+            const sourceName = String(item.metadata.source_name || item.metadata.source || "Unknown source");
             groups.set(docId, {
                 docId,
-                sourceName: String(item.metadata.source_name || item.metadata.source || "Unknown source"),
+                sourceName,
                 sourceUri: String(item.metadata.source_uri || ""),
                 bestScore: item.score,
                 chunks: [item],
+                isSynthetic,
             });
         }
     });
-    return Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
+    const arr = Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
+    arr.forEach((g) => {
+        if (g.sourceName && g.sourceName !== "Unknown source") rs.docNames.set(g.docId, g.sourceName);
+    });
+    return arr;
 }
 
-// ── Result cards ──────────────────────────────────────────────────────────────
+// ── Card rendering ────────────────────────────────────────────────────────────
 
 function buildChunkExcerpt(item: RetrievalResultItem): HTMLElement {
     const wrap = document.createElement("div");
@@ -153,7 +162,7 @@ function buildChunkExcerpt(item: RetrievalResultItem): HTMLElement {
     return wrap;
 }
 
-function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
+function buildResultCard(group: DocGroup): HTMLElement {
     const card = document.createElement("div");
     card.className = "retrieval-card";
     card.dataset.docId = group.docId;
@@ -171,7 +180,6 @@ function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
     nameEl.className = "retrieval-source-name";
     nameEl.textContent = group.sourceName;
 
-    // [view] link — opens the document just like chat citations do.
     const viewLink = document.createElement("a");
     viewLink.className = "retrieval-view-link";
     viewLink.href = "#";
@@ -207,12 +215,12 @@ function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
 
     const hideBtn = document.createElement("button");
     hideBtn.className = "retrieval-hide-btn";
-    if (isSynthetic) {
+    if (group.isSynthetic) {
         hideBtn.disabled = true;
         hideBtn.title = "No document id — cannot hide";
     } else {
         hideBtn.title = "Hide from this conversation";
-        hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
+        hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName));
     }
     hideBtn.textContent = "Hide";
 
@@ -224,7 +232,6 @@ function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
     card.appendChild(header);
     card.appendChild(footer);
 
-    // Expandable chunks list (only when >1)
     if (group.chunks.length > 1) {
         const details = document.createElement("details");
         details.className = "retrieval-chunks-details";
@@ -238,127 +245,154 @@ function buildResultCard(group: DocGroup, isSynthetic: boolean): HTMLElement {
     return card;
 }
 
-// ── Doc-state list items ──────────────────────────────────────────────────────
+// ── Bubble thread ─────────────────────────────────────────────────────────────
+
+function buildUserBubble(text: string): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "msg-row user";
+    const wrap = document.createElement("div");
+    wrap.className = "bubble-wrap";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+    row.appendChild(wrap);
+    return row;
+}
+
+function buildAssistantBubble(turn: RetrievalTurn): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "msg-row assistant";
+    const wrap = document.createElement("div");
+    wrap.className = "bubble-wrap";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    if (turn.status === "pending") {
+        bubble.classList.add("streaming");
+        bubble.textContent = "Searching…";
+        wrap.appendChild(bubble);
+        row.appendChild(wrap);
+        return row;
+    }
+
+    if (turn.status === "error") {
+        bubble.classList.add("error-bubble");
+        bubble.textContent = `Search failed: ${turn.errorMsg ?? "unknown error"}`;
+        wrap.appendChild(bubble);
+        row.appendChild(wrap);
+        return row;
+    }
+
+    const visibleGroups = turn.groups.filter((g) => !rs.ignoredDocIds.has(g.docId));
+    const docCount = visibleGroups.length;
+    const chunkCount = visibleGroups.reduce((acc, g) => acc + g.chunks.length, 0);
+    const latency = turn.latencyMs != null ? ` in ${Math.round(turn.latencyMs)} ms` : "";
+
+    const intro = document.createElement("p");
+    intro.className = "retrieval-bubble-intro";
+    if (docCount === 0) {
+        intro.textContent = "No matching documents — try a different query.";
+        bubble.appendChild(intro);
+    } else {
+        intro.textContent = `Here are your documents — ${docCount} doc${docCount !== 1 ? "s" : ""} (${chunkCount} chunk${chunkCount !== 1 ? "s" : ""})${latency}.`;
+        bubble.appendChild(intro);
+        const cards = document.createElement("div");
+        cards.className = "retrieval-bubble-cards";
+        visibleGroups.forEach((g) => cards.appendChild(buildResultCard(g)));
+        bubble.appendChild(cards);
+    }
+
+    wrap.appendChild(bubble);
+    row.appendChild(wrap);
+    return row;
+}
+
+function renderThread(): void {
+    const thread = q("retrievalThread");
+    const empty = qOpt("retrievalThreadEmpty");
+    thread.innerHTML = "";
+
+    if (rs.turns.length === 0) {
+        if (empty) thread.appendChild(empty);
+        return;
+    }
+
+    rs.turns.forEach((turn) => {
+        thread.appendChild(buildUserBubble(turn.query));
+        thread.appendChild(buildAssistantBubble(turn));
+    });
+
+    // Auto-scroll to bottom.
+    thread.scrollTop = thread.scrollHeight;
+}
+
+// ── Right rail ────────────────────────────────────────────────────────────────
 
 function labelForDocId(docId: string): string {
     return rs.docNames.get(docId) || docId;
 }
 
-function buildDocStateItem(
+function buildRailItem(
     docId: string,
     actionLabel: string,
     actionClass: string,
-    onAction: (item: HTMLElement) => void,
+    onAction: () => void,
 ): HTMLElement {
     const item = document.createElement("div");
-    item.className = "retrieval-hidden-item";
+    item.className = "retrieval-rail-item";
     item.dataset.docId = docId;
 
     const label = document.createElement("span");
-    label.className = "retrieval-hidden-label";
+    label.className = "retrieval-rail-label";
     label.textContent = labelForDocId(docId);
     label.title = docId;
 
     const btn = document.createElement("button");
     btn.className = actionClass;
     btn.textContent = actionLabel;
-    btn.addEventListener("click", () => onAction(item));
+    btn.addEventListener("click", onAction);
 
     item.appendChild(label);
     item.appendChild(btn);
     return item;
 }
 
-function renderHiddenSection(): void {
-    const section = q("retrievalHiddenSection");
-    const list = q("retrievalHiddenList");
-    const countEl = q("retrievalHiddenCount");
+function renderRail(): void {
+    const relevantSection = qOpt("retrievalRelevantSection");
+    const hiddenSection = qOpt("retrievalHiddenSection");
+    const railEmpty = qOpt("retrievalRailEmpty");
 
-    const count = rs.ignoredDocIds.size;
-    countEl.textContent = String(count);
-    list.innerHTML = "";
-    rs.ignoredDocIds.forEach((docId) => {
-        list.appendChild(
-            buildDocStateItem(docId, "Restore", "retrieval-restore-btn", (item) =>
-                void restoreDoc(docId, item),
-            ),
-        );
-    });
-
-    if (count > 0) {
-        section.style.display = "block";
-    } else {
-        section.style.display = "none";
-        const details = section.querySelector("details");
-        if (details) details.removeAttribute("open");
-    }
-}
-
-function renderRelevantSection(): void {
-    const section = qOpt("retrievalRelevantSection");
-    if (!section) return; // HTML may not yet have the relevant accordion
-    const list = q("retrievalRelevantList");
-    const countEl = q("retrievalRelevantCount");
-
-    const count = rs.relevantDocIds.size;
-    countEl.textContent = String(count);
-    list.innerHTML = "";
-    rs.relevantDocIds.forEach((docId) => {
-        list.appendChild(
-            buildDocStateItem(docId, "Hide", "retrieval-hide-btn", (item) =>
-                void hideDocFromList(docId, item),
-            ),
-        );
-    });
-
-    if (count > 0) {
-        section.style.display = "block";
-    } else {
-        section.style.display = "none";
-        const details = section.querySelector("details");
-        if (details) details.removeAttribute("open");
-    }
-}
-
-// ── Result list ───────────────────────────────────────────────────────────────
-
-function renderResults(): void {
-    const list = q("retrievalResultsList");
-    const emptyState = q("retrievalEmptyState");
-
-    list.innerHTML = "";
-
-    const visibleItems = rs.results.filter((r, idx) => {
-        const { id } = docIdOf(r, idx);
-        return !rs.ignoredDocIds.has(id);
-    });
-
-    const groups = groupByDoc(visibleItems);
-
-    // Cache id → friendly name so the Hidden/Relevant lists can show source
-    // names instead of raw doc-ids.
-    groups.forEach((g) => {
-        if (g.sourceName && g.sourceName !== "Unknown source") {
-            rs.docNames.set(g.docId, g.sourceName);
-        }
-    });
-
-    if (groups.length === 0) {
-        emptyState.style.display = "block";
-        return;
+    if (relevantSection) {
+        const list = q("retrievalRelevantList");
+        const countEl = q("retrievalRelevantCount");
+        countEl.textContent = String(rs.relevantDocIds.size);
+        list.innerHTML = "";
+        rs.relevantDocIds.forEach((docId) => {
+            list.appendChild(
+                buildRailItem(docId, "Hide", "retrieval-hide-btn", () => void hideDocFromRail(docId)),
+            );
+        });
+        relevantSection.style.display = rs.relevantDocIds.size > 0 ? "block" : "none";
     }
 
-    emptyState.style.display = "none";
-    groups.forEach((g) => {
-        const isSynthetic = g.docId.startsWith("result-");
-        list.appendChild(buildResultCard(g, isSynthetic));
-    });
-}
+    if (hiddenSection) {
+        const list = q("retrievalHiddenList");
+        const countEl = q("retrievalHiddenCount");
+        countEl.textContent = String(rs.ignoredDocIds.size);
+        list.innerHTML = "";
+        rs.ignoredDocIds.forEach((docId) => {
+            list.appendChild(
+                buildRailItem(docId, "Restore", "retrieval-restore-btn", () => void restoreDoc(docId)),
+            );
+        });
+        hiddenSection.style.display = rs.ignoredDocIds.size > 0 ? "block" : "none";
+    }
 
-// ── Status line ───────────────────────────────────────────────────────────────
-
-function setStatus(msg: string): void {
-    q("retrievalStatus").textContent = msg;
+    if (railEmpty) {
+        const isEmpty = rs.relevantDocIds.size === 0 && rs.ignoredDocIds.size === 0;
+        railEmpty.style.display = isEmpty ? "block" : "none";
+    }
 }
 
 // ── Doc-state API calls ───────────────────────────────────────────────────────
@@ -371,26 +405,22 @@ async function fetchDocState(conversationId: string): Promise<void> {
         );
         rs.ignoredDocIds = new Set(data.ignored_doc_ids ?? []);
         rs.relevantDocIds = new Set(data.relevant_doc_ids ?? []);
-        renderHiddenSection();
-        renderRelevantSection();
-        renderResults();
+        renderRail();
+        renderThread();
     } catch {
-        // Non-fatal — sidebar lists just stay stale
+        // Non-fatal — rail just stays stale
     }
 }
 
-async function hideDoc(docId: string, sourceName: string, card: HTMLElement): Promise<void> {
+async function hideDoc(docId: string, sourceName: string): Promise<void> {
     if (!state.activeConversationId) {
         showToast("Select a conversation first");
         return;
     }
-
     rs.ignoredDocIds.add(docId);
     rs.relevantDocIds.delete(docId);
-    card.remove();
-    renderHiddenSection();
-    renderRelevantSection();
-
+    renderRail();
+    renderThread();
     try {
         await api<DocStateResponse>(
             "POST",
@@ -400,25 +430,21 @@ async function hideDoc(docId: string, sourceName: string, card: HTMLElement): Pr
         showToast(`Hidden: ${sourceName}`);
     } catch (err) {
         rs.ignoredDocIds.delete(docId);
-        renderResults();
-        renderHiddenSection();
-        renderRelevantSection();
+        renderRail();
+        renderThread();
         showToast("Failed to hide document: " + String(err));
     }
 }
 
-async function hideDocFromList(docId: string, item: HTMLElement): Promise<void> {
+async function hideDocFromRail(docId: string): Promise<void> {
     if (!state.activeConversationId) {
         showToast("Select a conversation first");
         return;
     }
     rs.ignoredDocIds.add(docId);
     rs.relevantDocIds.delete(docId);
-    item.remove();
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
-
+    renderRail();
+    renderThread();
     try {
         await api<DocStateResponse>(
             "POST",
@@ -429,26 +455,21 @@ async function hideDocFromList(docId: string, item: HTMLElement): Promise<void> 
     } catch (err) {
         rs.ignoredDocIds.delete(docId);
         rs.relevantDocIds.add(docId);
-        renderHiddenSection();
-        renderRelevantSection();
-        renderResults();
+        renderRail();
+        renderThread();
         showToast("Failed to hide document: " + String(err));
     }
 }
 
-async function restoreDoc(docId: string, item: HTMLElement): Promise<void> {
+async function restoreDoc(docId: string): Promise<void> {
     if (!state.activeConversationId) {
         showToast("Select a conversation first");
         return;
     }
-
     rs.ignoredDocIds.delete(docId);
     rs.relevantDocIds.add(docId);
-    item.remove();
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
-
+    renderRail();
+    renderThread();
     try {
         await api<DocStateResponse>(
             "DELETE",
@@ -458,9 +479,8 @@ async function restoreDoc(docId: string, item: HTMLElement): Promise<void> {
     } catch (err) {
         rs.ignoredDocIds.add(docId);
         rs.relevantDocIds.delete(docId);
-        renderHiddenSection();
-        renderRelevantSection();
-        renderResults();
+        renderRail();
+        renderThread();
         showToast("Failed to restore document: " + String(err));
     }
 }
@@ -482,8 +502,20 @@ async function submitQuery(): Promise<void> {
     const topNInput = q<HTMLInputElement>("retrievalTopN");
     const searchLimit = Math.max(1, Math.min(50, parseInt(topNInput.value, 10) || 10));
 
+    const turn: RetrievalTurn = {
+        id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        query,
+        status: "pending",
+        groups: [],
+        rawCount: 0,
+        latencyMs: null,
+    };
+    rs.turns.push(turn);
+
     findBtn.disabled = true;
-    setStatus("Searching…");
+    textarea.value = "";
+    textarea.style.height = "auto";
+    renderThread();
 
     try {
         const body: Record<string, unknown> = {
@@ -493,34 +525,26 @@ async function submitQuery(): Promise<void> {
             search_limit: searchLimit,
             rerank_top_k: Math.min(searchLimit, 10),
         };
-        if (state.activeConversationId) {
-            body.conversation_id = state.activeConversationId;
-        }
+        if (state.activeConversationId) body.conversation_id = state.activeConversationId;
 
         const data = await api<RetrievalResponse>("POST", "/console/query", body);
 
-        rs.results = data.results ?? [];
+        const items = data.results ?? [];
+        turn.groups = groupByDoc(items);
+        turn.rawCount = items.length;
+        turn.latencyMs = data.latency_ms ?? null;
+        turn.status = "done";
+
         if (data.ignored_doc_ids) rs.ignoredDocIds = new Set(data.ignored_doc_ids);
         if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
         rs.lastConversationId = state.activeConversationId;
 
-        const groups = groupByDoc(rs.results);
-        groups.forEach((g) => {
-            if (g.sourceName && g.sourceName !== "Unknown source") {
-                rs.docNames.set(g.docId, g.sourceName);
-            }
-        });
-        const docCount = groups.length;
-        const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
-        setStatus(
-            `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`,
-        );
-
-        renderResults();
-        renderHiddenSection();
-        renderRelevantSection();
+        renderThread();
+        renderRail();
     } catch (err) {
-        setStatus("Search failed.");
+        turn.status = "error";
+        turn.errorMsg = String(err);
+        renderThread();
         showToast("Retrieval error: " + String(err));
     } finally {
         findBtn.disabled = false;
@@ -531,7 +555,7 @@ async function submitQuery(): Promise<void> {
 
 function autoGrow(el: HTMLTextAreaElement): void {
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -541,6 +565,7 @@ export function initRetrievalView(): void {
     const findBtn = q<HTMLButtonElement>("retrievalFindBtn");
     const modeSmartBtn = q<HTMLButtonElement>("retrievalModeSmart");
     const modeExactBtn = q<HTMLButtonElement>("retrievalModeExact");
+    const toggleBtn = qOpt<HTMLButtonElement>("retrievalToggleBtn");
 
     modeSmartBtn.addEventListener("click", () => {
         modeSmartBtn.classList.add("active");
@@ -561,23 +586,30 @@ export function initRetrievalView(): void {
 
     findBtn.addEventListener("click", () => void submitQuery());
 
-    // Conversation change — refresh per-conversation doc-state lists, but
-    // KEEP the last query's results so they survive sidebar clicks and tab
-    // switches. The user can re-submit to refresh against the new conversation.
+    // Toggle the global sidebar (shared with chat) so users can create a new
+    // conversation from the retrieval pane just like from chat.
+    if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+            document.body.classList.toggle("sidebar-collapsed");
+        });
+    }
+
+    // Conversation change — clear the thread (turns are conversation-scoped),
+    // refresh per-conversation doc-state lists.
     document.addEventListener("conversation-changed", () => {
         renderConvPill();
+        rs.turns = [];
         if (state.activeConversationId) {
             void fetchDocState(state.activeConversationId);
         } else {
             rs.ignoredDocIds = new Set();
             rs.relevantDocIds = new Set();
-            renderHiddenSection();
-            renderRelevantSection();
-            renderResults();
+            renderRail();
         }
+        renderThread();
     });
 
-    // View-tab switch — refresh doc state when switching TO retrieval if the
+    // View-tab switch — refresh doc-state when switching TO retrieval if the
     // conversation has changed since the last fetch.
     document.querySelectorAll<HTMLElement>(".view-tab").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -592,7 +624,6 @@ export function initRetrievalView(): void {
     });
 
     renderConvPill();
-    renderResults();
-    renderHiddenSection();
-    renderRelevantSection();
+    renderThread();
+    renderRail();
 }

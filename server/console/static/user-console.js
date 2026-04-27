@@ -2238,7 +2238,7 @@ function initIngestView() {
 
 // src/retrieval.ts
 var rs = {
-  results: [],
+  turns: [],
   ignoredDocIds: /* @__PURE__ */ new Set(),
   relevantDocIds: /* @__PURE__ */ new Set(),
   docNames: /* @__PURE__ */ new Map(),
@@ -2269,7 +2269,7 @@ function renderConvPill() {
     if (labelEl) labelEl.textContent = title;
   } else {
     pill.style.display = "none";
-    noConvNote.style.display = "block";
+    noConvNote.style.display = "inline-flex";
   }
 }
 function scoreClass(score) {
@@ -2296,22 +2296,28 @@ function docIdOf(item, fallbackIdx) {
 function groupByDoc(items) {
   const groups = /* @__PURE__ */ new Map();
   items.forEach((item, idx) => {
-    const { id: docId } = docIdOf(item, idx);
+    const { id: docId, isSynthetic } = docIdOf(item, idx);
     const existing = groups.get(docId);
     if (existing) {
       existing.chunks.push(item);
       if (item.score > existing.bestScore) existing.bestScore = item.score;
     } else {
+      const sourceName = String(item.metadata.source_name || item.metadata.source || "Unknown source");
       groups.set(docId, {
         docId,
-        sourceName: String(item.metadata.source_name || item.metadata.source || "Unknown source"),
+        sourceName,
         sourceUri: String(item.metadata.source_uri || ""),
         bestScore: item.score,
-        chunks: [item]
+        chunks: [item],
+        isSynthetic
       });
     }
   });
-  return Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
+  const arr = Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
+  arr.forEach((g) => {
+    if (g.sourceName && g.sourceName !== "Unknown source") rs.docNames.set(g.docId, g.sourceName);
+  });
+  return arr;
 }
 function buildChunkExcerpt(item) {
   const wrap = document.createElement("div");
@@ -2326,7 +2332,7 @@ function buildChunkExcerpt(item) {
   wrap.appendChild(text);
   return wrap;
 }
-function buildResultCard(group, isSynthetic) {
+function buildResultCard(group) {
   const card = document.createElement("div");
   card.className = "retrieval-card";
   card.dataset.docId = group.docId;
@@ -2372,12 +2378,12 @@ function buildResultCard(group, isSynthetic) {
   topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
   const hideBtn = document.createElement("button");
   hideBtn.className = "retrieval-hide-btn";
-  if (isSynthetic) {
+  if (group.isSynthetic) {
     hideBtn.disabled = true;
     hideBtn.title = "No document id \u2014 cannot hide";
   } else {
     hideBtn.title = "Hide from this conversation";
-    hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
+    hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName));
   }
   hideBtn.textContent = "Hide";
   const footer = document.createElement("div");
@@ -2397,102 +2403,125 @@ function buildResultCard(group, isSynthetic) {
   }
   return card;
 }
+function buildUserBubble(text) {
+  const row = document.createElement("div");
+  row.className = "msg-row user";
+  const wrap = document.createElement("div");
+  wrap.className = "bubble-wrap";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  row.appendChild(wrap);
+  return row;
+}
+function buildAssistantBubble(turn) {
+  const row = document.createElement("div");
+  row.className = "msg-row assistant";
+  const wrap = document.createElement("div");
+  wrap.className = "bubble-wrap";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  if (turn.status === "pending") {
+    bubble.classList.add("streaming");
+    bubble.textContent = "Searching\u2026";
+    wrap.appendChild(bubble);
+    row.appendChild(wrap);
+    return row;
+  }
+  if (turn.status === "error") {
+    bubble.classList.add("error-bubble");
+    bubble.textContent = `Search failed: ${turn.errorMsg ?? "unknown error"}`;
+    wrap.appendChild(bubble);
+    row.appendChild(wrap);
+    return row;
+  }
+  const visibleGroups = turn.groups.filter((g) => !rs.ignoredDocIds.has(g.docId));
+  const docCount = visibleGroups.length;
+  const chunkCount = visibleGroups.reduce((acc, g) => acc + g.chunks.length, 0);
+  const latency = turn.latencyMs != null ? ` in ${Math.round(turn.latencyMs)} ms` : "";
+  const intro = document.createElement("p");
+  intro.className = "retrieval-bubble-intro";
+  if (docCount === 0) {
+    intro.textContent = "No matching documents \u2014 try a different query.";
+    bubble.appendChild(intro);
+  } else {
+    intro.textContent = `Here are your documents \u2014 ${docCount} doc${docCount !== 1 ? "s" : ""} (${chunkCount} chunk${chunkCount !== 1 ? "s" : ""})${latency}.`;
+    bubble.appendChild(intro);
+    const cards = document.createElement("div");
+    cards.className = "retrieval-bubble-cards";
+    visibleGroups.forEach((g) => cards.appendChild(buildResultCard(g)));
+    bubble.appendChild(cards);
+  }
+  wrap.appendChild(bubble);
+  row.appendChild(wrap);
+  return row;
+}
+function renderThread() {
+  const thread = q("retrievalThread");
+  const empty = qOpt("retrievalThreadEmpty");
+  thread.innerHTML = "";
+  if (rs.turns.length === 0) {
+    if (empty) thread.appendChild(empty);
+    return;
+  }
+  rs.turns.forEach((turn) => {
+    thread.appendChild(buildUserBubble(turn.query));
+    thread.appendChild(buildAssistantBubble(turn));
+  });
+  thread.scrollTop = thread.scrollHeight;
+}
 function labelForDocId(docId) {
   return rs.docNames.get(docId) || docId;
 }
-function buildDocStateItem(docId, actionLabel, actionClass, onAction) {
+function buildRailItem(docId, actionLabel, actionClass, onAction) {
   const item = document.createElement("div");
-  item.className = "retrieval-hidden-item";
+  item.className = "retrieval-rail-item";
   item.dataset.docId = docId;
   const label = document.createElement("span");
-  label.className = "retrieval-hidden-label";
+  label.className = "retrieval-rail-label";
   label.textContent = labelForDocId(docId);
   label.title = docId;
   const btn = document.createElement("button");
   btn.className = actionClass;
   btn.textContent = actionLabel;
-  btn.addEventListener("click", () => onAction(item));
+  btn.addEventListener("click", onAction);
   item.appendChild(label);
   item.appendChild(btn);
   return item;
 }
-function renderHiddenSection() {
-  const section = q("retrievalHiddenSection");
-  const list = q("retrievalHiddenList");
-  const countEl = q("retrievalHiddenCount");
-  const count = rs.ignoredDocIds.size;
-  countEl.textContent = String(count);
-  list.innerHTML = "";
-  rs.ignoredDocIds.forEach((docId) => {
-    list.appendChild(
-      buildDocStateItem(
-        docId,
-        "Restore",
-        "retrieval-restore-btn",
-        (item) => void restoreDoc(docId, item)
-      )
-    );
-  });
-  if (count > 0) {
-    section.style.display = "block";
-  } else {
-    section.style.display = "none";
-    const details = section.querySelector("details");
-    if (details) details.removeAttribute("open");
+function renderRail() {
+  const relevantSection = qOpt("retrievalRelevantSection");
+  const hiddenSection = qOpt("retrievalHiddenSection");
+  const railEmpty = qOpt("retrievalRailEmpty");
+  if (relevantSection) {
+    const list = q("retrievalRelevantList");
+    const countEl = q("retrievalRelevantCount");
+    countEl.textContent = String(rs.relevantDocIds.size);
+    list.innerHTML = "";
+    rs.relevantDocIds.forEach((docId) => {
+      list.appendChild(
+        buildRailItem(docId, "Hide", "retrieval-hide-btn", () => void hideDocFromRail(docId))
+      );
+    });
+    relevantSection.style.display = rs.relevantDocIds.size > 0 ? "block" : "none";
   }
-}
-function renderRelevantSection() {
-  const section = qOpt("retrievalRelevantSection");
-  if (!section) return;
-  const list = q("retrievalRelevantList");
-  const countEl = q("retrievalRelevantCount");
-  const count = rs.relevantDocIds.size;
-  countEl.textContent = String(count);
-  list.innerHTML = "";
-  rs.relevantDocIds.forEach((docId) => {
-    list.appendChild(
-      buildDocStateItem(
-        docId,
-        "Hide",
-        "retrieval-hide-btn",
-        (item) => void hideDocFromList(docId, item)
-      )
-    );
-  });
-  if (count > 0) {
-    section.style.display = "block";
-  } else {
-    section.style.display = "none";
-    const details = section.querySelector("details");
-    if (details) details.removeAttribute("open");
+  if (hiddenSection) {
+    const list = q("retrievalHiddenList");
+    const countEl = q("retrievalHiddenCount");
+    countEl.textContent = String(rs.ignoredDocIds.size);
+    list.innerHTML = "";
+    rs.ignoredDocIds.forEach((docId) => {
+      list.appendChild(
+        buildRailItem(docId, "Restore", "retrieval-restore-btn", () => void restoreDoc(docId))
+      );
+    });
+    hiddenSection.style.display = rs.ignoredDocIds.size > 0 ? "block" : "none";
   }
-}
-function renderResults() {
-  const list = q("retrievalResultsList");
-  const emptyState = q("retrievalEmptyState");
-  list.innerHTML = "";
-  const visibleItems = rs.results.filter((r, idx) => {
-    const { id } = docIdOf(r, idx);
-    return !rs.ignoredDocIds.has(id);
-  });
-  const groups = groupByDoc(visibleItems);
-  groups.forEach((g) => {
-    if (g.sourceName && g.sourceName !== "Unknown source") {
-      rs.docNames.set(g.docId, g.sourceName);
-    }
-  });
-  if (groups.length === 0) {
-    emptyState.style.display = "block";
-    return;
+  if (railEmpty) {
+    const isEmpty = rs.relevantDocIds.size === 0 && rs.ignoredDocIds.size === 0;
+    railEmpty.style.display = isEmpty ? "block" : "none";
   }
-  emptyState.style.display = "none";
-  groups.forEach((g) => {
-    const isSynthetic = g.docId.startsWith("result-");
-    list.appendChild(buildResultCard(g, isSynthetic));
-  });
-}
-function setStatus(msg) {
-  q("retrievalStatus").textContent = msg;
 }
 async function fetchDocState(conversationId) {
   try {
@@ -2502,22 +2531,20 @@ async function fetchDocState(conversationId) {
     );
     rs.ignoredDocIds = new Set(data.ignored_doc_ids ?? []);
     rs.relevantDocIds = new Set(data.relevant_doc_ids ?? []);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
+    renderRail();
+    renderThread();
   } catch {
   }
 }
-async function hideDoc(docId, sourceName, card) {
+async function hideDoc(docId, sourceName) {
   if (!state.activeConversationId) {
     showToast("Select a conversation first");
     return;
   }
   rs.ignoredDocIds.add(docId);
   rs.relevantDocIds.delete(docId);
-  card.remove();
-  renderHiddenSection();
-  renderRelevantSection();
+  renderRail();
+  renderThread();
   try {
     await api(
       "POST",
@@ -2527,23 +2554,20 @@ async function hideDoc(docId, sourceName, card) {
     showToast(`Hidden: ${sourceName}`);
   } catch (err) {
     rs.ignoredDocIds.delete(docId);
-    renderResults();
-    renderHiddenSection();
-    renderRelevantSection();
+    renderRail();
+    renderThread();
     showToast("Failed to hide document: " + String(err));
   }
 }
-async function hideDocFromList(docId, item) {
+async function hideDocFromRail(docId) {
   if (!state.activeConversationId) {
     showToast("Select a conversation first");
     return;
   }
   rs.ignoredDocIds.add(docId);
   rs.relevantDocIds.delete(docId);
-  item.remove();
-  renderHiddenSection();
-  renderRelevantSection();
-  renderResults();
+  renderRail();
+  renderThread();
   try {
     await api(
       "POST",
@@ -2554,23 +2578,20 @@ async function hideDocFromList(docId, item) {
   } catch (err) {
     rs.ignoredDocIds.delete(docId);
     rs.relevantDocIds.add(docId);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
+    renderRail();
+    renderThread();
     showToast("Failed to hide document: " + String(err));
   }
 }
-async function restoreDoc(docId, item) {
+async function restoreDoc(docId) {
   if (!state.activeConversationId) {
     showToast("Select a conversation first");
     return;
   }
   rs.ignoredDocIds.delete(docId);
   rs.relevantDocIds.add(docId);
-  item.remove();
-  renderHiddenSection();
-  renderRelevantSection();
-  renderResults();
+  renderRail();
+  renderThread();
   try {
     await api(
       "DELETE",
@@ -2580,9 +2601,8 @@ async function restoreDoc(docId, item) {
   } catch (err) {
     rs.ignoredDocIds.add(docId);
     rs.relevantDocIds.delete(docId);
-    renderHiddenSection();
-    renderRelevantSection();
-    renderResults();
+    renderRail();
+    renderThread();
     showToast("Failed to restore document: " + String(err));
   }
 }
@@ -2598,8 +2618,19 @@ async function submitQuery() {
   const mode = modeSmartBtn.classList.contains("active") ? "auto" : "hard";
   const topNInput = q("retrievalTopN");
   const searchLimit = Math.max(1, Math.min(50, parseInt(topNInput.value, 10) || 10));
+  const turn = {
+    id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    query,
+    status: "pending",
+    groups: [],
+    rawCount: 0,
+    latencyMs: null
+  };
+  rs.turns.push(turn);
   findBtn.disabled = true;
-  setStatus("Searching\u2026");
+  textarea.value = "";
+  textarea.style.height = "auto";
+  renderThread();
   try {
     const body = {
       query,
@@ -2608,30 +2639,22 @@ async function submitQuery() {
       search_limit: searchLimit,
       rerank_top_k: Math.min(searchLimit, 10)
     };
-    if (state.activeConversationId) {
-      body.conversation_id = state.activeConversationId;
-    }
+    if (state.activeConversationId) body.conversation_id = state.activeConversationId;
     const data = await api("POST", "/console/query", body);
-    rs.results = data.results ?? [];
+    const items = data.results ?? [];
+    turn.groups = groupByDoc(items);
+    turn.rawCount = items.length;
+    turn.latencyMs = data.latency_ms ?? null;
+    turn.status = "done";
     if (data.ignored_doc_ids) rs.ignoredDocIds = new Set(data.ignored_doc_ids);
     if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
     rs.lastConversationId = state.activeConversationId;
-    const groups = groupByDoc(rs.results);
-    groups.forEach((g) => {
-      if (g.sourceName && g.sourceName !== "Unknown source") {
-        rs.docNames.set(g.docId, g.sourceName);
-      }
-    });
-    const docCount = groups.length;
-    const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
-    setStatus(
-      `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`
-    );
-    renderResults();
-    renderHiddenSection();
-    renderRelevantSection();
+    renderThread();
+    renderRail();
   } catch (err) {
-    setStatus("Search failed.");
+    turn.status = "error";
+    turn.errorMsg = String(err);
+    renderThread();
     showToast("Retrieval error: " + String(err));
   } finally {
     findBtn.disabled = false;
@@ -2639,13 +2662,14 @@ async function submitQuery() {
 }
 function autoGrow(el) {
   el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
+  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 }
 function initRetrievalView() {
   const textarea = q("retrievalQueryInput");
   const findBtn = q("retrievalFindBtn");
   const modeSmartBtn = q("retrievalModeSmart");
   const modeExactBtn = q("retrievalModeExact");
+  const toggleBtn = qOpt("retrievalToggleBtn");
   modeSmartBtn.addEventListener("click", () => {
     modeSmartBtn.classList.add("active");
     modeExactBtn.classList.remove("active");
@@ -2662,17 +2686,22 @@ function initRetrievalView() {
     }
   });
   findBtn.addEventListener("click", () => void submitQuery());
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      document.body.classList.toggle("sidebar-collapsed");
+    });
+  }
   document.addEventListener("conversation-changed", () => {
     renderConvPill();
+    rs.turns = [];
     if (state.activeConversationId) {
       void fetchDocState(state.activeConversationId);
     } else {
       rs.ignoredDocIds = /* @__PURE__ */ new Set();
       rs.relevantDocIds = /* @__PURE__ */ new Set();
-      renderHiddenSection();
-      renderRelevantSection();
-      renderResults();
+      renderRail();
     }
+    renderThread();
   });
   document.querySelectorAll(".view-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2686,9 +2715,8 @@ function initRetrievalView() {
     });
   });
   renderConvPill();
-  renderResults();
-  renderHiddenSection();
-  renderRelevantSection();
+  renderThread();
+  renderRail();
 }
 
 // src/user-console.ts

@@ -265,86 +265,60 @@
     </section>
 
     <section class="view-pane" id="view-retrieval">
-      <header class="retrieval-header">
-        <span class="retrieval-title">&#128269; Retrieval</span>
-        <span class="retrieval-sub">Find documents from your knowledge base.</span>
+      <header class="chat-header">
+        <button class="toggle-btn" id="retrievalToggleBtn" title="Toggle sidebar">&#9776;</button>
+        <span class="conv-title">&#128269; Retrieval</span>
+        <span class="retrieval-conv-pill" id="retrievalConvPill" style="display:none">
+          <span class="retrieval-conv-dot"></span>
+          <span class="retrieval-conv-label"></span>
+        </span>
+        <span class="retrieval-no-conv" id="retrievalNoConvNote">
+          No conversation selected
+        </span>
       </header>
 
-      <div class="retrieval-body">
-        <div class="retrieval-main">
-
-          <!-- Active conversation indicator -->
-          <div class="retrieval-conv-row">
-            <span class="retrieval-conv-pill" id="retrievalConvPill" style="display:none">
-              <span class="retrieval-conv-dot"></span>
-              <span class="retrieval-conv-prefix">Filtering for: </span>
-              <span class="retrieval-conv-label"></span>
-            </span>
-            <span class="retrieval-no-conv" id="retrievalNoConvNote">
-              No conversation selected — results are not tied to a chat yet.
-            </span>
+      <div class="retrieval-layout">
+        <main class="retrieval-thread-col">
+          <div class="message-thread retrieval-thread" id="retrievalThread">
+            <div class="thread-empty" id="retrievalThreadEmpty">
+              <div class="thread-empty-icon">&#128269;</div>
+              <div class="thread-empty-title">Retrieve from your KB</div>
+              <div class="thread-empty-sub">Ask anything — I'll show every matching document with its chunks.</div>
+            </div>
           </div>
 
-          <!-- Query area -->
-          <div class="retrieval-query-wrap">
-            <textarea
-              class="retrieval-query-input"
-              id="retrievalQueryInput"
-              placeholder="What are you looking for?"
-              rows="2"
-            ></textarea>
-
-            <div class="retrieval-controls">
+          <div class="input-bar retrieval-composer">
+            <div class="retrieval-controls-inline">
               <div class="retrieval-mode-toggle" role="group" aria-label="Search mode">
                 <button class="retrieval-mode-btn active" id="retrievalModeSmart" title="Smart — the query rewriter may expand or rephrase your search">Smart</button>
                 <button class="retrieval-mode-btn" id="retrievalModeExact" title="Exact — runs your query as-is, no rewriting">Exact</button>
               </div>
-
               <label class="retrieval-topn-label">
-                Show top
-                <input
-                  class="retrieval-topn-input"
-                  id="retrievalTopN"
-                  type="number"
-                  value="10"
-                  min="1"
-                  max="50"
-                  aria-label="Number of results"
-                >
+                Top
+                <input class="retrieval-topn-input" id="retrievalTopN" type="number" value="10" min="1" max="50" aria-label="Number of results">
               </label>
-
-              <button class="retrieval-find-btn" id="retrievalFindBtn">Find documents</button>
             </div>
+            <div class="input-wrap">
+              <textarea class="input-textarea" id="retrievalQueryInput" placeholder="What are you looking for?" rows="2"></textarea>
+              <button class="send-btn" id="retrievalFindBtn" title="Search">&#9650;</button>
+            </div>
+            <div class="input-hint">Enter&nbsp;to&nbsp;search &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line</div>
           </div>
+        </main>
 
-          <!-- Status line -->
-          <div class="retrieval-status" id="retrievalStatus"></div>
-
-          <!-- Results list -->
-          <div class="retrieval-results" id="retrievalResultsList"></div>
-          <div class="retrieval-empty" id="retrievalEmptyState">No results yet — try a query above.</div>
-
-          <!-- Relevant documents accordion -->
-          <div class="retrieval-hidden-section" id="retrievalRelevantSection" style="display:none">
-            <details open>
-              <summary class="retrieval-hidden-summary">
-                Relevant documents (<span id="retrievalRelevantCount">0</span>)
-              </summary>
-              <div class="retrieval-hidden-list" id="retrievalRelevantList"></div>
-            </details>
+        <aside class="retrieval-rail">
+          <div class="retrieval-rail-section" id="retrievalRelevantSection" style="display:none">
+            <div class="retrieval-rail-title">Relevant documents (<span id="retrievalRelevantCount">0</span>)</div>
+            <div class="retrieval-rail-list" id="retrievalRelevantList"></div>
           </div>
-
-          <!-- Hidden documents accordion -->
-          <div class="retrieval-hidden-section" id="retrievalHiddenSection" style="display:none">
-            <details>
-              <summary class="retrieval-hidden-summary">
-                Hidden documents (<span id="retrievalHiddenCount">0</span>)
-              </summary>
-              <div class="retrieval-hidden-list" id="retrievalHiddenList"></div>
-            </details>
+          <div class="retrieval-rail-section" id="retrievalHiddenSection" style="display:none">
+            <div class="retrieval-rail-title">Hidden documents (<span id="retrievalHiddenCount">0</span>)</div>
+            <div class="retrieval-rail-list" id="retrievalHiddenList"></div>
           </div>
-
-        </div>
+          <div class="retrieval-rail-empty" id="retrievalRailEmpty">
+            No documents tracked yet — run a query to populate the relevant list.
+          </div>
+        </aside>
       </div>
     </section>
 
