@@ -2237,12 +2237,16 @@ function initIngestView() {
 var rs = {
   results: [],
   ignoredDocIds: /* @__PURE__ */ new Set(),
+  relevantDocIds: /* @__PURE__ */ new Set(),
   lastConversationId: null
 };
 function q(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing #${id}`);
   return el;
+}
+function qOpt(id) {
+  return document.getElementById(id);
 }
 function getActiveConvTitle() {
   const activeItem = document.querySelector(".conv-item.active");
@@ -2272,61 +2276,104 @@ function scoreClass(score) {
 function scorePct(score) {
   return `${Math.round(score * 100)}%`;
 }
-function buildResultCard(item, idx) {
-  const docId = String(
-    item.metadata.doc_id || item.metadata.document_id || `result-${idx}`
-  );
-  const sourceName = String(item.metadata.source_name || item.metadata.source || "Unknown source");
-  const sourceUri = String(item.metadata.source_uri || "");
-  const excerpt = item.text ? item.text.slice(0, 200) : "";
-  const cls = scoreClass(item.score);
+function docIdOf(item, fallbackIdx) {
+  return String(item.metadata.doc_id || item.metadata.document_id || `result-${fallbackIdx}`);
+}
+function groupByDoc(items) {
+  const groups = /* @__PURE__ */ new Map();
+  items.forEach((item, idx) => {
+    const docId = docIdOf(item, idx);
+    const existing = groups.get(docId);
+    if (existing) {
+      existing.chunks.push(item);
+      if (item.score > existing.bestScore) existing.bestScore = item.score;
+    } else {
+      groups.set(docId, {
+        docId,
+        sourceName: String(item.metadata.source_name || item.metadata.source || "Unknown source"),
+        sourceUri: String(item.metadata.source_uri || ""),
+        bestScore: item.score,
+        chunks: [item]
+      });
+    }
+  });
+  return Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+function buildChunkExcerpt(item) {
+  const wrap = document.createElement("div");
+  wrap.className = "retrieval-chunk";
+  const score = document.createElement("span");
+  score.className = `retrieval-chunk-score ${scoreClass(item.score)}`;
+  score.textContent = scorePct(item.score);
+  const text = document.createElement("p");
+  text.className = "retrieval-chunk-text";
+  text.textContent = item.text ? item.text.slice(0, 400) : "";
+  wrap.appendChild(score);
+  wrap.appendChild(text);
+  return wrap;
+}
+function buildResultCard(group) {
   const card = document.createElement("div");
   card.className = "retrieval-card";
-  card.dataset.docId = docId;
+  card.dataset.docId = group.docId;
   const badge = document.createElement("span");
-  badge.className = `retrieval-score-badge ${cls}`;
-  badge.textContent = scorePct(item.score);
-  const nameEl = sourceUri ? document.createElement("a") : document.createElement("span");
+  badge.className = `retrieval-score-badge ${scoreClass(group.bestScore)}`;
+  badge.textContent = scorePct(group.bestScore);
+  const chunkBadge = document.createElement("span");
+  chunkBadge.className = "retrieval-chunk-count";
+  const n = group.chunks.length;
+  chunkBadge.textContent = `${n} chunk${n === 1 ? "" : "s"}`;
+  const nameEl = group.sourceUri ? document.createElement("a") : document.createElement("span");
   nameEl.className = "retrieval-source-name";
-  nameEl.textContent = sourceName;
-  if (nameEl instanceof HTMLAnchorElement && sourceUri) {
-    nameEl.href = sourceUri;
+  nameEl.textContent = group.sourceName;
+  if (nameEl instanceof HTMLAnchorElement && group.sourceUri) {
+    nameEl.href = group.sourceUri;
     nameEl.target = "_blank";
     nameEl.rel = "noopener noreferrer";
   }
   const header = document.createElement("div");
   header.className = "retrieval-card-header";
   header.appendChild(nameEl);
+  header.appendChild(chunkBadge);
   header.appendChild(badge);
-  const excerptEl = document.createElement("p");
-  excerptEl.className = "retrieval-card-excerpt";
-  excerptEl.textContent = excerpt;
+  const topExcerpt = document.createElement("p");
+  topExcerpt.className = "retrieval-card-excerpt";
+  topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
   const hideBtn = document.createElement("button");
   hideBtn.className = "retrieval-hide-btn";
   hideBtn.title = "Hide from this conversation";
   hideBtn.textContent = "Hide";
-  hideBtn.addEventListener("click", () => void hideDoc(docId, sourceName, card));
+  hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName, card));
   const footer = document.createElement("div");
   footer.className = "retrieval-card-footer";
-  footer.appendChild(excerptEl);
+  footer.appendChild(topExcerpt);
   footer.appendChild(hideBtn);
   card.appendChild(header);
   card.appendChild(footer);
+  if (group.chunks.length > 1) {
+    const details = document.createElement("details");
+    details.className = "retrieval-chunks-details";
+    const summary = document.createElement("summary");
+    summary.textContent = `Show all ${group.chunks.length} chunks`;
+    details.appendChild(summary);
+    group.chunks.forEach((c) => details.appendChild(buildChunkExcerpt(c)));
+    card.appendChild(details);
+  }
   return card;
 }
-function buildHiddenItem(docId) {
+function buildDocStateItem(docId, actionLabel, actionClass, onAction) {
   const item = document.createElement("div");
   item.className = "retrieval-hidden-item";
   item.dataset.docId = docId;
   const label = document.createElement("span");
   label.className = "retrieval-hidden-label";
   label.textContent = docId;
-  const restoreBtn = document.createElement("button");
-  restoreBtn.className = "retrieval-restore-btn";
-  restoreBtn.textContent = "Restore";
-  restoreBtn.addEventListener("click", () => void restoreDoc(docId, item));
+  const btn = document.createElement("button");
+  btn.className = actionClass;
+  btn.textContent = actionLabel;
+  btn.addEventListener("click", () => onAction(item));
   item.appendChild(label);
-  item.appendChild(restoreBtn);
+  item.appendChild(btn);
   return item;
 }
 function renderHiddenSection() {
@@ -2337,7 +2384,40 @@ function renderHiddenSection() {
   countEl.textContent = String(count);
   list.innerHTML = "";
   rs.ignoredDocIds.forEach((docId) => {
-    list.appendChild(buildHiddenItem(docId));
+    list.appendChild(
+      buildDocStateItem(
+        docId,
+        "Restore",
+        "retrieval-restore-btn",
+        (item) => void restoreDoc(docId, item)
+      )
+    );
+  });
+  if (count > 0) {
+    section.style.display = "block";
+  } else {
+    section.style.display = "none";
+    const details = section.querySelector("details");
+    if (details) details.removeAttribute("open");
+  }
+}
+function renderRelevantSection() {
+  const section = qOpt("retrievalRelevantSection");
+  if (!section) return;
+  const list = q("retrievalRelevantList");
+  const countEl = q("retrievalRelevantCount");
+  const count = rs.relevantDocIds.size;
+  countEl.textContent = String(count);
+  list.innerHTML = "";
+  rs.relevantDocIds.forEach((docId) => {
+    list.appendChild(
+      buildDocStateItem(
+        docId,
+        "Hide",
+        "retrieval-hide-btn",
+        (item) => void hideDocFromList(docId, item)
+      )
+    );
   });
   if (count > 0) {
     section.style.display = "block";
@@ -2351,18 +2431,17 @@ function renderResults() {
   const list = q("retrievalResultsList");
   const emptyState = q("retrievalEmptyState");
   list.innerHTML = "";
-  const visible = rs.results.filter((r) => {
-    const docId = String(r.metadata.doc_id || r.metadata.document_id || "");
-    return !docId || !rs.ignoredDocIds.has(docId);
+  const visibleItems = rs.results.filter((r, idx) => {
+    const docId = docIdOf(r, idx);
+    return !rs.ignoredDocIds.has(docId);
   });
-  if (visible.length === 0) {
+  const groups = groupByDoc(visibleItems);
+  if (groups.length === 0) {
     emptyState.style.display = "block";
     return;
   }
   emptyState.style.display = "none";
-  visible.forEach((item, idx) => {
-    list.appendChild(buildResultCard(item, idx));
-  });
+  groups.forEach((g) => list.appendChild(buildResultCard(g)));
 }
 function setStatus(msg) {
   q("retrievalStatus").textContent = msg;
@@ -2374,7 +2453,9 @@ async function fetchDocState(conversationId) {
       `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
     );
     rs.ignoredDocIds = new Set(data.ignored_doc_ids ?? []);
+    rs.relevantDocIds = new Set(data.relevant_doc_ids ?? []);
     renderHiddenSection();
+    renderRelevantSection();
     renderResults();
   } catch {
   }
@@ -2385,8 +2466,10 @@ async function hideDoc(docId, sourceName, card) {
     return;
   }
   rs.ignoredDocIds.add(docId);
+  rs.relevantDocIds.delete(docId);
   card.remove();
   renderHiddenSection();
+  renderRelevantSection();
   try {
     await api(
       "POST",
@@ -2398,6 +2481,34 @@ async function hideDoc(docId, sourceName, card) {
     rs.ignoredDocIds.delete(docId);
     renderResults();
     renderHiddenSection();
+    renderRelevantSection();
+    showToast("Failed to hide document: " + String(err));
+  }
+}
+async function hideDocFromList(docId, item) {
+  if (!state.activeConversationId) {
+    showToast("Select a conversation first");
+    return;
+  }
+  rs.ignoredDocIds.add(docId);
+  rs.relevantDocIds.delete(docId);
+  item.remove();
+  renderHiddenSection();
+  renderRelevantSection();
+  renderResults();
+  try {
+    await api(
+      "POST",
+      `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore`,
+      { doc_id: docId }
+    );
+    showToast("Document hidden");
+  } catch (err) {
+    rs.ignoredDocIds.delete(docId);
+    rs.relevantDocIds.add(docId);
+    renderHiddenSection();
+    renderRelevantSection();
+    renderResults();
     showToast("Failed to hide document: " + String(err));
   }
 }
@@ -2407,8 +2518,10 @@ async function restoreDoc(docId, item) {
     return;
   }
   rs.ignoredDocIds.delete(docId);
+  rs.relevantDocIds.add(docId);
   item.remove();
   renderHiddenSection();
+  renderRelevantSection();
   renderResults();
   try {
     await api(
@@ -2418,7 +2531,9 @@ async function restoreDoc(docId, item) {
     showToast("Document restored");
   } catch (err) {
     rs.ignoredDocIds.add(docId);
+    rs.relevantDocIds.delete(docId);
     renderHiddenSection();
+    renderRelevantSection();
     renderResults();
     showToast("Failed to restore document: " + String(err));
   }
@@ -2450,14 +2565,17 @@ async function submitQuery() {
     }
     const data = await api("POST", "/console/query", body);
     rs.results = data.results ?? [];
-    if (data.ignored_doc_ids) {
-      rs.ignoredDocIds = new Set(data.ignored_doc_ids);
-    }
+    if (data.ignored_doc_ids) rs.ignoredDocIds = new Set(data.ignored_doc_ids);
+    if (data.relevant_doc_ids) rs.relevantDocIds = new Set(data.relevant_doc_ids);
     rs.lastConversationId = state.activeConversationId;
+    const docCount = groupByDoc(rs.results).length;
     const latency = data.latency_ms != null ? ` in ${Math.round(data.latency_ms)} ms` : "";
-    setStatus(`Found ${rs.results.length} document${rs.results.length !== 1 ? "s" : ""}${latency}.`);
+    setStatus(
+      `Found ${docCount} document${docCount !== 1 ? "s" : ""} (${rs.results.length} chunk${rs.results.length !== 1 ? "s" : ""})${latency}.`
+    );
     renderResults();
     renderHiddenSection();
+    renderRelevantSection();
   } catch (err) {
     setStatus("Search failed.");
     showToast("Retrieval error: " + String(err));
@@ -2492,15 +2610,14 @@ function initRetrievalView() {
   findBtn.addEventListener("click", () => void submitQuery());
   document.addEventListener("conversation-changed", () => {
     renderConvPill();
-    rs.results = [];
-    rs.ignoredDocIds = /* @__PURE__ */ new Set();
-    rs.lastConversationId = null;
-    setStatus("");
-    renderResults();
-    renderHiddenSection();
-    const pane = document.getElementById("view-retrieval");
-    if (pane?.classList.contains("active") && state.activeConversationId) {
+    if (state.activeConversationId) {
       void fetchDocState(state.activeConversationId);
+    } else {
+      rs.ignoredDocIds = /* @__PURE__ */ new Set();
+      rs.relevantDocIds = /* @__PURE__ */ new Set();
+      renderHiddenSection();
+      renderRelevantSection();
+      renderResults();
     }
   });
   document.querySelectorAll(".view-tab").forEach((btn) => {
@@ -2509,6 +2626,7 @@ function initRetrievalView() {
         renderConvPill();
         if (state.activeConversationId && state.activeConversationId !== rs.lastConversationId) {
           void fetchDocState(state.activeConversationId);
+          rs.lastConversationId = state.activeConversationId;
         }
       }
     });
@@ -2516,6 +2634,7 @@ function initRetrievalView() {
   renderConvPill();
   renderResults();
   renderHiddenSection();
+  renderRelevantSection();
 }
 
 // src/user-console.ts

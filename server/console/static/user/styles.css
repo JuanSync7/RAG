@@ -1364,3 +1364,34 @@
       cursor: pointer; transition: border-color 0.12s, background 0.12s;
     }
     .retrieval-restore-btn:hover { border-color: var(--accent-brd); background: var(--accent-bg); }
+
+    /* Chunk count badge + expandable chunks */
+    .retrieval-chunk-count {
+      font-size: 11px; font-weight: 600; color: var(--text-3);
+      background: var(--bg-elevated); border: 1px solid var(--border);
+      padding: 2px 8px; border-radius: 4px; flex-shrink: 0;
+    }
+    .retrieval-chunks-details { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .retrieval-chunks-details summary {
+      font-size: 12px; color: var(--text-3); cursor: pointer; user-select: none;
+      list-style: none; padding: 2px 0;
+    }
+    .retrieval-chunks-details summary::-webkit-details-marker { display: none; }
+    .retrieval-chunks-details summary::before {
+      content: "▸ "; font-size: 10px; color: var(--text-3);
+    }
+    .retrieval-chunks-details[open] summary::before { content: "▾ "; }
+    .retrieval-chunk {
+      display: flex; gap: 10px; padding: 8px 0; border-top: 1px dashed var(--border);
+    }
+    .retrieval-chunk:first-of-type { border-top: 0; }
+    .retrieval-chunk-score {
+      font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+      flex-shrink: 0; align-self: flex-start; font-family: "JetBrains Mono","Fira Code",monospace;
+    }
+    .retrieval-chunk-score.high { color: #52c97a; background: var(--green-bg); }
+    .retrieval-chunk-score.mid  { color: #e0c060; background: var(--warn-bg); }
+    .retrieval-chunk-score.low  { color: #e06060; background: var(--err-bg); }
+    .retrieval-chunk-text {
+      flex: 1; font-size: 12px; color: var(--text-2); line-height: 1.5; margin: 0;
+    }
