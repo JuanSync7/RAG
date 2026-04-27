@@ -19,8 +19,10 @@ between activities through Temporal.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from temporalio import activity
@@ -36,6 +38,7 @@ from langchain_core.embeddings import Embeddings
 from src.core import get_embedding_provider
 from src.core import KnowledgeGraphBuilder
 from src.ingest.common import (
+    CleanDocumentStore,
     IngestionConfig,
     Runtime,
 )
@@ -188,11 +191,40 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
         connector=s.connector,
         source_version=s.source_version,
     )
+
+    errors = list(result.get("errors", []))
+    source_hash = result.get("source_hash", "")
+    processing_log = list(result.get("processing_log", []))
+    clean_hash = ""
+
+    # Write clean text to CleanDocumentStore so Phase 2 can read it.
+    # This is the durable boundary between activities — the workflow
+    # contract requires Phase 2 to read from here, not from Temporal payload.
+    if not errors and config.clean_store_dir:
+        clean_text = result.get("refactored_text") or result.get("cleaned_text", "")
+        clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+        meta = {
+            "source_key": s.source_key,
+            "source_name": s.source_name,
+            "source_uri": s.source_uri,
+            "source_id": s.source_id,
+            "connector": s.connector,
+            "source_version": s.source_version,
+            "source_hash": source_hash,
+            "clean_hash": clean_hash,
+            "refactored": result.get("refactored_text") is not None,
+        }
+        try:
+            CleanDocumentStore(Path(config.clean_store_dir)).write(s.source_key, clean_text, meta)
+        except Exception as exc:
+            logger.exception("CleanDocumentStore write failed for %s", s.source_key)
+            errors.append(f"clean_store_write_failed: {exc}")
+
     return DocProcessingResult(
-        errors=result.get("errors", []),
-        source_hash=result.get("source_hash", ""),
-        clean_hash=result.get("clean_hash", ""),
-        processing_log=result.get("processing_log", []),
+        errors=errors,
+        source_hash=source_hash,
+        clean_hash=clean_hash,
+        processing_log=processing_log,
     )
 
 
@@ -205,6 +237,22 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
     """
     config = _deserialise_config(args.config)
     s = args.source
+
+    if not config.clean_store_dir:
+        return EmbeddingResult(
+            errors=["clean_store_dir is not configured — Phase 2 cannot read Phase 1 output"],
+            stored_count=0, metadata_summary="", metadata_keywords=[], processing_log=[],
+        )
+
+    store = CleanDocumentStore(Path(config.clean_store_dir))
+    try:
+        clean_text, _meta = store.read(s.source_key)
+    except FileNotFoundError as exc:
+        return EmbeddingResult(
+            errors=[f"clean_store_read_failed: {exc}"],
+            stored_count=0, metadata_summary="", metadata_keywords=[], processing_log=[],
+        )
+    clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
 
     with vector_db.get_client() as wv_client:
         vector_db.ensure_collection(wv_client, config.target_collection or None)
@@ -226,6 +274,8 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             source_id=s.source_id,
             connector=s.connector,
             source_version=s.source_version,
+            clean_text=clean_text,
+            clean_hash=clean_hash,
         )
 
     return EmbeddingResult(
