@@ -2448,7 +2448,7 @@ async function submitQuery() {
     if (state.activeConversationId) {
       body.conversation_id = state.activeConversationId;
     }
-    const data = await api("POST", "/query", body);
+    const data = await api("POST", "/console/query", body);
     rs.results = data.results ?? [];
     if (data.ignored_doc_ids) {
       rs.ignoredDocIds = new Set(data.ignored_doc_ids);

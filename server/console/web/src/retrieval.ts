@@ -311,7 +311,7 @@ async function submitQuery(): Promise<void> {
             body.conversation_id = state.activeConversationId;
         }
 
-        const data = await api<RetrievalResponse>("POST", "/query", body);
+        const data = await api<RetrievalResponse>("POST", "/console/query", body);
 
         rs.results = data.results ?? [];
         if (data.ignored_doc_ids) {
