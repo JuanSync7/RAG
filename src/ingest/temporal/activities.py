@@ -45,6 +45,7 @@ from src.ingest.common import (
 from src.ingest.doc_processing import run_document_processing
 from src.ingest.embedding import run_embedding_pipeline
 from src.ingest.support import ensure_docling_ready
+from src.vector_db.weaviate.store import get_source_hash
 import src.db as db
 import src.vector_db as vector_db
 
@@ -142,6 +143,9 @@ class DocProcessingResult:
     source_hash: str
     clean_hash: str
     processing_log: list[str]
+    # True when Phase 1 short-circuited because the prior ingest of this
+    # source_key has the same source_hash. Workflow uses this to skip Phase 2.
+    skipped: bool = False
 
 
 @dataclass
@@ -178,6 +182,37 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
     """
     config = _deserialise_config(args.config)
     s = args.source
+
+    # --- Idempotent re-ingest check ---------------------------------------
+    # Cheap pre-check before the expensive parse step. Reading the raw bytes
+    # and one Weaviate query is far cheaper than running Docling + embedding.
+    # On any error, fall through to the full pipeline — never block re-ingest.
+    try:
+        raw_bytes = Path(s.source_path).read_bytes()
+        precomputed_source_hash = hashlib.sha256(raw_bytes).hexdigest()
+    except (OSError, ValueError):
+        precomputed_source_hash = ""
+
+    if precomputed_source_hash:
+        try:
+            with vector_db.get_client() as wv_client:
+                prior_hash = get_source_hash(wv_client, s.source_key)
+        except Exception:
+            logger.debug("idempotency check failed for %s", s.source_key, exc_info=True)
+            prior_hash = None
+
+        if prior_hash and prior_hash == precomputed_source_hash:
+            logger.info(
+                "phase1 short-circuit: source unchanged source_key=%s hash=%s",
+                s.source_key, precomputed_source_hash[:12],
+            )
+            return DocProcessingResult(
+                errors=[],
+                source_hash=precomputed_source_hash,
+                clean_hash="",
+                processing_log=["doc_processing:skipped:unchanged"],
+                skipped=True,
+            )
 
     # Phase 1 does not need embedder or vector DB — pass minimal Runtime.
     runtime = Runtime(

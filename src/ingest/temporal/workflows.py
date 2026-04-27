@@ -188,6 +188,17 @@ class IngestDocumentWorkflow:
                 processing_log=phase1.processing_log,
             )
 
+        # Idempotent short-circuit: source bytes unchanged since last ingest.
+        # Phase 2 has nothing to do — chunks for this source_key + source_hash
+        # are already in Weaviate (that's how Phase 1 detected the match).
+        if getattr(phase1, "skipped", False):
+            return IngestDocumentResult(
+                source_key=args.source.source_key,
+                errors=[],
+                stored_count=0,
+                processing_log=phase1.processing_log,
+            )
+
         # ── Phase 2 ──────────────────────────────────────────────────────
         phase2: EmbeddingResult = await workflow.execute_activity(
             embedding_pipeline_activity,
