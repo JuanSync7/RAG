@@ -45,6 +45,9 @@ class _FakeMemory:
     def compact_if_needed(self, **_kwargs):  # pragma: no cover - trivial stub
         return None
 
+    def get_seen_doc_ids(self, **_kwargs) -> list[str]:  # pragma: no cover - trivial stub
+        return []
+
 
 class _DummyWorkflowService:
     async def get_system_info(self):
