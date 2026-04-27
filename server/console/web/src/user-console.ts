@@ -20,6 +20,7 @@ import { initAttachments } from "./attachments";
 import { initInput } from "./input";
 import { initIngestView } from "./ingest";
 import { initRetrievalView } from "./retrieval";
+import { initChatMode } from "./chatMode";
 
 document.addEventListener("DOMContentLoaded", () => {
     populateRefs();
@@ -37,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initInput();
     initIngestView();
     initRetrievalView();
+    initChatMode();
 
     // Restore persisted UI state.
     loadSettings();
