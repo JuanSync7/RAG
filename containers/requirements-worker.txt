@@ -23,7 +23,7 @@ nemoguardrails>=0.21.0
 tree-sitter
 tree-sitter-verilog
 pyverilog
-temporalio
+temporalio>=1.23,<2
 redis
 langfuse
 pyyaml
