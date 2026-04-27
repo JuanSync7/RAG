@@ -261,7 +261,19 @@ def _install_stub_modules() -> None:
         sys.modules["PIL"] = pil
         sys.modules["PIL.Image"] = pil_image
 
-    if "temporalio" not in sys.modules:
+    # Only stub temporalio when the real package can't be imported. Tests that
+    # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
+    # real `temporalio.worker.workflow_sandbox` submodule, which the stubs
+    # below don't provide. With temporalio pinned as a regular dependency the
+    # real package is always available, so this branch is mostly defensive.
+    _temporalio_available = "temporalio" in sys.modules
+    if not _temporalio_available:
+        try:
+            import temporalio as _real_temporalio  # noqa: F401
+            _temporalio_available = True
+        except ImportError:
+            pass
+    if not _temporalio_available:
         temporalio = types.ModuleType("temporalio")
 
         activity_mod = types.ModuleType("temporalio.activity")

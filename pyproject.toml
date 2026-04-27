@@ -15,7 +15,7 @@ dependencies = [
   "langchain-text-splitters",
   "langgraph",
   "numpy",
-  "temporalio",
+  "temporalio>=1.23,<2",
   "langfuse",
   "fastapi",
   "uvicorn[standard]",
