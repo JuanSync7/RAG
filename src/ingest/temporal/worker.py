@@ -3,6 +3,7 @@
 # In dual-queue mode runs two Worker instances (user + background queues) with
 # independent concurrency slot budgets.  Falls back to a single legacy worker
 # when dual-queue env vars are unset (FR-3553).
+# Registers DeleteSourceWorkflow and delete_source_activity (Issue #42, PR-B).
 # Exports: main, run_worker
 # Deps: temporalio, config.settings, src.ingest.temporal.activities,
 #       src.ingest.temporal.workflows, src.ingest.temporal.constants
@@ -36,16 +37,21 @@ from temporalio.worker import Worker
 
 from config.settings import TEMPORAL_TARGET_HOST, TEMPORAL_TASK_QUEUE
 from src.ingest.temporal.activities import (
+    delete_source_activity,
     document_processing_activity,
     embedding_pipeline_activity,
     prewarm_worker_resources,
 )
-from src.ingest.temporal.workflows import IngestDirectoryWorkflow, IngestDocumentWorkflow
+from src.ingest.temporal.workflows import (
+    DeleteSourceWorkflow,
+    IngestDirectoryWorkflow,
+    IngestDocumentWorkflow,
+)
 
 logger = logging.getLogger("rag.ingest.temporal.worker")
 
-_WORKFLOWS = [IngestDirectoryWorkflow, IngestDocumentWorkflow]
-_ACTIVITIES = [document_processing_activity, embedding_pipeline_activity]
+_WORKFLOWS = [IngestDirectoryWorkflow, IngestDocumentWorkflow, DeleteSourceWorkflow]
+_ACTIVITIES = [document_processing_activity, embedding_pipeline_activity, delete_source_activity]
 
 # ---------------------------------------------------------------------------
 # Slot allocation helpers (mirrors config/settings.py precedence — until the
