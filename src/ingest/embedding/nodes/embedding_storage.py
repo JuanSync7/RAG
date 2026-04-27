@@ -1,5 +1,5 @@
 # @summary
-# LangGraph node for embedding generation and vector store persistence.
+# LangGraph node for embedding generation; stages records for atomic commit (Issue #42).
 # Exports: embedding_storage_node, _form_batches, _embed_batches,
 #   _log_batch_metrics, _log_batch_summary
 # Deps: src.vector_db, src.ingest.embedding.state, src.ingest.common.shared,
@@ -7,6 +7,7 @@
 # trace_id, schema_version, batch_id attached to every chunk payload (FR-3052, FR-3053, FR-3100).
 # Chunks are embedded in configurable batches (FR-1210–FR-1214) with per-batch
 # retry isolation; failed batches are excluded from output via success_mask.
+# Weaviate write is deferred to commit_node for atomicity.
 # @end-summary
 
 """Embedding-storage node implementation."""
@@ -155,32 +156,33 @@ def _embed_batches(
 
 
 def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
-    """Persist chunk embeddings and metadata into the configured vector store.
+    """Generate chunk embeddings and STAGE records for atomic commit (Issue #42).
+
+    The actual Weaviate write (``add_documents`` / ``delete_by_source_key``) is
+    deferred to ``commit_node`` so that MinIO, Weaviate, and the KG are all
+    flushed in one terminal phase.
 
     Args:
         state: Ingestion pipeline state.
 
     Returns:
-        Partial state update containing ``stored_count`` and an updated
-        ``processing_log``. When the workflow is skipped or there are no chunks,
-        returns ``stored_count=0``.
+        Partial state update containing ``staged_weaviate_records``,
+        ``staged_weaviate_delete_old``, ``stored_count=0`` (real count set by
+        commit_node), and an updated ``processing_log``.
+        When the workflow is skipped or there are no chunks, returns
+        empty staging fields.
     """
     t0 = time.monotonic()
     if state.get("should_skip", False) or not state["chunks"]:
         return {
             "stored_count": 0,
+            "staged_weaviate_records": [],
+            "staged_weaviate_delete_old": False,
             "processing_log": append_processing_log(state, "embedding_storage:skipped"),
         }
 
     runtime = state["runtime"]
     try:
-        if runtime.config.update_mode:
-            delete_by_source_key(
-                runtime.weaviate_client,
-                state["source_key"],
-                legacy_source=state["source_name"],
-            )
-
         # Attach trace/schema/batch metadata to every chunk (FR-3052, FR-3053, FR-3100).
         # These three keys are merged into a copy of each chunk's metadata so that
         # existing keys are preserved and the original chunk objects are not mutated.
@@ -216,21 +218,21 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             )
             for pos, idx in enumerate(successful_chunk_indices)
         ]
-        stored_count = add_documents(
-            runtime.weaviate_client, records,
-            collection=runtime.config.target_collection or None,
-        )
     except Exception as exc:
         logger.error("embedding_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
         return {
             "errors": state.get("errors", []) + [f"embedding_storage:{exc}"],
+            "staged_weaviate_records": [],
+            "staged_weaviate_delete_old": False,
             "processing_log": append_processing_log(state, "embedding_storage:error"),
         }
 
     existing_errors = state.get("errors", [])
-    logger.debug("embedding_storage_node completed in %.3fs", time.monotonic() - t0)
+    logger.debug("embedding_storage_node staged %d records in %.3fs", len(records), time.monotonic() - t0)
     return {
-        "stored_count": stored_count,
+        "stored_count": 0,  # not stored yet — commit_node sets the real count
         "errors": existing_errors + batch_errors,
-        "processing_log": append_processing_log(state, "embedding_storage:ok"),
+        "staged_weaviate_records": records,
+        "staged_weaviate_delete_old": bool(runtime.config.update_mode),
+        "processing_log": append_processing_log(state, "embedding_storage:staged"),
     }

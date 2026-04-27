@@ -97,6 +97,11 @@ def run_embedding_pipeline(
         "batch_id": batch_id,
         "staging_batch_id": staging_batch_id,
         "source_hash": source_hash,
+        # Staging fields for atomic commit (Issue #42); populated by storage nodes.
+        "staged_minio": None,
+        "staged_weaviate_records": [],
+        "staged_weaviate_delete_old": False,
+        "staged_kg_chunks": [],
     }
     try:
         final_state = _GRAPH.invoke(initial_state)

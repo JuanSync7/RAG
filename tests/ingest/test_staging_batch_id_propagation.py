@@ -98,17 +98,15 @@ class TestWorkflowMintsStagingBatchId:
 
 class TestEmbeddingStorageNodeInjectsAtomicityFields:
     def test_chunk_metadata_carries_staging_batch_id_and_source_hash(self, monkeypatch):
+        """staging_batch_id and source_hash must be in staged_weaviate_records metadata.
+
+        Since Issue #42, embedding_storage_node no longer calls add_documents; it
+        stages DocumentRecords in state["staged_weaviate_records"]. The metadata
+        fields are verified on the staged records directly.
+        """
         from src.ingest.embedding.nodes import embedding_storage as es_mod
         from src.ingest.common import IngestionConfig, ProcessedChunk, Runtime
 
-        captured: list[dict] = []
-
-        def fake_add_documents(client, records, collection=None):
-            for r in records:
-                captured.append(r.metadata)
-            return len(records)
-
-        monkeypatch.setattr(es_mod, "add_documents", fake_add_documents)
         # Stub embed step so we don't need a real embedder
         monkeypatch.setattr(
             es_mod, "_embed_batches",
@@ -136,9 +134,11 @@ class TestEmbeddingStorageNodeInjectsAtomicityFields:
             "source_hash": "deadbeef",
         }
 
-        es_mod.embedding_storage_node(state)
+        result = es_mod.embedding_storage_node(state)
 
-        assert len(captured) == 1
-        meta = captured[0]
+        # add_documents must NOT be called in the staging node.
+        staged = result.get("staged_weaviate_records", [])
+        assert len(staged) == 1, "Expected exactly 1 staged record"
+        meta = staged[0].metadata
         assert meta.get("staging_batch_id") == "batch-uuid-xyz"
         assert meta.get("source_hash") == "deadbeef"
