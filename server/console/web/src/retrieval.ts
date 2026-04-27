@@ -12,6 +12,7 @@ import { showToast } from "./toast";
 import { state } from "./state";
 import { openSourceDocument } from "./citations";
 import { createNewConversation } from "./conversations";
+import { parseMarkdown } from "./markdown";
 import type { RetrievalResultItem, RetrievalResponse, DocStateResponse } from "./user-types";
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -155,9 +156,10 @@ function buildChunkExcerpt(item: RetrievalResultItem): HTMLElement {
     const score = document.createElement("span");
     score.className = `retrieval-chunk-score ${scoreClass(item.score)}`;
     score.textContent = scorePct(item.score);
-    const text = document.createElement("p");
-    text.className = "retrieval-chunk-text";
-    text.textContent = item.text ? item.text.slice(0, 400) : "";
+    const text = document.createElement("div");
+    text.className = "retrieval-chunk-text markdown-body";
+    // parseMarkdown sanitizes; safe to set innerHTML.
+    text.innerHTML = parseMarkdown(item.text || "");
     wrap.appendChild(score);
     wrap.appendChild(text);
     return wrap;
@@ -210,9 +212,29 @@ function buildResultCard(group: DocGroup): HTMLElement {
     header.appendChild(chunkBadge);
     header.appendChild(badge);
 
-    const topExcerpt = document.createElement("p");
-    topExcerpt.className = "retrieval-card-excerpt";
-    topExcerpt.textContent = group.chunks[0]?.text ? group.chunks[0].text.slice(0, 240) : "";
+    const topExcerpt = document.createElement("div");
+    topExcerpt.className = "retrieval-card-excerpt markdown-body";
+    topExcerpt.innerHTML = parseMarkdown(group.chunks[0]?.text || "");
+
+    const actions = document.createElement("div");
+    actions.className = "retrieval-card-actions";
+
+    const isAlreadyRelevant = rs.relevantDocIds.has(group.docId);
+    const isHidden = rs.ignoredDocIds.has(group.docId);
+
+    if (!isAlreadyRelevant && !isHidden) {
+        const relevantBtn = document.createElement("button");
+        relevantBtn.className = "retrieval-relevant-btn";
+        relevantBtn.title = "Pin this document as relevant for the current conversation";
+        relevantBtn.textContent = "Mark relevant";
+        if (group.isSynthetic) {
+            relevantBtn.disabled = true;
+            relevantBtn.title = "No document id — cannot mark relevant";
+        } else {
+            relevantBtn.addEventListener("click", () => void markRelevant(group.docId, group.sourceName));
+        }
+        actions.appendChild(relevantBtn);
+    }
 
     const hideBtn = document.createElement("button");
     hideBtn.className = "retrieval-hide-btn";
@@ -224,11 +246,12 @@ function buildResultCard(group: DocGroup): HTMLElement {
         hideBtn.addEventListener("click", () => void hideDoc(group.docId, group.sourceName));
     }
     hideBtn.textContent = "Hide";
+    actions.appendChild(hideBtn);
 
     const footer = document.createElement("div");
     footer.className = "retrieval-card-footer";
     footer.appendChild(topExcerpt);
-    footer.appendChild(hideBtn);
+    footer.appendChild(actions);
 
     card.appendChild(header);
     card.appendChild(footer);
@@ -459,6 +482,34 @@ async function hideDocFromRail(docId: string): Promise<void> {
         renderRail();
         renderThread();
         showToast("Failed to hide document: " + String(err));
+    }
+}
+
+async function markRelevant(docId: string, sourceName: string): Promise<void> {
+    if (!state.activeConversationId) {
+        showToast("Select a conversation first");
+        return;
+    }
+    if (rs.relevantDocIds.has(docId)) return;
+
+    rs.relevantDocIds.add(docId);
+    rs.ignoredDocIds.delete(docId);
+    renderRail();
+    renderThread();
+
+    try {
+        // Backend's restore-to-relevant endpoint also serves as "mark relevant"
+        // for fresh docs — it adds to the relevant set regardless of prior state.
+        await api<DocStateResponse>(
+            "DELETE",
+            `/console/conversations/${encodeURIComponent(state.activeConversationId)}/ignore/${encodeURIComponent(docId)}`,
+        );
+        showToast(`Marked relevant: ${sourceName}`);
+    } catch (err) {
+        rs.relevantDocIds.delete(docId);
+        renderRail();
+        renderThread();
+        showToast("Failed to mark relevant: " + String(err));
     }
 }
 

@@ -1477,6 +1477,25 @@
     }
     .retrieval-new-btn:hover { background: var(--accent); color: #000; }
 
+    /* Card actions row + relevant button */
+    .retrieval-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .retrieval-relevant-btn {
+      background: transparent; border: 1px solid var(--accent-brd);
+      border-radius: 6px; color: var(--accent); font-size: 11px; padding: 3px 10px;
+      cursor: pointer; transition: background 0.12s, color 0.12s;
+    }
+    .retrieval-relevant-btn:hover:not(:disabled) {
+      background: var(--accent-bg); color: var(--accent-2);
+    }
+    .retrieval-relevant-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Markdown styling inside excerpts (preserve clamp on top excerpt) */
+    .retrieval-card-excerpt { display: block; }
+    .retrieval-card-excerpt p:first-child { margin-top: 0; }
+    .retrieval-card-excerpt p:last-child { margin-bottom: 0; }
+    .retrieval-chunk-text p:first-child { margin-top: 0; }
+    .retrieval-chunk-text p:last-child { margin-bottom: 0; }
+
     /* Cards inside an assistant bubble */
     .retrieval-bubble-intro { margin: 0 0 10px; font-size: 13px; color: var(--text-2); }
     .retrieval-bubble-cards { display: flex; flex-direction: column; gap: 10px; }
