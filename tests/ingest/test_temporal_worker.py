@@ -351,7 +351,7 @@ class TestRunWorkerIntegration:
 
         class FakeWorker:
             def __init__(self, client, *, task_queue, max_concurrent_activities,
-                         workflows, activities):
+                         workflows, activities, **kwargs):
                 workers_created.append({
                     "queue": task_queue,
                     "slots": max_concurrent_activities,
@@ -400,7 +400,7 @@ class TestRunWorkerIntegration:
 
         class FakeWorker:
             def __init__(self, client, *, task_queue, max_concurrent_activities,
-                         workflows, activities):
+                         workflows, activities, **kwargs):
                 workers_created.append({
                     "queue": task_queue,
                     "slots": max_concurrent_activities,
