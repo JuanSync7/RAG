@@ -10,7 +10,7 @@ import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
 import type { ChunkResult } from "./user-types";
 
-interface ViewPayload {
+export interface ViewPayload {
     source?: string;
     source_uri?: string;
     source_key?: string;
@@ -20,6 +20,31 @@ interface ViewPayload {
     refactored_start?: number;
     refactored_end?: number;
     provenance_confidence?: number;
+}
+
+export async function openSourceDocument(payload: ViewPayload): Promise<void> {
+    const url = apiBase() + "/console/source-document/view";
+    try {
+        const res = await fetch(url, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const contentType = (res.headers.get("Content-Type") ?? "text/html").split(";")[0].trim();
+        const buf = await res.arrayBuffer();
+        const blob = new Blob([buf], { type: contentType });
+        const blobUrl = URL.createObjectURL(blob);
+        const win = window.open(blobUrl, "_blank");
+        if (!win) {
+            showToast("Pop-up blocked. Allow pop-ups to view sources.");
+            URL.revokeObjectURL(blobUrl);
+            return;
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (err) {
+        showToast("Could not open source: " + String(err));
+    }
 }
 
 const _viewPayloads = new Map<string, ViewPayload>();
@@ -89,28 +114,7 @@ async function openSourceView(e: Event, viewKey: string): Promise<void> {
         showToast("Citation context lost — try re-running the query.");
         return;
     }
-    const url = apiBase() + "/console/source-document/view";
-    try {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: authHeaders(),
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const contentType = (res.headers.get("Content-Type") ?? "text/html").split(";")[0].trim();
-        const buf = await res.arrayBuffer();
-        const blob = new Blob([buf], { type: contentType });
-        const blobUrl = URL.createObjectURL(blob);
-        const win = window.open(blobUrl, "_blank");
-        if (!win) {
-            showToast("Pop-up blocked. Allow pop-ups to view sources.");
-            URL.revokeObjectURL(blobUrl);
-            return;
-        }
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    } catch (err) {
-        showToast("Could not open source: " + String(err));
-    }
+    await openSourceDocument(payload);
 }
 
 function toggleCitation(card: HTMLElement): void {

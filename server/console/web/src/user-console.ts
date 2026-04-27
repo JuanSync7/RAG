@@ -19,6 +19,7 @@ import { loadModelInfo } from "./modelBadge";
 import { initAttachments } from "./attachments";
 import { initInput } from "./input";
 import { initIngestView } from "./ingest";
+import { initChatMode } from "./chatMode";
 
 document.addEventListener("DOMContentLoaded", () => {
     populateRefs();
@@ -35,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initAttachments();
     initInput();
     initIngestView();
+    initChatMode();
 
     // Restore persisted UI state.
     loadSettings();

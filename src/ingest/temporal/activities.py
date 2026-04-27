@@ -1,7 +1,8 @@
 # @summary
 # Temporal activity definitions for the two-phase ingestion pipeline.
 # Exports: document_processing_activity, embedding_pipeline_activity,
-#          prewarm_worker_resources
+#          prewarm_worker_resources,
+#          delete_source_activity, DeleteSourceArgs, DeleteSourceResult
 # Deps: temporalio, src.ingest.doc_processing.impl, src.ingest.embedding.impl,
 #       src.ingest.common.types, src.vector_db, src.db, src.core.embeddings
 # @end-summary
@@ -45,6 +46,7 @@ from src.ingest.common import (
 from src.ingest.doc_processing import run_document_processing
 from src.ingest.embedding import run_embedding_pipeline
 from src.ingest.support import ensure_docling_ready
+from src.vector_db.weaviate.store import get_source_hash
 import src.db as db
 import src.vector_db as vector_db
 
@@ -130,6 +132,9 @@ class ActivityArgs:
     """Full input for either ingestion activity."""
     source: SourceArgs
     config: dict[str, Any]  # IngestionConfig serialised via dataclasses.asdict()
+    # Per-document UUID minted at workflow entry. Persisted on every chunk so
+    # commit_node can roll back partial writes by filtering on this id.
+    staging_batch_id: str = ""
 
 
 @dataclass
@@ -139,6 +144,9 @@ class DocProcessingResult:
     source_hash: str
     clean_hash: str
     processing_log: list[str]
+    # True when Phase 1 short-circuited because the prior ingest of this
+    # source_key has the same source_hash. Workflow uses this to skip Phase 2.
+    skipped: bool = False
 
 
 @dataclass
@@ -149,6 +157,28 @@ class EmbeddingResult:
     metadata_summary: str
     metadata_keywords: list[str]
     processing_log: list[str]
+
+
+@dataclass
+class DeleteSourceArgs:
+    """Input for delete_source_activity.
+
+    Args:
+        source_key: Stable source identity. Always required.
+        staging_batch_id: When set, delete only chunks tagged with this batch
+            (used by post-cancel cleanup of a single in-flight document).
+            When empty, delete all chunks for ``source_key`` (manual purge).
+    """
+    source_key: str
+    staging_batch_id: str = ""
+
+
+@dataclass
+class DeleteSourceResult:
+    """Output of delete_source_activity."""
+    weaviate_deleted: int
+    minio_deleted: bool
+    errors: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +205,37 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
     """
     config = _deserialise_config(args.config)
     s = args.source
+
+    # --- Idempotent re-ingest check ---------------------------------------
+    # Cheap pre-check before the expensive parse step. Reading the raw bytes
+    # and one Weaviate query is far cheaper than running Docling + embedding.
+    # On any error, fall through to the full pipeline — never block re-ingest.
+    try:
+        raw_bytes = Path(s.source_path).read_bytes()
+        precomputed_source_hash = hashlib.sha256(raw_bytes).hexdigest()
+    except (OSError, ValueError):
+        precomputed_source_hash = ""
+
+    if precomputed_source_hash:
+        try:
+            with vector_db.get_client() as wv_client:
+                prior_hash = get_source_hash(wv_client, s.source_key)
+        except Exception:
+            logger.debug("idempotency check failed for %s", s.source_key, exc_info=True)
+            prior_hash = None
+
+        if prior_hash and prior_hash == precomputed_source_hash:
+            logger.info(
+                "phase1 short-circuit: source unchanged source_key=%s hash=%s",
+                s.source_key, precomputed_source_hash[:12],
+            )
+            return DocProcessingResult(
+                errors=[],
+                source_hash=precomputed_source_hash,
+                clean_hash="",
+                processing_log=["doc_processing:skipped:unchanged"],
+                skipped=True,
+            )
 
     # Phase 1 does not need embedder or vector DB — pass minimal Runtime.
     runtime = Runtime(
@@ -250,13 +311,14 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
 
     store = CleanDocumentStore(Path(config.clean_store_dir))
     try:
-        clean_text, _meta = store.read(s.source_key)
+        clean_text, meta = store.read(s.source_key)
     except FileNotFoundError as exc:
         return EmbeddingResult(
             errors=[f"clean_store_read_failed: {exc}"],
             stored_count=0, metadata_summary="", metadata_keywords=[], processing_log=[],
         )
     clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+    source_hash = meta.get("source_hash", "") if isinstance(meta, dict) else ""
 
     with vector_db.get_client() as wv_client:
         vector_db.ensure_collection(wv_client, config.target_collection or None)
@@ -280,6 +342,8 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             source_version=s.source_version,
             clean_text=clean_text,
             clean_hash=clean_hash,
+            staging_batch_id=args.staging_batch_id,
+            source_hash=source_hash,
         )
 
     return EmbeddingResult(
@@ -288,4 +352,55 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
         metadata_summary=result.get("metadata_summary", ""),
         metadata_keywords=result.get("metadata_keywords", []),
         processing_log=result.get("processing_log", []),
+    )
+
+
+@activity.defn
+async def delete_source_activity(args: DeleteSourceArgs) -> DeleteSourceResult:
+    """Best-effort delete of a source's chunks (Weaviate) and document (MinIO).
+
+    Idempotent: zero-match deletes are a success, not a failure.
+    Each store is cleaned independently — a failure in one does not block
+    the other so the operator gets maximum cleanup per attempt.
+    Temporal retries the workflow wrapper if the activity itself raises.
+    """
+    from src.vector_db.weaviate.store import delete_documents_by_staging_batch
+
+    errors: list[str] = []
+    weaviate_deleted = 0
+    minio_deleted = False
+
+    # --- Weaviate cleanup ---------------------------------------------------
+    try:
+        with vector_db.get_client() as wv_client:
+            if args.staging_batch_id:
+                weaviate_deleted = delete_documents_by_staging_batch(
+                    wv_client, args.staging_batch_id,
+                )
+            else:
+                weaviate_deleted = vector_db.delete_by_source_key(
+                    wv_client, args.source_key,
+                )
+    except Exception as exc:
+        logger.exception(
+            "delete_source: Weaviate cleanup failed source_key=%s", args.source_key
+        )
+        errors.append(f"weaviate_delete_failed:{exc}")
+
+    # --- MinIO cleanup -------------------------------------------------------
+    try:
+        from src.db import build_document_id
+        document_id = build_document_id(args.source_key)
+        client = _get_db_client()
+        minio_deleted = bool(db.delete_document(client, document_id))
+    except Exception as exc:
+        logger.exception(
+            "delete_source: MinIO cleanup failed source_key=%s", args.source_key
+        )
+        errors.append(f"minio_delete_failed:{exc}")
+
+    return DeleteSourceResult(
+        weaviate_deleted=weaviate_deleted,
+        minio_deleted=minio_deleted,
+        errors=errors,
     )

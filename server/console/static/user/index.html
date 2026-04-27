@@ -96,6 +96,10 @@
       <button class="toggle-btn" id="toggleBtn">&#9776;</button>
       <span class="conv-title" id="convTitle">RagWeave</span>
       <div class="model-badge" id="modelBadge"><span class="model-dot"></span><span id="modelBadgeText">Loading…</span></div>
+      <div class="chat-mode-toggle" id="chatModeToggle" role="tablist" aria-label="Renderer">
+        <button class="chat-mode-btn active" id="chatModeAnswer" data-mode="answer" role="tab" aria-selected="true" title="Generate an answer with citations">Answer</button>
+        <button class="chat-mode-btn" id="chatModeSources" data-mode="sources" role="tab" aria-selected="false" title="Return source documents only — no generated answer">Sources</button>
+      </div>
       <div class="ctx-chip" id="ctxChip">
         <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
         <span id="ctxPct">—</span>
@@ -118,6 +122,8 @@
 
     <button class="scroll-fab" id="scrollFab" title="Jump to bottom">&#8595;</button>
 
+    <div class="chat-body">
+    <div class="chat-main">
     <div class="message-thread" id="thread">
       <div class="thread-empty" id="threadEmpty">
         <div class="thread-empty-icon">&#9670;</div>
@@ -192,6 +198,18 @@
         <button class="send-btn" id="sendBtn">&#9650;</button>
       </div>
       <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; Esc&nbsp;Esc&nbsp;to&nbsp;clear &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
+    </div>
+    </div>
+    <aside class="chat-rail" id="chatRail" aria-label="Document state">
+      <div class="chat-rail-section">
+        <div class="chat-rail-title"><span>&#9989; Relevant</span><span class="chat-rail-count" id="chatRailRelevantCount">0</span></div>
+        <div class="chat-rail-list" id="chatRailRelevant"></div>
+      </div>
+      <div class="chat-rail-section">
+        <div class="chat-rail-title"><span>&#128683; Hidden</span><span class="chat-rail-count" id="chatRailHiddenCount">0</span></div>
+        <div class="chat-rail-list" id="chatRailHidden"></div>
+      </div>
+    </aside>
     </div>
     </section>
 

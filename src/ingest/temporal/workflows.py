@@ -1,10 +1,10 @@
 # @summary
-# Temporal workflow definitions for per-document and per-directory ingestion.
-# Workflows now accept a trigger_type argument (FR-3565, FR-3566) that is
-# propagated to child workflows and used for structured log enrichment (FR-3575).
+# Temporal workflow definitions for per-document and per-directory ingestion,
+# plus DeleteSourceWorkflow for durable post-workflow source cleanup.
 # Exports: IngestDocumentWorkflow, IngestDirectoryWorkflow,
 #          IngestDocumentArgs, IngestDocumentResult,
-#          IngestDirectoryArgs, IngestDirectoryResult
+#          IngestDirectoryArgs, IngestDirectoryResult,
+#          DeleteSourceWorkflow
 # Deps: temporalio, src.ingest.temporal.activities, src.ingest.temporal.constants,
 #       config.settings
 # @end-summary
@@ -50,9 +50,12 @@ with workflow.unsafe.imports_passed_through():
     )
     from src.ingest.temporal.activities import (
         ActivityArgs,
+        DeleteSourceArgs,
+        DeleteSourceResult,
         DocProcessingResult,
         EmbeddingResult,
         SourceArgs,
+        delete_source_activity,
         document_processing_activity,
         embedding_pipeline_activity,
     )
@@ -162,7 +165,16 @@ class IngestDocumentWorkflow:
             _priority,
         )
 
-        activity_args = ActivityArgs(source=args.source, config=args.config)
+        # Mint a per-document UUID at workflow entry (Issue #42). The same
+        # id is passed to Phase 1 and Phase 2 so the commit step can roll
+        # back any partial writes by filtering chunks on this property.
+        # workflow.uuid4() is deterministic across replay.
+        staging_batch_id = str(workflow.uuid4())
+        activity_args = ActivityArgs(
+            source=args.source,
+            config=args.config,
+            staging_batch_id=staging_batch_id,
+        )
 
         # ── Phase 1 ──────────────────────────────────────────────────────
         phase1: DocProcessingResult = await workflow.execute_activity(
@@ -175,6 +187,17 @@ class IngestDocumentWorkflow:
             return IngestDocumentResult(
                 source_key=args.source.source_key,
                 errors=phase1.errors,
+                stored_count=0,
+                processing_log=phase1.processing_log,
+            )
+
+        # Idempotent short-circuit: source bytes unchanged since last ingest.
+        # Phase 2 has nothing to do — chunks for this source_key + source_hash
+        # are already in Weaviate (that's how Phase 1 detected the match).
+        if getattr(phase1, "skipped", False):
+            return IngestDocumentResult(
+                source_key=args.source.source_key,
+                errors=[],
                 stored_count=0,
                 processing_log=phase1.processing_log,
             )
@@ -259,4 +282,37 @@ class IngestDirectoryWorkflow:
             failed=failed,
             stored_chunks=stored_chunks,
             errors=errors,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Delete-source workflow (Issue #42, PR-B)
+# ---------------------------------------------------------------------------
+
+@workflow.defn
+class DeleteSourceWorkflow:
+    """Temporal-retryable wrapper around delete_source_activity.
+
+    Provides a durable cleanup primitive callable from operator tools or future
+    post-cancel hooks. Idempotent at the activity level, so retries are safe.
+
+    Filters by ``staging_batch_id`` when supplied (post-cancel rollback of one
+    in-flight batch) or by ``source_key`` only (manual full purge).
+
+    Wiring into a future cancel-job HTTP endpoint will land separately when
+    async ingest submission is added (no synchronous cancel route exists yet).
+    """
+
+    @workflow.run
+    async def run(self, args: "DeleteSourceArgs") -> "DeleteSourceResult":
+        workflow.logger.info(
+            "delete_source workflow entry source_key=%s batch=%s",
+            args.source_key,
+            args.staging_batch_id or "<all>",
+        )
+        return await workflow.execute_activity(
+            delete_source_activity,
+            args,
+            schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=_RETRY_POLICY,
         )

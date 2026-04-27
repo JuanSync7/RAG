@@ -29,6 +29,8 @@ export interface ChunkResult {
 export interface SourceRef {
     source?: string;
     source_uri?: string;
+    source_key?: string;
+    document_id?: string;
     section?: string;
     score?: number;
     text?: string;
@@ -72,6 +74,36 @@ export interface CommandResult {
     data?: Record<string, unknown>;
 }
 
+// -- Retrieval tab --
+
+export interface RetrievalResultItem {
+    score: number;
+    text: string;
+    metadata: {
+        source_name?: string;
+        source?: string;
+        source_uri?: string;
+        chunk_id?: string;
+        doc_id?: string;
+        document_id?: string;
+        [key: string]: unknown;
+    };
+}
+
+export interface RetrievalResponse {
+    results: RetrievalResultItem[];
+    relevant_doc_ids: string[];
+    ignored_doc_ids: string[];
+    latency_ms: number;
+    conversation_id?: string;
+}
+
+export interface DocStateResponse {
+    conversation_id: string;
+    relevant_doc_ids: string[];
+    ignored_doc_ids: string[];
+}
+
 export function sourceRefToChunkResult(ref: SourceRef): ChunkResult {
     return {
         text: ref.text ?? "",
@@ -79,6 +111,8 @@ export function sourceRefToChunkResult(ref: SourceRef): ChunkResult {
         metadata: {
             source: ref.source ?? "",
             source_uri: ref.source_uri ?? "",
+            source_key: ref.source_key ?? "",
+            document_id: ref.document_id ?? "",
             section: ref.section ?? "",
             original_char_start: ref.original_char_start,
             original_char_end: ref.original_char_end,

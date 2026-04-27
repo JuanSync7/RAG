@@ -77,11 +77,16 @@ def _ensure_workflow_sandbox_attrs(wf_mod):
     With real temporalio installed, ``workflow.logger`` exists but raises
     ``_NotInWorkflowEventLoopError`` when called outside a workflow runtime.
     These tests run workflow code directly (no Temporal harness), so we
-    unconditionally replace it with a stdlib logger.
+    unconditionally replace sandbox-only symbols with stdlib equivalents.
     """
-    wf = wf_mod.workflow
     import logging
+    import uuid
+    wf = wf_mod.workflow
     wf.logger = logging.getLogger("temporalio.workflow.test")
+    # workflow.uuid4() is deterministic-replay-safe inside Temporal but raises
+    # _NotInWorkflowEventLoopError outside a workflow loop.  Replace it with a
+    # plain uuid.uuid4() for tests — determinism is not required here.
+    wf.uuid4 = uuid.uuid4
     if not hasattr(wf, 'execute_activity'):
         async def _noop(*a, **kw):
             raise NotImplementedError("execute_activity not patched")
