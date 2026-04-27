@@ -19,6 +19,26 @@ from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
 from server.schemas import ApiErrorResponse, HealthResponse, RootResponse
 from server.workflows import RAG_QUERY_TASK_QUEUE
+from src.ingest.temporal.constants import TRIGGER_SINGLE, trigger_to_queue
+
+
+async def _queue_has_poller(client: Client, queue_name: str) -> bool:
+    """Return True iff at least one worker is polling *queue_name*."""
+    for queue_type in (
+        TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW,
+        TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
+    ):
+        response = await client.workflow_service.describe_task_queue(
+            DescribeTaskQueueRequest(
+                namespace=client.namespace,
+                task_queue=TaskQueue(name=queue_name),
+                task_queue_type=queue_type,
+            ),
+            timeout=timedelta(seconds=2),
+        )
+        if response.pollers:
+            return True
+    return False
 
 
 async def build_health_response(
@@ -28,6 +48,7 @@ async def build_health_response(
     """Build health payload from Temporal connectivity and worker availability."""
     temporal_ok = False
     worker_ok = False
+    ingest_worker_ok = False
     if temporal_client is not None:
         try:
             # SDK-compatible connectivity check across Temporal client versions.
@@ -45,29 +66,25 @@ async def build_health_response(
             temporal_ok = False
         if temporal_ok:
             try:
-                for queue_type in (
-                    TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW,
-                    TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
-                ):
-                    response = await temporal_client.workflow_service.describe_task_queue(
-                        DescribeTaskQueueRequest(
-                            namespace=temporal_client.namespace,
-                            task_queue=TaskQueue(name=RAG_QUERY_TASK_QUEUE),
-                            task_queue_type=queue_type,
-                        ),
-                        timeout=timedelta(seconds=2),
-                    )
-                    if response.pollers:
-                        worker_ok = True
-                        break
+                worker_ok = await _queue_has_poller(temporal_client, RAG_QUERY_TASK_QUEUE)
             except Exception as exc:
                 worker_ok = False
-                logger.warning("Worker availability check failed: %s", exc)
-    status = "healthy" if (temporal_ok and worker_ok) else "degraded"
+                logger.warning("Query worker availability check failed: %s", exc)
+            ingest_queue = trigger_to_queue(TRIGGER_SINGLE)
+            try:
+                if ingest_queue == RAG_QUERY_TASK_QUEUE:
+                    ingest_worker_ok = worker_ok
+                else:
+                    ingest_worker_ok = await _queue_has_poller(temporal_client, ingest_queue)
+            except Exception as exc:
+                ingest_worker_ok = False
+                logger.warning("Ingest worker availability check failed: %s", exc)
+    status = "healthy" if (temporal_ok and worker_ok and ingest_worker_ok) else "degraded"
     return HealthResponse(
         status=status,
         temporal_connected=temporal_ok,
         worker_available=worker_ok,
+        ingest_worker_available=ingest_worker_ok,
     )
 
 

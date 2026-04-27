@@ -4,13 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "build": "node ./build.mjs",
     "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "watch": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --watch --preserveWatchOutput"
+    "watch": "node ./build.mjs --watch"
   },
   "devDependencies": {
-    "typescript": "^5.9.2",
+    "dompurify": "^3.0.0",
+    "esbuild": "^0.28.0",
     "marked": "^15.0.0",
-    "dompurify": "^3.0.0"
+    "typescript": "^5.9.2"
   }
 }
