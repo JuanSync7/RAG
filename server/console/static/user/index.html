@@ -324,6 +324,16 @@
           <div class="retrieval-results" id="retrievalResultsList"></div>
           <div class="retrieval-empty" id="retrievalEmptyState">No results yet — try a query above.</div>
 
+          <!-- Relevant documents accordion -->
+          <div class="retrieval-hidden-section" id="retrievalRelevantSection" style="display:none">
+            <details open>
+              <summary class="retrieval-hidden-summary">
+                Relevant documents (<span id="retrievalRelevantCount">0</span>)
+              </summary>
+              <div class="retrieval-hidden-list" id="retrievalRelevantList"></div>
+            </details>
+          </div>
+
           <!-- Hidden documents accordion -->
           <div class="retrieval-hidden-section" id="retrievalHiddenSection" style="display:none">
             <details>
