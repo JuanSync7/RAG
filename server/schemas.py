@@ -289,6 +289,9 @@ class ConsoleQueryRequest(BaseModel):
     memory_enabled: bool = Field(default=True)
     memory_turn_window: Optional[int] = Field(default=None, ge=1, le=40)
     compact_now: bool = Field(default=False)
+    mode: Literal["query", "retrieval"] = Field(default="query")
+    retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
+    extra_processing: bool = Field(default=False)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.

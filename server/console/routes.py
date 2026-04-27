@@ -498,6 +498,103 @@ def create_console_router(
         )
         return console_ok(request, {"conversation_id": conversation_id, "deleted": deleted})
 
+    @router.get(
+        "/console/conversations/{conversation_id}/doc-state",
+        response_model=ConsoleEnvelope,
+        responses=standard_error_responses,
+    )
+    async def console_conversation_doc_state(
+        request: Request,
+        conversation_id: str,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        memory = get_conversation_memory()
+        meta = memory.ensure_conversation(
+            tenant_id=principal.tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conversation_id,
+        )
+        return console_ok(
+            request,
+            {
+                "conversation_id": conversation_id,
+                "relevant_doc_ids": list(meta.relevant_doc_ids),
+                "ignored_doc_ids": list(meta.ignored_doc_ids),
+            },
+        )
+
+    @router.post(
+        "/console/conversations/{conversation_id}/ignore",
+        response_model=ConsoleEnvelope,
+        responses=standard_error_responses,
+    )
+    async def console_conversation_ignore(
+        request: Request,
+        conversation_id: str,
+        payload: dict = Body(...),
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        raw_ids = payload.get("doc_ids")
+        if isinstance(raw_ids, list):
+            doc_ids = [str(d).strip() for d in raw_ids if str(d).strip()]
+        else:
+            single = payload.get("doc_id")
+            doc_ids = [str(single).strip()] if single and str(single).strip() else []
+        if not doc_ids:
+            raise HTTPException(status_code=400, detail="doc_id or doc_ids required")
+        memory = get_conversation_memory()
+        meta = None
+        for doc_id in doc_ids:
+            meta = memory.move_to_ignored(
+                tenant_id=principal.tenant_id,
+                subject=principal.subject,
+                project_id=principal.project_id,
+                conversation_id=conversation_id,
+                doc_id=doc_id,
+            )
+        relevant = list(meta.relevant_doc_ids) if meta else []
+        ignored = list(meta.ignored_doc_ids) if meta else []
+        return console_ok(
+            request,
+            {
+                "conversation_id": conversation_id,
+                "relevant_doc_ids": relevant,
+                "ignored_doc_ids": ignored,
+            },
+        )
+
+    @router.delete(
+        "/console/conversations/{conversation_id}/ignore/{doc_id}",
+        response_model=ConsoleEnvelope,
+        responses=standard_error_responses,
+    )
+    async def console_conversation_restore(
+        request: Request,
+        conversation_id: str,
+        doc_id: str,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        memory = get_conversation_memory()
+        meta = memory.restore_to_relevant(
+            tenant_id=principal.tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conversation_id,
+            doc_id=doc_id,
+        )
+        return console_ok(
+            request,
+            {
+                "conversation_id": conversation_id,
+                "relevant_doc_ids": list(meta.relevant_doc_ids),
+                "ignored_doc_ids": list(meta.ignored_doc_ids),
+            },
+        )
+
     @router.post("/console/ingest", response_model=ConsoleEnvelope, responses=standard_error_responses)
     async def console_ingest(
         request: Request,

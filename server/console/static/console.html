@@ -206,6 +206,37 @@
       font-size: 12px;
       white-space: pre-wrap;
     }
+    .relevant-pane, .ignored-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .doc-card {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: #111522;
+    }
+    .doc-card .doc-body { flex: 1; min-width: 0; }
+    .doc-card .doc-excerpt {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn-ignore, .btn-restore {
+      padding: 4px 8px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .btn-ignore { color: var(--err); }
+    .btn-restore { color: var(--accent); }
+    .btn-thumbs-down { background: #2a1418; }
     .timing-key { color: var(--muted); font-size: 12px; }
     .timing-val { font-weight: 700; margin-top: 4px; }
     @media (max-width: 900px) {
@@ -235,6 +266,7 @@
 
     <div class="tabs row card">
       <button data-tab="query" class="active">Query</button>
+      <button data-tab="retrieval">Retrieval</button>
       <button data-tab="ingest">Ingest</button>
       <button data-tab="health">Health & Logs</button>
       <button data-tab="admin">Admin</button>
@@ -295,6 +327,71 @@
           <div class="timing-panel">
             <label>Timing</label>
             <div id="timingOut" class="muted">No timing yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-retrieval" class="card hidden">
+      <div class="query-layout">
+        <aside class="sidebar">
+          <label>Conversation</label>
+          <div id="retrievalActiveConv" class="muted">Active: (uses Query tab's conversation)</div>
+          <div class="muted" style="margin-top:6px; font-size:12px;">
+            The Retrieval tab shares the active conversation selected in the Query tab.
+          </div>
+          <div style="margin-top:12px;">
+            <label>Mode</label>
+            <div class="row">
+              <label style="display:inline-flex; align-items:center; gap:6px;">
+                <input type="radio" name="retrievalMode" value="auto" checked /> Auto
+              </label>
+              <label style="display:inline-flex; align-items:center; gap:6px;">
+                <input type="radio" name="retrievalMode" value="hard" /> Hard
+              </label>
+            </div>
+            <div class="muted" style="font-size:12px; margin-top:4px;">
+              Auto: rewriter decides whether to pull history. Hard: literal query, no LLM rewrite.
+            </div>
+          </div>
+          <div style="margin-top:10px;">
+            <label title="Reserved — not yet wired in current build.">
+              <input id="retrievalExtraProcessing" type="checkbox" disabled />
+              extra_processing (reserved)
+            </label>
+          </div>
+        </aside>
+        <div>
+          <label>Query</label>
+          <textarea id="retrievalQueryText" rows="3" placeholder="Find documents about..."></textarea>
+          <div class="grid">
+            <div>
+              <label>Search limit</label>
+              <input id="retrievalSearchLimit" type="number" value="10" />
+            </div>
+            <div>
+              <label>Rerank top K</label>
+              <input id="retrievalRerankTopK" type="number" value="5" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <button id="runRetrievalBtn">Run Retrieval</button>
+            <button id="retrievalThumbsDownBtn" class="btn-thumbs-down" title="Ignore all docs in this response">👎 Ignore all</button>
+          </div>
+          <div class="explainability-strip muted" id="retrievalExplain" style="margin-top:10px; font-size:12px;">
+            No retrieval yet.
+          </div>
+          <div style="margin-top:10px;">
+            <label>Relevant documents</label>
+            <div id="retrievalRelevantPane" class="relevant-pane"></div>
+          </div>
+          <details style="margin-top:10px;">
+            <summary class="muted">Ignored documents</summary>
+            <div id="retrievalIgnoredPane" class="ignored-pane"></div>
+          </details>
+          <div class="timing-panel">
+            <label>Timing</label>
+            <div id="retrievalTimingOut" class="muted">No timing yet.</div>
           </div>
         </div>
       </div>

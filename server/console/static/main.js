@@ -20,10 +20,12 @@ let _convMenuCloseHandler = null;
 let _convMenuEscapeHandler = null;
 const tabMap = {
     query: "tab-query",
+    retrieval: "tab-retrieval",
     ingest: "tab-ingest",
     health: "tab-health",
     admin: "tab-admin",
 };
+const retrievalDocCache = new Map();
 function initTabs() {
     const tabs = document.querySelectorAll(".tabs button");
     tabs.forEach((btn) => {
@@ -158,7 +160,12 @@ function setSuggestions(elementId, commands) {
 function setActiveConversation(id) {
     activeConversationId = id;
     byId("activeConversationLabel").textContent = `Active: ${id || "(auto/new on query)"}`;
+    const retrievalLabel = document.getElementById("retrievalActiveConv");
+    if (retrievalLabel) {
+        retrievalLabel.textContent = `Active: ${id || "(auto/new on query)"}`;
+    }
     renderConversationList();
+    void loadRetrievalDocState();
 }
 function parseSlash(raw) {
     const text = raw.trim();
@@ -771,6 +778,200 @@ function bindConversationActions() {
         });
     });
 }
+function getDocId(result) {
+    const meta = (result && result.metadata) || {};
+    const candidates = [meta.document_id, meta.doc_id, meta.source_uri, meta.source];
+    for (const c of candidates) {
+        const s = String(c ?? "").trim();
+        if (s)
+            return s;
+    }
+    return "";
+}
+function renderRelevantDocCard(result, idx) {
+    const docId = getDocId(result);
+    const metadata = (result.metadata || {});
+    const link = rerankSourceLink(metadata);
+    const score = Number(result.score);
+    const scoreText = Number.isFinite(score) ? score.toFixed(4) : "n/a";
+    const chunkNo = formatChunkNumber(metadata);
+    const excerpt = compactExcerpt(String(result.text || ""));
+    const sourceCell = link.href
+        ? `<a class="source-link" target="_blank" rel="noopener noreferrer" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`
+        : `<span>${escapeHtml(link.label)}</span>`;
+    return (`<div class="doc-card" data-doc-id="${escapeHtml(docId)}">` +
+        `<div class="doc-body">` +
+        `<div><strong>#${idx + 1}</strong> · ${sourceCell} · <code>chunk ${escapeHtml(chunkNo)}</code> · <code>score ${escapeHtml(scoreText)}</code></div>` +
+        `<div class="doc-excerpt">${escapeHtml(excerpt)}</div>` +
+        `</div>` +
+        `<button class="btn-ignore" data-doc-id="${escapeHtml(docId)}" title="Ignore this document">✕</button>` +
+        `</div>`);
+}
+function renderRelevantPane(results) {
+    const out = byId("retrievalRelevantPane");
+    if (!Array.isArray(results) || results.length === 0) {
+        out.innerHTML = '<div class="muted">No relevant documents yet.</div>';
+        return;
+    }
+    out.innerHTML = results.map(renderRelevantDocCard).join("");
+    out.querySelectorAll(".btn-ignore").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const docId = btn.dataset.docId || "";
+            if (!docId)
+                return;
+            await ignoreDoc(docId);
+        });
+    });
+}
+function renderIgnoredPane(ignoredIds) {
+    const out = byId("retrievalIgnoredPane");
+    if (!Array.isArray(ignoredIds) || ignoredIds.length === 0) {
+        out.innerHTML = '<div class="muted">No ignored documents.</div>';
+        return;
+    }
+    out.innerHTML = ignoredIds
+        .map((id) => `<div class="doc-card" data-doc-id="${escapeHtml(id)}">` +
+        `<div class="doc-body"><code>${escapeHtml(id)}</code></div>` +
+        `<button class="btn-restore" data-doc-id="${escapeHtml(id)}" title="Restore to relevant">↺ Restore</button>` +
+        `</div>`)
+        .join("");
+    out.querySelectorAll(".btn-restore").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const docId = btn.dataset.docId || "";
+            if (!docId)
+                return;
+            await restoreDoc(docId);
+        });
+    });
+}
+function renderRetrievalExplain(data) {
+    const el = byId("retrievalExplain");
+    const decision = String(data?.history_decision || "n/a");
+    const turns = Number(data?.history_turns_used ?? 0);
+    const processed = String(data?.processed_query || data?.standalone_query || "");
+    el.textContent = `decision: ${decision} · turns_used: ${turns}` + (processed ? ` · processed_query: ${processed}` : "");
+}
+async function loadRetrievalDocState() {
+    if (!activeConversationId) {
+        renderIgnoredPane([]);
+        return { relevant_doc_ids: [], ignored_doc_ids: [] };
+    }
+    try {
+        const out = await api("GET", `/console/conversations/${encodeURIComponent(activeConversationId)}/doc-state`);
+        const data = out.data || {};
+        const ignored = Array.isArray(data.ignored_doc_ids) ? data.ignored_doc_ids : [];
+        renderIgnoredPane(ignored);
+        return {
+            relevant_doc_ids: Array.isArray(data.relevant_doc_ids) ? data.relevant_doc_ids : [],
+            ignored_doc_ids: ignored,
+        };
+    }
+    catch {
+        renderIgnoredPane([]);
+        return { relevant_doc_ids: [], ignored_doc_ids: [] };
+    }
+}
+async function ignoreDoc(docId) {
+    if (!activeConversationId) {
+        return;
+    }
+    try {
+        await api("POST", `/console/conversations/${encodeURIComponent(activeConversationId)}/ignore`, { doc_id: docId });
+        retrievalDocCache.delete(docId);
+        const remaining = Array.from(retrievalDocCache.values());
+        renderRelevantPane(remaining);
+        await loadRetrievalDocState();
+    }
+    catch (err) {
+        const el = byId("retrievalExplain");
+        el.textContent = `Ignore error: ${String(err)}`;
+    }
+}
+async function ignoreAllDisplayed() {
+    if (!activeConversationId)
+        return;
+    const docIds = Array.from(retrievalDocCache.keys());
+    if (!docIds.length)
+        return;
+    try {
+        await api("POST", `/console/conversations/${encodeURIComponent(activeConversationId)}/ignore`, { doc_ids: docIds });
+        retrievalDocCache.clear();
+        renderRelevantPane([]);
+        await loadRetrievalDocState();
+    }
+    catch (err) {
+        const el = byId("retrievalExplain");
+        el.textContent = `Ignore-all error: ${String(err)}`;
+    }
+}
+async function restoreDoc(docId) {
+    if (!activeConversationId)
+        return;
+    try {
+        await api("DELETE", `/console/conversations/${encodeURIComponent(activeConversationId)}/ignore/${encodeURIComponent(docId)}`);
+        await loadRetrievalDocState();
+    }
+    catch (err) {
+        const el = byId("retrievalExplain");
+        el.textContent = `Restore error: ${String(err)}`;
+    }
+}
+function bindRetrievalActions() {
+    const modeRadios = document.querySelectorAll('input[name="retrievalMode"]');
+    const getMode = () => {
+        for (const r of modeRadios) {
+            if (r.checked)
+                return r.value;
+        }
+        return "auto";
+    };
+    byId("runRetrievalBtn").addEventListener("click", async () => {
+        const explainEl = byId("retrievalExplain");
+        try {
+            const payload = {
+                query: byId("retrievalQueryText").value,
+                search_limit: Number(byId("retrievalSearchLimit").value || 10),
+                rerank_top_k: Number(byId("retrievalRerankTopK").value || 5),
+                stream: false,
+                conversation_id: activeConversationId,
+                memory_enabled: true,
+                mode: "retrieval",
+                retrieval_sub_mode: getMode(),
+                extra_processing: byId("retrievalExtraProcessing").checked,
+            };
+            const out = await api("POST", "/console/query", payload);
+            const data = out.data || out;
+            if (typeof data.conversation_id === "string" && data.conversation_id) {
+                setActiveConversation(data.conversation_id);
+                byId("retrievalActiveConv").textContent = `Active: ${data.conversation_id}`;
+            }
+            renderRetrievalExplain(data);
+            const results = Array.isArray(data.results) ? data.results : [];
+            retrievalDocCache.clear();
+            results.forEach((r) => {
+                const id = getDocId(r);
+                if (id)
+                    retrievalDocCache.set(id, r);
+            });
+            renderRelevantPane(results);
+            renderTiming({
+                latency_ms: asOptionalNumber(data.latency_ms),
+                stage_timings: data.stage_timings || [],
+                timing_totals: data.timing_totals || {},
+            });
+            const tEl = byId("retrievalTimingOut");
+            tEl.innerHTML = byId("timingOut").innerHTML;
+            await loadRetrievalDocState();
+        }
+        catch (err) {
+            explainEl.textContent = `Retrieval error: ${String(err)}`;
+            byId("retrievalRelevantPane").innerHTML = '<div class="muted">No relevant documents.</div>';
+        }
+    });
+    byId("retrievalThumbsDownBtn").addEventListener("click", async () => {
+        await ignoreAllDisplayed();
+    });
+}
 function bindIngestionActions() {
     byId("runIngestBtn").addEventListener("click", async () => {
         try {
@@ -890,6 +1091,7 @@ function initializeConsoleUi() {
     initTabs();
     bindQueryActions();
     bindConversationActions();
+    bindRetrievalActions();
     bindIngestionActions();
     bindHealthActions();
     bindAdminActions();
