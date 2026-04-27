@@ -218,14 +218,22 @@ class TestPrewarmDoclingEnabled:
 
 
 class TestDocumentProcessingActivity:
-    def test_mock_document_processing_activity_returns_result(self, monkeypatch):
-        """document_processing_activity should call run_document_processing and return DocProcessingResult."""
+    def test_mock_document_processing_activity_returns_result(self, monkeypatch, tmp_path):
+        """document_processing_activity should call run_document_processing and return DocProcessingResult.
+
+        clean_hash is now computed by document_processing_activity as sha256 of the
+        clean text written to CleanDocumentStore — it is NOT taken from the
+        run_document_processing result dict.
+        """
         import asyncio
         import dataclasses
+        import hashlib
         acts = _import_activities()
         from src.ingest.common import IngestionConfig
 
-        config_dict = dataclasses.asdict(IngestionConfig())
+        config = IngestionConfig()
+        config.clean_store_dir = str(tmp_path / "clean_store")
+        config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
             source_name="doc.pdf",
@@ -237,10 +245,11 @@ class TestDocumentProcessingActivity:
         )
         args = acts.ActivityArgs(source=source_args, config=config_dict)
 
+        fake_clean_text = "cleaned document content"
         fake_result = {
             "errors": [],
             "source_hash": "abc123",
-            "clean_hash": "def456",
+            "cleaned_text": fake_clean_text,
             "processing_log": ["step1", "step2"],
         }
 
@@ -253,9 +262,10 @@ class TestDocumentProcessingActivity:
 
         result = asyncio.run(acts.document_processing_activity(args))
 
+        expected_clean_hash = hashlib.sha256(fake_clean_text.encode("utf-8")).hexdigest()
         assert isinstance(result, acts.DocProcessingResult)
         assert result.source_hash == "abc123"
-        assert result.clean_hash == "def456"
+        assert result.clean_hash == expected_clean_hash
         assert result.errors == []
         assert result.processing_log == ["step1", "step2"]
 
@@ -341,20 +351,32 @@ class TestDocumentProcessingActivity:
 
 
 class TestEmbeddingPipelineActivity:
-    def test_mock_embedding_pipeline_activity_returns_result(self, monkeypatch):
-        """embedding_pipeline_activity should call run_embedding_pipeline and return EmbeddingResult."""
+    def test_mock_embedding_pipeline_activity_returns_result(self, monkeypatch, tmp_path):
+        """embedding_pipeline_activity should call run_embedding_pipeline and return EmbeddingResult.
+
+        Phase 2 reads clean text from CleanDocumentStore — the test must pre-populate
+        the store and configure clean_store_dir in IngestionConfig.
+        """
         import asyncio
         import dataclasses
         from contextlib import contextmanager
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig
+        from src.ingest.common import IngestionConfig, CleanDocumentStore
 
-        config_dict = dataclasses.asdict(IngestionConfig())
+        clean_store_path = tmp_path / "clean_store"
+        source_key = "key"
+        clean_text = "clean document text for embedding"
+        meta = {"source_key": source_key}
+        CleanDocumentStore(clean_store_path).write(source_key, clean_text, meta)
+
+        config = IngestionConfig()
+        config.clean_store_dir = str(clean_store_path)
+        config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
             source_name="doc.pdf",
             source_uri="file:///tmp/doc.pdf",
-            source_key="key",
+            source_key=source_key,
             source_id="id",
             connector="local",
             source_version="v1",
@@ -393,20 +415,26 @@ class TestEmbeddingPipelineActivity:
         assert result.metadata_keywords == ["widget", "foo"]
         assert result.errors == []
 
-    def test_mock_embedding_pipeline_activity_errors_propagated(self, monkeypatch):
+    def test_mock_embedding_pipeline_activity_errors_propagated(self, monkeypatch, tmp_path):
         """embedding_pipeline_activity propagates errors from run_embedding_pipeline."""
         import asyncio
         import dataclasses
         from contextlib import contextmanager
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig
+        from src.ingest.common import IngestionConfig, CleanDocumentStore
 
-        config_dict = dataclasses.asdict(IngestionConfig())
+        clean_store_path = tmp_path / "clean_store"
+        source_key = "k"
+        CleanDocumentStore(clean_store_path).write(source_key, "some text", {"source_key": source_key})
+
+        config = IngestionConfig()
+        config.clean_store_dir = str(clean_store_path)
+        config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/bad.pdf",
             source_name="bad.pdf",
             source_uri="file:///tmp/bad.pdf",
-            source_key="k",
+            source_key=source_key,
             source_id="i",
             connector="local",
             source_version="v1",
@@ -437,24 +465,29 @@ class TestEmbeddingPipelineActivity:
         assert result.errors == ["weaviate timeout"]
         assert result.stored_count == 0
 
-    def test_mock_embedding_pipeline_activity_with_kg_builder(self, monkeypatch):
+    def test_mock_embedding_pipeline_activity_with_kg_builder(self, monkeypatch, tmp_path):
         """embedding_pipeline_activity creates KnowledgeGraphBuilder when build_kg=True."""
         import asyncio
         import dataclasses
         from contextlib import contextmanager
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig
+        from src.ingest.common import IngestionConfig, CleanDocumentStore
+
+        clean_store_path = tmp_path / "clean_store"
+        source_key = "k"
+        CleanDocumentStore(clean_store_path).write(source_key, "doc text", {"source_key": source_key})
 
         config = IngestionConfig()
         config.build_kg = True
         config.store_documents = False
+        config.clean_store_dir = str(clean_store_path)
         config_dict = dataclasses.asdict(config)
 
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
             source_name="doc.pdf",
             source_uri="file:///tmp/doc.pdf",
-            source_key="k",
+            source_key=source_key,
             source_id="i",
             connector="local",
             source_version="v1",
