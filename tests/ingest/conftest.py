@@ -5,10 +5,24 @@ The previous version checked ``"X" not in sys.modules``, which incorrectly stubb
 real installed packages whenever they hadn't been imported yet at conftest load
 time. This broke tests that exercise real PIL / docling behaviour. The fix:
 try to import the real module first; only stub on ImportError.
+
+NOTE: datasketch must be imported (and its transitive deps cached) here, at the
+top-level ingest conftest, BEFORE lifecycle/conftest.py has a chance to install a
+stub ``redis`` module.  datasketch.storage imports redis at module load time; if
+the stub is in sys.modules first, the import fails with AttributeError on
+redis.client.Pipeline.  Eagerly importing datasketch here ensures the real redis
+(and datasketch itself) are cached before any lower-level conftest runs.
 """
 
 import sys
 import types
+
+# Pre-cache datasketch and its real redis dependency before any stub conftest
+# can shadow redis.  This is safe — datasketch IS installed in the project venv.
+try:
+    import datasketch  # noqa: F401
+except ImportError:
+    pass  # datasketch not installed — minhash tests will be skipped by the engine
 
 
 def _install_ingest_stubs() -> None:

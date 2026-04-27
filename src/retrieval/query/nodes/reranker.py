@@ -1,20 +1,21 @@
 # @summary
-# Reranker providers: local BAAI bge-reranker-v2-m3 and LiteLLM-backed vLLM.
-# Key exports: LocalBGEReranker, LiteLLMReranker, RankedResult, get_reranker_provider
-# Deps: transformers, torch (local path only), litellm (vllm path only),
+# Reranker providers: local BAAI bge-reranker-v2-m3 (in-process) and TEI over HTTP.
+# Key exports: LocalBGEReranker, TEIReranker, RankedResult, get_reranker_provider
+# Deps: transformers + torch (local path only; lazy-imported), httpx (TEI path),
 #       config.settings (RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH,
-#       RERANKER_BATCH_SIZE, RERANKER_PRECISION, INFERENCE_BACKEND, VLLM_TIMEOUT_SECONDS),
+#       RERANKER_BATCH_SIZE, RERANKER_PRECISION, INFERENCE_BACKEND, TEI_*),
 #       src.vector_db.common.schemas, src.retrieval.common.schemas,
 #       src.retrieval.common.exceptions
 # @end-summary
 """Reranker provider implementations and factory.
 
 Two backends:
-  local  — BAAI/bge-reranker-v2-m3 loaded in-process via transformers (default)
-  vllm   — Qwen3-Reranker served by a separate vLLM container via LiteLLM
-
-Uses transformers directly instead of FlagEmbedding to avoid compatibility
-issues with transformers >= 5.x.
+  local — BAAI/bge-reranker-v2-m3 loaded in-process via transformers. Dev venv
+          only; requires the `local-embed` pyproject extra. Heavy deps
+          (torch, transformers) are lazy-imported inside the class so the
+          module itself can be loaded without them.
+  tei   — BAAI/bge-reranker-v2-m3 served by a separate TEI container
+          (rag-rerank) over HTTP via the native /rerank endpoint.
 """
 from __future__ import annotations
 
@@ -23,8 +24,7 @@ import logging
 import math
 import time
 
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import httpx
 
 from config.settings import (
     RERANKER_MODEL_PATH,
@@ -33,7 +33,9 @@ from config.settings import (
     RERANKER_BATCH_SIZE,
     RERANKER_PRECISION,
     INFERENCE_BACKEND,
-    VLLM_TIMEOUT_SECONDS,
+    TEI_RERANK_URL,
+    TEI_RERANKER_MODEL,
+    TEI_TIMEOUT_SECONDS,
 )
 from src.platform.observability import get_tracer
 from src.vector_db.common import SearchResult
@@ -45,12 +47,9 @@ logger = logging.getLogger("rag.reranker")
 
 # Mapping from precision name → torch dtype attribute name. Stored as
 # strings (resolved via getattr at use time) rather than as torch dtype
-# objects so the module can be imported even when torch is partially
-# installed — module-level `torch.float32` access blew up CI collection
-# whenever the wheel cache landed on an incomplete torch build. int8/int4
-# are handled via bitsandbytes quantization (not a plain dtype) and fall
-# through to the fp32 load path in this iteration — the keys exist so
-# downstream iterations can flip them on without another PROGRAM.md change.
+# objects so the module can be imported even when torch is not installed
+# (worker image slimming). int8/int4 are handled via bitsandbytes
+# quantization (not a plain dtype) and fall through to the fp32 load path.
 _TORCH_DTYPE_NAME_BY_PRECISION = {
     "fp32": "float32",
     "fp16": "float16",
@@ -60,6 +59,10 @@ _TORCH_DTYPE_NAME_BY_PRECISION = {
 
 class LocalBGEReranker:
     """Reranker using a local BAAI/bge-reranker-v2-m3 model.
+
+    Heavy imports (torch, transformers) are deferred to ``__init__`` so the
+    containing module can be imported in environments without those packages
+    (e.g., the slim worker image that runs in TEI mode).
 
     Attributes:
         device: Compute device string ("cuda" or "cpu").
@@ -73,6 +76,17 @@ class LocalBGEReranker:
         model_path: str = RERANKER_MODEL_PATH,
         precision: str = RERANKER_PRECISION,
     ) -> None:
+        # Lazy imports — only pay the torch/transformers import cost when
+        # actually instantiating the local reranker. Module-level imports
+        # would break the slim worker image, which has neither installed.
+        import torch  # noqa: PLC0415
+        from transformers import (  # noqa: PLC0415
+            AutoModelForSequenceClassification,
+            AutoTokenizer,
+        )
+
+        self._torch = torch  # stored so rerank() can use inference_mode without re-import
+
         _t0 = time.perf_counter()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.precision = precision
@@ -157,10 +171,9 @@ class LocalBGEReranker:
         # decorator form runs `torch.inference_mode()` at class-body
         # definition time, which is import time — and CI's torch install
         # intermittently lacks attributes at that point, breaking pytest
-        # collection (see history on _TORCH_DTYPE_NAME_BY_PRECISION above).
-        # The context-manager form defers the call to invocation time,
-        # which is functionally equivalent.
-        with torch.inference_mode(), get_tracer().span(
+        # collection. The context-manager form defers the call to
+        # invocation time, which is functionally equivalent.
+        with self._torch.inference_mode(), get_tracer().span(
             "reranker.rerank",
             {"input_count": len(documents), "top_k": top_k},
         ) as span:
@@ -215,16 +228,22 @@ class LocalBGEReranker:
             return top_results
 
 
-class LiteLLMReranker:
-    """Reranker backed by ``litellm.rerank()`` routing to a vLLM /v1/rerank endpoint.
+class TEIReranker:
+    """Reranker backed by TEI's native ``/rerank`` endpoint over HTTP.
 
-    The ``model`` name is resolved by the LiteLLM router config
-    (``RAG_LLM_ROUTER_CONFIG``) to the actual backend URL and served-model name.
+    TEI returns a JSON array of ``{"index": i, "score": s}`` objects sorted
+    by score descending. We preserve that ordering and build RankedResults.
     """
 
-    def __init__(self, model: str = "reranking", timeout: int = VLLM_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        base_url: str = TEI_RERANK_URL,
+        model: str = TEI_RERANKER_MODEL,
+        timeout: int = TEI_TIMEOUT_SECONDS,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
         self.model = model
-        self.timeout = timeout
+        self._client = httpx.Client(timeout=timeout)
         self.tracer = get_tracer()
 
     def rerank(
@@ -233,7 +252,7 @@ class LiteLLMReranker:
         documents: list[SearchResult],
         top_k: int = RERANK_TOP_K,
     ) -> list[RankedResult]:
-        """Rerank documents against a query via LiteLLM.
+        """Rerank documents against a query via TEI /rerank.
 
         Args:
             query: The search query.
@@ -243,8 +262,6 @@ class LiteLLMReranker:
         Returns:
             Sorted list of RankedResult (highest relevance score first).
         """
-        import litellm  # noqa: PLC0415 — deferred so API container never imports it
-
         if not documents:
             return []
 
@@ -252,21 +269,24 @@ class LiteLLMReranker:
             "reranker.rerank",
             {"input_count": len(documents), "top_k": top_k},
         ) as span:
-            resp = litellm.rerank(
-                model=self.model,
-                query=query,
-                documents=[d.text for d in documents],
-                top_n=top_k,
-                timeout=self.timeout,
+            resp = self._client.post(
+                f"{self.base_url}/rerank",
+                json={
+                    "query": query,
+                    "texts": [d.text for d in documents],
+                    "truncate": True,
+                },
             )
-            raw_results = resp.results or []
+            resp.raise_for_status()
+            raw = resp.json()
+            # TEI returns a top-level list, sorted desc by score.
             results = [
                 RankedResult(
-                    text=documents[r["index"]].text,
-                    score=r["relevance_score"],
-                    metadata=documents[r["index"]].metadata,
+                    text=documents[item["index"]].text,
+                    score=float(item["score"]),
+                    metadata=documents[item["index"]].metadata,
                 )
-                for r in sorted(raw_results, key=lambda x: x["relevance_score"], reverse=True)
+                for item in raw[:top_k]
             ]
             if results:
                 values = [r.score for r in results]
@@ -280,12 +300,13 @@ def get_reranker_provider():
     """Return the configured reranker provider.
 
     Reads ``INFERENCE_BACKEND`` from settings:
-      - ``"vllm"``  → :class:`LiteLLMReranker` (routes via LiteLLM to vLLM)
-      - anything else → :class:`LocalBGEReranker` (in-process transformers)
+      - ``"tei"``   → :class:`TEIReranker` (direct HTTP to rag-rerank container)
+      - anything else → :class:`LocalBGEReranker` (in-process transformers;
+                         dev venv path — requires the `local-embed` pyproject extra)
     """
-    if INFERENCE_BACKEND == "vllm":
-        return LiteLLMReranker(timeout=VLLM_TIMEOUT_SECONDS)
+    if INFERENCE_BACKEND == "tei":
+        return TEIReranker()
     return LocalBGEReranker()
 
 
-__all__ = ["LocalBGEReranker", "LiteLLMReranker", "RankedResult", "get_reranker_provider"]
+__all__ = ["LocalBGEReranker", "TEIReranker", "RankedResult", "get_reranker_provider"]

@@ -29,6 +29,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ from src.ingest.support import (
     _extract_image_candidates,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.embedding.vlm_enrichment")
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ def vlm_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     Returns:
         dict with keys ``"chunks"`` and ``"processing_log"``.
     """
+    t0 = time.monotonic()
     config: IngestionConfig = state["runtime"].config
 
     # No-op for modes that do not require post-chunking VLM enrichment.
@@ -97,6 +99,8 @@ def vlm_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             )
             result_chunks.append(enriched_chunk)
 
+        logger.info("vlm_enrichment complete: source=%s", state.get("source_name", ""))
+        logger.debug("vlm_enrichment_node completed in %.3fs", time.monotonic() - t0)
         return {
             "chunks": result_chunks,
             "processing_log": append_processing_log(

@@ -1,8 +1,8 @@
 # @summary
 # Ingestion common package: shared schemas, utilities, state/config types, node helpers, and inter-phase store.
-# Exports: ManifestEntry, SourceIdentity, ProcessedChunk, IngestState, IngestionConfig, Runtime,
-#          PIPELINE_NODE_NAMES, append_processing_log, sha256_path, load_manifest, save_manifest,
-#          CleanDocumentStore, MinioCleanStore
+# Exports: ManifestEntry, SourceIdentity, ProcessedChunk, IngestionConfig, Runtime,
+#          PIPELINE_NODE_NAMES, append_processing_log, decode_with_fallbacks, sha256_bytes, sha256_path,
+#          load_manifest, save_manifest, CleanDocumentStore, MinioCleanStore
 # Deps: src.ingest.common.schemas, src.ingest.common.utils, src.ingest.common.types, src.ingest.common.shared,
 #       src.ingest.common.clean_store, src.ingest.common.minio_clean_store
 # @end-summary
@@ -15,17 +15,18 @@ intended to provide a stable import surface for other ingestion modules.
 
 from src.ingest.common.schemas import ManifestEntry, ProcessedChunk, SourceIdentity
 from src.ingest.common.utils import (
+    decode_with_fallbacks,
     load_manifest,
     parse_json_object,
     read_text_with_fallbacks,
     save_manifest,
+    sha256_bytes,
     sha256_path,
 )
 from src.ingest.common.types import (
     IngestionConfig,
     IngestionDesignCheck,
     IngestionRunSummary,
-    IngestState,
     PIPELINE_NODE_NAMES,
     Runtime,
 )
@@ -36,6 +37,7 @@ from src.ingest.common.shared import (
     cross_refs,
     quality_score,
 )
+from src.ingest.common.edit_log import EditLog
 from src.ingest.common.clean_store import CleanDocumentStore
 from src.ingest.common.minio_clean_store import MinioCleanStore
 
@@ -43,6 +45,8 @@ __all__ = [
     "ManifestEntry",
     "ProcessedChunk",
     "SourceIdentity",
+    "decode_with_fallbacks",
+    "sha256_bytes",
     "sha256_path",
     "load_manifest",
     "save_manifest",
@@ -51,7 +55,6 @@ __all__ = [
     "IngestionConfig",
     "IngestionDesignCheck",
     "IngestionRunSummary",
-    "IngestState",
     "PIPELINE_NODE_NAMES",
     "Runtime",
     "append_processing_log",
@@ -59,6 +62,7 @@ __all__ = [
     "extract_keywords_fallback",
     "cross_refs",
     "quality_score",
+    "EditLog",
     "CleanDocumentStore",
     "MinioCleanStore",
 ]

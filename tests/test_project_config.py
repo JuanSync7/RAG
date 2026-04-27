@@ -75,6 +75,11 @@ _STDLIB_MODULES = frozenset({
 # Mapping from pyproject.toml package name -> importable module name(s)
 _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     "weaviate-client": {"weaviate"},
+    "httpx": {"httpx"},
+    # torch + sentence-transformers + transformers + accelerate are in the
+    # [local-embed] optional extra, not core deps. Listed here so the audit
+    # recognizes them when someone has the extra installed; they're also
+    # valid core imports for the in-process `local` inference backend.
     "sentence-transformers": {"sentence_transformers"},
     "transformers": {"transformers"},
     "torch": {"torch"},

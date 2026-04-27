@@ -165,7 +165,6 @@ def _make_state(
             {
                 "stored_count": 47,
                 "chunks": [],
-                "enriched_chunks": [],
                 "metadata_summary": "existing summary",
                 "metadata_keywords": ["kw1", "kw2"],
             }
@@ -793,7 +792,6 @@ class TestVisualEmbeddingNodeStateIsolation:
     _TEXT_TRACK_FIELDS = [
         "stored_count",
         "chunks",
-        "enriched_chunks",
         "metadata_summary",
         "metadata_keywords",
     ]
@@ -820,11 +818,6 @@ class TestVisualEmbeddingNodeStateIsolation:
         """FR-803: chunks (text-track) must NOT be in returned dict."""
         result = self._run_happy()
         assert "chunks" not in result
-
-    def test_enriched_chunks_not_in_result(self):
-        """FR-803: enriched_chunks (text-track) must NOT be in returned dict."""
-        result = self._run_happy()
-        assert "enriched_chunks" not in result
 
     def test_metadata_summary_not_in_result(self):
         """FR-803: metadata_summary (text-track) must NOT be in returned dict."""

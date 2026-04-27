@@ -142,9 +142,19 @@ _UNICODE_REPLACEMENTS = {
     "\u00a0": " ",   # non-breaking space
 }
 
+# Pre-built translation table for single-character replacements (O(n) one-pass).
+# Multi-character replacements (em dash → "--", ellipsis → "...") are handled
+# separately via str.replace since str.maketrans only supports 1-to-1 mappings.
+_UNICODE_SINGLE = {k: v for k, v in _UNICODE_REPLACEMENTS.items() if len(v) == 1}
+_UNICODE_MULTI = {k: v for k, v in _UNICODE_REPLACEMENTS.items() if len(v) > 1}
+_UNICODE_TRANS = str.maketrans(_UNICODE_SINGLE)
+
 
 def normalize_unicode(text: str) -> str:
     """Normalize typographic unicode characters to simpler equivalents.
+
+    Single-character replacements are done in one pass via ``str.translate``
+    (O(n)); multi-character replacements (em dash, ellipsis) use ``str.replace``.
 
     Args:
         text: Input text.
@@ -152,7 +162,8 @@ def normalize_unicode(text: str) -> str:
     Returns:
         Text with common typographic characters replaced and NFC-normalized.
     """
-    for char, replacement in _UNICODE_REPLACEMENTS.items():
+    text = text.translate(_UNICODE_TRANS)
+    for char, replacement in _UNICODE_MULTI.items():
         text = text.replace(char, replacement)
     # Normalize remaining unicode to NFC form
     text = unicodedata.normalize("NFC", text)

@@ -1,0 +1,7 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	8359322	—	60%	keep	baseline — no changes, initial score 60% coverage (1121 tests, 4785 stmts, 1855 missed)
+002	cde720a	Adding 151 pure logic tests for document.py (42% covered, all pure Python) should lift coverage to 63-68%	61%	keep	confirmed +1% — 151 tests across 10 classes covering all document.py functions; document.py now ~95%+
+003	2e03527	Covering ~171 zero-coverage stmts across temporal/constants.py, worker.py helpers, minhash_engine.py should lift to 66-70%	66%	keep	confirmed +5% — 81 tests across 3 files; fixed conftest cross-test pollution bug with datasketch/redis
+004	e2ac828	Edge case tests for parser_text fallbacks, parser_registry missing deps, validation error paths should lift to ~70%	68%	keep	confirmed +2% — 51 tests across parser_text.py, parser_registry.py, validation.py error paths
+005	6e63943	Mock+pure tests for vision.py, minio_clean_store.py, markdown.py should lift to ~74%	72%	keep	confirmed +4% — 89 tests across vision, minio, markdown support
+006	7050d5b	Mock/edge tests for gc.py, migration.py, parser_code.py should push to 75%+	75%	keep	confirmed +3% — 100 tests across gc engine, migration, parser_code; target 75% reached

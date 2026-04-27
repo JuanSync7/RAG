@@ -1,0 +1,20 @@
+schema_version: 1
+
+status: done
+topic: "Test coverage strategy — completeness, enforcement, and tooling"
+slug: "test-coverage-strategy"
+
+type: "planning"
+shape: "Plan"
+
+scope: project
+
+created: "2026-04-21"
+last_updated: "2026-04-21"
+
+related_sessions: []
+related_skills: []
+follow_ups: []
+
+pause_reason: ""
+open_threads_at_pause: []

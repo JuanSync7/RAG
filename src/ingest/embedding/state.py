@@ -3,12 +3,15 @@
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
-#   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
+#   document_id, chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log,
 #   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
 #   parser_instance (Any, transient parser instance for chunk() call — never serialised),
 #   visual_stored_count (int, FR-602), page_images (Optional[list[Any]], FR-602),
-#   trace_id (str, FR-3052), batch_id (str, FR-3053)
+#   trace_id (str, FR-3052), batch_id (str, FR-3053),
+#   staging_batch_id (str, Issue #42 atomicity), source_hash (str, Issue #42),
+#   staged_minio (Optional[dict], Issue #42), staged_weaviate_records (list, Issue #42),
+#   staged_weaviate_delete_old (bool, Issue #42), staged_kg_chunks (list, Issue #42)
 # NOTE: docling_document field removed (Phase 3.2 / FR-3205 AC 2). It was in-memory
 #   only and was never persisted. Replaced by parse_result + parser_instance.
 # @end-summary
@@ -58,8 +61,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
         Stable document UUID set by document_storage_node (node X), links to MinIO.
     chunks : list[ProcessedChunk]
         Chunks produced by chunking_node (node 6).
-    enriched_chunks : list[ProcessedChunk]
-        Chunks with IDs and provenance from chunk_enrichment_node (node 7).
     metadata_summary : str
         LLM-generated document summary from metadata_generation_node (node 8).
     metadata_keywords : list[str]
@@ -94,7 +95,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
     clean_hash: str
     document_id: str
     chunks: list[ProcessedChunk]
-    enriched_chunks: list[ProcessedChunk]
     metadata_summary: str
     metadata_keywords: list[str]
     cross_references: list[dict[str, str]]
@@ -132,3 +132,17 @@ class EmbeddingPipelineState(TypedDict, total=False):
     """List of MergeEvent dicts emitted by cross_document_dedup_node."""
     dedup_stats: dict[str, Any]
     """Dedup run statistics: total_input_chunks, exact_matches, fuzzy_matches, novel_chunks, degraded."""
+
+    # -- Staging fields for atomic commit (Issue #42) --
+    staging_batch_id: str
+    """Propagated from Phase 1; used as rollback marker by commit_node."""
+    source_hash: str
+    """Propagated from Phase 1; persisted on every chunk record for idempotency."""
+    staged_minio: Optional[dict[str, Any]]
+    """Payload staged for MinIO write: {document_id, content, metadata, bucket} or None."""
+    staged_weaviate_records: list[Any]
+    """List of DocumentRecord objects staged for Weaviate flush at commit_node."""
+    staged_weaviate_delete_old: bool
+    """Whether to delete-by-source_key before flushing (update_mode path)."""
+    staged_kg_chunks: list[Any]
+    """List of (text, source_name) tuples staged for KG add_chunk replay at commit_node."""

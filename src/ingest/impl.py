@@ -69,6 +69,7 @@ from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.common import (
     load_manifest,
     save_manifest,
+    sha256_bytes,
     sha256_path,
 )
 from src.ingest.common import (
@@ -536,6 +537,7 @@ def ingest_file(
     existing_hash: str = "",
     existing_source_uri: str = "",
     batch_id: str = "",
+    raw_bytes: bytes | None = None,
 ) -> IngestFileResult:
     """Run the two-phase ingestion pipeline for a single source file.
 
@@ -556,6 +558,9 @@ def ingest_file(
         existing_source_uri: Previously stored URI (for incremental updates).
         batch_id: Optional batch grouping ID (FR-3053). Empty string when not
             part of a named batch run.
+        raw_bytes: Pre-read file bytes. When provided, ``document_ingestion_node``
+            skips the disk read, avoiding a double-read when the caller already
+            read the file for the idempotency hash check.
 
     Returns:
         ``IngestFileResult`` describing errors, stored chunk count, metadata,
@@ -583,6 +588,7 @@ def ingest_file(
         connector=connector,
         source_version=source_version,
         trace_id=trace_id,
+        raw_bytes=raw_bytes,
     )
 
     # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
@@ -782,7 +788,7 @@ def ingest_directory(
 
         runtime = Runtime(
             config=config,
-            embedder=get_embedding_provider(),
+            embedder=get_embedding_provider(tier="ingest"),
             weaviate_client=client,
             kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
             if config.build_kg
@@ -804,9 +810,12 @@ def ingest_directory(
             matched_key, matched_entry = _find_manifest_entry(manifest, source)
             previous_hash = matched_entry.get("content_hash", "") if update else ""
             previous_uri = matched_entry.get("source_uri", "") if update else ""
-            # Idempotency check: skip if source unchanged (hash match in manifest)
+            # Idempotency check: skip if source unchanged (hash match in manifest).
+            # Read bytes once here so we can reuse them in ingest_file, avoiding
+            # a second disk read inside document_ingestion_node.
+            raw_bytes = source_path.read_bytes()
+            current_hash = sha256_bytes(raw_bytes)
             if update and previous_hash:
-                current_hash = sha256_path(source_path)
                 if current_hash == previous_hash:
                     skipped += 1
                     if matched_key and matched_key != source["source_key"]:
@@ -821,7 +830,6 @@ def ingest_directory(
                         "source_version": source["source_version"],
                         "content_hash": previous_hash,
                     }
-                    save_manifest(manifest)
                     logger.info(
                         "ingestion_skipped source=%s source_key=%s reason=unchanged",
                         source["source_name"],
@@ -841,6 +849,7 @@ def ingest_directory(
                     existing_hash=previous_hash if update else "",
                     existing_source_uri=previous_uri if update else "",
                     batch_id=batch_id,
+                    raw_bytes=raw_bytes,
                 )
                 if result.errors:
                     failed += 1

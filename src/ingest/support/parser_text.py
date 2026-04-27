@@ -40,6 +40,18 @@ class PlainTextParser:
 
     def __init__(self) -> None:
         self._config: Any = None
+        self._suffix: str = ""
+        self._source_path: Path | None = None
+        self._source_key: str | None = None
+        self._doc_store_client: Any = None
+
+    def configure_storage(self, *, source_key: str, doc_store_client: Any) -> None:
+        """Optional: pass identity + doc-store client so figure uploads (when
+        ``config.store_figures_in_db=True``) get a stable key. No-op when
+        either argument is None.
+        """
+        self._source_key = source_key
+        self._doc_store_client = doc_store_client
 
     def parse(self, file_path: Path, config: Any) -> ParseResult:
         """Read file, normalise to markdown, extract headings. FR-3281.
@@ -58,6 +70,8 @@ class PlainTextParser:
         self._config = config
         content = file_path.read_text(encoding="utf-8", errors="replace")
         suffix = file_path.suffix.lower()
+        self._suffix = suffix
+        self._source_path = file_path
 
         if suffix in (".html", ".htm"):
             content = self._html_to_markdown(content)
@@ -76,16 +90,17 @@ class PlainTextParser:
         )
 
     def chunk(self, parse_result: ParseResult) -> list[Chunk]:
-        """Chunk using shared markdown chunker. FR-3282.
+        """Chunk using a structure-aware path for markdown, char-splitter elsewhere.
 
-        Delegates to chunk_with_markdown() which uses heading-aware splitting
-        with MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter.
+        For .md / .markdown / .html / .rst (already converted to markdown in parse()),
+        try Docling's HybridChunker — it preserves lists, tables, and requirement
+        blocks as atomic units, which the LangChain splitter cannot. Fall back to
+        chunk_with_markdown() (MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter)
+        if Docling is unavailable, the markdown is empty, or HybridChunker raises.
 
-        Args:
-            parse_result: ParseResult from a prior parse() call.
+        For .txt the source is unstructured, so the legacy char-splitter is fine.
 
-        Returns:
-            List of Chunk objects with section_path from heading hierarchy.
+        Toggle: config.use_docling_chunker_for_markdown (default True).
 
         Raises:
             RuntimeError: If called before parse().
@@ -95,6 +110,37 @@ class PlainTextParser:
                 "PlainTextParser.chunk() called before parse(). "
                 "Call parse() first to populate config."
             )
+
+        markdown_suffixes = {".md", ".markdown", ".html", ".htm", ".rst"}
+        use_docling_chunker = getattr(
+            self._config, "use_docling_chunker_for_markdown", True
+        )
+        if (
+            use_docling_chunker
+            and self._suffix in markdown_suffixes
+            and parse_result.markdown
+        ):
+            try:
+                from src.ingest.support.docling import chunk_markdown_via_docling
+
+                max_tokens = getattr(
+                    self._config, "hybrid_chunker_max_tokens", 512
+                )
+                return chunk_markdown_via_docling(
+                    parse_result.markdown,
+                    max_tokens=max_tokens,
+                    source_path=self._source_path,
+                    config=self._config,
+                    source_key=self._source_key,
+                    doc_store_client=self._doc_store_client,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "HybridChunker failed for suffix=%s, falling back to "
+                    "char-splitter: %s",
+                    self._suffix, exc,
+                )
+
         return chunk_with_markdown(parse_result, self._config)
 
     @classmethod

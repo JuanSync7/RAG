@@ -8,7 +8,7 @@ from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
 from src.retrieval.query.nodes.query_processor import process_query, warm_up_ollama
 from src.retrieval.query.nodes.reranker import (
     LocalBGEReranker,
-    LiteLLMReranker,
+    TEIReranker,
     RankedResult,
     get_reranker_provider,
 )
@@ -20,7 +20,7 @@ __all__ = [
     "process_query",
     "warm_up_ollama",
     "LocalBGEReranker",
-    "LiteLLMReranker",
+    "TEIReranker",
     "RankedResult",
     "get_reranker_provider",
 ]

@@ -32,7 +32,6 @@ from src.ingest.impl import verify_core_design
 # Patch targets
 _ADD_DOCS = "src.ingest.embedding.nodes.embedding_storage.add_documents"
 _DELETE = "src.ingest.embedding.nodes.embedding_storage.delete_by_source_key"
-_ENSURE = "src.ingest.embedding.nodes.embedding_storage.ensure_collection"
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +281,9 @@ class TestEmbedBatches:
             _embed_batches(embedder, batches)
 
         assert mock_sleep.call_count == 2
-        # Delays: 1.0 * 1 = 1.0, then 1.0 * 2 = 2.0
-        assert mock_sleep.call_args_list[0] == call(1.0)
-        assert mock_sleep.call_args_list[1] == call(2.0)
+        # Delays: _BATCH_RETRY_DELAY * 1 = 0.3, then _BATCH_RETRY_DELAY * 2 = 0.6
+        assert mock_sleep.call_args_list[0] == call(0.3)
+        assert mock_sleep.call_args_list[1] == call(0.6)
 
     def test_empty_batches_list(self):
         embedder = MagicMock()
@@ -354,20 +353,25 @@ class TestBatchObservability:
 
 
 class TestEmbeddingStorageNodeBatching:
-    def test_5_chunks_batch_size_2_three_batches_all_stored(self):
-        """5 chunks + batch_size=2 → 3 batches → all 5 records stored."""
+    def test_5_chunks_batch_size_2_three_batches_all_staged(self):
+        """5 chunks + batch_size=2 → 3 batches → all 5 records staged (Issue #42).
+
+        Since the staging refactor, add_documents is NOT called in this node.
+        The node stages records in staged_weaviate_records for commit_node.
+        stored_count stays 0 here; commit_node sets the real count.
+        """
         chunks = [_make_chunk(f"chunk {i}") for i in range(5)]
         state = _make_state(chunks=chunks, batch_size=2)
-        with patch(_ADD_DOCS, return_value=5) as mock_add, patch(_ENSURE), patch(_DELETE):
+        with patch(_ADD_DOCS) as mock_add, patch(_DELETE):
             result = embedding_storage_node(state)
-        assert result["stored_count"] == 5
-        mock_add.assert_called_once()
-        # Verify 5 records passed
-        passed_records = mock_add.call_args.args[1]
-        assert len(passed_records) == 5
+        mock_add.assert_not_called()
+        assert result["stored_count"] == 0
+        # Verify 5 records staged
+        staged = result.get("staged_weaviate_records", [])
+        assert len(staged) == 5
 
-    def test_batch_2_fails_chunks_0_1_excluded_errors_recorded(self):
-        """Batch 2 (chunks 2–3) fails permanently → 4 records stored; batch_embedding_failure in errors."""
+    def test_batch_2_fails_chunks_excluded_from_staged_records(self):
+        """Batch 2 (chunks 2–3) fails permanently → 3 records staged; batch_embedding_failure in errors."""
         chunks = [_make_chunk(f"chunk {i}") for i in range(5)]
         state = _make_state(chunks=chunks, batch_size=2)
 
@@ -382,13 +386,15 @@ class TestEmbeddingStorageNodeBatching:
 
         state["runtime"].embedder.embed_documents.side_effect = embed_side_effect
 
-        with patch(_ADD_DOCS, return_value=3) as mock_add, patch(_ENSURE), patch(_DELETE), \
+        with patch(_ADD_DOCS) as mock_add, patch(_DELETE), \
              patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
             result = embedding_storage_node(state)
 
+        # Since Issue #42, add_documents is NOT called here.
+        mock_add.assert_not_called()
         # batch 1 (chunks 0,1) succeeds, batch 2 (chunks 2,3) fails, batch 3 (chunk 4) succeeds
-        passed_records = mock_add.call_args.args[1]
-        assert len(passed_records) == 3  # 2 + 0 + 1
+        staged = result.get("staged_weaviate_records", [])
+        assert len(staged) == 3  # 2 + 0 + 1
 
         batch_errors = [e for e in result["errors"] if isinstance(e, dict) and e.get("type") == "batch_embedding_failure"]
         assert len(batch_errors) == 1
@@ -399,29 +405,27 @@ class TestEmbeddingStorageNodeBatching:
     def test_all_batches_succeed_no_errors(self):
         chunks = [_make_chunk(f"text {i}") for i in range(4)]
         state = _make_state(chunks=chunks, batch_size=2)
-        with patch(_ADD_DOCS, return_value=4), patch(_ENSURE), patch(_DELETE):
+        with patch(_ADD_DOCS) as mock_add, patch(_DELETE):
             result = embedding_storage_node(state)
-        assert result["stored_count"] == 4
+        mock_add.assert_not_called()  # Issue #42: staging only
+        assert result["stored_count"] == 0  # real count set by commit_node
         assert result.get("errors", []) == []
+        assert len(result.get("staged_weaviate_records", [])) == 4
 
-    def test_lifecycle_meta_attached_to_stored_records(self):
-        """trace_id, schema_version, and batch_id appear in every stored record's metadata."""
+    def test_lifecycle_meta_attached_to_staged_records(self):
+        """trace_id, schema_version, and batch_id appear in every staged record's metadata."""
         chunks = [_make_chunk("hello"), _make_chunk("world")]
         state = _make_state(chunks=chunks, batch_size=10)
         state["trace_id"] = "trace-abc"
         state["batch_id"] = "batch-xyz"
 
-        captured_records = []
+        with patch(_ADD_DOCS) as mock_add, patch(_DELETE):
+            result = embedding_storage_node(state)
 
-        def capture_add(client, records, **kwargs):
-            captured_records.extend(records)
-            return len(records)
-
-        with patch(_ADD_DOCS, side_effect=capture_add), patch(_ENSURE), patch(_DELETE):
-            embedding_storage_node(state)
-
-        assert len(captured_records) == 2
-        for rec in captured_records:
+        mock_add.assert_not_called()  # Issue #42: staging only
+        staged = result.get("staged_weaviate_records", [])
+        assert len(staged) == 2
+        for rec in staged:
             assert rec.metadata["trace_id"] == "trace-abc"
             assert rec.metadata["batch_id"] == "batch-xyz"
             assert "schema_version" in rec.metadata
@@ -430,7 +434,7 @@ class TestEmbeddingStorageNodeBatching:
         chunks = [_make_chunk()]
         state = _make_state(chunks=chunks)
         state["should_skip"] = True
-        with patch(_ADD_DOCS) as mock_add, patch(_ENSURE):
+        with patch(_ADD_DOCS) as mock_add:
             result = embedding_storage_node(state)
         assert result["stored_count"] == 0
         mock_add.assert_not_called()
@@ -441,8 +445,7 @@ class TestEmbeddingStorageNodeBatching:
         state = _make_state(chunks=chunks)
         state["runtime"].embedder.embed_documents.side_effect = RuntimeError("crash")
 
-        with patch(_ENSURE), \
-             patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
+        with patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
             result = embedding_storage_node(state)
 
         # All retries exhausted → error recorded as batch_embedding_failure dict

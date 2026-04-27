@@ -21,12 +21,18 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
+from config.settings import VECTOR_COLLECTION_DEFAULT
+
 if TYPE_CHECKING:
     from src.ingest.embedding.common.types import MergeEvent
 
 logger = logging.getLogger("rag.ingest.embedding.dedup_utils")
 
 _WHITESPACE_RE = re.compile(r"\s+")
+
+# Default collection name for chunk lookups. Sourced from config so that
+# environment-level overrides (RAG_VECTOR_COLLECTION_DEFAULT) are respected.
+_DEFAULT_CHUNK_COLLECTION = VECTOR_COLLECTION_DEFAULT
 
 
 def normalise_chunk_text(text: str) -> str:
@@ -57,7 +63,9 @@ def compute_content_hash(text: str) -> str:
 
 
 def find_chunk_by_content_hash(
-    client: Any, content_hash: str
+    client: Any,
+    content_hash: str,
+    collection_name: str = _DEFAULT_CHUNK_COLLECTION,
 ) -> Optional[dict[str, Any]]:
     """Query Weaviate for a chunk with matching content_hash.
 
@@ -67,6 +75,8 @@ def find_chunk_by_content_hash(
     Args:
         client: Weaviate client handle.
         content_hash: SHA-256 hex string to match.
+        collection_name: Weaviate collection name. Defaults to
+            ``_DEFAULT_CHUNK_COLLECTION``.
 
     Returns:
         Dict with uuid, source_documents, text_length; or None.
@@ -74,7 +84,7 @@ def find_chunk_by_content_hash(
     try:
         from weaviate.classes.query import Filter  # lazy import — Weaviate optional
 
-        collection = client.collections.get("Chunk")
+        collection = client.collections.get(collection_name)
         result = collection.query.fetch_objects(
             filters=Filter.by_property("content_hash").equal(content_hash),
             limit=1,
@@ -98,7 +108,10 @@ def find_chunk_by_content_hash(
 
 
 def append_source_document(
-    client: Any, chunk_uuid: str, source_key: str
+    client: Any,
+    chunk_uuid: str,
+    source_key: str,
+    collection_name: str = _DEFAULT_CHUNK_COLLECTION,
 ) -> bool:
     """Append source_key to a canonical chunk's source_documents array.
 
@@ -109,12 +122,14 @@ def append_source_document(
         client: Weaviate client handle.
         chunk_uuid: UUID of the canonical chunk to update.
         source_key: Source key to append.
+        collection_name: Weaviate collection name. Defaults to
+            ``_DEFAULT_CHUNK_COLLECTION``.
 
     Returns:
         True on success, False on error.
     """
     try:
-        collection = client.collections.get("Chunk")
+        collection = client.collections.get(collection_name)
         obj = collection.query.fetch_object_by_id(
             chunk_uuid, return_properties=["source_documents"]
         )
@@ -138,7 +153,11 @@ def append_source_document(
         return False
 
 
-def remove_source_document_refs(client: Any, source_key: str) -> None:
+def remove_source_document_refs(
+    client: Any,
+    source_key: str,
+    collection_name: str = _DEFAULT_CHUNK_COLLECTION,
+) -> None:
     """Remove source_key from all chunks' source_documents arrays.
 
     Chunks whose source_documents becomes empty are deleted (FR-3433 AC-3).
@@ -147,11 +166,13 @@ def remove_source_document_refs(client: Any, source_key: str) -> None:
     Args:
         client: Weaviate client handle.
         source_key: Source key to remove from all chunk provenance arrays.
+        collection_name: Weaviate collection name. Defaults to
+            ``_DEFAULT_CHUNK_COLLECTION``.
     """
     try:
         from weaviate.classes.query import Filter  # lazy import — Weaviate optional
 
-        collection = client.collections.get("Chunk")
+        collection = client.collections.get(collection_name)
         results = collection.query.fetch_objects(
             filters=Filter.by_property("source_documents").contains_any([source_key]),
             limit=10_000,
@@ -197,13 +218,14 @@ def revert_merge(
         client: Weaviate client handle.
         event: A ``MergeEvent`` dict produced by ``cross_document_dedup_node``.
             Must contain ``canonical_content_hash`` and ``merged_source_key``.
-        collection: Weaviate collection name. Defaults to ``"Chunk"``.
+        collection: Weaviate collection name. Defaults to
+            ``_DEFAULT_CHUNK_COLLECTION``.
 
     Returns:
         ``True`` if a revert was performed (source_key was detached or canonical
         deleted), ``False`` on no-op or error.
     """
-    collection_name = collection or "Chunk"
+    collection_name = collection or _DEFAULT_CHUNK_COLLECTION
     canonical_content_hash: str = event["canonical_content_hash"]
     source_key: str = event["merged_source_key"]
 

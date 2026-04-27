@@ -1,0 +1,4 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	ceede72	—	96%	keep	baseline — no changes, initial score 96% coverage (1831 tests, ~4331 prod stmts, ~183 missed)
+002	8e1d44f	Tree-sitter AST chunk path + migration CLI/strategy dispatchers	97%	keep	+1% — 19 tests; parser_code 82→100%, migration 89→99%
+003	b572885	Broad coverage: gc CLI helpers, impl fallbacks, validation CLI, structure_detection error paths	98%	keep	+1% — 31 tests across 4 files; target 98% reached

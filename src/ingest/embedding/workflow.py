@@ -1,11 +1,11 @@
 # @summary
-# LangGraph StateGraph for the 11-node Embedding Pipeline (Phase 3.3).
+# LangGraph StateGraph for the 12-node Embedding Pipeline (Phase 3.3 + Issue #42).
 # Exports: build_embedding_graph
 # Deps: langgraph.graph, src.ingest.embedding.nodes.*, src.ingest.embedding.state
 # Node order: document_storage → chunking → vlm_enrichment → chunk_enrichment →
 #   metadata_generation → [cross_reference_extraction →] knowledge_graph_extraction
 #   → quality_validation → [cross_document_dedup →] embedding_storage
-#   → visual_embedding → [knowledge_graph_storage]
+#   → visual_embedding → [knowledge_graph_storage →] commit → END
 # vlm_enrichment_node is always present; it short-circuits internally for
 # vlm_mode != "external".
 # visual_embedding_node is always present (between embedding_storage and
@@ -13,6 +13,7 @@
 # are present.
 # cross_document_dedup_node: conditional — only runs when
 #   config.enable_cross_document_dedup=True; skips to embedding_storage otherwise.
+# commit_node: new terminal node; flushes MinIO + Weaviate + KG atomically (Issue #42).
 # @end-summary
 
 """Phase 2 / Phase 3.3 LangGraph workflow for embedding and storage."""
@@ -23,6 +24,7 @@ from langgraph.graph import END, StateGraph
 
 from src.ingest.embedding.nodes import chunk_enrichment_node
 from src.ingest.embedding.nodes import chunking_node
+from src.ingest.embedding.nodes import commit_node
 from src.ingest.embedding.nodes import vlm_enrichment_node
 from src.ingest.embedding.nodes import document_storage_node
 from src.ingest.embedding.nodes import cross_reference_extraction_node
@@ -37,14 +39,14 @@ from src.ingest.embedding.state import EmbeddingPipelineState
 
 
 def build_embedding_graph(config=None):
-    """Compile the Phase 3.3 Embedding Pipeline StateGraph.
+    """Compile the Phase 3.3 + Issue #42 Embedding Pipeline StateGraph.
 
     Node order:
         document_storage → chunking → vlm_enrichment → chunk_enrichment
         → metadata_generation → [cross_reference_extraction →]
         knowledge_graph_extraction → quality_validation
         → [cross_document_dedup →] embedding_storage
-        → visual_embedding → [knowledge_graph_storage]
+        → visual_embedding → [knowledge_graph_storage →] commit → END
 
     Routing:
     - vlm_enrichment: always in graph; short-circuits internally when
@@ -58,6 +60,9 @@ def build_embedding_graph(config=None):
     - visual_embedding: always in graph; short-circuits internally when no
       visual chunks are present or visual embedding is not configured.
     - knowledge_graph_storage: only if config.enable_knowledge_graph_storage.
+    - commit: terminal node; always present. Flushes MinIO + Weaviate + KG
+      atomically. On failure, rolls back Weaviate (by staging_batch_id) and
+      MinIO (by document_id). See Issue #42.
 
     Returns:
         Compiled LangGraph graph accepting ``EmbeddingPipelineState``.
@@ -75,6 +80,7 @@ def build_embedding_graph(config=None):
     graph.add_node("embedding_storage", embedding_storage_node)
     graph.add_node("visual_embedding", visual_embedding_node)
     graph.add_node("knowledge_graph_storage", knowledge_graph_storage_node)
+    graph.add_node("commit", commit_node)
 
     graph.set_entry_point("document_storage")
     graph.add_edge("document_storage", "chunking")
@@ -113,14 +119,18 @@ def build_embedding_graph(config=None):
     )
     graph.add_edge("cross_document_dedup", "embedding_storage")
     graph.add_edge("embedding_storage", "visual_embedding")
+    # Issue #42: knowledge_graph_storage and the direct path both converge on commit.
+    # visual_embedding routes to knowledge_graph_storage (when enabled) or directly
+    # to commit; knowledge_graph_storage always routes to commit.
     graph.add_conditional_edges(
         "visual_embedding",
         lambda state: (
             "knowledge_graph_storage"
             if state["runtime"].config.enable_knowledge_graph_storage
-            else "end"
+            else "commit"
         ),
-        {"knowledge_graph_storage": "knowledge_graph_storage", "end": END},
+        {"knowledge_graph_storage": "knowledge_graph_storage", "commit": "commit"},
     )
-    graph.add_edge("knowledge_graph_storage", END)
+    graph.add_edge("knowledge_graph_storage", "commit")
+    graph.add_edge("commit", END)
     return graph.compile()

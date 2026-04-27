@@ -8,7 +8,11 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.docproc.document_refactoring")
 
 from src.ingest.support import _llm_json
 from src.ingest.common import append_processing_log
@@ -30,6 +34,7 @@ def document_refactoring_node(state: DocumentProcessingState) -> dict[str, Any]:
         ``processing_log``. When refactoring is disabled or the LLM response is
         empty, this node passes through the cleaned text unchanged.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     if not config.enable_document_refactoring:
         return {
@@ -41,6 +46,8 @@ def document_refactoring_node(state: DocumentProcessingState) -> dict[str, Any]:
     prompt = _REFACTOR_PROMPT + state["cleaned_text"][:_MAX_REFACTOR_INPUT]
     response = _llm_json(prompt, config, _REFACTOR_MAX_TOKENS)
     refactored_text = str(response.get("refactored_text", "")).strip()
+    logger.info("document_refactoring complete: source=%s", state.get("source_name", ""))
+    logger.debug("document_refactoring_node completed in %.3fs", time.monotonic() - t0)
     return {
         "refactored_text": refactored_text or state["cleaned_text"],
         "processing_log": append_processing_log(state, "document_refactoring:ok"),

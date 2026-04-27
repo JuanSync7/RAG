@@ -46,6 +46,8 @@ class ConversationMeta:
     updated_at_ms: int = 0
     message_count: int = 0
     summary: ConversationSummary = field(default_factory=ConversationSummary)
+    relevant_doc_ids: list[str] = field(default_factory=list)
+    ignored_doc_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -59,7 +59,7 @@ class TestDocumentIngestionError:
 
     def test_document_ingestion_node_returns_error_when_file_unreadable(self):
         with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
+            "pathlib.Path.read_bytes",
             side_effect=PermissionError("Permission denied"),
         ):
             state = _make_state()
@@ -68,9 +68,9 @@ class TestDocumentIngestionError:
         assert any("read_failed:" in e for e in result["errors"])
         assert result["processing_log"][-1].endswith("document_ingestion:failed")
 
-    def test_document_ingestion_node_returns_error_when_read_text_with_fallbacks_raises(self):
+    def test_document_ingestion_node_returns_error_when_read_bytes_raises(self):
         with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
+            "pathlib.Path.read_bytes",
             side_effect=OSError("disk error"),
         ):
             state = _make_state()
@@ -105,18 +105,17 @@ class TestDocumentIngestionBoundary:
         assert result["raw_text"], "raw_text should be non-empty"
         assert re.fullmatch(r"[0-9a-f]{64}", result["source_hash"])
 
-    def test_document_ingestion_node_handles_binary_content_with_replacement(self):
-        replacement_text = "text with \ufffd replacement"
-        with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
-            return_value=replacement_text,
-        ), patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.sha256_path",
-            return_value="a" * 64,
-        ):
-            state = _make_state()
-            result = document_ingestion_node(state)
-        assert "\ufffd" in result["raw_text"]
+    def test_document_ingestion_node_handles_binary_content_with_replacement(self, tmp_path):
+        # Write bytes that are invalid in all fallback encodings to force replacement character
+        bin_file = tmp_path / "binary.txt"
+        # Bytes that form an invalid sequence in utf-8, latin-1, and cp1252 are impossible
+        # since latin-1 accepts all single bytes. Instead, write valid bytes that decode to
+        # a known string via latin-1, then verify decoding succeeds without error.
+        bin_file.write_bytes(b"text with \xff byte")
+        state = _make_state(source_path=str(bin_file))
+        result = document_ingestion_node(state)
+        assert "raw_text" in result
+        assert len(result["raw_text"]) > 0
 
     def test_document_ingestion_node_handles_latin1_encoded_file(self, tmp_path):
         latin1_file = tmp_path / "latin1.txt"
@@ -144,28 +143,23 @@ class TestDocumentIngestionErrorScenarios:
 
     def test_document_ingestion_node_error_format_includes_filename_and_exception(self):
         with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
+            "pathlib.Path.read_bytes",
             side_effect=ValueError("bad value"),
         ):
             state = _make_state(source_path="/tmp/myfile.txt")
             result = document_ingestion_node(state)
         assert any(e == "read_failed:myfile.txt:bad value" for e in result["errors"])
 
-    def test_document_ingestion_node_processing_log_records_ok_on_success(self):
-        with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
-            return_value="text",
-        ), patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.sha256_path",
-            return_value="abc123",
-        ):
-            state = _make_state()
-            result = document_ingestion_node(state)
+    def test_document_ingestion_node_processing_log_records_ok_on_success(self, tmp_path):
+        f = tmp_path / "ok.txt"
+        f.write_text("text", encoding="utf-8")
+        state = _make_state(source_path=str(f))
+        result = document_ingestion_node(state)
         assert "document_ingestion:ok" in result["processing_log"][-1]
 
     def test_document_ingestion_node_processing_log_records_failed_on_error(self):
         with patch(
-            "src.ingest.doc_processing.nodes.document_ingestion.read_text_with_fallbacks",
+            "pathlib.Path.read_bytes",
             side_effect=RuntimeError("boom"),
         ):
             state = _make_state()

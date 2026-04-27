@@ -1,0 +1,5 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	5a14da9	—	0/8	keep	baseline — no changes, initial score
+002	ca86b34	Removing IngestState class, export, and type hint should fix 3 legacy_type criteria	3/8	keep	confirmed — IngestState removed from types.py, __init__.py, shared.py type hint updated to dict[str, Any]
+003	6b03278	Removing enriched_chunks declaration and initialization should fix 2 dead_field criteria	5/8	keep	confirmed — enriched_chunks removed from EmbeddingPipelineState, embedding/impl.py init, visual_embedding comment, and test assertions
+004	edb7281	Replacing sha256_path with sha256_bytes and passing raw_bytes through state should fix 3 double_read criteria	8/8	keep	confirmed — ingest_directory reads bytes once, passes through ingest_file/run_document_processing/document_ingestion_node; fallback preserved

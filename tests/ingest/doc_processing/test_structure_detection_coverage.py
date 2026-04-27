@@ -208,3 +208,129 @@ class TestStructureDetectionErrorScenarios:
         result = structure_detection_node(state)
 
         assert result["processing_log"][-1].endswith("structure_detection:ok")
+
+
+# ---------------------------------------------------------------------------
+# Iter-003: registry path error handler (lines 100-118)
+# ---------------------------------------------------------------------------
+
+
+class TestStructureDetectionRegistryPath:
+    """Lines 100-118: parser_registry exception paths (strict and non-strict)."""
+
+    def _make_state_with_registry(
+        self,
+        raw_text="",
+        source_path="/tmp/test.txt",
+        source_name="test.txt",
+        docling_strict=False,
+        registry=None,
+        **config_overrides,
+    ):
+        """Build state with a parser_registry set on the Runtime."""
+        config = IngestionConfig(
+            enable_docling_parser=True,
+            docling_strict=docling_strict,
+            **config_overrides,
+        )
+        runtime = Runtime(
+            config=config,
+            embedder=MagicMock(),
+            weaviate_client=MagicMock(),
+            kg_builder=None,
+        )
+        if registry is not None:
+            runtime.parser_registry = registry
+        return {
+            "raw_text": raw_text,
+            "source_path": source_path,
+            "source_name": source_name,
+            "runtime": runtime,
+            "errors": [],
+            "processing_log": [],
+        }
+
+    def test_mock_registry_parser_failure_strict_returns_error(self):
+        """Registry path: parser raises + strict=True → should_skip=True (lines 100-108)."""
+        failing_registry = MagicMock()
+        failing_parser = MagicMock()
+        failing_parser.parse.side_effect = RuntimeError("parser blew up")
+        failing_registry.get_parser.return_value = failing_parser
+
+        state = self._make_state_with_registry(
+            raw_text="some text",
+            docling_strict=True,
+            registry=failing_registry,
+        )
+        result = structure_detection_node(state)
+
+        assert result.get("should_skip") is True
+        assert result.get("errors"), "errors must be non-empty on strict failure"
+        assert any("parser_failed" in e for e in result["errors"])
+
+    def test_mock_registry_parser_failure_non_strict_falls_back_to_regex(self):
+        """Registry path: parser raises + strict=False → regex fallback (lines 109-118)."""
+        failing_registry = MagicMock()
+        failing_parser = MagicMock()
+        failing_parser.parse.side_effect = RuntimeError("parser blew up")
+        failing_registry.get_parser.return_value = failing_parser
+
+        state = self._make_state_with_registry(
+            raw_text="Figure 1 is shown. See also Fig. 2.",
+            docling_strict=False,
+            registry=failing_registry,
+        )
+        result = structure_detection_node(state)
+
+        # Non-strict: no errors, no skip, regex detects figures
+        assert not result.get("should_skip")
+        assert not result.get("errors")
+        assert result["structure"]["has_figures"] is True
+        assert result["structure"]["parser_strategy"] == "regex_fallback"
+
+    def test_mock_registry_parser_failure_non_strict_clears_parse_result(self):
+        """After registry parser failure, parse_result/parser_instance cleared (lines 114-116)."""
+        failing_registry = MagicMock()
+        failing_parser = MagicMock()
+        failing_parser.parse.side_effect = ValueError("bad input")
+        failing_registry.get_parser.return_value = failing_parser
+
+        state = self._make_state_with_registry(
+            raw_text="# Heading one\nsome text",
+            docling_strict=False,
+            registry=failing_registry,
+        )
+        result = structure_detection_node(state)
+
+        # Should still have processed output (regex path)
+        assert "structure" in result
+        assert result["structure"]["heading_count"] >= 1
+
+    def test_mock_registry_get_parser_failure_non_strict(self):
+        """Registry path: get_parser itself raises (before parse) — non-strict fallback."""
+        failing_registry = MagicMock()
+        failing_registry.get_parser.side_effect = RuntimeError("no parser for type")
+
+        state = self._make_state_with_registry(
+            raw_text="Figure 3 and more text.",
+            docling_strict=False,
+            registry=failing_registry,
+        )
+        result = structure_detection_node(state)
+
+        assert not result.get("should_skip")
+        assert result["structure"]["has_figures"] is True
+
+    def test_mock_registry_get_parser_failure_strict(self):
+        """Registry path: get_parser itself raises — strict mode → should_skip=True."""
+        failing_registry = MagicMock()
+        failing_registry.get_parser.side_effect = RuntimeError("no parser for type")
+
+        state = self._make_state_with_registry(
+            raw_text="some text",
+            docling_strict=True,
+            registry=failing_registry,
+        )
+        result = structure_detection_node(state)
+
+        assert result.get("should_skip") is True

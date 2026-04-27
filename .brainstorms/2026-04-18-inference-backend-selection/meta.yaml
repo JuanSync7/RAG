@@ -1,0 +1,20 @@
+schema_version: 1
+
+status: done
+topic: "Which inference backend to use for embeddings and reranking (xinference, vllm, ollama, tei, etc.)"
+slug: "inference-backend-selection"
+
+type: decision
+shape: Decision
+
+scope: project
+
+created: "2026-04-18"
+last_updated: "2026-04-18"
+
+related_sessions: []
+related_skills: []
+follow_ups: []
+
+pause_reason: ""
+open_threads_at_pause: []

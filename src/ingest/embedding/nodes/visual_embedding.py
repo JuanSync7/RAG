@@ -59,7 +59,7 @@ from src.vector_db.weaviate import (
     ensure_visual_collection,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     On short-circuit: returns visual_stored_count=0, logs descriptive entry.
     On completion: clears page_images from state (FR-606).
 
-    MUST NOT modify: stored_count, chunks, enriched_chunks, or any
+    MUST NOT modify: stored_count, chunks, or any
     text-track state fields (FR-803).
 
     Args:
@@ -92,7 +92,7 @@ def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Dict with keys: visual_stored_count, page_images (None), processing_log,
         and optionally errors.
     """
-    node_start = time.time()
+    node_start = time.monotonic()
 
     # ── Short-circuit: config flag ─────────────────────────────────────────
     runtime = state["runtime"]
@@ -387,7 +387,7 @@ def _run_visual_embedding(
         )
 
     # ── Step 8: Timing and processing log ──────────────────────────────────
-    elapsed_s = time.time() - node_start
+    elapsed_s = time.monotonic() - node_start
     log_entries = [
         f"visual_embedding:pages_extracted:{pages_extracted}",
         f"visual_embedding:pages_stored_minio:{pages_stored_minio}",

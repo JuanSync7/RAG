@@ -14,7 +14,7 @@ from src.ingest.common import IngestionConfig
 from src.ingest.common import parse_json_object
 from src.platform.llm import get_llm_provider
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.support.llm")
 
 
 def _llm_json(
@@ -47,9 +47,5 @@ def _llm_json(
         )
         return parse_json_object(response.content)
     except Exception:
-        logger.debug("LLM JSON call failed, returning empty dict", exc_info=True)
+        logger.warning("LLM JSON call failed, returning empty dict", exc_info=True)
         return {}
-
-
-# Backward-compatible alias for callers still using the old name.
-_ollama_json = _llm_json

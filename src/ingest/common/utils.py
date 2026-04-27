@@ -1,6 +1,6 @@
 # @summary
 # Shared deterministic ingestion utilities for manifest IO, hashing, text reads, and JSON parsing.
-# Exports: sha256_path, load_manifest, save_manifest, read_text_with_fallbacks, parse_json_object
+# Exports: sha256_path, sha256_bytes, load_manifest, save_manifest, read_text_with_fallbacks, decode_with_fallbacks, parse_json_object
 # Deps: config.settings, pathlib, json, hashlib, src.common.utils
 # @end-summary
 """Deterministic utility helpers shared across ingestion modules.
@@ -21,11 +21,26 @@ from typing import Any
 from config.settings import INGESTION_MANIFEST_PATH
 from src.common import parse_json_object
 
-logger = logging.getLogger("rag.ingest.pipeline.stage")
+logger = logging.getLogger("rag.ingest.common.utils")
+
+
+def sha256_bytes(data: bytes) -> str:
+    """Compute SHA-256 digest for in-memory bytes.
+
+    Args:
+        data: Raw bytes to hash.
+
+    Returns:
+        Lowercase hex-encoded SHA-256 digest.
+    """
+    return hashlib.sha256(data).hexdigest()
 
 
 def sha256_path(path: Path) -> str:
     """Compute the SHA-256 digest for a file path.
+
+    Uses chunked reads (64 KB blocks) to avoid loading large files
+    entirely into memory.
 
     Args:
         path: Path to the file to hash.
@@ -33,7 +48,11 @@ def sha256_path(path: Path) -> str:
     Returns:
         Lowercase hex-encoded SHA-256 digest.
     """
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def load_manifest(path: Path = INGESTION_MANIFEST_PATH) -> dict[str, Any]:
@@ -82,6 +101,30 @@ def save_manifest(manifest: dict[str, Any], path: Path = INGESTION_MANIFEST_PATH
     tmp_path.replace(path)
 
 
+_FALLBACK_ENCODINGS = ("utf-8", "latin-1", "cp1252")
+"""Ordered sequence of encodings tried when decoding legacy documents."""
+
+
+def decode_with_fallbacks(data: bytes) -> str:
+    """Decode bytes using fallback encodings for legacy documents.
+
+    Tries each encoding in ``_FALLBACK_ENCODINGS`` in order. Falls back to
+    UTF-8 with replacement characters when all decodings fail.
+
+    Args:
+        data: Raw bytes to decode.
+
+    Returns:
+        Decoded text content. Uses replacement characters as a last resort.
+    """
+    for encoding in _FALLBACK_ENCODINGS:
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def read_text_with_fallbacks(path: Path) -> str:
     """Read text content using fallback encodings for legacy documents.
 
@@ -91,10 +134,5 @@ def read_text_with_fallbacks(path: Path) -> str:
     Returns:
         Decoded text content. Uses replacement characters as a last resort.
     """
-    for encoding in ("utf-8", "latin-1", "cp1252"):
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-    return path.read_text(encoding="utf-8", errors="replace")
+    return decode_with_fallbacks(path.read_bytes())
 

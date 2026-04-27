@@ -1,9 +1,12 @@
 # @summary
-# Weaviate embedded client helpers: connection, collection management, CRUD, hybrid search, and aggregation.
+# Weaviate client helpers: connection (embedded or networked), collection management,
+# CRUD, hybrid search, and aggregation. Connection mode is controlled by
+# ``config.settings.RAG_WEAVIATE_MODE`` ("embedded" or "networked").
 # All collection-scoped operations accept a collection parameter for multi-collection support.
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
+#          delete_documents_by_staging_batch, get_source_hash,
 #          aggregate_by_source, get_collection_stats, list_collections,
 #          update_chunk_content
 # Deps: weaviate, config.settings, src.platform.observability
@@ -33,6 +36,10 @@ from config.settings import (
     WEAVIATE_DATA_DIR,
     HYBRID_SEARCH_ALPHA,
     SEARCH_LIMIT,
+    RAG_WEAVIATE_MODE,
+    RAG_WEAVIATE_HOST,
+    RAG_WEAVIATE_HTTP_PORT,
+    RAG_WEAVIATE_GRPC_PORT,
 )
 from src.platform.observability import get_tracer
 
@@ -40,12 +47,33 @@ logger = logging.getLogger("rag.vector_db.weaviate.store")
 tracer = get_tracer()
 
 
+def _connect() -> weaviate.WeaviateClient:
+    """Open a Weaviate client based on ``RAG_WEAVIATE_MODE``.
+
+    Wrapped in its own span so the connect cost (previously invisible — especially
+    for embedded mode, which spawns a Java subprocess) shows up in traces.
+    """
+    attrs = {"mode": RAG_WEAVIATE_MODE}
+    if RAG_WEAVIATE_MODE == "networked":
+        attrs["host"] = RAG_WEAVIATE_HOST
+        attrs["http_port"] = RAG_WEAVIATE_HTTP_PORT
+        attrs["grpc_port"] = RAG_WEAVIATE_GRPC_PORT
+    with tracer.span("vector_store.connect", attrs):
+        if RAG_WEAVIATE_MODE == "networked":
+            return weaviate.connect_to_local(
+                host=RAG_WEAVIATE_HOST,
+                port=RAG_WEAVIATE_HTTP_PORT,
+                grpc_port=RAG_WEAVIATE_GRPC_PORT,
+            )
+        return weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
+
+
 def create_persistent_client() -> weaviate.WeaviateClient:
-    """Create a long-lived Weaviate embedded client."""
+    """Create a long-lived Weaviate client (embedded or networked)."""
     span = tracer.start_span("vector_store.create_persistent_client")
     client: Optional[weaviate.WeaviateClient] = None
     try:
-        client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
+        client = _connect()
         span.end(status="ok")
         return client
     except Exception:
@@ -57,9 +85,9 @@ def create_persistent_client() -> weaviate.WeaviateClient:
 
 @contextmanager
 def get_weaviate_client():
-    """Context manager for a short-lived Weaviate embedded client."""
+    """Context manager for a short-lived Weaviate client (embedded or networked)."""
     span = tracer.start_span("vector_store.get_weaviate_client")
-    client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
+    client = _connect()
     try:
         yield client
     finally:
@@ -131,6 +159,21 @@ def ensure_collection(
                 name="canonical",
                 data_type=DataType.BOOL,
                 description="Always true; reserved for future soft-delete flows",
+            ),
+            # -- Atomicity & idempotency (Issue #42) --
+            Property(
+                name="staging_batch_id",
+                data_type=DataType.TEXT,
+                description="Per-document UUID set at workflow entry; used to roll back partial writes",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="source_hash",
+                data_type=DataType.TEXT,
+                description="SHA-256 of source bytes; used to short-circuit unchanged re-ingest",
+                index_filterable=True,
+                index_searchable=False,
             ),
         ],
     )
@@ -216,6 +259,8 @@ def add_documents(
                 "refactored_char_start": int(metadata.get("refactored_char_start", -1)),
                 "refactored_char_end": int(metadata.get("refactored_char_end", -1)),
                 "document_id": metadata.get("document_id", ""),
+                "staging_batch_id": metadata.get("staging_batch_id", ""),
+                "source_hash": metadata.get("source_hash", ""),
             }
             for key, val in optional.items():
                 if key in collection_props:
@@ -320,6 +365,60 @@ def delete_documents_by_source(
     span.set_attribute("deleted_count", deleted)
     span.end(status="ok")
     return deleted
+
+
+def delete_documents_by_staging_batch(
+    client: weaviate.WeaviateClient,
+    staging_batch_id: str,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> int:
+    """Delete chunks tagged with the given staging_batch_id.
+
+    Used by ``commit_node`` rollback when a per-document commit fails partway
+    through. Matches only the active batch; chunks from prior successful
+    ingests have a different (or empty) staging_batch_id and are left alone.
+    """
+    span = tracer.start_span(
+        "vector_store.delete_documents_by_staging_batch",
+        {"staging_batch_id": staging_batch_id, "collection": collection},
+    )
+    col = client.collections.get(collection)
+    where = Filter.by_property("staging_batch_id").equal(staging_batch_id)
+    result = col.data.delete_many(where=where)
+    deleted = getattr(result, "matches", 0) or 0
+    span.set_attribute("deleted_count", deleted)
+    span.end(status="ok")
+    return deleted
+
+
+def get_source_hash(
+    client: weaviate.WeaviateClient,
+    source_key: str,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> Optional[str]:
+    """Return the source_hash recorded on existing chunks for ``source_key``.
+
+    Used by Phase 1 to short-circuit re-ingest of unchanged content. Returns
+    ``None`` if no chunks exist, the property is missing/empty, or the query
+    fails (caller treats None as "no prior record" and proceeds with full
+    ingest).
+    """
+    try:
+        if not client.collections.exists(collection):
+            return None
+        col = client.collections.get(collection)
+        response = col.query.fetch_objects(
+            filters=Filter.by_property("source_key").equal(source_key),
+            limit=1,
+            return_properties=["source_hash"],
+        )
+        if not response.objects:
+            return None
+        value = response.objects[0].properties.get("source_hash") or ""
+        return value or None
+    except Exception:
+        logger.debug("get_source_hash query failed for %s", source_key, exc_info=True)
+        return None
 
 
 def delete_documents_by_source_key(

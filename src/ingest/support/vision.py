@@ -273,6 +273,141 @@ def ensure_vision_ready(config: IngestionConfig) -> None:
 # ── Public API ─────────────────────────────────────────────────────────
 
 
+def caption_markdown_images_inline(
+    markdown: str,
+    *,
+    source_path: Path,
+    config: IngestionConfig,
+    source_key: str | None = None,
+    doc_store_client: Any = None,
+) -> tuple[str, list[dict]]:
+    """Replace markdown image references inline with VLM-generated captions.
+
+    Walks the input markdown for ``![alt](src)`` references. For each:
+      - If src is a data URL or local file path that resolves: run VLM → caption.
+      - If src is an HTTP(S) URL: skip (not fetched), keep alt text as caption.
+      - On VLM failure (timeout, model error): keep alt text as caption + warn.
+
+    The image reference is replaced inline with ``[Figure N: <caption>]`` so
+    the description sits where the image was discussed in the prose. Useful as
+    a pre-pass before structure-aware chunking — keeps caption text adjacent
+    to surrounding context for the chunker.
+
+    Returns:
+        Tuple ``(rewritten_markdown, figures)`` where ``figures`` is a list of
+        dicts ``{label, src, alt, caption, visible_text, tags}`` — one per image
+        reference encountered, suitable for citation linkback metadata.
+    """
+    figures: list[dict] = []
+    max_figures = max(1, config.vision_max_figures)
+    max_image_bytes = max(16_384, config.vision_max_image_bytes)
+    store_to_db = (
+        bool(getattr(config, "store_figures_in_db", False))
+        and doc_store_client is not None
+        and source_key
+    )
+
+    def _replace(match: re.Match) -> str:
+        idx = len(figures)
+        if idx >= max_figures:
+            # over the cap; preserve the original ref so nothing is lost
+            return match.group(0)
+
+        alt_text = (match.group("alt") or "").strip()
+        src = (match.group("src") or "").strip()
+        figure_label = f"Figure {idx + 1}"
+        figure_meta = {
+            "label": figure_label,
+            "src": src,
+            "alt": alt_text,
+            "caption": "",
+            "visible_text": "",
+            "tags": [],
+            "captioned": False,
+            "store_key": None,
+        }
+
+        # Resolve to bytes (HTTP URLs return None and are skipped here).
+        candidate: VisionImageCandidate | None = None
+        resolved_bytes: bytes | None = None
+        resolved_mime: str | None = None
+        decoded = _decode_data_url(src)
+        if decoded is not None:
+            image_bytes, mime_type = decoded
+            if image_bytes and len(image_bytes) <= max_image_bytes:
+                resolved_bytes = image_bytes
+                resolved_mime = mime_type
+                candidate = VisionImageCandidate(
+                    figure_label=figure_label,
+                    alt_text=alt_text,
+                    source_ref="data-url",
+                    image_b64=base64.b64encode(image_bytes).decode("ascii"),
+                    mime_type=mime_type,
+                )
+        elif src.startswith(("http://", "https://")):
+            logger.warning(
+                "HTTP-linked image not fetched (v1 limitation): %s — keeping alt text",
+                src,
+            )
+        else:
+            resolved = _resolve_file_image_bytes(src, source_path=source_path)
+            if resolved is not None:
+                image_bytes, mime_type, source_ref = resolved
+                if image_bytes and len(image_bytes) <= max_image_bytes:
+                    resolved_bytes = image_bytes
+                    resolved_mime = mime_type
+                    candidate = VisionImageCandidate(
+                        figure_label=figure_label,
+                        alt_text=alt_text,
+                        source_ref=source_ref,
+                        image_b64=base64.b64encode(image_bytes).decode("ascii"),
+                        mime_type=mime_type,
+                    )
+
+        # Optional: upload the bytes to the document store so citation UIs
+        # survive source moves. Backend currently MinIO; the call site is the
+        # only place that needs to change to support another backend.
+        if store_to_db and resolved_bytes is not None and resolved_mime is not None:
+            try:
+                from src.db.minio.store import store_figure_image
+
+                figure_meta["store_key"] = store_figure_image(
+                    doc_store_client,
+                    source_key=source_key,
+                    figure_label=figure_label,
+                    image_bytes=resolved_bytes,
+                    mime_type=resolved_mime,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Figure store upload failed for %s (%s): %s",
+                    figure_label, src, exc,
+                )
+
+        description: VisionDescription | None = None
+        if candidate is not None:
+            description = _describe_image(candidate, config)
+
+        if description is not None:
+            figure_meta["caption"] = description.caption
+            figure_meta["visible_text"] = description.visible_text
+            figure_meta["tags"] = list(description.tags)
+            figure_meta["captioned"] = True
+            caption_text = description.as_note()
+        else:
+            # Graceful fallback: alt text as the caption stand-in.
+            caption_text = (
+                f"{figure_label}: {alt_text}" if alt_text else f"{figure_label}: (no caption)"
+            )
+            figure_meta["caption"] = alt_text or "(no caption)"
+
+        figures.append(figure_meta)
+        return f"[{caption_text}]"
+
+    rewritten = _IMAGE_REF_PATTERN.sub(_replace, markdown)
+    return rewritten, figures
+
+
 def generate_vision_notes(
     markdown: str,
     *,

@@ -8,8 +8,12 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.docproc.multimodal_processing")
 
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
@@ -31,6 +35,7 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
         ``processing_log``. In strict vision mode, failures return an error
         payload with ``should_skip=True``.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     has_figures = state["structure"].get("has_figures", False)
     if not config.enable_multimodal_processing or not has_figures:
@@ -63,6 +68,13 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
                         "multimodal_processing:failed",
                     ),
                 }
+            else:
+                logger.warning(
+                    "vision_processing failed (non-strict) source=%s: %s",
+                    state.get("source_name", ""),
+                    exc,
+                    exc_info=True,
+                )
 
     structure = dict(state.get("structure", {}))
     if config.enable_vision_processing:
@@ -70,6 +82,8 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
         structure["vision_model"] = config.vision_model
         structure["vision_described_count"] = described_count
 
+    logger.info("multimodal_processing complete: source=%s notes=%d", state["source_name"], len(notes))
+    logger.debug("multimodal_processing_node completed in %.3fs", time.monotonic() - t0)
     return {
         "multimodal_notes": notes,
         "structure": structure,

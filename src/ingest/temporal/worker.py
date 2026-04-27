@@ -3,6 +3,7 @@
 # In dual-queue mode runs two Worker instances (user + background queues) with
 # independent concurrency slot budgets.  Falls back to a single legacy worker
 # when dual-queue env vars are unset (FR-3553).
+# Registers DeleteSourceWorkflow and delete_source_activity (Issue #42, PR-B).
 # Exports: main, run_worker
 # Deps: temporalio, config.settings, src.ingest.temporal.activities,
 #       src.ingest.temporal.workflows, src.ingest.temporal.constants
@@ -33,19 +34,38 @@ import os
 
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
+
+# Modules whose top-level evaluation trips the workflow sandbox (e.g. httpx
+# touching urllib.request.Request during class construction). They're imported
+# transitively by parent packages of our workflow module, not by workflow code
+# itself, so passthrough is safe — the workflow never calls them.
+_PASSTHROUGH_MODULES = (
+    "httpx",
+    "urllib",
+    "src",
+)
+_WORKFLOW_RUNNER = SandboxedWorkflowRunner(
+    restrictions=SandboxRestrictions.default.with_passthrough_modules(*_PASSTHROUGH_MODULES),
+)
 
 from config.settings import TEMPORAL_TARGET_HOST, TEMPORAL_TASK_QUEUE
 from src.ingest.temporal.activities import (
+    delete_source_activity,
     document_processing_activity,
     embedding_pipeline_activity,
     prewarm_worker_resources,
 )
-from src.ingest.temporal.workflows import IngestDirectoryWorkflow, IngestDocumentWorkflow
+from src.ingest.temporal.workflows import (
+    DeleteSourceWorkflow,
+    IngestDirectoryWorkflow,
+    IngestDocumentWorkflow,
+)
 
 logger = logging.getLogger("rag.ingest.temporal.worker")
 
-_WORKFLOWS = [IngestDirectoryWorkflow, IngestDocumentWorkflow]
-_ACTIVITIES = [document_processing_activity, embedding_pipeline_activity]
+_WORKFLOWS = [IngestDirectoryWorkflow, IngestDocumentWorkflow, DeleteSourceWorkflow]
+_ACTIVITIES = [document_processing_activity, embedding_pipeline_activity, delete_source_activity]
 
 # ---------------------------------------------------------------------------
 # Slot allocation helpers (mirrors config/settings.py precedence — until the
@@ -158,6 +178,7 @@ async def run_worker() -> None:
             max_concurrent_activities=user_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         bg_worker = Worker(
             client,
@@ -165,6 +186,7 @@ async def run_worker() -> None:
             max_concurrent_activities=bg_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         logger.info(
             "worker started mode=dual-queue "
@@ -187,6 +209,7 @@ async def run_worker() -> None:
             max_concurrent_activities=total_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         logger.warning(
             "Running in legacy single-queue mode. "

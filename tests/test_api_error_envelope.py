@@ -1,12 +1,70 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from server import api
+from src.platform.memory.schemas import ConversationMeta
 from src.platform.security import auth
 from src.platform.security.auth import authenticate_request, Principal
+
+
+@dataclass
+class _FakeMemory:
+    """In-memory conversation memory; avoids Redis dependency in CI."""
+
+    relevant: dict[str, list[str]] = field(default_factory=dict)
+    ignored: dict[str, list[str]] = field(default_factory=dict)
+
+    def _meta(self, conversation_id: str) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id or "conv_test",
+            tenant_id="t",
+            subject="s",
+            project_id="",
+        )
+
+    def ensure_conversation(self, *, tenant_id, subject, project_id, conversation_id=None, title=""):
+        return self._meta(conversation_id or "conv_test")
+
+    def build_context(self, **_kwargs):  # pragma: no cover - trivial stub
+        ctx = MagicMock()
+        ctx.context_text = ""
+        ctx.recent_turns = []
+        return ctx
+
+    def append_turn(self, **_kwargs):  # pragma: no cover - trivial stub
+        return None
+
+    def update_conversation_title(self, **_kwargs):  # pragma: no cover - trivial stub
+        return None
+
+    def compact_if_needed(self, **_kwargs):  # pragma: no cover - trivial stub
+        return None
+
+    def get_seen_doc_ids(self, **_kwargs) -> list[str]:  # pragma: no cover - trivial stub
+        return []
+
+    def mark_retrieved(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
+
+    def move_to_ignored(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
+
+    def restore_to_relevant(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
+
+    def delete_conversation(self, **_kwargs) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def list_conversations(self, **_kwargs) -> list:  # pragma: no cover - trivial stub
+        return []
+
+    def get_turns(self, **_kwargs) -> list:  # pragma: no cover - trivial stub
+        return []
 
 
 class _DummyWorkflowService:
@@ -166,13 +224,15 @@ def test_503_overload_uses_standard_envelope(monkeypatch):
 
 
 def _patched_client(monkeypatch, *, fail_query: bool = False):
-    """Return a TestClient with a stubbed Temporal connection."""
+    """Return a TestClient with stubbed Temporal + in-memory conversation memory."""
     _set_auth_defaults()
 
     async def _fake_connect(_target: str):
         return _DummyTemporalClient(fail_query=fail_query)
 
     monkeypatch.setattr(api.Client, "connect", _fake_connect)
+    fake = _FakeMemory()
+    monkeypatch.setattr("server.routes.query.get_conversation_memory", lambda: fake)
     return TestClient(api.app, raise_server_exceptions=False)
 
 

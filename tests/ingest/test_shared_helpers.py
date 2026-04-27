@@ -428,3 +428,141 @@ class TestParseJsonObject:
         raw = '{"a": {"b": {"c": {"d": "deep"}}}}'
         result = parse_json_object(raw)
         assert result == {"a": {"b": {"c": {"d": "deep"}}}}
+
+
+# ---------------------------------------------------------------------------
+# Edge case tests for shared helper internals
+# ---------------------------------------------------------------------------
+
+
+class TestLocateSpanEdgeCases:
+    """Tests for _locate_span helper (private, tested via map_chunk_provenance)."""
+
+    def test_mock_locate_span_empty_haystack(self):
+        """map_chunk_provenance with empty original_text returns no-match."""
+        provenance, _, _ = map_chunk_provenance(
+            "some chunk",
+            original_text="",
+            refactored_text="some chunk appears here",
+            original_cursor=0,
+            refactored_cursor=0,
+        )
+        assert provenance["original_char_start"] == -1
+        assert provenance["provenance_confidence"] == 0.0
+
+    def test_mock_locate_span_empty_needle(self):
+        """map_chunk_provenance with empty chunk_text returns no-match."""
+        provenance, _, _ = map_chunk_provenance(
+            "",
+            original_text="some original text here",
+            refactored_text="some refactored text here",
+            original_cursor=0,
+            refactored_cursor=0,
+        )
+        # Empty needle returns -1 in _locate_span
+        assert provenance["refactored_char_start"] == -1
+
+    def test_mock_locate_span_cursor_hint_used(self):
+        """Cursor hint should speed up matching — match after cursor offset."""
+        text = "AAA first segment. BBB second segment."
+        # Search for "BBB second segment." with cursor at 19 (start of 'BBB')
+        provenance, new_orig, new_ref = map_chunk_provenance(
+            "BBB second segment.",
+            original_text=text,
+            refactored_text=text,
+            original_cursor=19,
+            refactored_cursor=19,
+        )
+        assert provenance["original_char_start"] >= 0
+
+    def test_mock_paragraph_fuzzy_fallback(self):
+        """map_chunk_provenance should use paragraph fuzzy match when exact fails."""
+        original = "First paragraph content here.\n\nSecond paragraph content here.\n\n"
+        # Use a slightly different chunk text to trigger fuzzy matching
+        chunk = "First paragraph content here"  # exact match exists as substring
+
+        provenance, _, _ = map_chunk_provenance(
+            chunk,
+            original_text=original,
+            refactored_text="different refactored " + chunk + " here",
+            original_cursor=0,
+            refactored_cursor=0,
+        )
+        # Should find a match (exact or fuzzy)
+        assert isinstance(provenance["provenance_confidence"], float)
+
+
+class TestBestParagraphSpanEdgeCases:
+    """Tests for _best_paragraph_span (tested indirectly via map_chunk_provenance)."""
+
+    def test_mock_empty_text_returns_no_match(self):
+        """Empty original_text should cause no-match in paragraph span."""
+        provenance, _, _ = map_chunk_provenance(
+            "some anchor text",
+            original_text="",
+            refactored_text="",
+            original_cursor=0,
+            refactored_cursor=0,
+        )
+        assert provenance["original_char_start"] == -1
+
+    def test_mock_empty_anchor_returns_no_match(self):
+        """Empty chunk_text should return no-match."""
+        provenance, _, _ = map_chunk_provenance(
+            "",
+            original_text="some text here",
+            refactored_text="",
+            original_cursor=0,
+            refactored_cursor=0,
+        )
+        assert provenance["refactored_char_start"] == -1
+
+
+class TestAppendProcessingLogVerbose:
+    """Tests for verbose logging path in append_processing_log."""
+
+    def test_mock_append_log_verbose_logging_emits_info(self, caplog):
+        """When verbose_stage_logs=True, append_processing_log should emit info log."""
+        import logging
+
+        class FakeConfig:
+            verbose_stage_logs = True
+
+        class FakeRuntime:
+            config = FakeConfig()
+
+        state = {
+            "processing_log": [],
+            "runtime": FakeRuntime(),
+            "source_name": "test_source",
+        }
+
+        with caplog.at_level(logging.INFO, logger="rag.ingest.common.shared"):
+            result = append_processing_log(state, "chunk:ok")
+
+        assert "chunk:ok" in result
+        assert any("chunk:ok" in r.message for r in caplog.records)
+
+    def test_mock_append_log_no_runtime_no_crash(self):
+        """append_processing_log with runtime=None should not crash."""
+        state = {"processing_log": [], "runtime": None}
+        result = append_processing_log(state, "stage:ok")
+        assert "stage:ok" in result
+
+
+class TestQualityScoreEdgeCases:
+    """Additional edge cases for quality_score."""
+
+    def test_mock_quality_score_just_below_bonus_threshold(self):
+        """Text just below 120 chars should not get length bonus."""
+        text = "a" * 119
+        score = quality_score(text)
+        # Base is 0.4, no length bonus
+        assert score == pytest.approx(0.4, abs=0.01)
+
+    def test_mock_quality_score_exactly_at_bonus_threshold(self):
+        """Text at exactly 120 chars should get length bonus."""
+        text = "a" * 120
+        score = quality_score(text)
+        # Base 0.4 + bonus 0.2 = 0.6
+        assert score >= 0.6

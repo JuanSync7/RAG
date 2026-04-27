@@ -49,7 +49,7 @@ class _FakeRedisModule:
     def __init__(self, client):
         self._client = client
 
-    def from_url(self, _url, decode_responses=True):
+    def from_url(self, _url, decode_responses=True, **_kwargs):
         assert decode_responses is True
         return self._client
 
@@ -247,3 +247,131 @@ def test_conversation_id_isolation(monkeypatch):
 
     assert len(turns_a) == 1 and turns_a[0].content == "Only in A"
     assert len(turns_b) == 1 and turns_b[0].content == "Only in B"
+
+
+# ---------------------------------------------------------------------------
+# Retrieved / ignored doc-list lifecycle (S1)
+# ---------------------------------------------------------------------------
+
+def _ensure(provider):
+    return provider.ensure_conversation(
+        tenant_id="t1", subject="u1", project_id="p1", title="Doc-state test"
+    ).conversation_id
+
+
+def test_mark_retrieved_seeds_relevant_list(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    cid = _ensure(provider)
+
+    meta = provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["doc1", "doc2", "doc3"],
+    )
+    assert meta.relevant_doc_ids == ["doc1", "doc2", "doc3"]
+    assert meta.ignored_doc_ids == []
+
+
+def test_mark_retrieved_is_idempotent_and_skips_already_ignored(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    cid = _ensure(provider)
+
+    provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["doc1", "doc2"],
+    )
+    provider.move_to_ignored(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_id="doc2",
+    )
+    # Re-mark with overlapping ids — doc2 must NOT come back to relevant.
+    meta = provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["doc1", "doc2", "doc3"],
+    )
+    assert meta.relevant_doc_ids == ["doc1", "doc3"]
+    assert meta.ignored_doc_ids == ["doc2"]
+
+
+def test_move_to_ignored_and_restore(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    cid = _ensure(provider)
+
+    provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["doc1", "doc2"],
+    )
+    meta = provider.move_to_ignored(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_id="doc1",
+    )
+    assert meta.relevant_doc_ids == ["doc2"]
+    assert meta.ignored_doc_ids == ["doc1"]
+
+    meta = provider.restore_to_relevant(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_id="doc1",
+    )
+    assert "doc1" in meta.relevant_doc_ids
+    assert "doc1" not in meta.ignored_doc_ids
+
+
+def test_get_seen_doc_ids_returns_union(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    cid = _ensure(provider)
+
+    provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["a", "b", "c"],
+    )
+    provider.move_to_ignored(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_id="b",
+    )
+    seen = provider.get_seen_doc_ids(
+        tenant_id="t1", subject="u1", project_id="p1", conversation_id=cid,
+    )
+    assert set(seen) == {"a", "b", "c"}
+
+
+def test_get_seen_doc_ids_empty_for_unknown_conversation(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    seen = provider.get_seen_doc_ids(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id="conv_never_created",
+    )
+    assert seen == []
+
+
+def test_doc_state_persists_across_meta_reads(monkeypatch):
+    """Round-trip via ensure_conversation: state stored in meta hash decodes back."""
+    provider = _make_provider(monkeypatch)
+    cid = _ensure(provider)
+
+    provider.mark_retrieved(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_ids=["x", "y"],
+    )
+    provider.move_to_ignored(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid, doc_id="y",
+    )
+    # Re-fetch via ensure_conversation — should rebuild from the hash.
+    reloaded = provider.ensure_conversation(
+        tenant_id="t1", subject="u1", project_id="p1",
+        conversation_id=cid,
+    )
+    assert reloaded.relevant_doc_ids == ["x"]
+    assert reloaded.ignored_doc_ids == ["y"]
+
+
+def test_noop_provider_doc_state_methods(monkeypatch):
+    provider = NoopConversationMemory()
+    meta = provider.mark_retrieved(
+        tenant_id="t", subject="s", project_id=None,
+        conversation_id="conv_noop", doc_ids=["a"],
+    )
+    assert meta.relevant_doc_ids == []
+    assert meta.ignored_doc_ids == []
+    assert provider.get_seen_doc_ids(
+        tenant_id="t", subject="s", project_id=None, conversation_id="conv_noop",
+    ) == []

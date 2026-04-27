@@ -86,21 +86,31 @@
   </aside>
 
   <main class="main">
+    <div class="view-tabs" id="viewTabs">
+      <button class="view-tab active" data-view="chat"><span class="view-tab-icon">&#128172;</span><span>Chat</span></button>
+      <button class="view-tab" data-view="ingest"><span class="view-tab-icon">&#128229;</span><span>Ingest</span></button>
+      <button class="view-tab" data-view="retrieval"><span class="view-tab-icon">&#128269;</span><span>Retrieval</span></button>
+    </div>
+
+    <section class="view-pane active" id="view-chat">
     <header class="chat-header">
       <button class="toggle-btn" id="toggleBtn">&#9776;</button>
       <span class="conv-title" id="convTitle">RagWeave</span>
-      <div class="model-badge"><span class="model-dot"></span>Claude Sonnet 4.5</div>
+      <div class="model-badge" id="modelBadge"><span class="model-dot"></span><span id="modelBadgeText">Loading…</span></div>
       <div class="ctx-chip" id="ctxChip">
         <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
         <span id="ctxPct">—</span>
         <div class="ctx-tooltip" id="ctxTooltip">
           <div class="ctx-tt-title">Context window</div>
-          <div class="ctx-tt-row"><span class="ctx-tt-label">System prompt</span><span class="ctx-tt-val" id="ttSystem">—</span></div>
-          <div class="ctx-tt-row"><span class="ctx-tt-label">Memory / history</span><span class="ctx-tt-val" id="ttMemory">—</span></div>
-          <div class="ctx-tt-row"><span class="ctx-tt-label">Retrieved chunks</span><span class="ctx-tt-val" id="ttChunks">—</span></div>
-          <div class="ctx-tt-row"><span class="ctx-tt-label">Query</span><span class="ctx-tt-val" id="ttQuery">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Model</span><span class="ctx-tt-val" id="ttModel">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Used</span><span class="ctx-tt-val" id="ttUsed">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Reserved (output)</span><span class="ctx-tt-val" id="ttReserved">—</span></div>
           <hr class="ctx-tt-divider">
-          <div class="ctx-tt-row"><span class="ctx-tt-label"><strong>Total used</strong></span><span class="ctx-tt-val" id="ttTotal">—</span></div>
+          <div class="ctx-tt-subtitle">Last turn</div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Prompt</span><span class="ctx-tt-val" id="ttPrompt">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Completion</span><span class="ctx-tt-val" id="ttCompletion">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Speed</span><span class="ctx-tt-val" id="ttSpeed">—</span></div>
+          <div class="ctx-tt-row" id="ttCostRow" style="display:none"><span class="ctx-tt-label">Cost</span><span class="ctx-tt-val" id="ttCost">—</span></div>
           <button class="ctx-tt-compact" id="ctxCompactBtn" style="display:none">&#9889; Compact conversation</button>
         </div>
       </div>
@@ -179,11 +189,155 @@
           <button class="toolbar-btn" id="cmdBtn" title="Commands"><strong>/</strong></button>
           <div class="toolbar-divider"></div>
         </div>
-        <textarea class="input-textarea" id="inputArea" placeholder="Message RagWeave…" rows="1"></textarea>
+        <textarea class="input-textarea" id="inputArea" placeholder="Message RagWeave…" rows="2"></textarea>
         <button class="send-btn" id="sendBtn">&#9650;</button>
       </div>
-      <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
+      <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; Esc&nbsp;Esc&nbsp;to&nbsp;clear &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
     </div>
+    </section>
+
+    <section class="view-pane" id="view-ingest">
+      <header class="ingest-header">
+        <span class="ingest-title">&#128229; Ingest documents</span>
+        <span class="ingest-sub">Upload files to add them to your knowledge base.</span>
+      </header>
+
+      <div class="ingest-body">
+        <div class="ingest-main">
+          <div class="ingest-mode-tabs" role="tablist">
+            <button class="ingest-mode-tab active" data-mode="files">Files</button>
+            <button class="ingest-mode-tab" data-mode="url">URL</button>
+            <button class="ingest-mode-tab" data-mode="directory">Directory</button>
+          </div>
+
+          <div class="ingest-mode-pane active" data-mode-pane="files">
+            <div class="dropzone" id="ingestDropzone">
+              <input type="file" id="ingestFileInput" multiple accept=".pdf,.docx,.txt,.md,.html,.htm,.pptx,.xlsx" style="display:none">
+              <div class="dropzone-icon">&#128206;</div>
+              <div class="dropzone-title">Drop files here or click to browse</div>
+              <div class="dropzone-sub">PDF, DOCX, PPTX, XLSX, TXT, MD, HTML</div>
+            </div>
+
+            <div class="ingest-selected" id="ingestSelected" style="display:none">
+              <div class="ingest-selected-head">
+                <span id="ingestSelectedCount">0 files selected</span>
+                <button class="ingest-clear-btn" id="ingestClearBtn">Clear</button>
+              </div>
+              <div class="ingest-selected-list" id="ingestSelectedList"></div>
+            </div>
+
+            <div class="ingest-submit-row">
+              <button class="ingest-submit-btn" id="ingestSubmitBtn" disabled>Start ingestion</button>
+              <span class="ingest-status" id="ingestSubmitStatus"></span>
+            </div>
+          </div>
+
+          <div class="ingest-mode-pane" data-mode-pane="url">
+            <label class="ingest-field-label" for="ingestUrlInput">Document URL</label>
+            <input class="ingest-input ingest-input-wide" id="ingestUrlInput" type="url" placeholder="https://example.com/paper.pdf">
+            <div class="ingest-field-sub">RagWeave fetches the URL, then ingests the response body as if you uploaded it.</div>
+            <div class="ingest-submit-row">
+              <button class="ingest-submit-btn" id="ingestUrlBtn" disabled>Fetch and ingest</button>
+              <span class="ingest-status" id="ingestUrlStatus"></span>
+            </div>
+          </div>
+
+          <div class="ingest-mode-pane" data-mode-pane="directory">
+            <label class="ingest-field-label" for="ingestDirInput">Server-side directory path</label>
+            <input class="ingest-input ingest-input-wide" id="ingestDirInput" type="text" placeholder="/data/docs">
+            <div class="ingest-field-sub">Path is read on the ingestion host. Use <strong>Check</strong> first to confirm RagWeave can reach it.</div>
+            <div class="ingest-submit-row">
+              <button class="ingest-secondary-btn" id="ingestDirCheckBtn">Check</button>
+              <button class="ingest-submit-btn" id="ingestDirBtn" disabled>Ingest directory</button>
+              <span class="ingest-status" id="ingestDirStatus"></span>
+            </div>
+            <div class="ingest-dir-result" id="ingestDirResult" style="display:none"></div>
+          </div>
+
+          <div class="ingest-jobs-section">
+            <div class="ingest-jobs-title">Active &amp; recent jobs</div>
+            <div class="ingest-jobs-list" id="ingestJobsList">
+              <div class="ingest-jobs-empty">No jobs yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view-pane" id="view-retrieval">
+      <header class="retrieval-header">
+        <span class="retrieval-title">&#128269; Retrieval</span>
+        <span class="retrieval-sub">Find documents from your knowledge base.</span>
+      </header>
+
+      <div class="retrieval-body">
+        <div class="retrieval-main">
+
+          <!-- Active conversation indicator -->
+          <div class="retrieval-conv-row">
+            <span class="retrieval-conv-pill" id="retrievalConvPill" style="display:none">
+              <span class="retrieval-conv-dot"></span>
+              <span class="retrieval-conv-prefix">Filtering for: </span>
+              <span class="retrieval-conv-label"></span>
+            </span>
+            <span class="retrieval-no-conv" id="retrievalNoConvNote">
+              No conversation selected — results are not tied to a chat yet.
+            </span>
+          </div>
+
+          <!-- Query area -->
+          <div class="retrieval-query-wrap">
+            <textarea
+              class="retrieval-query-input"
+              id="retrievalQueryInput"
+              placeholder="What are you looking for?"
+              rows="2"
+            ></textarea>
+
+            <div class="retrieval-controls">
+              <div class="retrieval-mode-toggle" role="group" aria-label="Search mode">
+                <button class="retrieval-mode-btn active" id="retrievalModeSmart" title="Smart — the query rewriter may expand or rephrase your search">Smart</button>
+                <button class="retrieval-mode-btn" id="retrievalModeExact" title="Exact — runs your query as-is, no rewriting">Exact</button>
+              </div>
+
+              <label class="retrieval-topn-label">
+                Show top
+                <input
+                  class="retrieval-topn-input"
+                  id="retrievalTopN"
+                  type="number"
+                  value="10"
+                  min="1"
+                  max="50"
+                  aria-label="Number of results"
+                >
+              </label>
+
+              <button class="retrieval-find-btn" id="retrievalFindBtn">Find documents</button>
+            </div>
+          </div>
+
+          <!-- Status line -->
+          <div class="retrieval-status" id="retrievalStatus"></div>
+
+          <!-- Results list -->
+          <div class="retrieval-results" id="retrievalResultsList"></div>
+          <div class="retrieval-empty" id="retrievalEmptyState">No results yet — try a query above.</div>
+
+          <!-- Hidden documents accordion -->
+          <div class="retrieval-hidden-section" id="retrievalHiddenSection" style="display:none">
+            <details>
+              <summary class="retrieval-hidden-summary">
+                Hidden documents (<span id="retrievalHiddenCount">0</span>)
+              </summary>
+              <div class="retrieval-hidden-list" id="retrievalHiddenList"></div>
+            </details>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -283,14 +437,6 @@
       </div>
     </div>
 
-    <div>
-      <div class="settings-section-title">API Configuration</div>
-      <div class="settings-sub" style="margin-bottom:6px">Leave endpoint blank to use this server</div>
-      <input type="text" class="settings-input" id="apiEndpoint" placeholder="https://api.example.com (optional)">
-      <div class="settings-sub" style="margin:8px 0 4px">API Token</div>
-      <input type="password" class="settings-input" id="apiToken" placeholder="Bearer token or API key">
-    </div>
-
   </div>
 
   <div class="settings-footer">
@@ -300,6 +446,42 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Conversation right-click bubble menu -->
+<div class="conv-ctx-menu" id="convCtxMenu" role="menu" aria-hidden="true">
+  <button type="button" data-action="rename">
+    <span class="conv-ctx-menu-icon">&#9998;</span>Rename conversation
+  </button>
+  <button type="button" data-action="delete" class="danger">
+    <span class="conv-ctx-menu-icon">&#128465;</span>Delete conversation
+  </button>
+</div>
+
+<!-- Feedback modal -->
+<div class="modal-overlay" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-title" id="feedbackModalTitle">Give feedback</div>
+    <div class="modal-subtitle">Please provide feedback (optional)</div>
+    <textarea class="modal-textarea" id="feedbackInput" rows="4" placeholder="What was helpful or unhelpful about this answer?"></textarea>
+    <div class="modal-note">Submitting this report will send the entire current conversation to RagWeave.</div>
+    <div class="modal-actions">
+      <button type="button" class="modal-btn" id="feedbackCancel">Cancel</button>
+      <button type="button" class="modal-btn primary" id="feedbackSubmit">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div class="modal-overlay" id="renameModal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-title" id="renameModalTitle">Rename conversation</div>
+    <input class="modal-input" id="renameInput" type="text" maxlength="200" placeholder="Conversation name" autocomplete="off" />
+    <div class="modal-actions">
+      <button type="button" class="modal-btn" id="renameCancel">Cancel</button>
+      <button type="button" class="modal-btn primary" id="renameSave">Save</button>
+    </div>
+  </div>
+</div>
 
 <script type="importmap">
 {

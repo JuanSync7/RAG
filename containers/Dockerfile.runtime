@@ -1,13 +1,17 @@
 # syntax=docker/dockerfile:1
-# --- Builder stage: installs ML deps with gcc available ---
+# --- Builder stage: installs deps with gcc available ---
 FROM python:3.11-slim AS builder
 
-# PIP_NO_CACHE_DIR intentionally omitted — the BuildKit cache mount below
-# persists pip's wheel cache across rebuilds (critical for torch re-downloads)
+# uv cache lives at /root/.cache/uv; the BuildKit mount below persists it
+# across rebuilds. No need to set PIP_NO_CACHE_DIR — we don't use pip.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+# uv: 10–100× faster than pip, honors pyproject.toml [tool.uv.sources] pins,
+# matches the project-wide tooling (see memory: prefer uv over pip).
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -15,8 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml /app/pyproject.toml
 COPY containers/requirements-worker.txt /app/requirements-worker.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-worker.txt \
+
+# Pre-install CPU-only torch + torchvision from the pytorch.org CPU index
+# (these are pulled in transitively by docling for its layout/table models).
+# Without this, the default PyPI index gives the CUDA-enabled wheels, which
+# ship ~2.7 GB of nvidia/* runtime libs + ~640 MB triton that never run in
+# this container (no GPU code here — embed/rerank are remote via TEI).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --prefix=/install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch torchvision
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --prefix=/install -r /app/requirements-worker.txt \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \

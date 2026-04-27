@@ -1,0 +1,25 @@
+{
+  "device_label": "gpu",
+  "cuda_available": true,
+  "device_name": "NVIDIA GeForce RTX 2060",
+  "file_count": 5,
+  "total_bytes": 244860,
+  "total_kb": 239.1,
+  "elapsed_sec": 53.821,
+  "docs_per_sec": 0.093,
+  "kb_per_sec": 4.443,
+  "processed": 5,
+  "skipped": 0,
+  "failed": 0,
+  "stored_chunks": 619,
+  "chunks_per_sec": 11.501,
+  "params": {
+    "chunk_size": 512,
+    "chunk_overlap": 50,
+    "hybrid_chunker_max_tokens": 512,
+    "semantic_chunking": false,
+    "min_chunk_chars": 40,
+    "min_quality_score": 0.45
+  },
+  "errors": []
+}

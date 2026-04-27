@@ -261,7 +261,19 @@ def _install_stub_modules() -> None:
         sys.modules["PIL"] = pil
         sys.modules["PIL.Image"] = pil_image
 
-    if "temporalio" not in sys.modules:
+    # Only stub temporalio when the real package can't be imported. Tests that
+    # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
+    # real `temporalio.worker.workflow_sandbox` submodule, which the stubs
+    # below don't provide. With temporalio pinned as a regular dependency the
+    # real package is always available, so this branch is mostly defensive.
+    _temporalio_available = "temporalio" in sys.modules
+    if not _temporalio_available:
+        try:
+            import temporalio as _real_temporalio  # noqa: F401
+            _temporalio_available = True
+        except ImportError:
+            pass
+    if not _temporalio_available:
         temporalio = types.ModuleType("temporalio")
 
         activity_mod = types.ModuleType("temporalio.activity")
@@ -298,6 +310,10 @@ def _install_stub_modules() -> None:
         service_mod = types.ModuleType("temporalio.service")
         service_mod.RPCError = type("RPCError", (Exception,), {})
 
+        exceptions_mod = types.ModuleType("temporalio.exceptions")
+        exceptions_mod.CancelledError = type("CancelledError", (Exception,), {})
+        exceptions_mod.WorkflowFailureError = type("WorkflowFailureError", (Exception,), {})
+
         api_mod = types.ModuleType("temporalio.api")
         enums_mod = types.ModuleType("temporalio.api.enums")
         enums_v1_mod = types.ModuleType("temporalio.api.enums.v1")
@@ -318,6 +334,7 @@ def _install_stub_modules() -> None:
         temporalio.client = client_mod
         temporalio.worker = worker_mod
         temporalio.service = service_mod
+        temporalio.exceptions = exceptions_mod
         temporalio.api = api_mod
         sys.modules["temporalio"] = temporalio
         sys.modules["temporalio.activity"] = activity_mod
@@ -326,6 +343,7 @@ def _install_stub_modules() -> None:
         sys.modules["temporalio.client"] = client_mod
         sys.modules["temporalio.worker"] = worker_mod
         sys.modules["temporalio.service"] = service_mod
+        sys.modules["temporalio.exceptions"] = exceptions_mod
         sys.modules["temporalio.api"] = api_mod
         sys.modules["temporalio.api.enums"] = enums_mod
         sys.modules["temporalio.api.enums.v1"] = enums_v1_mod
@@ -464,7 +482,11 @@ def _install_stub_modules() -> None:
         def connect_to_embedded(**kwargs):
             return WeaviateClient()
 
+        def connect_to_local(**kwargs):
+            return WeaviateClient()
+
         weaviate.connect_to_embedded = connect_to_embedded
+        weaviate.connect_to_local = connect_to_local
         weaviate.WeaviateClient = WeaviateClient
         sys.modules["weaviate"] = weaviate
 
@@ -600,6 +622,73 @@ def _install_stub_modules() -> None:
         prom.Histogram = _MetricBase
         prom.Summary = _MetricBase
         sys.modules["prometheus_client"] = prom
+
+    # httpx: prefer the real package if it's installed (litellm + openai depend
+    # on it internally, so stubbing over the top breaks their imports). The
+    # stub is only installed when real httpx is unavailable (minimal CI
+    # environments that skip the core deps).
+    try:
+        import httpx as _real_httpx  # noqa: F401
+        _has_real_httpx = True
+    except Exception:
+        _has_real_httpx = False
+    if not _has_real_httpx and "httpx" not in sys.modules:
+        # Shape-compatible stub for TEI (TEIEmbeddings / TEIReranker).
+        # /v1/embeddings  → {"data": [{"embedding": [...]}, ...]}
+        # /rerank         → [{"index": i, "score": s}, ...]  (sorted desc)
+        # Deterministic small vectors so tests can assert on dimensions.
+        httpx_stub = types.ModuleType("httpx")
+
+        class _StubResponse:
+            def __init__(self, payload):
+                self._payload = payload
+                self.status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._payload
+
+        class _StubClient:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            def post(self, url, *, json=None, **_kw):
+                json = json or {}
+                if "/rerank" in url:
+                    texts = json.get("texts", []) or []
+                    # TEI returns sorted desc; produce stable decreasing scores.
+                    return _StubResponse(
+                        [{"index": i, "score": 1.0 - i * 0.01} for i in range(len(texts))]
+                    )
+                # Embeddings path — accept a str or list under "input".
+                inputs = json.get("input", [])
+                if isinstance(inputs, str):
+                    inputs = [inputs]
+                return _StubResponse(
+                    {"data": [{"embedding": [0.1, 0.2, 0.3]} for _ in inputs]}
+                )
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        class _HTTPError(Exception):
+            pass
+
+        httpx_stub.Client = _StubClient
+        httpx_stub.AsyncClient = _StubClient  # close-enough for tests
+        httpx_stub.HTTPError = _HTTPError
+        httpx_stub.HTTPStatusError = _HTTPError
+        httpx_stub.RequestError = _HTTPError
+        httpx_stub.Response = _StubResponse
+        sys.modules["httpx"] = httpx_stub
 
 
 _install_stub_modules()

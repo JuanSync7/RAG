@@ -84,6 +84,13 @@ class DocumentProcessingState(TypedDict, total=False):
     """UUID v4 trace ID generated at workflow start (FR-3051). Empty string
     when absent for backward compatibility.
     """
+    raw_bytes: Optional[bytes]
+    """Pre-read file bytes supplied by the caller (e.g. ``ingest_directory``).
+    When present, ``document_ingestion_node`` uses these bytes directly and
+    skips its own disk read, eliminating the double-read that occurs when the
+    caller already read the file for an idempotency hash check.  ``None`` when
+    not supplied — the node falls back to reading from ``source_path``.
+    """
     docling_document: Optional[Any]
     """Native DoclingDocument object from Docling parse. None if Docling
     parsing was disabled or failed. Propagated to CleanDocumentStore and

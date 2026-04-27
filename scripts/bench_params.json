@@ -1,0 +1,9 @@
+{
+  "chunk_size": 512,
+  "chunk_overlap": 50,
+  "hybrid_chunker_max_tokens": 512,
+  "semantic_chunking": false,
+  "min_chunk_chars": 40,
+  "min_quality_score": 0.45,
+  "embedding_batch_size": 128
+}

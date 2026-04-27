@@ -31,6 +31,11 @@ class QueryResult:
     has_backward_reference: bool = False
     clarification_message: Optional[str] = None
     iterations: int = 0
+    # Retrieval-mode explainability — only populated when called with
+    # ``mode="retrieval"``. ``history_decision`` ∈ {"use_as_is",
+    # "partial_history", "full_history", "hard_query"}.
+    history_decision: Optional[str] = None
+    history_turns_used: int = 0
 
 
 class QueryState(TypedDict):

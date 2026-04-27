@@ -180,7 +180,7 @@ class _FakeRedisModule:
     def __init__(self, client):
         self._client = client
 
-    def from_url(self, _url, decode_responses=True):
+    def from_url(self, _url, decode_responses=True, **_kwargs):
         return self._client
 
 

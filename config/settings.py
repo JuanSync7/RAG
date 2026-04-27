@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
 # Exports (retrieval): RAG_KG_RETRIEVAL_EDGE_TYPES, RAG_KG_RETRIEVAL_PATH_PATTERNS,
 #   RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET, RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION
 # Deps: os, pathlib, logging, dotenv, json
@@ -55,6 +55,17 @@ WEAVIATE_DATA_DIR = os.environ.get(
     "RAG_WEAVIATE_DATA_DIR",
     str(PROJECT_ROOT / ".weaviate_data"),
 )
+
+# Connection mode: "embedded" runs Weaviate in-process (dev default, CI stubs
+# rely on this). "networked" connects to a shared Weaviate container.
+RAG_WEAVIATE_MODE: str = os.environ.get("RAG_WEAVIATE_MODE", "embedded").lower()
+RAG_WEAVIATE_HOST: str = os.environ.get("RAG_WEAVIATE_HOST", "localhost")
+RAG_WEAVIATE_HTTP_PORT: int = int(os.environ.get("RAG_WEAVIATE_HTTP_PORT", "8090"))
+RAG_WEAVIATE_GRPC_PORT: int = int(os.environ.get("RAG_WEAVIATE_GRPC_PORT", "50051"))
+if RAG_WEAVIATE_MODE not in ("embedded", "networked"):
+    raise ValueError(
+        f"RAG_WEAVIATE_MODE must be 'embedded' or 'networked', got {RAG_WEAVIATE_MODE!r}"
+    )
 
 # --- Hybrid Search ---
 # Alpha: 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
@@ -328,6 +339,12 @@ MEMORY_ENABLED = os.environ.get("RAG_MEMORY_ENABLED", "true").lower() in ("true"
 MEMORY_PROVIDER = os.environ.get("RAG_MEMORY_PROVIDER", "redis").strip().lower()
 MEMORY_REDIS_URL = os.environ.get("RAG_MEMORY_REDIS_URL", CACHE_REDIS_URL)
 MEMORY_REDIS_PREFIX = os.environ.get("RAG_MEMORY_REDIS_PREFIX", "rag:memory")
+# Timeout (seconds) for the connectivity ping issued when constructing the
+# Redis-backed memory provider. If the ping fails or times out, the factory
+# falls back to the no-op provider so request handlers do not 500.
+MEMORY_REDIS_CONNECT_TIMEOUT_S = float(
+    os.environ.get("RAG_MEMORY_REDIS_CONNECT_TIMEOUT_S", "1.0")
+)
 MEMORY_MAX_RECENT_TURNS = int(os.environ.get("RAG_MEMORY_MAX_RECENT_TURNS", "8"))
 MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE = int(
     os.environ.get("RAG_MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE", "1400")
@@ -488,6 +505,26 @@ RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
 ).lower() in ("true", "1", "yes")
 """If True (default), persist DoclingDocument JSON to CleanDocumentStore.
 Set to false to trade storage for compute (re-parse in Phase 2)."""
+
+RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN: bool = os.environ.get(
+    "RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), .md/.html/.rst files use Docling's HybridChunker
+(structure-aware: preserves lists, tables, and requirement blocks as atomic
+units). Set to false to fall back to the legacy LangChain char-splitter."""
+
+RAG_INGESTION_STORE_FIGURES_IN_DB: bool = os.environ.get(
+    "RAG_INGESTION_STORE_FIGURES_IN_DB", "false"
+).lower() in ("true", "1", "yes")
+"""If True, copy markdown image bytes to the configured document store
+(currently MinIO) at ingest time and record a stable ``store_key`` in chunk
+metadata so citation UIs can presign and render even if the original source
+moves. Default False — chunks carry only the relative ``src`` path; UI
+resolves against the original source location.
+
+Backend-agnostic flag — actual upload destination is whatever document store
+the pipeline is configured for. Flip on when the doc store should act as the
+canonical figure store."""
 
 # --- Ingestion Hardening: Document Parsing Abstraction (FR-3301, FR-3320) ---
 RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
@@ -708,33 +745,33 @@ RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD = float(
 )
 
 # --- Inference Backend ---
-# "local": BGE models run in-process inside the worker (default, backward-compatible).
-# "vllm":  Qwen3 models served by separate rag-vllm-* containers via LiteLLM routing.
+# "local": BGE models run in-process (dev venv path; requires the `local-embed`
+#          pyproject extra — torch + sentence-transformers + transformers).
+# "tei":   BGE models served by separate TEI containers (rag-embed / rag-rerank)
+#          via direct HTTP. Compose default. Worker image does NOT ship torch.
 INFERENCE_BACKEND: str = os.environ.get("RAG_INFERENCE_BACKEND", "local").strip().lower()
-_VALID_INFERENCE_BACKENDS = {"local", "vllm"}
+_VALID_INFERENCE_BACKENDS = {"local", "tei"}
 if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     raise ValueError(
         f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; "
         f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
     )
 
-# vLLM service URLs — used when INFERENCE_BACKEND="vllm".
-# Inside the compose network these resolve to rag-vllm-embed / rag-vllm-rerank.
-VLLM_EMBED_URL: str = os.environ.get("RAG_VLLM_EMBED_URL", "http://rag-vllm-embed:8001")
-VLLM_RERANK_URL: str = os.environ.get("RAG_VLLM_RERANK_URL", "http://rag-vllm-rerank:8002")
+# TEI service URLs — used when INFERENCE_BACKEND="tei".
+# Default routes through rag-nginx so replicas can be scaled horizontally
+# (`docker compose up -d --scale rag-embed=N`). Override to direct service DNS
+# (http://rag-embed:80) for single-replica dev or to bypass the LB.
+TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-nginx:8081")
+TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-nginx:8082")
 
-# Model IDs loaded by the vLLM containers (HuggingFace repo IDs).
-# CPU default: 0.6B models. GPU recommended: 4B models (see .env.example).
-VLLM_EMBEDDING_MODEL: str = os.environ.get(
-    "RAG_VLLM_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"
-)
-VLLM_RERANKER_MODEL: str = os.environ.get(
-    "RAG_VLLM_RERANKER_MODEL", "Qwen/Qwen3-Reranker-0.6B"
-)
+# Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
+# mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.
+TEI_EMBEDDING_MODEL: str = os.environ.get("RAG_TEI_EMBEDDING_MODEL", "BAAI/bge-m3")
+TEI_RERANKER_MODEL: str = os.environ.get("RAG_TEI_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
 # Timeout for HTTP inference calls (embed + rerank). Should exceed the
 # model's p99 latency, including GPU warm-up on first call.
-VLLM_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_VLLM_TIMEOUT_SECONDS", "30"))
+TEI_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_TEI_TIMEOUT_SECONDS", "30"))
 
 # --- Reranker ---
 RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))

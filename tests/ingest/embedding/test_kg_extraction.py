@@ -16,7 +16,10 @@ from src.ingest.embedding.nodes.knowledge_graph_extraction import knowledge_grap
 # Helpers
 # ---------------------------------------------------------------------------
 
-PATCH_TARGET = "src.ingest.embedding.nodes.knowledge_graph_extraction.EntityExtractor"
+# Patch the module-level singleton instance, not the class constructor.
+# EntityExtractor is now instantiated once at module load; tests patch _EXTRACTOR
+# directly to control extract_entities / extract_relations return values.
+EXTRACTOR_PATH = "src.ingest.embedding.nodes.knowledge_graph_extraction._EXTRACTOR"
 
 
 def _make_chunk(text: str) -> ProcessedChunk:
@@ -50,17 +53,17 @@ def test_disabled_returns_empty_triples():
     LangGraph keeps the original empty kg_triples via state merge."""
     chunks = [_make_chunk("Alice works at Acme Corp.")]
     state = _make_state(chunks=chunks, enabled=False)
-    with patch(PATCH_TARGET) as MockExtractor:
-        result = knowledge_graph_extraction_node(state)
+    result = knowledge_graph_extraction_node(state)
     assert result.get("kg_triples", []) == []
 
 
-def test_disabled_does_not_instantiate_extractor():
-    """EntityExtractor must never be constructed when the feature is disabled."""
+def test_disabled_does_not_use_extractor():
+    """_EXTRACTOR methods must never be called when the feature is disabled."""
     state = _make_state(chunks=[_make_chunk("text")], enabled=False)
-    with patch(PATCH_TARGET) as MockExtractor:
+    with patch(EXTRACTOR_PATH) as mock_extractor:
         knowledge_graph_extraction_node(state)
-    MockExtractor.assert_not_called()
+    mock_extractor.extract_entities.assert_not_called()
+    mock_extractor.extract_relations.assert_not_called()
 
 
 def test_single_chunk_produces_triples():
@@ -71,10 +74,9 @@ def test_single_chunk_produces_triples():
     chunk = _make_chunk("Alice works at Acme.")
     relation = ("Alice", "works_at", "Acme")
     state = _make_state(chunks=[chunk])
-    with patch(PATCH_TARGET) as MockExtractor:
-        instance = MockExtractor.return_value
-        instance.extract_entities.return_value = ["Alice", "Acme"]
-        instance.extract_relations.return_value = [relation]
+    with patch(EXTRACTOR_PATH) as mock_extractor:
+        mock_extractor.extract_entities.return_value = ["Alice", "Acme"]
+        mock_extractor.extract_relations.return_value = [relation]
         result = knowledge_graph_extraction_node(state)
     # Result contains dicts built from the (subject, predicate, object) tuple
     assert any(
@@ -92,10 +94,9 @@ def test_multiple_chunks_triples_collected():
     rel_a = ("Alice", "knows", "Bob")
     rel_b = ("Bob", "works_at", "Acme")
     state = _make_state(chunks=chunks)
-    with patch(PATCH_TARGET) as MockExtractor:
-        instance = MockExtractor.return_value
-        instance.extract_entities.return_value = []
-        instance.extract_relations.side_effect = [[rel_a], [rel_b]]
+    with patch(EXTRACTOR_PATH) as mock_extractor:
+        mock_extractor.extract_entities.return_value = []
+        mock_extractor.extract_relations.side_effect = [[rel_a], [rel_b]]
         result = knowledge_graph_extraction_node(state)
     subjects = [t.get("subject") for t in result["kg_triples"]]
     assert "Alice" in subjects
@@ -105,7 +106,7 @@ def test_multiple_chunks_triples_collected():
 def test_empty_chunks_returns_empty_triples():
     """An empty chunk list produces no triples."""
     state = _make_state(chunks=[], enabled=True)
-    with patch(PATCH_TARGET) as MockExtractor:
+    with patch(EXTRACTOR_PATH) as mock_extractor:
         result = knowledge_graph_extraction_node(state)
     assert result["kg_triples"] == []
 
@@ -114,9 +115,8 @@ def test_extractor_error_appended_not_raised():
     """A RuntimeError from EntityExtractor is caught and appended to state errors."""
     chunk = _make_chunk("Some text that triggers an error.")
     state = _make_state(chunks=[chunk])
-    with patch(PATCH_TARGET) as MockExtractor:
-        instance = MockExtractor.return_value
-        instance.extract_entities.side_effect = RuntimeError("extraction failed")
+    with patch(EXTRACTOR_PATH) as mock_extractor:
+        mock_extractor.extract_entities.side_effect = RuntimeError("extraction failed")
         result = knowledge_graph_extraction_node(state)
     assert len(result["errors"]) >= 1
     assert any("extraction failed" in str(e) or "extraction" in str(e).lower()
@@ -138,11 +138,10 @@ def test_extractor_error_processing_continues():
     ]
     rel_1 = ("Alice", "knows", "Bob")
     state = _make_state(chunks=chunks)
-    with patch(PATCH_TARGET) as MockExtractor:
-        instance = MockExtractor.return_value
-        instance.extract_entities.return_value = []
+    with patch(EXTRACTOR_PATH) as mock_extractor:
+        mock_extractor.extract_entities.return_value = []
         # First chunk succeeds, second raises (loop stops, third not reached)
-        instance.extract_relations.side_effect = [
+        mock_extractor.extract_relations.side_effect = [
             [rel_1],
             RuntimeError("boom"),
             [],

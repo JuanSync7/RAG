@@ -1,0 +1,14 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	cef51ae	—	6/62	keep	baseline — no changes, initial score (rebased to 62-criteria scorer)
+002	2c8ba53	Adding consistent rag.ingest.* logger naming to all 14 nodes should fix logger_naming criteria	20/62	keep	confirmed — all 14 targeted logger_naming criteria now pass, +14 gain
+003	346b60d	Adding INFO-level stage logging to 15 nodes should fix info_logging criteria	35/62	keep	confirmed — all 15 info_logging criteria pass, +15 gain; one test fix needed for mock state missing source_name
+004	9418461	Adding DEBUG-level timing to 16 nodes should fix debug_timing criteria	51/62	keep	confirmed — all 16 debug_timing criteria pass, +16 gain
+005	760410c	Fix LLM failure logging, streaming SHA-256, and unique logger names to reach robustness ceiling	54/62	keep	confirmed — all 3 remaining robustness criteria pass
+006	e63df42	Eliminate double file read, reduce retry delay, early-exit paragraph match, reduce manifest writes	58/62	keep	4 speed criteria fixed: single file read, retry delay 0.3s, paragraph early exit, manifest writes reduced
+007	278a375	Fix metadata state contract, remove dead alias, deprecate unused parameter	61/62	keep	3 code quality criteria fixed: metadata returns chunks, _ollama_json removed, docling_document deprecated
+008	ed45df3	Moving EntityExtractor to module-level singleton to avoid per-document construction	62/62	keep	confirmed — last speed criterion passes, EntityExtractor now module-level singleton
+---	---	scorer expanded from 62 to 77 criteria (phase 2: +8 robustness, +3 speed, +4 quality)	---	---	rebased score: 66/77
+009	d48b3d9	Adding error-path logging, fixing timing consistency, upgrading log levels should fix 6 robustness criteria	72/77	keep	6 robustness criteria fixed: 5 error-path logs, visual monotonic, quality score WARNING, multimodal error log
+010	1ca85be	Removing per-document ensure_collection/ensure_bucket and str.translate should fix 3 speed criteria	74/77	keep	3 speed criteria fixed: ensure_collection, ensure_bucket, str.translate; 3 test fixes needed
+011	5a14da9	Fixing hardcoded collection, type annotations, error returns, encoding dedup should fix 4 quality criteria	77/77	keep	4 quality criteria fixed: hardcoded collection uses config constant, list[str] typing, {**state} removed from error returns, encoding dedup via decode_with_fallbacks
+

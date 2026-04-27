@@ -26,6 +26,7 @@ def run_document_processing(
     connector: str,
     source_version: str,
     trace_id: str = "",
+    raw_bytes: bytes | None = None,
 ) -> DocumentProcessingState:
     """Run the Phase 1 Document Processing pipeline for a single source file.
 
@@ -44,6 +45,10 @@ def run_document_processing(
         source_version: Source version string (mtime nanoseconds).
         trace_id: UUID v4 trace ID for this ingestion run (FR-3051). Empty
             string when not provided (backward-compatible default).
+        raw_bytes: Pre-read file bytes from the caller. When provided,
+            ``document_ingestion_node`` uses these bytes directly and skips
+            the disk read, eliminating the double-read that occurs when the
+            caller already read the file for an idempotency hash check.
 
     Returns:
         Final ``DocumentProcessingState`` after all nodes have run.
@@ -66,5 +71,6 @@ def run_document_processing(
         "errors": [],
         "processing_log": [],
         "trace_id": trace_id,
+        "raw_bytes": raw_bytes,
     }
     return _GRAPH.invoke(initial_state)

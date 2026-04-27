@@ -30,6 +30,7 @@ all remaining chunks through unchanged.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from src.ingest.common import append_processing_log
@@ -65,6 +66,7 @@ def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Partial state update with deduplicated chunks, merge report,
         dedup stats, and updated processing log.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     chunks = state["chunks"]
 
@@ -175,6 +177,8 @@ def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     }
 
     log_tag = "cross_document_dedup:degraded" if degraded else "cross_document_dedup:ok"
+    logger.info("cross_document_dedup complete: source=%s", state.get("source_name", ""))
+    logger.debug("cross_document_dedup_node completed in %.3fs", time.monotonic() - t0)
     return {
         "chunks": novel_chunks,
         "dedup_merge_report": merge_report,

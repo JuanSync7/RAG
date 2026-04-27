@@ -20,9 +20,6 @@ When making changes — especially to deps, imports, or containers — run these
 | `make container-dep-check` | `pyproject.toml` out of sync with `containers/requirements-*.txt` | After editing requirements files |
 | `make container-probe` | Worker import failures inside the built `rag-api` image | After rebuilding `rag-api` |
 | `make container-probe-worker` | Worker import failures inside the built `rag-worker` image | After rebuilding `rag-worker` |
-| `make container-probe-vllm` | vLLM embed + rerank container health | After `--profile inference up` or `make restart-vllm` |
-| `make restart-vllm` | Restart `rag-vllm-embed` + `rag-vllm-rerank` | After changing `RAG_VLLM_*` config |
-| `make vllm-pull-models` | Pre-warm Qwen3 model caches on first use | First-time vLLM inference setup |
 | `make test` | Full pytest suite | Before committing or after functional changes |
 | `make precommit-check` | L1+L2+L3+L4+TypeScript (tracked files only) | Before every commit |
 
@@ -45,7 +42,7 @@ When making changes — especially to deps, imports, or containers — run these
 | --- | --- |
 | `compose.sh` | Docker/Podman compose wrapper with auto-runtime detection. **Use this instead of `docker-compose` directly.** Reads `docker-compose.yml` at repo root. |
 | `container-runtime.sh` | Detects and exports the active container runtime (`docker` or `podman`). Sourced by `compose.sh`. |
-| `restart_stack.sh` | Stops and restarts the compose stack services. |
+| `stack.sh` | Stack control: status table + per-service start/stop/restart/logs + full up/down. Run `./scripts/stack.sh` for an interactive menu, or `stack.sh status\|start <svc>\|stop <svc>\|up\|down\|ui`. CLI companion to Dozzle (web UI at http://localhost:9999, always-on, start/stop buttons enabled). |
 
 ## TLS / Certificates
 
@@ -81,7 +78,6 @@ When making changes — especially to deps, imports, or containers — run these
 | --- | --- |
 | `check_container_deps.py` | Verifies `containers/requirements-*.txt` stay in sync with `pyproject.toml`. Backing script for `make container-dep-check`. |
 | `import_check_tracked.py` | Checks internal imports for git-tracked files only. Backing script for `make import-check-tracked`. |
-| `ollama_host_proxy.py` | Proxy that forwards Ollama requests from containers to the host Ollama service (avoids `host.docker.internal` config). |
 | `warmup_docling_models.py` | Pre-downloads Docling layout and TableFormer models before ingestion runs. |
 | `temporal_worker.py` | Convenience script to start a Temporal worker (alternative to `python -m server.worker`). |
 | `format_spec_fr_blocks.py` | Developer utility: normalizes FR block formatting in spec Markdown documents. |
