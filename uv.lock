@@ -5690,7 +5690,7 @@ requires-dist = [
     { name = "redis" },
     { name = "sentence-transformers", marker = "extra == 'local-embed'" },
     { name = "spacy", marker = "extra == 'pii'" },
-    { name = "temporalio" },
+    { name = "temporalio", specifier = ">=1.23,<2" },
     { name = "torch", marker = "extra == 'local-embed'", index = "https://download.pytorch.org/whl/cu124" },
     { name = "transformers", marker = "extra == 'local-embed'" },
     { name = "tree-sitter", marker = "extra == 'kg'" },

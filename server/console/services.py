@@ -1,6 +1,6 @@
 # @summary
 # Shared console service helpers for UI serving, static asset resolution, log snapshots, source previews, and rendering.
-# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html
+# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html, read_clean_document_from_minio
 # Deps: config.settings, server.schemas, fastapi
 # @end-summary
 """Console service helpers."""
@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import deque
 from html import escape
 from pathlib import Path
@@ -15,7 +16,7 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException
 
-from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL
+from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL, PROJECT_ROOT
 from server.schemas import ConsoleLogsResponse
 
 logger = logging.getLogger(__name__)
@@ -113,8 +114,33 @@ def tail_log_lines(lines: int = 120) -> ConsoleLogsResponse:
     return ConsoleLogsResponse(files=found_files, lines=list(out_lines))
 
 
+_BINARY_SOURCE_EXTS = {".docx", ".pptx", ".xlsx", ".pdf", ".doc", ".ppt", ".xls"}
+
+
+def _allowed_source_roots() -> list[Path]:
+    """Roots under which the console may read source documents.
+
+    Defaults to ``DOCUMENTS_DIR``. Extra colon-separated roots may be added
+    via the ``RAG_CONSOLE_SOURCE_ROOTS`` env var — required for the
+    dev-against-prod-stack workflow where chunks reference the worker's
+    clone path (e.g., ``/home/.../RagWeave/docs``) rather than the frontend
+    project's ``documents/`` directory.
+    """
+    roots: list[Path] = [DOCUMENTS_DIR.resolve()]
+    extra = os.environ.get("RAG_CONSOLE_SOURCE_ROOTS", "")
+    for entry in extra.split(":"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            roots.append(Path(entry).expanduser().resolve())
+        except Exception:
+            logger.warning("invalid_console_source_root entry=%r", entry)
+    return roots
+
+
 def resolve_console_source_path(source: str | None, source_uri: str | None) -> Path:
-    """Resolve console source reference to a local file under DOCUMENTS_DIR."""
+    """Resolve console source reference to a local file under an allowed root."""
     if source_uri:
         parsed = urlparse(source_uri)
         if parsed.scheme and parsed.scheme != "file":
@@ -128,13 +154,22 @@ def resolve_console_source_path(source: str | None, source_uri: str | None) -> P
     try:
         resolved = candidate.resolve()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid source path") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Invalid source path: {candidate}"
+        ) from exc
 
-    documents_root = DOCUMENTS_DIR.resolve()
-    if not str(resolved).startswith(str(documents_root)):
-        raise HTTPException(status_code=400, detail="Invalid source path")
+    roots = _allowed_source_roots()
+    if not any(str(resolved).startswith(str(root)) for root in roots):
+        roots_str = ", ".join(str(r) for r in roots)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Source path {resolved} is outside allowed roots ({roots_str}). "
+                "Set RAG_CONSOLE_SOURCE_ROOTS to allow additional directories."
+            ),
+        )
     if not resolved.exists() or not resolved.is_file():
-        raise HTTPException(status_code=404, detail="Source document not found")
+        raise HTTPException(status_code=404, detail=f"Source document not found: {resolved}")
     return resolved
 
 
@@ -185,6 +220,50 @@ def build_source_preview_payload(
     }
 
 
+def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
+    """Read clean markdown + metadata from MinIO clean store by source_key.
+
+    Returns:
+        (markdown_text, metadata_dict)
+
+    Raises:
+        HTTPException(404) if MinIO is unreachable or the document is missing.
+    """
+    try:
+        from src.db.minio import create_client
+        from src.ingest.common.minio_clean_store import MinioCleanStore
+        from config.settings import MINIO_BUCKET
+    except Exception as exc:
+        logger.warning("minio_clean_store_import_failed error=%s", exc)
+        raise HTTPException(status_code=404, detail="Clean document store unavailable") from exc
+
+    try:
+        client = create_client()
+        store = MinioCleanStore(client, MINIO_BUCKET)
+        if not store.exists(source_key):
+            raise HTTPException(status_code=404, detail="Clean document not found in MinIO")
+        text, meta = store.read(source_key)
+        return text, meta
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("minio_clean_store_read_failed source_key=%s error=%s", source_key, exc)
+        raise HTTPException(status_code=404, detail="Failed to read clean document") from exc
+
+
+def _render_markdown_to_html(md_text: str) -> str:
+    """Render markdown to sanitized HTML using markdown-it-py.
+
+    Falls back to escaped <pre> on import failure.
+    """
+    try:
+        from markdown_it import MarkdownIt
+    except Exception:
+        return f"<pre>{escape(md_text)}</pre>"
+    md = MarkdownIt("commonmark", {"html": False, "linkify": True, "breaks": True}).enable("table")
+    return md.render(md_text)
+
+
 def render_source_document_html(
     *,
     target: Path,
@@ -192,8 +271,17 @@ def render_source_document_html(
     start: int | None,
     end: int | None,
     chunk: int | None,
+    is_markdown: bool = False,
+    title: str | None = None,
+    chunk_text: str | None = None,
 ) -> str:
-    """Render HTML document with optional highlighted source range."""
+    """Render HTML document with optional highlighted source range.
+
+    When ``is_markdown`` is True, the document is rendered as parsed markdown
+    (e.g., the clean markdown from MinIO). The cited [start..end] range is
+    shown as a quoted excerpt panel above the rendered body, which avoids
+    breaking markdown structure with raw <mark> insertion.
+    """
     total_chars = len(text)
     safe_start = 0
     safe_end = 0
@@ -202,32 +290,70 @@ def render_source_document_html(
         safe_start = max(0, min(start, total_chars))
         safe_end = max(safe_start, min(end, total_chars))
 
-    if has_range:
+    excerpt_html = ""
+    # Prefer the explicit chunk_text from retrieval — guarantees parity with the
+    # citation card. Fall back to slicing the document by offsets.
+    chosen = (chunk_text or "").strip()
+    if not chosen and has_range:
+        chosen = text[safe_start:safe_end].strip()
+    if chosen:
+        rendered = _render_markdown_to_html(chosen) if is_markdown else f"<pre>{escape(chosen)}</pre>"
+        excerpt_html = f"<div class='excerpt-label'>Cited chunk</div><blockquote class='excerpt'>{rendered}</blockquote>"
+
+    if is_markdown:
+        body = _render_markdown_to_html(text)
+        body_class = "doc"
+    elif has_range:
         before = escape(text[:safe_start])
         highlighted = escape(text[safe_start:safe_end]) or "&nbsp;"
         after = escape(text[safe_end:])
         body = f"{before}<mark>{highlighted}</mark>{after}"
+        body_class = "mono"
     else:
         body = escape(text)
+        body_class = "mono"
 
+    display_name = title or target.name
     chunk_label = f"Chunk {chunk}" if chunk is not None and chunk > 0 else "Document View"
     range_label = f"chars {safe_start}..{safe_end}" if has_range else "no highlight range provided"
+    source_label = "MinIO clean store" if is_markdown else str(target)
     return (
         "<!doctype html><html><head><meta charset='utf-8' />"
-        f"<title>{escape(target.name)} - {escape(chunk_label)}</title>"
+        f"<title>{escape(display_name)} - {escape(chunk_label)}</title>"
         "<style>"
-        "body{font-family:ui-sans-serif,system-ui;background:#0f1115;color:#e7ecf3;margin:0;padding:16px;}"
-        ".meta{margin-bottom:10px;padding:10px;border:1px solid #2a3040;border-radius:8px;background:#171a21;}"
-        ".mono{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
-        "line-height:1.45;border:1px solid #2a3040;border-radius:8px;padding:12px;background:#111522;}"
-        "mark{background:#ffe08a;color:#111;}"
+        "body{font-family:ui-sans-serif,system-ui;background:#0f1115;color:#e7ecf3;margin:0;padding:16px;max-width:920px;margin-left:auto;margin-right:auto;}"
+        ".meta{margin-bottom:14px;padding:10px 12px;border:1px solid #2a3040;border-radius:8px;background:#171a21;font-size:13px;color:#aebbcc;}"
+        ".meta strong{color:#e7ecf3;font-size:14px;}"
+        ".excerpt-label{font-size:11px;font-weight:600;letter-spacing:0.08em;color:#4da3ff;text-transform:uppercase;margin-bottom:4px;}"
+        ".excerpt{margin:0 0 16px 0;padding:10px 14px;border-left:3px solid #ffe08a;background:#1a1f2b;border-radius:0 6px 6px 0;color:#e7ecf3;font-size:13px;line-height:1.5;}"
+        ".excerpt p{margin:0.5em 0;}.excerpt p:first-child{margin-top:0;}.excerpt p:last-child{margin-bottom:0;}"
+        ".excerpt pre{background:#0a0d14;border:1px solid #2a3040;border-radius:6px;padding:8px;overflow-x:auto;margin:0;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#aebbcc;}"
+        ".excerpt table{border-collapse:collapse;margin:6px 0;font-size:12px;}.excerpt th,.excerpt td{border:1px solid #2a3040;padding:4px 8px;}.excerpt th{background:#0f1115;}"
+        ".mono{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.45;border:1px solid #2a3040;border-radius:8px;padding:12px;background:#111522;}"
+        ".doc{line-height:1.65;font-size:15px;}"
+        ".doc h1,.doc h2,.doc h3,.doc h4{color:#e7ecf3;margin-top:1.4em;}"
+        ".doc h1{font-size:1.6em;border-bottom:1px solid #2a3040;padding-bottom:6px;}"
+        ".doc h2{font-size:1.3em;border-bottom:1px solid #2a3040;padding-bottom:4px;}"
+        ".doc h3{font-size:1.1em;}"
+        ".doc p{margin:0.7em 0;}"
+        ".doc code{background:#1a1f2b;border:1px solid #2a3040;border-radius:4px;padding:1px 5px;font-size:0.9em;color:#ffd28a;}"
+        ".doc pre{background:#0a0d14;border:1px solid #2a3040;border-radius:8px;padding:12px;overflow-x:auto;}"
+        ".doc pre code{background:none;border:none;padding:0;color:#e7ecf3;}"
+        ".doc blockquote{border-left:3px solid #4da3ff;padding-left:12px;color:#aebbcc;margin:0.7em 0;}"
+        ".doc table{border-collapse:collapse;margin:0.7em 0;}"
+        ".doc th,.doc td{border:1px solid #2a3040;padding:6px 10px;}"
+        ".doc th{background:#171a21;}"
+        ".doc ul,.doc ol{padding-left:24px;}"
+        ".doc img{max-width:100%;}"
+        "mark{background:#ffe08a;color:#111;padding:0 2px;border-radius:2px;}"
         "a{color:#4da3ff;}"
         "</style></head><body>"
-        f"<div class='meta'><strong>{escape(target.name)}</strong><br/>"
-        f"<span>{escape(str(target))}</span><br/>"
+        f"<div class='meta'><strong>{escape(display_name)}</strong><br/>"
+        f"<span>{escape(source_label)}</span><br/>"
         f"<span>{escape(chunk_label)} | {escape(range_label)}</span><br/>"
         f"<span>total chars: {total_chars}</span></div>"
-        f"<div class='mono'>{body}</div>"
+        f"{excerpt_html}"
+        f"<div class='{body_class}'>{body}</div>"
         "</body></html>"
     )
 

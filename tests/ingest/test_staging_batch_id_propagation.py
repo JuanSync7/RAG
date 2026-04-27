@@ -28,16 +28,17 @@ def _import_activity_types():
 
 def _ensure_sandbox(wf_mod):
     import logging
+    import uuid
     wf = wf_mod.workflow
-    if not hasattr(wf, "logger"):
-        wf.logger = logging.getLogger("temporalio.workflow.test")
+    # Replace unconditionally — workflow.logger and workflow.uuid4 exist on the
+    # real temporalio module but raise _NotInWorkflowEventLoopError when called
+    # outside a Temporal workflow loop.
+    wf.logger = logging.getLogger("temporalio.workflow.test")
+    wf.uuid4 = uuid.uuid4
     if not hasattr(wf, "execute_activity"):
         async def _noop(*a, **kw):
             raise NotImplementedError
         wf.execute_activity = _noop
-    if not hasattr(wf, "uuid4"):
-        import uuid
-        wf.uuid4 = lambda: uuid.uuid4()
 
 
 def _run(coro):

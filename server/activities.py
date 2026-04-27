@@ -86,6 +86,15 @@ def execute_rag_query(request: dict) -> dict:
     conversation_id: Optional[str] = request.get("conversation_id")
     memory_context: Optional[str] = request.get("memory_context")
     memory_recent_turns: list[dict] = request.get("memory_recent_turns", []) or []
+    ignored_doc_ids: list[str] = list(request.get("ignored_doc_ids", []) or [])
+    mode: str = str(request.get("mode") or "query")
+    retrieval_sub_mode: str = str(request.get("retrieval_sub_mode") or "auto")
+    extra_processing: bool = bool(request.get("extra_processing") or False)
+    # Retrieval mode skips answer generation by definition. The route
+    # handler may also set skip_generation directly (e.g. for streaming);
+    # union both signals so neither path accidentally enables generation.
+    if mode == "retrieval":
+        skip_generation = True
 
     cache_payload = {
         "query": query,
@@ -103,6 +112,10 @@ def execute_rag_query(request: dict) -> dict:
         "conversation_id": conversation_id,
         "memory_context": memory_context,
         "memory_recent_turns": memory_recent_turns,
+        "ignored_doc_ids": sorted(ignored_doc_ids),
+        "mode": mode,
+        "retrieval_sub_mode": retrieval_sub_mode,
+        "extra_processing": extra_processing,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
@@ -133,6 +146,10 @@ def execute_rag_query(request: dict) -> dict:
         conversation_id=conversation_id,
         memory_context=memory_context,
         memory_recent_turns=memory_recent_turns,
+        ignored_doc_ids=ignored_doc_ids,
+        mode=mode,
+        retrieval_sub_mode=retrieval_sub_mode,
+        extra_processing=extra_processing,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 
