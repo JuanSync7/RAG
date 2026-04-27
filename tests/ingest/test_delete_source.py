@@ -46,11 +46,15 @@ def _run(coro):
 
 
 def _ensure_workflow_sandbox_attrs(wf_mod):
-    """Inject the sandbox-only attributes used inside workflow bodies."""
+    """Inject the sandbox-only attributes used inside workflow bodies.
+
+    Replace workflow.logger unconditionally — it exists on the real temporalio
+    module but raises _NotInWorkflowEventLoopError when accessed outside a
+    Temporal workflow loop. A stdlib logger is a safe stand-in for tests.
+    """
+    import logging
     wf = wf_mod.workflow
-    if not hasattr(wf, "logger"):
-        import logging
-        wf.logger = logging.getLogger("temporalio.workflow.test")
+    wf.logger = logging.getLogger("temporalio.workflow.test")
     if not hasattr(wf, "execute_activity"):
         async def _noop(*a, **kw):
             raise NotImplementedError("execute_activity not patched")

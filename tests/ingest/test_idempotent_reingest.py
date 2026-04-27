@@ -172,14 +172,15 @@ class TestWorkflowSkipsPhase2:
             DocProcessingResult, EmbeddingResult, SourceArgs,
         )
 
-        # Sandbox attrs (mirror tests/ingest/test_temporal_workflows.py helpers)
+        # Sandbox attrs (mirror tests/ingest/test_temporal_workflows.py helpers).
+        # Replace unconditionally: workflow.logger and workflow.uuid4 exist on the
+        # real temporalio module but raise _NotInWorkflowEventLoopError when called
+        # outside a Temporal workflow loop.
         import logging
         import uuid
         wf = wf_mod.workflow
-        if not hasattr(wf, "logger"):
-            wf.logger = logging.getLogger("test")
-        if not hasattr(wf, "uuid4"):
-            wf.uuid4 = lambda: uuid.uuid4()
+        wf.logger = logging.getLogger("test")
+        wf.uuid4 = uuid.uuid4
         if not hasattr(wf, "execute_activity"):
             async def _noop(*a, **kw):
                 raise NotImplementedError

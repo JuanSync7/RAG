@@ -261,7 +261,19 @@ def _install_stub_modules() -> None:
         sys.modules["PIL"] = pil
         sys.modules["PIL.Image"] = pil_image
 
-    if "temporalio" not in sys.modules:
+    # Only stub temporalio when the real package can't be imported. Tests that
+    # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
+    # real `temporalio.worker.workflow_sandbox` submodule, which the stubs
+    # below don't provide. With temporalio pinned as a regular dependency the
+    # real package is always available, so this branch is mostly defensive.
+    _temporalio_available = "temporalio" in sys.modules
+    if not _temporalio_available:
+        try:
+            import temporalio as _real_temporalio  # noqa: F401
+            _temporalio_available = True
+        except ImportError:
+            pass
+    if not _temporalio_available:
         temporalio = types.ModuleType("temporalio")
 
         activity_mod = types.ModuleType("temporalio.activity")
@@ -298,6 +310,10 @@ def _install_stub_modules() -> None:
         service_mod = types.ModuleType("temporalio.service")
         service_mod.RPCError = type("RPCError", (Exception,), {})
 
+        exceptions_mod = types.ModuleType("temporalio.exceptions")
+        exceptions_mod.CancelledError = type("CancelledError", (Exception,), {})
+        exceptions_mod.WorkflowFailureError = type("WorkflowFailureError", (Exception,), {})
+
         api_mod = types.ModuleType("temporalio.api")
         enums_mod = types.ModuleType("temporalio.api.enums")
         enums_v1_mod = types.ModuleType("temporalio.api.enums.v1")
@@ -318,6 +334,7 @@ def _install_stub_modules() -> None:
         temporalio.client = client_mod
         temporalio.worker = worker_mod
         temporalio.service = service_mod
+        temporalio.exceptions = exceptions_mod
         temporalio.api = api_mod
         sys.modules["temporalio"] = temporalio
         sys.modules["temporalio.activity"] = activity_mod
@@ -326,6 +343,7 @@ def _install_stub_modules() -> None:
         sys.modules["temporalio.client"] = client_mod
         sys.modules["temporalio.worker"] = worker_mod
         sys.modules["temporalio.service"] = service_mod
+        sys.modules["temporalio.exceptions"] = exceptions_mod
         sys.modules["temporalio.api"] = api_mod
         sys.modules["temporalio.api.enums"] = enums_mod
         sys.modules["temporalio.api.enums.v1"] = enums_v1_mod

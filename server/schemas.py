@@ -74,6 +74,32 @@ class QueryRequest(BaseModel):
         default=False,
         description="Force a summary compaction pass for the conversation after this turn",
     )
+    mode: Literal["query", "retrieval"] = Field(
+        default="query",
+        description=(
+            "Pipeline mode. ``query`` (default) generates an answer from "
+            "retrieved chunks. ``retrieval`` returns ranked docs only and "
+            "skips answer generation."
+        ),
+    )
+    retrieval_sub_mode: Literal["auto", "hard"] = Field(
+        default="auto",
+        description=(
+            "Only consulted when ``mode='retrieval'``. ``auto`` lets the "
+            "rewriter decide whether to pull conversation history. "
+            "``hard`` runs the literal user query with no rewriting and "
+            "no history pull."
+        ),
+    )
+    extra_processing: bool = Field(
+        default=False,
+        description=(
+            "Reserved: enables an optional retrieval-only processing loop "
+            "(e.g. query expansion / multi-query fan-out). The behaviour "
+            "behind this flag is gated separately and may be a no-op in "
+            "the current build."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -159,6 +185,28 @@ class QueryResponse(BaseModel):
     visual_results: Optional[list[VisualPageResultResponse]] = None  # FR-703
     conversation_id: Optional[str] = None
     token_budget: Optional[TokenBudgetResponse] = None
+    # Conversation-scoped doc-id state for the Retrieval tab. The Query tab
+    # also benefits: previously-served docs are excluded from this turn's
+    # retrieval. ``seen_doc_ids`` is the union of relevant + ignored.
+    seen_doc_ids: list[str] = Field(default_factory=list)
+    relevant_doc_ids: list[str] = Field(default_factory=list)
+    ignored_doc_ids: list[str] = Field(default_factory=list)
+    history_decision: Optional[str] = Field(
+        default=None,
+        description=(
+            "For retrieval-mode auto runs: which history strategy the "
+            "rewriter chose (use_as_is / partial_history / full_history). "
+            "For retrieval-mode hard runs: 'hard_query'. None for "
+            "query-mode requests."
+        ),
+    )
+    history_turns_used: int = Field(
+        default=0,
+        description=(
+            "Number of conversation turns the retrieval-mode rewriter "
+            "actually consumed when shaping the processed query."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -166,6 +214,7 @@ class HealthResponse(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
 
 
 class CreateApiKeyRequest(BaseModel):
@@ -241,6 +290,9 @@ class ConsoleQueryRequest(BaseModel):
     memory_enabled: bool = Field(default=True)
     memory_turn_window: Optional[int] = Field(default=None, ge=1, le=40)
     compact_now: bool = Field(default=False)
+    mode: Literal["query", "retrieval"] = Field(default="query")
+    retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
+    extra_processing: bool = Field(default=False)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.
@@ -362,7 +414,52 @@ class ConsoleHealthSummary(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+    ingest_worker_available: bool = False
     ollama_reachable: bool
+
+
+class ConsoleModelInfo(BaseModel):
+    """Active generation model + provider exposed to the console UI."""
+
+    generation_enabled: bool
+    provider: str
+    model: str
+    display: str
+
+
+class ConsoleSourceViewRequest(BaseModel):
+    """Source-document view payload. Carries both coordinate systems plus the
+    exact chunk text so the viewer can land the highlight precisely regardless
+    of which storage path (MinIO clean store vs. raw file) serves the document.
+    """
+
+    source: Optional[str] = Field(default=None, max_length=2000)
+    source_uri: Optional[str] = Field(default=None, max_length=2000)
+    source_key: Optional[str] = Field(default=None, max_length=512)
+    chunk_text: Optional[str] = Field(default=None, max_length=32000)
+    chunk: Optional[int] = Field(default=None, ge=0)
+    original_start: Optional[int] = None
+    original_end: Optional[int] = None
+    refactored_start: Optional[int] = None
+    refactored_end: Optional[int] = None
+    provenance_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class ConsoleFeedbackTurn(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    text: str = Field(default="", max_length=32000)
+
+
+class ConsoleFeedbackRequest(BaseModel):
+    """User-supplied thumbs-up/down feedback for an assistant turn."""
+
+    rating: Literal["up", "down"]
+    conversation_id: Optional[str] = Field(default=None, max_length=128)
+    message_index: Optional[int] = Field(default=None, ge=0)
+    query: Optional[str] = Field(default=None, max_length=8000)
+    answer: Optional[str] = Field(default=None, max_length=32000)
+    comment: Optional[str] = Field(default=None, max_length=4000)
+    transcript: Optional[list[ConsoleFeedbackTurn]] = Field(default=None, max_length=200)
 
 
 class ConversationCreateRequest(BaseModel):
@@ -397,6 +494,10 @@ class ConversationHistoryResponse(BaseModel):
 
 class ConversationCompactRequest(BaseModel):
     conversation_id: str = Field(..., min_length=3, max_length=128)
+
+
+class ConversationTitleUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
 
 
 # ---------------------------------------------------------------------------
