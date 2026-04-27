@@ -48,8 +48,8 @@ class _FakeMemory:
     def get_seen_doc_ids(self, **_kwargs) -> list[str]:  # pragma: no cover - trivial stub
         return []
 
-    def mark_retrieved(self, **_kwargs) -> None:  # pragma: no cover - trivial stub
-        return None
+    def mark_retrieved(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
 
     def move_to_ignored(self, **_kwargs):  # pragma: no cover - trivial stub
         return self._meta(_kwargs.get("conversation_id", "conv_test"))
