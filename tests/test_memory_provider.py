@@ -44,12 +44,15 @@ class _FakeRedis:
         cur.append(value)
         self.lists[key] = cur
 
+    def ping(self):
+        return True
+
 
 class _FakeRedisModule:
     def __init__(self, client):
         self._client = client
 
-    def from_url(self, _url, decode_responses=True):
+    def from_url(self, _url, decode_responses=True, **_kwargs):
         assert decode_responses is True
         return self._client
 
@@ -113,6 +116,40 @@ def test_redis_memory_roundtrip(monkeypatch):
         force=True,
     )
     assert compact.text == "summary updated"
+
+
+def test_unreachable_redis_falls_back_to_noop(monkeypatch):
+    """Regression for #52: lazy from_url must not hide an unreachable Redis.
+
+    Constructor should ping eagerly so that get_conversation_memory's
+    try/except can catch ConnectionError and return NoopConversationMemory
+    instead of letting the error surface from a request handler.
+    """
+    import pytest
+
+    class _UnreachableClient:
+        def ping(self):
+            raise ConnectionError("Error 111 connecting to localhost:6379")
+
+    class _UnreachableModule:
+        def from_url(self, _url, decode_responses=True, **_kwargs):
+            return _UnreachableClient()
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", _UnreachableModule())
+
+    with pytest.raises(ConnectionError):
+        RedisConversationMemory("redis://unreachable:6379", "rag:test:memory")
+
+    # Factory wraps construction in try/except; the same unreachable Redis
+    # should produce a NoopConversationMemory rather than propagate.
+    from src.platform.memory import provider as provider_mod
+
+    monkeypatch.setattr(provider_mod, "_MEMORY", None)
+    monkeypatch.setattr(provider_mod, "MEMORY_ENABLED", True)
+    monkeypatch.setattr(provider_mod, "MEMORY_PROVIDER", "redis")
+    monkeypatch.setattr(provider_mod, "MEMORY_REDIS_URL", "redis://unreachable:6379")
+    memory = provider_mod.get_conversation_memory()
+    assert isinstance(memory, NoopConversationMemory)
 
 
 def _make_provider(monkeypatch):

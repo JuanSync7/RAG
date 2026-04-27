@@ -310,7 +310,14 @@ class RedisConversationMemory(ConversationMemoryProvider):
         """
         import redis  # type: ignore
 
-        self._client = redis.from_url(redis_url, decode_responses=True)
+        # redis-py's from_url is lazy — no socket dial until the first
+        # command. Ping eagerly so get_conversation_memory's try/except
+        # can actually catch unreachable-Redis and fall back to Noop,
+        # instead of ConnectionError surfacing from inside a request.
+        self._client = redis.from_url(
+            redis_url, decode_responses=True, socket_connect_timeout=1
+        )
+        self._client.ping()
         self._prefix = key_prefix.strip() or "rag:memory"
         self._llm_provider = get_llm_provider()
 
