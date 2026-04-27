@@ -36,11 +36,18 @@ interface RetrievalTurn {
     errorMsg?: string;
 }
 
+interface DocMeta {
+    sourceName: string;
+    source: string;
+    sourceUri: string;
+    sourceKey: string;
+}
+
 interface RetrievalState {
     turns: RetrievalTurn[];
     ignoredDocIds: Set<string>;
     relevantDocIds: Set<string>;
-    docNames: Map<string, string>;
+    docMeta: Map<string, DocMeta>;
     lastConversationId: string | null;
 }
 
@@ -48,9 +55,52 @@ const rs: RetrievalState = {
     turns: [],
     ignoredDocIds: new Set(),
     relevantDocIds: new Set(),
-    docNames: new Map(),
+    docMeta: new Map(),
     lastConversationId: null,
 };
+
+// ── Persistence (per-conversation, localStorage) ─────────────────────────────
+
+const PERSIST_KEY_PREFIX = "ragweave-retrieval-thread:";
+const PERSIST_KEY_GLOBAL = "ragweave-retrieval-thread:_no_conv_";
+
+function persistKey(conversationId: string | null): string {
+    return conversationId ? `${PERSIST_KEY_PREFIX}${conversationId}` : PERSIST_KEY_GLOBAL;
+}
+
+interface PersistedThread {
+    turns: RetrievalTurn[];
+    docMeta: Array<[string, DocMeta]>;
+}
+
+function persistThread(): void {
+    try {
+        const payload: PersistedThread = {
+            turns: rs.turns,
+            docMeta: Array.from(rs.docMeta.entries()),
+        };
+        localStorage.setItem(persistKey(state.activeConversationId), JSON.stringify(payload));
+    } catch {
+        // Ignore quota or serialization errors — persistence is best-effort.
+    }
+}
+
+function loadThread(): void {
+    try {
+        const raw = localStorage.getItem(persistKey(state.activeConversationId));
+        if (!raw) {
+            rs.turns = [];
+            rs.docMeta = new Map();
+            return;
+        }
+        const payload = JSON.parse(raw) as PersistedThread;
+        rs.turns = Array.isArray(payload.turns) ? payload.turns : [];
+        rs.docMeta = new Map(Array.isArray(payload.docMeta) ? payload.docMeta : []);
+    } catch {
+        rs.turns = [];
+        rs.docMeta = new Map();
+    }
+}
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
@@ -143,7 +193,14 @@ function groupByDoc(items: RetrievalResultItem[]): DocGroup[] {
     });
     const arr = Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
     arr.forEach((g) => {
-        if (g.sourceName && g.sourceName !== "Unknown source") rs.docNames.set(g.docId, g.sourceName);
+        const top = g.chunks[0];
+        const m = top?.metadata ?? {};
+        rs.docMeta.set(g.docId, {
+            sourceName: g.sourceName,
+            source: String(m.source ?? "") || g.sourceName,
+            sourceUri: g.sourceUri,
+            sourceKey: m.source_key != null ? String(m.source_key) : "",
+        });
     });
     return arr;
 }
@@ -354,7 +411,8 @@ function renderThread(): void {
 // ── Right rail ────────────────────────────────────────────────────────────────
 
 function labelForDocId(docId: string): string {
-    return rs.docNames.get(docId) || docId;
+    const meta = rs.docMeta.get(docId);
+    return meta?.sourceName || docId;
 }
 
 function buildRailItem(
@@ -372,13 +430,33 @@ function buildRailItem(
     label.textContent = labelForDocId(docId);
     label.title = docId;
 
+    const meta = rs.docMeta.get(docId);
+    if (meta && (meta.sourceUri || meta.sourceKey || meta.source)) {
+        const viewLink = document.createElement("a");
+        viewLink.className = "retrieval-rail-view";
+        viewLink.href = "#";
+        viewLink.textContent = "view";
+        viewLink.title = "Open document";
+        viewLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            void openSourceDocument({
+                source: meta.source || meta.sourceName || undefined,
+                source_uri: meta.sourceUri || undefined,
+                source_key: meta.sourceKey || undefined,
+            });
+        });
+        item.appendChild(label);
+        item.appendChild(viewLink);
+    } else {
+        item.appendChild(label);
+    }
+
     const btn = document.createElement("button");
     btn.className = actionClass;
     btn.textContent = actionLabel;
     btn.addEventListener("click", onAction);
-
-    item.appendChild(label);
     item.appendChild(btn);
+
     return item;
 }
 
@@ -593,10 +671,12 @@ async function submitQuery(): Promise<void> {
 
         renderThread();
         renderRail();
+        persistThread();
     } catch (err) {
         turn.status = "error";
         turn.errorMsg = String(err);
         renderThread();
+        persistThread();
         showToast("Retrieval error: " + String(err));
     } finally {
         findBtn.disabled = false;
@@ -661,15 +741,18 @@ export function initRetrievalView(): void {
     // refresh per-conversation doc-state lists.
     document.addEventListener("conversation-changed", () => {
         renderConvPill();
-        rs.turns = [];
+        // Load this conversation's thread + cached doc metadata from
+        // localStorage so query history persists across tab switches and
+        // page reloads.
+        loadThread();
         if (state.activeConversationId) {
             void fetchDocState(state.activeConversationId);
         } else {
             rs.ignoredDocIds = new Set();
             rs.relevantDocIds = new Set();
-            renderRail();
         }
         renderThread();
+        renderRail();
     });
 
     // View-tab switch — refresh doc-state when switching TO retrieval if the
@@ -686,6 +769,9 @@ export function initRetrievalView(): void {
         });
     });
 
+    // Initial load: hydrate from localStorage for the current conversation
+    // (or the no-conv key) so reloads don't blank the thread.
+    loadThread();
     renderConvPill();
     renderThread();
     renderRail();

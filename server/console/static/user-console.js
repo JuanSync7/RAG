@@ -2241,9 +2241,40 @@ var rs = {
   turns: [],
   ignoredDocIds: /* @__PURE__ */ new Set(),
   relevantDocIds: /* @__PURE__ */ new Set(),
-  docNames: /* @__PURE__ */ new Map(),
+  docMeta: /* @__PURE__ */ new Map(),
   lastConversationId: null
 };
+var PERSIST_KEY_PREFIX = "ragweave-retrieval-thread:";
+var PERSIST_KEY_GLOBAL = "ragweave-retrieval-thread:_no_conv_";
+function persistKey(conversationId) {
+  return conversationId ? `${PERSIST_KEY_PREFIX}${conversationId}` : PERSIST_KEY_GLOBAL;
+}
+function persistThread() {
+  try {
+    const payload = {
+      turns: rs.turns,
+      docMeta: Array.from(rs.docMeta.entries())
+    };
+    localStorage.setItem(persistKey(state.activeConversationId), JSON.stringify(payload));
+  } catch {
+  }
+}
+function loadThread() {
+  try {
+    const raw = localStorage.getItem(persistKey(state.activeConversationId));
+    if (!raw) {
+      rs.turns = [];
+      rs.docMeta = /* @__PURE__ */ new Map();
+      return;
+    }
+    const payload = JSON.parse(raw);
+    rs.turns = Array.isArray(payload.turns) ? payload.turns : [];
+    rs.docMeta = new Map(Array.isArray(payload.docMeta) ? payload.docMeta : []);
+  } catch {
+    rs.turns = [];
+    rs.docMeta = /* @__PURE__ */ new Map();
+  }
+}
 function q(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing #${id}`);
@@ -2315,7 +2346,14 @@ function groupByDoc(items) {
   });
   const arr = Array.from(groups.values()).sort((a, b) => b.bestScore - a.bestScore);
   arr.forEach((g) => {
-    if (g.sourceName && g.sourceName !== "Unknown source") rs.docNames.set(g.docId, g.sourceName);
+    const top = g.chunks[0];
+    const m = top?.metadata ?? {};
+    rs.docMeta.set(g.docId, {
+      sourceName: g.sourceName,
+      source: String(m.source ?? "") || g.sourceName,
+      sourceUri: g.sourceUri,
+      sourceKey: m.source_key != null ? String(m.source_key) : ""
+    });
   });
   return arr;
 }
@@ -2490,7 +2528,8 @@ function renderThread() {
   thread.scrollTop = thread.scrollHeight;
 }
 function labelForDocId(docId) {
-  return rs.docNames.get(docId) || docId;
+  const meta = rs.docMeta.get(docId);
+  return meta?.sourceName || docId;
 }
 function buildRailItem(docId, actionLabel, actionClass, onAction) {
   const item = document.createElement("div");
@@ -2500,11 +2539,30 @@ function buildRailItem(docId, actionLabel, actionClass, onAction) {
   label.className = "retrieval-rail-label";
   label.textContent = labelForDocId(docId);
   label.title = docId;
+  const meta = rs.docMeta.get(docId);
+  if (meta && (meta.sourceUri || meta.sourceKey || meta.source)) {
+    const viewLink = document.createElement("a");
+    viewLink.className = "retrieval-rail-view";
+    viewLink.href = "#";
+    viewLink.textContent = "view";
+    viewLink.title = "Open document";
+    viewLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      void openSourceDocument({
+        source: meta.source || meta.sourceName || void 0,
+        source_uri: meta.sourceUri || void 0,
+        source_key: meta.sourceKey || void 0
+      });
+    });
+    item.appendChild(label);
+    item.appendChild(viewLink);
+  } else {
+    item.appendChild(label);
+  }
   const btn = document.createElement("button");
   btn.className = actionClass;
   btn.textContent = actionLabel;
   btn.addEventListener("click", onAction);
-  item.appendChild(label);
   item.appendChild(btn);
   return item;
 }
@@ -2692,10 +2750,12 @@ async function submitQuery() {
     rs.lastConversationId = state.activeConversationId;
     renderThread();
     renderRail();
+    persistThread();
   } catch (err) {
     turn.status = "error";
     turn.errorMsg = String(err);
     renderThread();
+    persistThread();
     showToast("Retrieval error: " + String(err));
   } finally {
     findBtn.disabled = false;
@@ -2741,15 +2801,15 @@ function initRetrievalView() {
   }
   document.addEventListener("conversation-changed", () => {
     renderConvPill();
-    rs.turns = [];
+    loadThread();
     if (state.activeConversationId) {
       void fetchDocState(state.activeConversationId);
     } else {
       rs.ignoredDocIds = /* @__PURE__ */ new Set();
       rs.relevantDocIds = /* @__PURE__ */ new Set();
-      renderRail();
     }
     renderThread();
+    renderRail();
   });
   document.querySelectorAll(".view-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2762,6 +2822,7 @@ function initRetrievalView() {
       }
     });
   });
+  loadThread();
   renderConvPill();
   renderThread();
   renderRail();
