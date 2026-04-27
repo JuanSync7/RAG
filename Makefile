@@ -7,7 +7,7 @@
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check import-check-tracked \
         all-check precommit-check setup restart restart-all \
-        start start-all dev worker tunnel restart-worker scale-workers \
+        start start-all dev worker tunnel restart-worker scale-workers scale-tei \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-probe-worker \
@@ -71,6 +71,7 @@ help:
 	@echo "  dev                Start uvicorn with hot-reload (run in its own terminal)"
 	@echo "  worker             Start Temporal worker locally (run in its own terminal)"
 	@echo "  scale-workers      Scale containerised workers: make scale-workers N=3"
+	@echo "  scale-tei          Scale TEI embed/rerank: make scale-tei EMBED=2 EMBED_CPU=4 RERANK=2"
 	@echo "  tunnel             Start Cloudflare trycloudflare.com tunnel (run in its own terminal)"
 	@echo ""
 	@echo "Stack restart (uses scripts/stack.sh — auto-detects docker/podman)"
@@ -271,6 +272,17 @@ restart-worker:
 # Scale rag-worker horizontally. Usage: make scale-workers N=3
 scale-workers:
 	./scripts/compose.sh --profile workers up -d --scale rag-worker=$${N:-2}
+
+# Scale TEI inference services horizontally behind rag-nginx (8081/8082).
+# Usage: make scale-tei EMBED=2 EMBED_CPU=4 RERANK=2
+# Caveat: on a single-host single-GPU setup, GPU replicas share one device and
+# you'll get contention, not throughput. Use one replica per GPU node on AWS.
+# CPU replicas scale freely (no shared device).
+scale-tei:
+	./scripts/compose.sh up -d \
+	  --scale rag-embed=$${EMBED:-2} \
+	  --scale rag-embed-cpu=$${EMBED_CPU:-2} \
+	  --scale rag-rerank=$${RERANK:-2}
 
 start:
 	./scripts/compose.sh up -d

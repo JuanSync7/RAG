@@ -102,3 +102,8 @@ class RAGResponse:
     visual_results: Optional[list["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)
+    # Retrieval-tab explainability — populated by the auto-mode rewriter in
+    # S4. ``history_decision`` reports which strategy the LLM picked
+    # ("use_as_is" | "partial_history" | "full_history" | "hard_query").
+    history_decision: Optional[str] = None
+    history_turns_used: int = 0

@@ -15,7 +15,7 @@ dependencies = [
   "langchain-text-splitters",
   "langgraph",
   "numpy",
-  "temporalio",
+  "temporalio>=1.23,<2",
   "langfuse",
   "fastapi",
   "uvicorn[standard]",
@@ -172,6 +172,7 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
+    "smoke: end-to-end stack smoke tests requiring docker compose up (run with '-m smoke')",
 ]
 
 [dependency-groups]

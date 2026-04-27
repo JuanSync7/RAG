@@ -231,6 +231,18 @@ async def run_query(
         payload = request.model_dump(exclude_none=True)
         payload["tenant_id"] = tenant_id
         payload["conversation_id"] = conv.conversation_id
+        # Hard-suppress previously-served docs (relevant ∪ ignored).
+        # Lives outside ``memory_enabled`` because doc state tracking is
+        # logically separate from chat-history context building — Noop
+        # provider naturally short-circuits this to an empty list.
+        seen_doc_ids = memory.get_seen_doc_ids(
+            tenant_id=tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conv.conversation_id,
+        )
+        if seen_doc_ids:
+            payload["ignored_doc_ids"] = seen_doc_ids
         if request.memory_enabled:
             mem_start = time.perf_counter()
             ctx = memory.build_context(
@@ -271,7 +283,34 @@ async def run_query(
         result["conversation_id"] = conv.conversation_id
         if "latency_ms" not in result:
             result["latency_ms"] = round(total_ms, 1)
-        if request.memory_enabled:
+        # Update conversation doc-state so subsequent queries don't re-serve
+        # what was just returned. Marks new doc_ids as relevant by default;
+        # already-ignored ids stay ignored. Echoed back to the client so the
+        # Retrieval tab can hydrate panes without a follow-up call.
+        new_doc_ids = [
+            r["metadata"]["document_id"]
+            for r in result.get("results", []) or []
+            if isinstance(r, dict)
+            and isinstance(r.get("metadata"), dict)
+            and r["metadata"].get("document_id")
+        ]
+        meta_after = memory.mark_retrieved(
+            tenant_id=tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conv.conversation_id,
+            doc_ids=new_doc_ids,
+        )
+        result["relevant_doc_ids"] = list(meta_after.relevant_doc_ids)
+        result["ignored_doc_ids"] = list(meta_after.ignored_doc_ids)
+        result["seen_doc_ids"] = list(
+            dict.fromkeys([*meta_after.relevant_doc_ids, *meta_after.ignored_doc_ids])
+        )
+        # Retrieval mode never writes turns to chat history — retrieval activity
+        # is captured entirely on the conversation's relevant/ignored doc lists.
+        # This keeps the auto-mode rewriter's view of "real" chat clean when the
+        # user later switches back to the Query tab.
+        if request.memory_enabled and request.mode != "retrieval":
             user_text = request.query.strip()
             assistant_text = (
                 str(result.get("generated_answer", "")).strip()
@@ -408,6 +447,15 @@ def create_query_router(
         payload["skip_generation"] = True
         payload["tenant_id"] = tenant_id
         payload["conversation_id"] = conv.conversation_id
+        # Hard-suppress previously-served docs (relevant ∪ ignored).
+        seen_doc_ids = memory.get_seen_doc_ids(
+            tenant_id=tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conv.conversation_id,
+        )
+        if seen_doc_ids:
+            payload["ignored_doc_ids"] = seen_doc_ids
         if request.memory_enabled:
             payload["memory_context"] = mem_ctx_text
             payload["memory_recent_turns"] = mem_recent_turns
@@ -463,6 +511,30 @@ def create_query_router(
                 retrieval_result["workflow_id"] = workflow_id
                 retrieval_result["latency_ms"] = round(retrieval_ms, 1)
                 retrieval_result["conversation_id"] = conv.conversation_id
+                # Mark newly-returned docs as relevant on the conversation;
+                # echo doc-state for client hydration.
+                stream_new_doc_ids = [
+                    r["metadata"]["document_id"]
+                    for r in retrieval_result.get("results", []) or []
+                    if isinstance(r, dict)
+                    and isinstance(r.get("metadata"), dict)
+                    and r["metadata"].get("document_id")
+                ]
+                stream_meta_after = memory.mark_retrieved(
+                    tenant_id=tenant_id,
+                    subject=principal.subject,
+                    project_id=principal.project_id,
+                    conversation_id=conv.conversation_id,
+                    doc_ids=stream_new_doc_ids,
+                )
+                retrieval_result["relevant_doc_ids"] = list(stream_meta_after.relevant_doc_ids)
+                retrieval_result["ignored_doc_ids"] = list(stream_meta_after.ignored_doc_ids)
+                retrieval_result["seen_doc_ids"] = list(
+                    dict.fromkeys([
+                        *stream_meta_after.relevant_doc_ids,
+                        *stream_meta_after.ignored_doc_ids,
+                    ])
+                )
                 retrieval_stages = list(retrieval_result.get("stage_timings", []))
                 yield _sse("retrieval", retrieval_result)
 
@@ -480,7 +552,7 @@ def create_query_router(
                         "conversation_id": conv.conversation_id,
                         "token_budget": _stream_token_budget,
                     }
-                    if request.memory_enabled:
+                    if request.memory_enabled and request.mode != "retrieval":
                         mem_start = time.perf_counter()
                         memory.append_turn(
                             tenant_id=tenant_id,
@@ -576,7 +648,7 @@ def create_query_router(
                         "token_budget": _stream_token_budget,
                     },
                 )
-                if request.memory_enabled:
+                if request.memory_enabled and request.mode != "retrieval":
                     mem_start = time.perf_counter()
                     memory.append_turn(
                         tenant_id=tenant_id,

@@ -1797,6 +1797,15 @@ function initInput() {
   });
 }
 
+// src/format.ts
+function fmtSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 // src/ingest-stream.ts
 var _activeStreams = /* @__PURE__ */ new Map();
 function attachStream(jobId) {
@@ -1873,11 +1882,6 @@ async function refreshJobsList() {
 // src/ingest-jobs.ts
 var jobLog = /* @__PURE__ */ new Map();
 var jobMeta = /* @__PURE__ */ new Map();
-function fmtSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-}
 function escapeHtml(s) {
   return s.replace(
     /[&<>"']/g,

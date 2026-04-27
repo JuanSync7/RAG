@@ -339,6 +339,12 @@ MEMORY_ENABLED = os.environ.get("RAG_MEMORY_ENABLED", "true").lower() in ("true"
 MEMORY_PROVIDER = os.environ.get("RAG_MEMORY_PROVIDER", "redis").strip().lower()
 MEMORY_REDIS_URL = os.environ.get("RAG_MEMORY_REDIS_URL", CACHE_REDIS_URL)
 MEMORY_REDIS_PREFIX = os.environ.get("RAG_MEMORY_REDIS_PREFIX", "rag:memory")
+# Timeout (seconds) for the connectivity ping issued when constructing the
+# Redis-backed memory provider. If the ping fails or times out, the factory
+# falls back to the no-op provider so request handlers do not 500.
+MEMORY_REDIS_CONNECT_TIMEOUT_S = float(
+    os.environ.get("RAG_MEMORY_REDIS_CONNECT_TIMEOUT_S", "1.0")
+)
 MEMORY_MAX_RECENT_TURNS = int(os.environ.get("RAG_MEMORY_MAX_RECENT_TURNS", "8"))
 MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE = int(
     os.environ.get("RAG_MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE", "1400")
@@ -752,9 +758,11 @@ if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     )
 
 # TEI service URLs — used when INFERENCE_BACKEND="tei".
-# Inside the compose network these resolve to rag-embed / rag-rerank.
-TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-embed:80")
-TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-rerank:80")
+# Default routes through rag-nginx so replicas can be scaled horizontally
+# (`docker compose up -d --scale rag-embed=N`). Override to direct service DNS
+# (http://rag-embed:80) for single-replica dev or to bypass the LB.
+TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-nginx:8081")
+TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-nginx:8082")
 
 # Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
 # mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.

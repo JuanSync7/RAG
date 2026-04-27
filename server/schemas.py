@@ -74,6 +74,32 @@ class QueryRequest(BaseModel):
         default=False,
         description="Force a summary compaction pass for the conversation after this turn",
     )
+    mode: Literal["query", "retrieval"] = Field(
+        default="query",
+        description=(
+            "Pipeline mode. ``query`` (default) generates an answer from "
+            "retrieved chunks. ``retrieval`` returns ranked docs only and "
+            "skips answer generation."
+        ),
+    )
+    retrieval_sub_mode: Literal["auto", "hard"] = Field(
+        default="auto",
+        description=(
+            "Only consulted when ``mode='retrieval'``. ``auto`` lets the "
+            "rewriter decide whether to pull conversation history. "
+            "``hard`` runs the literal user query with no rewriting and "
+            "no history pull."
+        ),
+    )
+    extra_processing: bool = Field(
+        default=False,
+        description=(
+            "Reserved: enables an optional retrieval-only processing loop "
+            "(e.g. query expansion / multi-query fan-out). The behaviour "
+            "behind this flag is gated separately and may be a no-op in "
+            "the current build."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -159,6 +185,28 @@ class QueryResponse(BaseModel):
     visual_results: Optional[list[VisualPageResultResponse]] = None  # FR-703
     conversation_id: Optional[str] = None
     token_budget: Optional[TokenBudgetResponse] = None
+    # Conversation-scoped doc-id state for the Retrieval tab. The Query tab
+    # also benefits: previously-served docs are excluded from this turn's
+    # retrieval. ``seen_doc_ids`` is the union of relevant + ignored.
+    seen_doc_ids: list[str] = Field(default_factory=list)
+    relevant_doc_ids: list[str] = Field(default_factory=list)
+    ignored_doc_ids: list[str] = Field(default_factory=list)
+    history_decision: Optional[str] = Field(
+        default=None,
+        description=(
+            "For retrieval-mode auto runs: which history strategy the "
+            "rewriter chose (use_as_is / partial_history / full_history). "
+            "For retrieval-mode hard runs: 'hard_query'. None for "
+            "query-mode requests."
+        ),
+    )
+    history_turns_used: int = Field(
+        default=0,
+        description=(
+            "Number of conversation turns the retrieval-mode rewriter "
+            "actually consumed when shaping the processed query."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -242,6 +290,9 @@ class ConsoleQueryRequest(BaseModel):
     memory_enabled: bool = Field(default=True)
     memory_turn_window: Optional[int] = Field(default=None, ge=1, le=40)
     compact_now: bool = Field(default=False)
+    mode: Literal["query", "retrieval"] = Field(default="query")
+    retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
+    extra_processing: bool = Field(default=False)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.

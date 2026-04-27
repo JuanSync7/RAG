@@ -65,6 +65,7 @@ rag-langfuse-minio
 rag-langfuse-worker
 rag-langfuse-web
 rag-embed
+rag-embed-cpu
 rag-rerank
 rag-ollama
 rag-nginx
@@ -79,14 +80,21 @@ cmd_status() {
     local running
     running=$(docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null || true)
     while IFS= read -r name; do
-        local line status
+        local line status count
+        # Exact match first (services with container_name pinned).
         line=$(grep "^${name}|" <<<"$running" || true)
         if [[ -n "$line" ]]; then
             status="${G}● ${line#*|}${X}"
-        elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
-            status="${Y}○ stopped${X}"
         else
-            status="${D}· not created${X}"
+            # Fallback: match scaled compose replicas (e.g. ragweave-rag-embed-1).
+            count=$(grep -cE "[-_]${name}[-_][0-9]+\|" <<<"$running" || true)
+            if [[ "$count" -gt 0 ]]; then
+                status="${G}● ${count} replica(s) running${X}"
+            elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qE "(^${name}\$)|([-_]${name}[-_][0-9]+\$)"; then
+                status="${Y}○ stopped${X}"
+            else
+                status="${D}· not created${X}"
+            fi
         fi
         printf "  %-28s %s\n" "$name" "$status"
     done < <(_all_containers)
