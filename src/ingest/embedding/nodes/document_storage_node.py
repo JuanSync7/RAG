@@ -1,9 +1,10 @@
 # @summary
-# LangGraph node for storing the full clean markdown document in the document store (MinIO).
+# LangGraph node that computes document_id and stages MinIO write into pipeline state.
+# Write is deferred to commit_node for atomic commit (Issue #42).
 # Exports: document_storage_node
 # Deps: src.db, src.ingest.embedding.state, src.ingest.common.shared
 # @end-summary
-"""Document-storage node — persists the clean markdown to MinIO before chunking."""
+"""Document-storage node — stages the MinIO write; defers execution to commit_node."""
 
 from __future__ import annotations
 
@@ -13,27 +14,26 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.document_storage")
 
-from src.db import build_document_id, put_document
+from src.db import build_document_id, put_document  # noqa: F401 — put_document kept for legacy refs
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
 def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
-    """Compute a stable document_id and persist the clean markdown to MinIO.
+    """Compute a stable document_id and STAGE the MinIO write into pipeline state.
 
-    Runs before chunking so that ``document_id`` is available to all downstream
-    nodes. Failing here surfaces MinIO unavailability before any embedding work
-    is done, keeping Weaviate and MinIO consistent.
+    The actual write is deferred to ``commit_node`` so that MinIO, Weaviate, and
+    the KG are all flushed atomically in one terminal phase (Issue #42).
 
-    Skips the write (but still sets ``document_id``) when
+    Skips staging (sets ``staged_minio: None``) when
     ``runtime.config.store_documents`` is False or no db_client is available.
 
     Args:
         state: Embedding pipeline state.
 
     Returns:
-        Partial state update containing ``document_id`` and an updated
-        ``processing_log``.
+        Partial state update containing ``document_id``, ``staged_minio``, and
+        an updated ``processing_log``.
     """
     t0 = time.monotonic()
     document_id = build_document_id(state["source_key"])
@@ -41,8 +41,10 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
 
     if not runtime.config.store_documents or runtime.db_client is None:
         reason = "skipped" if not runtime.config.store_documents else "no_client"
+        logger.debug("document_storage_node %s in %.3fs", reason, time.monotonic() - t0)
         return {
             "document_id": document_id,
+            "staged_minio": None,
             "processing_log": append_processing_log(state, f"document_storage:{reason}"),
         }
 
@@ -56,18 +58,14 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         "connector": state["connector"],
     }
 
-    try:
-        put_document(runtime.db_client, document_id, content, metadata, runtime.config.target_bucket or None)
-    except Exception as exc:
-        logger.error("document_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
-        return {
-            "errors": state.get("errors", []) + [f"document_storage:{exc}"],
-            "processing_log": append_processing_log(state, "document_storage:error"),
-        }
-
-    logger.info("document_storage complete: doc_id=%s source=%s", document_id, state["source_key"])
-    logger.debug("document_storage_node completed in %.3fs", time.monotonic() - t0)
+    logger.debug("document_storage_node staged doc_id=%s in %.3fs", document_id, time.monotonic() - t0)
     return {
         "document_id": document_id,
-        "processing_log": append_processing_log(state, "document_storage:ok"),
+        "staged_minio": {
+            "document_id": document_id,
+            "content": content,
+            "metadata": metadata,
+            "bucket": runtime.config.target_bucket or None,
+        },
+        "processing_log": append_processing_log(state, "document_storage:staged"),
     }

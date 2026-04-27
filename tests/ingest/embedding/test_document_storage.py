@@ -1,8 +1,8 @@
 # @summary
 # Tests for src/ingest/embedding/nodes/document_storage_node.py.
 # Covers: document_id derivation (SHA-256, 24-char hex, determinism),
-#         upload gating (store_documents flag, minio_client presence),
-#         and error handling (exception captured in state.errors).
+#         staged_minio population (store_documents flag, minio_client presence),
+#         and no-error behavior (Issue #42: node does no live I/O).
 # @end-summary
 """Tests for the document_storage_node pipeline stage."""
 
@@ -146,11 +146,11 @@ class TestDocumentIdDerivation:
 class TestUploadGating:
     """Upload is only attempted when both the flag and client are present."""
 
-    def test_upload_called_when_enabled_and_client_present(self):
-        """Upload is called when store_documents=True and minio_client present.
+    def test_staged_minio_populated_when_enabled_and_client_present(self):
+        """staged_minio is populated when store_documents=True and minio_client present.
 
-        The node calls put_document() (an imported function from src.db), not a
-        method on the client directly. We verify it via the put_document patch.
+        Since Issue #42 the node no longer calls put_document directly; it stages
+        the payload in state["staged_minio"] for commit_node to flush atomically.
         """
         from src.ingest.embedding.nodes.document_storage_node import document_storage_node
         from unittest.mock import patch
@@ -163,8 +163,13 @@ class TestUploadGating:
             cleaned_text="# Content to upload",
         )
         with patch("src.ingest.embedding.nodes.document_storage_node.put_document") as mock_put:
-            document_storage_node(state)
-        mock_put.assert_called_once()
+            result = document_storage_node(state)
+        # Direct write must NOT happen in this node any more (Issue #42).
+        mock_put.assert_not_called()
+        # Instead, staged_minio must be populated.
+        assert result.get("staged_minio") is not None
+        assert result["staged_minio"]["content"] == "# Content to upload"
+        assert result["staged_minio"]["document_id"]
 
     def test_upload_not_called_when_disabled(self):
         """Upload NOT called when store_documents=False.
@@ -205,14 +210,14 @@ class TestUploadGating:
 # ---------------------------------------------------------------------------
 
 class TestUploadErrorHandling:
-    """Upload errors are caught and appended to state.errors; execution continues."""
+    """document_storage_node only stages; upload errors surface at commit_node."""
 
-    def test_upload_error_appended_to_errors(self):
-        """Upload exception → error recorded in state.errors; execution continues.
+    def test_node_never_errors_because_no_live_io(self):
+        """document_storage_node performs no live I/O since Issue #42.
 
-        On error the node returns {**state, errors: [...], ...}.  document_id is
-        NOT in the error-path partial return (it is only set on the success path).
-        The node catches exceptions and stores them as f'document_storage:{exc}'.
+        The node only builds staged_minio; commit_node is responsible for the
+        actual put_document call and error handling. Therefore this node must
+        not inject errors even when put_document is patched to raise.
         """
         from src.ingest.embedding.nodes.document_storage_node import document_storage_node
         from unittest.mock import patch
@@ -228,8 +233,8 @@ class TestUploadErrorHandling:
                    side_effect=RuntimeError("connection refused")):
             result = document_storage_node(state)
 
-        # At least one error must be recorded
-        errors = result.get("errors", state.get("errors", []))
-        assert len(errors) > 0
-        # Error format: "document_storage:<exc message>"
-        assert any("document_storage" in e or "connection refused" in e for e in errors)
+        # No errors injected; the node never calls put_document.
+        errors = result.get("errors", [])
+        assert errors == [], f"Unexpected errors from staging node: {errors}"
+        # staged_minio must still be populated
+        assert result.get("staged_minio") is not None
