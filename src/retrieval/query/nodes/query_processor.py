@@ -131,6 +131,68 @@ def _get_combined_prompt() -> str:
     return _COMBINED_PROMPT
 
 
+_RETRIEVAL_REWRITER_PROMPT: Optional[str] = None
+
+
+def _get_retrieval_rewriter_prompt() -> str:
+    global _RETRIEVAL_REWRITER_PROMPT
+    if _RETRIEVAL_REWRITER_PROMPT is None:
+        _RETRIEVAL_REWRITER_PROMPT = _load_prompt("retrieval_query_rewriter.md")
+    return _RETRIEVAL_REWRITER_PROMPT
+
+
+_VALID_HISTORY_DECISIONS = {"use_as_is", "partial_history", "full_history"}
+
+
+def _retrieval_auto_rewrite(
+    user_query: str,
+    memory_context: str,
+) -> tuple[str, str, int]:
+    """Run the retrieval-mode rewriter LLM and return (processed_query, decision, turns_used).
+
+    Falls back to ``use_as_is`` with the literal query if the LLM is unavailable
+    or returns malformed output. Never raises — Auto mode must always produce
+    a usable query.
+    """
+    try:
+        provider = get_llm_provider()
+        if not _check_llm_available():
+            return user_query, "use_as_is", 0
+        prompt = _get_retrieval_rewriter_prompt()
+        messages = [
+            {"role": "system", "content": prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"USER_QUERY: {user_query}\n\n"
+                    f"CONVERSATION_HISTORY:\n{memory_context or '(none)'}"
+                ),
+            },
+        ]
+        response = provider.generate(
+            messages,
+            model_alias="default",
+            temperature=QUERY_PROCESSING_TEMPERATURE,
+            max_tokens=400,
+        )
+        raw = (response.content or "").strip()
+        parsed = parse_json_object(raw) or {}
+        decision = str(parsed.get("decision", "")).strip().lower()
+        if decision not in _VALID_HISTORY_DECISIONS:
+            decision = "use_as_is"
+        processed = str(parsed.get("processed_query", "") or "").strip() or user_query
+        try:
+            turns_used = int(parsed.get("history_turns_used", 0) or 0)
+        except (TypeError, ValueError):
+            turns_used = 0
+        if decision == "use_as_is":
+            turns_used = 0
+        return processed, decision, max(0, turns_used)
+    except Exception as exc:
+        logger.warning("Retrieval rewriter failed, using literal query: %s", exc)
+        return user_query, "use_as_is", 0
+
+
 # ---------------------------------------------------------------------------
 # Knowledge graph vocabulary (loaded once, used for reformulation context)
 # ---------------------------------------------------------------------------
@@ -734,6 +796,8 @@ def process_query(
     fast_path: bool = False,
     memory_context: Optional[str] = None,
     user_query: Optional[str] = None,
+    mode: str = "query",
+    retrieval_sub_mode: str = "auto",
 ) -> QueryResult:
     """Query processing loop with confidence-based routing.
 
@@ -769,6 +833,43 @@ def process_query(
         recommended action.
     """
     _ensure_file_logging()
+    # Retrieval mode short-circuits the LangGraph creation/verification loop.
+    # Hard sub-mode never calls the LLM; Auto sub-mode runs a single
+    # retrieval-tuned rewriter pass. Both produce a usable QueryResult with
+    # ``action=SEARCH`` because retrieval never asks the user for clarification —
+    # the user always sees ranked docs, even if the rewriter's output is poor.
+    if mode == "retrieval":
+        bare_user_query = (user_query if user_query is not None else raw_query) or ""
+        if retrieval_sub_mode == "hard":
+            return QueryResult(
+                processed_query=bare_user_query,
+                standalone_query=bare_user_query,
+                confidence=1.0,
+                action=QueryAction.SEARCH,
+                clarification_message=None,
+                iterations=0,
+                has_backward_reference=False,
+                suppress_memory=True,
+                history_decision="hard_query",
+                history_turns_used=0,
+            )
+        # Auto sub-mode.
+        processed, decision, turns_used = _retrieval_auto_rewrite(
+            bare_user_query, memory_context or ""
+        )
+        return QueryResult(
+            processed_query=processed,
+            standalone_query=processed,
+            confidence=1.0,
+            action=QueryAction.SEARCH,
+            clarification_message=None,
+            iterations=1,
+            has_backward_reference=(decision != "use_as_is"),
+            suppress_memory=False,
+            history_decision=decision,
+            history_turns_used=turns_used,
+        )
+
     with get_tracer().span("query_processor.process_query", {"raw_query_len": len(raw_query)}) as root_span:
         ollama_available = _check_llm_available()
         if not ollama_available:

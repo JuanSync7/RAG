@@ -33,6 +33,20 @@ import os
 
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
+
+# Modules whose top-level evaluation trips the workflow sandbox (e.g. httpx
+# touching urllib.request.Request during class construction). They're imported
+# transitively by parent packages of our workflow module, not by workflow code
+# itself, so passthrough is safe — the workflow never calls them.
+_PASSTHROUGH_MODULES = (
+    "httpx",
+    "urllib",
+    "src",
+)
+_WORKFLOW_RUNNER = SandboxedWorkflowRunner(
+    restrictions=SandboxRestrictions.default.with_passthrough_modules(*_PASSTHROUGH_MODULES),
+)
 
 from config.settings import TEMPORAL_TARGET_HOST, TEMPORAL_TASK_QUEUE
 from src.ingest.temporal.activities import (
@@ -158,6 +172,7 @@ async def run_worker() -> None:
             max_concurrent_activities=user_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         bg_worker = Worker(
             client,
@@ -165,6 +180,7 @@ async def run_worker() -> None:
             max_concurrent_activities=bg_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         logger.info(
             "worker started mode=dual-queue "
@@ -187,6 +203,7 @@ async def run_worker() -> None:
             max_concurrent_activities=total_slots,
             workflows=_WORKFLOWS,
             activities=_ACTIVITIES,
+            workflow_runner=_WORKFLOW_RUNNER,
         )
         logger.warning(
             "Running in legacy single-queue mode. "

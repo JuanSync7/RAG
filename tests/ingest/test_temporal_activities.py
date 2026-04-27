@@ -219,12 +219,7 @@ class TestPrewarmDoclingEnabled:
 
 class TestDocumentProcessingActivity:
     def test_mock_document_processing_activity_returns_result(self, monkeypatch, tmp_path):
-        """document_processing_activity should call run_document_processing and return DocProcessingResult.
-
-        clean_hash is now computed by document_processing_activity as sha256 of the
-        clean text written to CleanDocumentStore — it is NOT taken from the
-        run_document_processing result dict.
-        """
+        """document_processing_activity should call run_document_processing and return DocProcessingResult."""
         import asyncio
         import dataclasses
         import hashlib
@@ -232,7 +227,7 @@ class TestDocumentProcessingActivity:
         from src.ingest.common import IngestionConfig
 
         config = IngestionConfig()
-        config.clean_store_dir = str(tmp_path / "clean_store")
+        config.clean_store_dir = str(tmp_path)
         config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
@@ -245,11 +240,11 @@ class TestDocumentProcessingActivity:
         )
         args = acts.ActivityArgs(source=source_args, config=config_dict)
 
-        fake_clean_text = "cleaned document content"
+        cleaned_text = "Hello widgets."
         fake_result = {
             "errors": [],
             "source_hash": "abc123",
-            "cleaned_text": fake_clean_text,
+            "cleaned_text": cleaned_text,
             "processing_log": ["step1", "step2"],
         }
 
@@ -262,10 +257,11 @@ class TestDocumentProcessingActivity:
 
         result = asyncio.run(acts.document_processing_activity(args))
 
-        expected_clean_hash = hashlib.sha256(fake_clean_text.encode("utf-8")).hexdigest()
         assert isinstance(result, acts.DocProcessingResult)
         assert result.source_hash == "abc123"
-        assert result.clean_hash == expected_clean_hash
+        # clean_hash is now derived from the cleaned_text written to CleanDocumentStore,
+        # not echoed from the run_document_processing result.
+        assert result.clean_hash == hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
         assert result.errors == []
         assert result.processing_log == ["step1", "step2"]
 
@@ -352,36 +348,33 @@ class TestDocumentProcessingActivity:
 
 class TestEmbeddingPipelineActivity:
     def test_mock_embedding_pipeline_activity_returns_result(self, monkeypatch, tmp_path):
-        """embedding_pipeline_activity should call run_embedding_pipeline and return EmbeddingResult.
-
-        Phase 2 reads clean text from CleanDocumentStore — the test must pre-populate
-        the store and configure clean_store_dir in IngestionConfig.
-        """
+        """embedding_pipeline_activity should call run_embedding_pipeline and return EmbeddingResult."""
         import asyncio
         import dataclasses
         from contextlib import contextmanager
+        from pathlib import Path
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig, CleanDocumentStore
-
-        clean_store_path = tmp_path / "clean_store"
-        source_key = "key"
-        clean_text = "clean document text for embedding"
-        meta = {"source_key": source_key}
-        CleanDocumentStore(clean_store_path).write(source_key, clean_text, meta)
+        from src.ingest.common import IngestionConfig
+        from src.ingest.common.clean_store import CleanDocumentStore
 
         config = IngestionConfig()
-        config.clean_store_dir = str(clean_store_path)
+        config.clean_store_dir = str(tmp_path)
         config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
             source_name="doc.pdf",
             source_uri="file:///tmp/doc.pdf",
-            source_key=source_key,
+            source_key="key",
             source_id="id",
             connector="local",
             source_version="v1",
         )
         args = acts.ActivityArgs(source=source_args, config=config_dict)
+
+        # Phase 2 reads cleaned text from CleanDocumentStore; seed it.
+        CleanDocumentStore(Path(config.clean_store_dir)).write(
+            source_args.source_key, "doc body", {"source_key": source_args.source_key},
+        )
 
         fake_wv_client = MagicMock()
 
@@ -420,26 +413,28 @@ class TestEmbeddingPipelineActivity:
         import asyncio
         import dataclasses
         from contextlib import contextmanager
+        from pathlib import Path
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig, CleanDocumentStore
-
-        clean_store_path = tmp_path / "clean_store"
-        source_key = "k"
-        CleanDocumentStore(clean_store_path).write(source_key, "some text", {"source_key": source_key})
+        from src.ingest.common import IngestionConfig
+        from src.ingest.common.clean_store import CleanDocumentStore
 
         config = IngestionConfig()
-        config.clean_store_dir = str(clean_store_path)
+        config.clean_store_dir = str(tmp_path)
         config_dict = dataclasses.asdict(config)
         source_args = acts.SourceArgs(
             source_path="/tmp/bad.pdf",
             source_name="bad.pdf",
             source_uri="file:///tmp/bad.pdf",
-            source_key=source_key,
+            source_key="k",
             source_id="i",
             connector="local",
             source_version="v1",
         )
         args = acts.ActivityArgs(source=source_args, config=config_dict)
+
+        CleanDocumentStore(Path(config.clean_store_dir)).write(
+            source_args.source_key, "doc body", {"source_key": source_args.source_key},
+        )
 
         @contextmanager
         def fake_get_client():
@@ -470,29 +465,31 @@ class TestEmbeddingPipelineActivity:
         import asyncio
         import dataclasses
         from contextlib import contextmanager
+        from pathlib import Path
         acts = _import_activities()
-        from src.ingest.common import IngestionConfig, CleanDocumentStore
-
-        clean_store_path = tmp_path / "clean_store"
-        source_key = "k"
-        CleanDocumentStore(clean_store_path).write(source_key, "doc text", {"source_key": source_key})
+        from src.ingest.common import IngestionConfig
+        from src.ingest.common.clean_store import CleanDocumentStore
 
         config = IngestionConfig()
         config.build_kg = True
         config.store_documents = False
-        config.clean_store_dir = str(clean_store_path)
+        config.clean_store_dir = str(tmp_path)
         config_dict = dataclasses.asdict(config)
 
         source_args = acts.SourceArgs(
             source_path="/tmp/doc.pdf",
             source_name="doc.pdf",
             source_uri="file:///tmp/doc.pdf",
-            source_key=source_key,
+            source_key="k",
             source_id="i",
             connector="local",
             source_version="v1",
         )
         args = acts.ActivityArgs(source=source_args, config=config_dict)
+
+        CleanDocumentStore(Path(config.clean_store_dir)).write(
+            source_args.source_key, "doc body", {"source_key": source_args.source_key},
+        )
 
         @contextmanager
         def fake_get_client():

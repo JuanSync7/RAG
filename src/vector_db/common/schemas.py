@@ -67,8 +67,9 @@ class SearchFilter:
         operator: Comparison operator. Supported values:
             ``"eq"`` (equal), ``"ne"`` (not equal),
             ``"gt"`` / ``"lt"`` / ``"gte"`` / ``"lte"`` (numeric comparisons),
-            ``"like"`` (glob-style pattern match).
-        value: Value to compare against.
+            ``"like"`` (glob-style pattern match),
+            ``"not_in"`` (value is a list; matches when the property is not in it).
+        value: Value to compare against. For ``"not_in"`` this must be a list.
     """
 
     property: str
