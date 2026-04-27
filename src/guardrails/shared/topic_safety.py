@@ -132,9 +132,9 @@ class TopicSafetyChecker:
             `TopicSafetyResult` derived from the LLM's "on-topic"/"off-topic"
             response.
         """
-        from src.retrieval.query.nodes import _call_ollama
+        from src.platform.llm import call_oneshot
 
-        result = _call_ollama(
+        result = call_oneshot(
             f"User message: {query}",
             system=self._system_prompt,
         )

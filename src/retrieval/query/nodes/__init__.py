@@ -24,6 +24,3 @@ __all__ = [
     "RankedResult",
     "get_reranker_provider",
 ]
-
-# --- Auto-generated re-exports (fix_encapsulation.py) ---
-from src.retrieval.query.nodes.query_processor import _call_ollama
