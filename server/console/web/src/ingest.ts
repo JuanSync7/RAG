@@ -21,7 +21,7 @@ import {
 } from "./ingest-modes";
 import { refreshJobsList } from "./ingest-stream";
 
-function switchView(view: "chat" | "ingest"): void {
+export function switchView(view: string): void {
     document.querySelectorAll<HTMLElement>(".view-tab").forEach((b) => {
         b.classList.toggle("active", b.dataset.view === view);
     });
@@ -41,10 +41,10 @@ function switchMode(mode: "files" | "url" | "directory"): void {
 }
 
 export function initIngestView(): void {
-    // Top-level Chat / Ingest tabs.
+    // Top-level Chat / Ingest / Retrieval tabs.
     document.querySelectorAll<HTMLElement>(".view-tab").forEach((btn) => {
         btn.addEventListener("click", () => {
-            const view = btn.dataset.view as "chat" | "ingest";
+            const view = btn.dataset.view;
             if (view) switchView(view);
         });
     });

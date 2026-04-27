@@ -55,4 +55,5 @@ export function setActiveConversation(id: string | null): void {
     state.activeConversationId = id;
     if (id) localStorage.setItem("nc_active_conv", id);
     else localStorage.removeItem("nc_active_conv");
+    document.dispatchEvent(new CustomEvent("conversation-changed", { detail: { id } }));
 }
