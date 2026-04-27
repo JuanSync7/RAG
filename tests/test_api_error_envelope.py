@@ -48,6 +48,24 @@ class _FakeMemory:
     def get_seen_doc_ids(self, **_kwargs) -> list[str]:  # pragma: no cover - trivial stub
         return []
 
+    def mark_retrieved(self, **_kwargs) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def move_to_ignored(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
+
+    def restore_to_relevant(self, **_kwargs):  # pragma: no cover - trivial stub
+        return self._meta(_kwargs.get("conversation_id", "conv_test"))
+
+    def delete_conversation(self, **_kwargs) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def list_conversations(self, **_kwargs) -> list:  # pragma: no cover - trivial stub
+        return []
+
+    def get_turns(self, **_kwargs) -> list:  # pragma: no cover - trivial stub
+        return []
+
 
 class _DummyWorkflowService:
     async def get_system_info(self):
