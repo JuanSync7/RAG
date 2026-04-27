@@ -188,6 +188,8 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "trace_id": state.get("trace_id", ""),
             "schema_version": PIPELINE_SCHEMA_VERSION,
             "batch_id": state.get("batch_id", ""),
+            "staging_batch_id": state.get("staging_batch_id", ""),
+            "source_hash": state.get("source_hash", ""),
         }
 
         chunks = state["chunks"]

@@ -36,6 +36,8 @@ def run_embedding_pipeline(
     docling_document: Optional[Any] = None,
     trace_id: str = "",
     batch_id: str = "",
+    staging_batch_id: str = "",
+    source_hash: str = "",
 ) -> EmbeddingPipelineState:
     """Run the Phase 2 Embedding Pipeline for a single clean document.
 
@@ -93,6 +95,8 @@ def run_embedding_pipeline(
         "processing_log": [],
         "trace_id": trace_id,
         "batch_id": batch_id,
+        "staging_batch_id": staging_batch_id,
+        "source_hash": source_hash,
     }
     try:
         final_state = _GRAPH.invoke(initial_state)

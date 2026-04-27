@@ -162,7 +162,16 @@ class IngestDocumentWorkflow:
             _priority,
         )
 
-        activity_args = ActivityArgs(source=args.source, config=args.config)
+        # Mint a per-document UUID at workflow entry (Issue #42). The same
+        # id is passed to Phase 1 and Phase 2 so the commit step can roll
+        # back any partial writes by filtering chunks on this property.
+        # workflow.uuid4() is deterministic across replay.
+        staging_batch_id = str(workflow.uuid4())
+        activity_args = ActivityArgs(
+            source=args.source,
+            config=args.config,
+            staging_batch_id=staging_batch_id,
+        )
 
         # ── Phase 1 ──────────────────────────────────────────────────────
         phase1: DocProcessingResult = await workflow.execute_activity(
@@ -175,6 +184,17 @@ class IngestDocumentWorkflow:
             return IngestDocumentResult(
                 source_key=args.source.source_key,
                 errors=phase1.errors,
+                stored_count=0,
+                processing_log=phase1.processing_log,
+            )
+
+        # Idempotent short-circuit: source bytes unchanged since last ingest.
+        # Phase 2 has nothing to do — chunks for this source_key + source_hash
+        # are already in Weaviate (that's how Phase 1 detected the match).
+        if getattr(phase1, "skipped", False):
+            return IngestDocumentResult(
+                source_key=args.source.source_key,
+                errors=[],
                 stored_count=0,
                 processing_log=phase1.processing_log,
             )
