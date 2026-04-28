@@ -95,11 +95,19 @@
     <header class="chat-header">
       <button class="toggle-btn" id="toggleBtn">&#9776;</button>
       <span class="conv-title" id="convTitle">RagWeave</span>
-      <div class="model-badge" id="modelBadge"><span class="model-dot"></span><span id="modelBadgeText">Loading…</span></div>
       <div class="chat-mode-toggle" id="chatModeToggle" role="tablist" aria-label="Renderer">
         <button class="chat-mode-btn active" id="chatModeAnswer" data-mode="answer" role="tab" aria-selected="true" title="Generate an answer with citations">Answer</button>
         <button class="chat-mode-btn" id="chatModeSources" data-mode="sources" role="tab" aria-selected="false" title="Return source documents only — no generated answer">Sources</button>
       </div>
+      <div class="model-badge" id="modelBadge"><span class="model-dot"></span><span id="modelBadgeText">Loading…</span></div>
+      <div class="chat-submode-toggle" id="chatSubmodeToggle" role="tablist" aria-label="Retrieval sub-mode" title="Hard: send query verbatim. Auto: LLM-rewrites query first.">
+        <button class="chat-submode-btn active" id="chatSubmodeHard" data-submode="hard" role="tab" aria-selected="true" title="Send query verbatim — no LLM rewriting">Hard</button>
+        <button class="chat-submode-btn" id="chatSubmodeAuto" data-submode="auto" role="tab" aria-selected="false" title="LLM rewrites the query for better retrieval">Auto</button>
+      </div>
+      <label class="chat-topk" id="chatTopkWrap" title="Number of source chunks to return">
+        <span class="chat-topk-label">top_k</span>
+        <input class="chat-topk-input" id="chatTopkInput" type="text" inputmode="numeric" pattern="[0-9]*" value="5">
+      </label>
       <div class="ctx-chip" id="ctxChip">
         <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
         <span id="ctxPct">—</span>
@@ -201,13 +209,19 @@
     </div>
     </div>
     <aside class="chat-rail" id="chatRail" aria-label="Document state">
-      <div class="chat-rail-section">
-        <div class="chat-rail-title"><span>&#9989; Relevant</span><span class="chat-rail-count" id="chatRailRelevantCount">0</span></div>
-        <div class="chat-rail-list" id="chatRailRelevant"></div>
+      <div class="chat-rail-header">
+        <button class="chat-rail-toggle" id="chatRailToggle" title="Collapse" aria-expanded="true" aria-controls="chatRailBody">&#9654;</button>
+        <span class="chat-rail-heading">Documents</span>
       </div>
-      <div class="chat-rail-section">
-        <div class="chat-rail-title"><span>&#128683; Hidden</span><span class="chat-rail-count" id="chatRailHiddenCount">0</span></div>
-        <div class="chat-rail-list" id="chatRailHidden"></div>
+      <div class="chat-rail-body" id="chatRailBody">
+        <div class="chat-rail-section">
+          <div class="chat-rail-title"><span>&#9989; Relevant</span><span class="chat-rail-count" id="chatRailRelevantCount">0</span></div>
+          <div class="chat-rail-list" id="chatRailRelevant"></div>
+        </div>
+        <div class="chat-rail-section">
+          <div class="chat-rail-title"><span>&#128683; Hidden</span><span class="chat-rail-count" id="chatRailHiddenCount">0</span></div>
+          <div class="chat-rail-list" id="chatRailHidden"></div>
+        </div>
       </div>
     </aside>
     </div>

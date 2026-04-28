@@ -15,7 +15,7 @@ import { buildCitationsHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, appendSourcesTurn, applyDocState } from "./chatMode";
+import { getChatMode, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions } from "./chatMode";
 import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
@@ -27,7 +27,13 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
-    if (getChatMode() === "sources") body.mode = "retrieval";
+    if (getChatMode() === "sources") {
+        body.mode = "retrieval";
+        body.retrieval_sub_mode = getRetrievalSubMode();
+        const topK = getSourcesTopK();
+        body.rerank_top_k = topK;
+        body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+    }
     return body;
 }
 
@@ -54,6 +60,7 @@ async function sourcesOnlyQuery(queryText: string): Promise<void> {
             conversation_id?: string;
             relevant_doc_ids?: string[];
             ignored_doc_ids?: string[];
+            token_budget?: TokenBudget;
         }>("POST", "/console/query", buildQueryBody(queryText));
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
@@ -61,6 +68,9 @@ async function sourcesOnlyQuery(queryText: string): Promise<void> {
         appendSourcesTurn(refs.thread, sources);
         if (data.relevant_doc_ids || data.ignored_doc_ids) {
             applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+        }
+        if (data.token_budget) {
+            updateContextIndicator(data.token_budget);
         }
         scrollToBottom();
         await loadConversations();
@@ -218,9 +228,20 @@ export async function streamQuery(queryText: string): Promise<void> {
                     }
 
                     const results = (data.results ?? []) as ChunkResult[];
+                    if (results.length) {
+                        const sourceRefs = results.map(chunkToSourceRef);
+                        cacheDocsFromSources(sourceRefs);
+                    }
                     const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
                     if (showCitations && results.length) {
                         citationsEl.innerHTML = buildCitationsHtml(results);
+                        wireCitationActions(citationsEl);
+                    }
+                    if (data.relevant_doc_ids || data.ignored_doc_ids) {
+                        applyDocState(
+                            (data.relevant_doc_ids ?? []) as string[],
+                            (data.ignored_doc_ids ?? []) as string[],
+                        );
                     }
                 } else if (evtType === "error") {
                     errorShown = true;
@@ -372,8 +393,12 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 
         const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
         const results = data.results ?? [];
+        if (results.length) {
+            cacheDocsFromSources(results.map(chunkToSourceRef));
+        }
         if (showCitations && results.length) {
             citationsEl.innerHTML = buildCitationsHtml(results);
+            wireCitationActions(citationsEl);
             revealCitations(citationsEl);
         }
 

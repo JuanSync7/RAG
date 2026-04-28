@@ -13,7 +13,7 @@ import { showToast, copyMsg } from "./toast";
 import { appendUserMsg, appendErrorMsg, setEmptyState } from "./thread";
 import { buildCitationsHtml } from "./citations";
 import { sourceRefToChunkResult } from "./user-types";
-import { isSourcesTurn, appendSourcesTurn } from "./chatMode";
+import { isSourcesTurn, appendSourcesTurn, cacheDocsFromSources, wireCitationActions } from "./chatMode";
 import type { ConversationMeta, SourceRef } from "./user-types";
 
 export function renderConversationList(convs: ConversationMeta[]): void {
@@ -116,6 +116,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
                 group.className = "msg-group";
                 const ts = fmtTime(turn.timestamp_ms ?? Date.now());
                 const sources = turn.sources ?? [];
+                if (sources.length) cacheDocsFromSources(sources);
                 const citationsHtml = sources.length
                     ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>`
                     : "";
@@ -136,6 +137,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
                     const bubbleEl = group.querySelector<HTMLElement>(".bubble")!;
                     copyBtn.addEventListener("click", () => copyMsg(copyBtn, bubbleEl.innerText));
                 }
+                if (sources.length) wireCitationActions(group);
                 refs.thread.appendChild(group);
             }
         });

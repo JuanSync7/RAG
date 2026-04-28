@@ -4,10 +4,11 @@
 // paths plus the conversation-history replay in conversations.ts.
 // @end-summary
 
-import { byId, escHtml } from "./dom";
+import { escHtml } from "./dom";
 import { parseMarkdown } from "./markdown";
 import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
+import { docKeyFromMeta } from "./chatMode";
 import type { ChunkResult } from "./user-types";
 
 export interface ViewPayload {
@@ -55,15 +56,29 @@ export function buildCitationsHtml(results: ChunkResult[]): string {
     let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
     results.forEach((r, i) => {
         const meta = r.metadata || {};
-        const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
+        const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
+        const filename = escHtml(filenameRaw);
         const section = escHtml(String(meta.section ?? meta.heading ?? ""));
         const score = Math.round(r.score * 100);
         const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
         const chunkHtml = parseMarkdown(r.text || "");
-        const chunkId = `chunk-${i}-${Date.now()}`;
         const sourceUri = String(meta.source_uri ?? "").trim();
         const source = String(meta.source ?? "").trim();
         const sourceKey = String(meta.source_key ?? "").trim();
+        const docKey = docKeyFromMeta(meta as Record<string, unknown>);
+        const cardAttrs = docKey
+            ? ` data-doc-key="${escHtml(docKey)}" data-doc-name="${escHtml(filenameRaw)}"`
+                + (source ? ` data-source="${escHtml(source)}"` : "")
+                + (sourceUri ? ` data-source-uri="${escHtml(sourceUri)}"` : "")
+                + (sourceKey ? ` data-source-key="${escHtml(sourceKey)}"` : "")
+            : "";
+        const actionsHtml = docKey
+            ? `<div class="citation-card-actions" onclick="event.stopPropagation()">`
+                + `<button class="citation-card-action" data-action="relevant">Mark relevant</button>`
+                + `<button class="citation-card-action" data-action="hide">Hide</button>`
+                + `<button class="citation-card-action" data-action="reset" disabled>Reset</button>`
+                + `</div>`
+            : "";
         let viewKey = "";
         if (sourceKey || sourceUri || source) {
             viewKey = `view-${++_viewCounter}`;
@@ -80,7 +95,7 @@ export function buildCitationsHtml(results: ChunkResult[]): string {
             });
         }
         html += `
-          <div class="citation-card" onclick="toggleCitation(this)">
+          <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
               <span class="citation-icon">&#128196;</span>
               <div class="citation-info">
@@ -94,8 +109,8 @@ export function buildCitationsHtml(results: ChunkResult[]): string {
               <span class="citation-chevron">&#8964;</span>
             </div>
             <div class="citation-body">
-              <div class="citation-chunk markdown-body" id="${chunkId}">${chunkHtml}</div>
-              <button class="citation-show-more" onclick="event.stopPropagation();toggleChunk(event,'${chunkId}')">Show more</button>
+              <div class="citation-chunk markdown-body">${chunkHtml}</div>
+              ${actionsHtml}
             </div>
           </div>`;
     });
@@ -121,13 +136,6 @@ function toggleCitation(card: HTMLElement): void {
     card.classList.toggle("expanded");
 }
 
-function toggleChunk(e: Event, id: string): void {
-    e.stopPropagation();
-    const el = byId(id);
-    el.classList.toggle("show-all");
-    (e.target as HTMLElement).textContent = el.classList.contains("show-all") ? "Show less" : "Show more";
-}
-
 export function revealCitations(citationsEl: HTMLElement): void {
     citationsEl.style.display = "block";
     citationsEl.classList.remove("reveal");
@@ -138,6 +146,5 @@ export function revealCitations(citationsEl: HTMLElement): void {
 
 export function initCitations(): void {
     (window as unknown as Record<string, unknown>)["toggleCitation"] = toggleCitation;
-    (window as unknown as Record<string, unknown>)["toggleChunk"] = toggleChunk;
     (window as unknown as Record<string, unknown>)["openSourceView"] = openSourceView;
 }

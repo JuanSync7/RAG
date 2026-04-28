@@ -233,6 +233,8 @@ async def run_query(
         payload = request.model_dump(exclude_none=True)
         payload["tenant_id"] = tenant_id
         payload["conversation_id"] = conv.conversation_id
+        if request.mode == "retrieval":
+            payload["skip_generation"] = True
         # Hard-suppress previously-served docs (relevant ∪ ignored).
         # Lives outside ``memory_enabled`` because doc state tracking is
         # logically separate from chat-history context building — Noop
@@ -313,10 +315,9 @@ async def run_query(
         # under either renderer (citation strip vs doc cards) on the frontend.
         if request.memory_enabled:
             user_text = request.query.strip()
-            assistant_text = (
-                str(result.get("generated_answer", "")).strip()
-                or str(result.get("clarification_message", "")).strip()
-            )
+            generated = result.get("generated_answer") or ""
+            clarification = result.get("clarification_message") or ""
+            assistant_text = str(generated).strip() or str(clarification).strip()
             is_retrieval = request.mode == "retrieval"
             source_refs = _source_refs(result.get("results", []))
             mem_start = time.perf_counter()

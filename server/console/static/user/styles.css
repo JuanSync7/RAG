@@ -300,15 +300,13 @@
     }
 
     /* ── Message Thread ── */
+    /* Note: overflow lives on .chat-body so the scrollbar lands at the
+       page's rightmost edge (past the chat rail). */
     .message-thread {
-      flex: 1; overflow-y: auto;
-      padding: 24px max(16px, calc((100% - 820px) / 2));
+      flex: 1; padding: 24px max(16px, calc((100% - 820px) / 2));
       display: flex; flex-direction: column; gap: 4px;
       width: 100%;
     }
-    .message-thread::-webkit-scrollbar { width: 6px; }
-    .message-thread::-webkit-scrollbar-track { background: transparent; }
-    .message-thread::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
     .scroll-fab {
       position: absolute; right: 20px; bottom: 116px;
@@ -485,19 +483,25 @@
     .citation-body { display: none; padding: 0 12px 10px; border-top: 1px solid var(--border); }
     .citation-card.expanded .citation-body { display: block; }
     .citation-chunk {
-      font-size: 12px; color: var(--text-2); line-height: 1.5; margin-top: 8px;
-      max-height: 6.5em; overflow: hidden; position: relative;
+      font-size: 12px; color: var(--text); line-height: 1.5; margin-top: 8px;
     }
-    .citation-chunk::after {
-      content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.4em;
-      background: linear-gradient(to bottom, transparent, var(--bg-card));
-      pointer-events: none;
-    }
-    .citation-chunk.show-all { max-height: none; }
-    .citation-chunk.show-all::after { display: none; }
     .citation-chunk p:first-child { margin-top: 0; }
     .citation-chunk p:last-child { margin-bottom: 0; }
     .citation-chunk h1, .citation-chunk h2, .citation-chunk h3 { font-size: 13px; margin: 4px 0; }
+    .citation-chunk ul, .citation-chunk ol { margin: 4px 0; padding-left: 22px; }
+    .citation-chunk li { margin: 2px 0; }
+    .citation-card-actions {
+      display: flex; gap: 8px; margin-top: 8px; padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    .citation-card-action {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text-2); cursor: pointer;
+    }
+    .citation-card-action:hover { color: var(--text); border-color: var(--text-2); }
+    .citation-card-action[disabled] { opacity: 0.4; cursor: not-allowed; }
+    .citation-chunk li::marker { color: var(--text-2); }
 
     /* ── Markdown tables (in bubbles and citation chunks) ── */
     .bubble table, .citation-chunk table {
@@ -515,7 +519,6 @@
     .citation-chunk table tr:nth-child(even) td {
       background: rgba(255,255,255,0.02);
     }
-    .citation-show-more { background: none; border: none; color: var(--accent); font-size: 11px; cursor: pointer; margin-top: 4px; padding: 0; }
 
     /* ── Input bar ── */
     .input-bar {
@@ -1199,19 +1202,54 @@
     .ingest-dir-result code { font-family: var(--mono, monospace); color: var(--text); }
     .ingest-dir-files { margin-top: 8px; max-height: 160px; overflow: auto; font-family: var(--mono, monospace); font-size: 11px; color: var(--text-3); }
 
-    /* Chat body: main column + optional right rail (sources mode only) */
+    /* Chat body: main column + optional right rail (sources mode only).
+       chat-body owns the vertical scroll so its scrollbar sits at the
+       rightmost edge of the page — past the chat rail. The rail and
+       input-bar are position: sticky so they stay pinned while scrolling. */
     .chat-body {
       flex: 1; min-height: 0; display: flex; flex-direction: row;
+      overflow-y: auto;
     }
+    .chat-body::-webkit-scrollbar { width: 8px; }
+    .chat-body::-webkit-scrollbar-track { background: transparent; }
+    .chat-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
     .chat-main {
       flex: 1; min-width: 0; display: flex; flex-direction: column;
+      min-height: 100%;
+    }
+    .chat-main .input-bar {
+      position: sticky; bottom: 0; z-index: 50;
     }
     .chat-rail {
-      width: 280px; border-left: 1px solid var(--border); padding: 12px;
-      overflow-y: auto; display: none; flex-direction: column; gap: 16px;
-      background: var(--bg);
+      width: 260px; border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      background: var(--bg-surface); flex-shrink: 0;
+      transition: width 0.15s ease;
+      position: sticky; top: 0;
+      align-self: stretch; height: 100vh;
     }
-    #view-chat[data-chat-mode="sources"] .chat-rail { display: flex; }
+    .chat-rail.collapsed { width: 32px; }
+    .chat-rail-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      gap: 8px; min-height: 38px;
+    }
+    .chat-rail.collapsed .chat-rail-header { padding: 10px 4px; justify-content: center; }
+    .chat-rail-heading {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--text-2); white-space: nowrap;
+    }
+    .chat-rail.collapsed .chat-rail-heading { display: none; }
+    .chat-rail-toggle {
+      background: none; border: none; color: var(--text-2); cursor: pointer;
+      font-size: 13px; padding: 2px 6px; border-radius: 4px;
+    }
+    .chat-rail-toggle:hover { background: var(--bg-card); color: var(--text); }
+    .chat-rail-body {
+      flex: 1; min-height: 0; overflow-y: auto; padding: 12px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .chat-rail.collapsed .chat-rail-body { display: none; }
     .chat-rail-section {
       display: flex; flex-direction: column; gap: 6px;
     }
@@ -1272,12 +1310,50 @@
       background: var(--bg-elevated); color: var(--text); font-weight: 600;
     }
 
+    /* Sub-mode toggle (Hard / Auto) — only visible in Sources mode */
+    .chat-submode-toggle {
+      display: none; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 3px; gap: 2px; margin-left: 4px;
+    }
+    #view-chat[data-chat-mode="sources"] .chat-submode-toggle { display: inline-flex; }
+    .chat-submode-btn {
+      padding: 4px 10px; border-radius: 6px; border: none; background: transparent;
+      color: var(--text-2); font-size: 11px; font-weight: 500; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .chat-submode-btn:hover { color: var(--text); }
+    .chat-submode-btn.active {
+      background: var(--bg-elevated); color: var(--text); font-weight: 600;
+    }
+
+    /* top_k input — only visible in Sources mode */
+    .chat-topk {
+      display: none; align-items: center; gap: 6px; margin-left: 4px;
+      padding: 3px 8px; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #view-chat[data-chat-mode="sources"] .chat-topk { display: inline-flex; }
+    .chat-topk-label {
+      font-size: 11px; color: var(--text-2); font-weight: 600;
+      text-transform: lowercase; letter-spacing: 0.02em;
+    }
+    .chat-topk-input {
+      width: 44px; background: transparent; border: none; outline: none;
+      color: var(--text); font-size: 12px; font-weight: 600; padding: 0;
+      text-align: center;
+    }
+    .chat-topk-input::-webkit-outer-spin-button,
+    .chat-topk-input::-webkit-inner-spin-button { opacity: 0.6; }
+
     /* Doc-cards turn (Sources mode) — rendered inside thread instead of bubble */
+    .sources-lead {
+      margin-bottom: 8px;
+    }
     .sources-turn {
-      display: flex; gap: 12px; padding: 4px 0;
+      display: block; padding: 0;
     }
     .sources-turn .sources-cards {
-      display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0;
+      display: flex; flex-direction: column; gap: 8px; min-width: 0;
     }
     .sources-card {
       background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
@@ -1298,11 +1374,110 @@
       font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: none;
     }
     .sources-card-view:hover { text-decoration: underline; }
+    .sources-card-minimize {
+      background: none; border: none; color: var(--text-2); cursor: pointer;
+      font-size: 11px; padding: 2px 6px; border-radius: 4px; line-height: 1;
+    }
+    .sources-card-minimize:hover { background: var(--bg-elevated); color: var(--text); }
+    .sources-card.collapsed .sources-card-meta,
+    .sources-card.collapsed .sources-card-chunks,
+    .sources-card.collapsed .sources-card-actions { display: none; }
     .sources-card-excerpt {
       font-size: 12px; color: var(--text-2); line-height: 1.5;
       max-height: 5.4em; overflow: hidden;
     }
     .sources-card-excerpt.expanded { max-height: none; }
+
+    /* Per-chunk rendering inside a doc card */
+    .sources-card-chunks {
+      display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
+    }
+    .sources-chunk {
+      border-left: 2px solid var(--border); padding: 4px 0 4px 10px;
+    }
+    .sources-chunk-meta {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 10px; color: var(--text-3); margin-bottom: 3px;
+    }
+    .sources-chunk-idx {
+      font-weight: 700; color: var(--text-2);
+    }
+    .sources-chunk-section {
+      color: var(--text-2); font-style: italic;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+    }
+    .sources-chunk-score {
+      margin-left: auto; background: var(--bg-elevated);
+      border-radius: 4px; padding: 1px 5px; color: var(--text-2);
+    }
+    .sources-chunk-text {
+      font-size: 12px; color: var(--text); line-height: 1.5;
+    }
+    .sources-chunk-text p:first-child { margin-top: 0; }
+    .sources-chunk-text p:last-child { margin-bottom: 0; }
+    .sources-chunk-text ul, .sources-chunk-text ol {
+      margin: 4px 0; padding-left: 22px;
+    }
+    .sources-chunk-text li { margin: 2px 0; }
+    .sources-chunk-text li::marker { color: var(--text-2); }
+    .sources-chunk-text blockquote {
+      margin: 6px 0; padding: 4px 10px;
+      border-left: 3px solid var(--border-strong, var(--border));
+      color: var(--text-2);
+    }
+    .sources-chunk-text blockquote :first-child { margin-top: 0; }
+    .sources-chunk-text blockquote :last-child { margin-bottom: 0; }
+    .sources-chunk-text h1, .sources-chunk-text h2, .sources-chunk-text h3 { font-size: 13px; margin: 4px 0; color: var(--text); }
+    .sources-chunk-text strong { color: var(--accent-2); }
+    .sources-chunk-text em { color: var(--text-2); font-style: italic; }
+    .sources-chunk-text a { color: var(--accent); text-decoration: none; }
+    .sources-chunk-text a:hover { text-decoration: underline; }
+    .sources-chunk-text h1 { font-size: 15px; }
+    .sources-chunk-text h2 { font-size: 14px; }
+    .sources-chunk-text h3, .sources-chunk-text h4, .sources-chunk-text h5, .sources-chunk-text h6 {
+      font-size: 13px; margin: 4px 0; color: var(--text);
+    }
+    .sources-chunk-text hr {
+      border: none; border-top: 1px solid var(--border); margin: 8px 0;
+    }
+    .sources-chunk-text code {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 3px; padding: 1px 4px; font-family: "JetBrains Mono","Fira Code",monospace;
+      font-size: 11px; color: var(--code-text);
+    }
+    .sources-chunk-text pre {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 4px; padding: 8px; overflow-x: auto; font-size: 11px;
+      color: var(--code-text);
+    }
+    .sources-chunk-text pre code { background: transparent; border: none; padding: 0; }
+    .sources-chunk-text .code-block-wrap {
+      margin: 8px 0; background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 6px; overflow: hidden;
+    }
+    .sources-chunk-text .code-block-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 10px; background: var(--code-hdr); border-bottom: 1px solid var(--border);
+      font-size: 10px; color: var(--text-3);
+    }
+    .sources-chunk-text .code-block {
+      padding: 8px 10px; font-family: "JetBrains Mono","Fira Code",monospace;
+      font-size: 11px; color: var(--code-text); white-space: pre; overflow-x: auto;
+    }
+    .sources-chunk-text table {
+      border-collapse: collapse; margin: 8px 0;
+      font-size: 12px; max-width: 100%; display: block; overflow-x: auto;
+    }
+    .sources-chunk-text table th, .sources-chunk-text table td {
+      border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top;
+      color: var(--text);
+    }
+    .sources-chunk-text table th {
+      background: var(--bg-elevated); font-weight: 700; color: var(--text);
+    }
+    .sources-chunk-text table tr:nth-child(even) td {
+      background: rgba(255,255,255,0.02);
+    }
     .sources-card-meta {
       font-size: 11px; color: var(--text-3); margin-top: 4px;
     }

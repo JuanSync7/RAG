@@ -259,6 +259,521 @@ async function api(method, path, body) {
   return json.data;
 }
 
+// src/chatMode.ts
+var STORAGE_KEY = "rw_chat_mode";
+var SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
+var RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
+var TOPK_STORAGE_KEY = "rw_sources_top_k";
+var DEFAULT_TOPK = 5;
+var _topK = (() => {
+  const raw = parseInt(localStorage.getItem(TOPK_STORAGE_KEY) || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(50, raw) : DEFAULT_TOPK;
+})();
+function getSourcesTopK() {
+  return _topK;
+}
+function initTopKInput() {
+  const input = document.getElementById("chatTopkInput");
+  if (!input) return;
+  input.value = String(_topK);
+  input.addEventListener("change", () => {
+    const v = parseInt(input.value, 10);
+    if (!Number.isFinite(v) || v < 1) {
+      input.value = String(_topK);
+      return;
+    }
+    _topK = Math.min(50, Math.max(1, v));
+    input.value = String(_topK);
+    localStorage.setItem(TOPK_STORAGE_KEY, String(_topK));
+  });
+}
+var _mode = localStorage.getItem(STORAGE_KEY) === "sources" ? "sources" : "answer";
+var _subMode = localStorage.getItem(SUBMODE_STORAGE_KEY) === "auto" ? "auto" : "hard";
+function getRetrievalSubMode() {
+  return _subMode;
+}
+function setRetrievalSubMode(sub) {
+  _subMode = sub;
+  localStorage.setItem(SUBMODE_STORAGE_KEY, sub);
+  syncSubmodeUI();
+}
+function syncSubmodeUI() {
+  const hardBtn = document.getElementById("chatSubmodeHard");
+  const autoBtn = document.getElementById("chatSubmodeAuto");
+  if (hardBtn) {
+    hardBtn.classList.toggle("active", _subMode === "hard");
+    hardBtn.setAttribute("aria-selected", _subMode === "hard" ? "true" : "false");
+  }
+  if (autoBtn) {
+    autoBtn.classList.toggle("active", _subMode === "auto");
+    autoBtn.setAttribute("aria-selected", _subMode === "auto" ? "true" : "false");
+  }
+}
+var _docCache = /* @__PURE__ */ new Map();
+var _ignoredDocIds = /* @__PURE__ */ new Set();
+var _relevantDocIds = /* @__PURE__ */ new Set();
+function getChatMode() {
+  return _mode;
+}
+function setChatMode(mode) {
+  _mode = mode;
+  localStorage.setItem(STORAGE_KEY, mode);
+  syncToggleUI();
+  applyModeToView();
+  if (mode === "sources" && state.activeConversationId) {
+    void fetchAndRenderDocState(state.activeConversationId);
+  }
+  document.dispatchEvent(new CustomEvent("chat-mode-changed", { detail: { mode } }));
+}
+function syncToggleUI() {
+  const answerBtn = document.getElementById("chatModeAnswer");
+  const sourcesBtn = document.getElementById("chatModeSources");
+  if (answerBtn) {
+    answerBtn.classList.toggle("active", _mode === "answer");
+    answerBtn.setAttribute("aria-selected", _mode === "answer" ? "true" : "false");
+  }
+  if (sourcesBtn) {
+    sourcesBtn.classList.toggle("active", _mode === "sources");
+    sourcesBtn.setAttribute("aria-selected", _mode === "sources" ? "true" : "false");
+  }
+}
+function applyModeToView() {
+  const view = document.getElementById("view-chat");
+  if (view) view.dataset.chatMode = _mode;
+}
+function initChatMode() {
+  const toggle = document.getElementById("chatModeToggle");
+  if (toggle) {
+    toggle.querySelectorAll("[data-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode;
+        if (mode === "answer" || mode === "sources") setChatMode(mode);
+      });
+    });
+  }
+  const subToggle = document.getElementById("chatSubmodeToggle");
+  if (subToggle) {
+    subToggle.querySelectorAll("[data-submode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sub = btn.dataset.submode;
+        if (sub === "hard" || sub === "auto") setRetrievalSubMode(sub);
+      });
+    });
+  }
+  initRailCollapse();
+  initTopKInput();
+  syncToggleUI();
+  syncSubmodeUI();
+  applyModeToView();
+  renderRail();
+  document.addEventListener("conversation-changed", () => {
+    _ignoredDocIds.clear();
+    _relevantDocIds.clear();
+    renderRail();
+    if (_mode === "sources" && state.activeConversationId) {
+      void fetchAndRenderDocState(state.activeConversationId);
+    }
+  });
+}
+function docKeyOf(ref) {
+  return (ref.document_id || ref.source_key || ref.source_uri || ref.source || "").trim();
+}
+function docKeyFromMeta(meta) {
+  if (!meta) return "";
+  const pick = (k) => {
+    const v = meta[k];
+    return typeof v === "string" ? v : v == null ? "" : String(v);
+  };
+  return (pick("document_id") || pick("source_key") || pick("source_uri") || pick("source") || "").trim();
+}
+function nameOf(ref) {
+  const raw = ref.source || ref.source_uri || ref.source_key || ref.document_id || "Unknown source";
+  const stripped = String(raw).split("/").pop() || String(raw);
+  return stripped;
+}
+function groupSources(sources) {
+  const groups = /* @__PURE__ */ new Map();
+  let synthCounter = 0;
+  for (const ref of sources) {
+    let key = docKeyOf(ref);
+    if (!key) key = `__synth_${synthCounter++}`;
+    const score = ref.score ?? 0;
+    const text = ref.text ?? "";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.refs.push(ref);
+      if (score > existing.bestScore) {
+        existing.bestScore = score;
+        existing.excerpt = text;
+      }
+    } else {
+      groups.set(key, {
+        docKey: key,
+        name: nameOf(ref),
+        bestScore: score,
+        excerpt: text,
+        refs: [ref],
+        sourceUri: ref.source_uri ?? "",
+        sourceKey: ref.source_key ?? "",
+        source: ref.source ?? ""
+      });
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.bestScore - a.bestScore);
+}
+function cacheDocs(groups) {
+  for (const g of groups) {
+    if (!g.docKey || g.docKey.startsWith("__synth_")) continue;
+    _docCache.set(g.docKey, {
+      name: g.name,
+      sourceUri: g.sourceUri,
+      sourceKey: g.sourceKey,
+      source: g.source
+    });
+  }
+}
+function cacheDocsFromSources(sources) {
+  cacheDocs(groupSources(sources));
+}
+function appendSourcesTurn(thread, sources) {
+  const group = document.createElement("div");
+  group.className = "msg-group";
+  const ts = fmtTime(Date.now());
+  const docs = groupSources(sources);
+  cacheDocs(docs);
+  const cardsHtml = docs.length ? docs.map((d) => renderCardHtml(d)).join("") : `<div class="sources-empty">No sources matched.</div>`;
+  const lead = docs.length ? `Here are the documents I found:` : `I couldn't find any relevant documents.`;
+  group.innerHTML = `
+        <div class="msg-row assistant">
+          <div class="avatar ai-av">AI</div>
+          <div class="bubble-wrap">
+            <div class="bubble assistant sources-lead">${escHtml(lead)}</div>
+            <div class="sources-turn"><div class="sources-cards">${cardsHtml}</div></div>
+            <div class="msg-meta">Sources \xB7 ${ts}</div>
+          </div>
+        </div>`;
+  thread.appendChild(group);
+  wireCardActions(group, docs);
+  return group;
+}
+function renderCardHtml(d) {
+  const score = Math.round(d.bestScore * 100);
+  const chunkCount = d.refs.length;
+  const synthetic = d.docKey.startsWith("__synth_");
+  const viewBtn = !synthetic ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
+  const minimizeBtn = `<button class="sources-card-minimize" data-doc-key="${escHtml(d.docKey)}" title="Minimize" aria-expanded="true">&#9650;</button>`;
+  const isRelevant = _relevantDocIds.has(d.docKey);
+  const isHidden = _ignoredDocIds.has(d.docKey);
+  const actionsDisabled = synthetic ? "disabled" : "";
+  const relevantLabel = isRelevant ? "Relevant \u2713" : "Mark relevant";
+  const hideLabel = isHidden ? "Hidden" : "Hide";
+  const orderedRefs = [...d.refs].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const chunksHtml = orderedRefs.map((ref, idx) => {
+    const refScore = Math.round((ref.score ?? 0) * 100);
+    const text = ref.text ?? "";
+    const sectionLabel = ref.section ? escHtml(String(ref.section)) : "";
+    const sectionHtml = sectionLabel ? `<span class="sources-chunk-section">${sectionLabel}</span>` : "";
+    return `
+              <div class="sources-chunk">
+                <div class="sources-chunk-meta">
+                  <span class="sources-chunk-idx">#${idx + 1}</span>
+                  ${sectionHtml}
+                  <span class="sources-chunk-score">${refScore}%</span>
+                </div>
+                <div class="sources-chunk-text markdown-body">${parseMarkdown(text)}</div>
+              </div>`;
+  }).join("");
+  const chunkLabel = chunkCount > 1 ? `${chunkCount} chunks matched` : `1 chunk matched`;
+  return `
+      <div class="sources-card" data-doc-key="${escHtml(d.docKey)}">
+        <div class="sources-card-header">
+          <span class="sources-card-name" title="${escHtml(d.name)}">${escHtml(d.name)}</span>
+          <span class="sources-card-score">${score}%</span>
+          ${viewBtn}
+          ${minimizeBtn}
+        </div>
+        <div class="sources-card-meta">${chunkLabel}</div>
+        <div class="sources-card-chunks">${chunksHtml}</div>
+        <div class="sources-card-actions">
+          <button class="sources-card-action" data-action="relevant" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isRelevant ? "disabled" : "")}>${relevantLabel}</button>
+          <button class="sources-card-action" data-action="hide" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isHidden ? "disabled" : "")}>${hideLabel}</button>
+          <button class="sources-card-action" data-action="reset" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (!isRelevant && !isHidden ? "disabled" : "")}>Reset</button>
+        </div>
+      </div>`;
+}
+function wireCardActions(scope, docs) {
+  const docMap = new Map(docs.map((d) => [d.docKey, d]));
+  scope.querySelectorAll(".sources-card-view").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const key = link.dataset.docKey;
+      if (!key) return;
+      const doc = docMap.get(key);
+      if (!doc) return;
+      const top = doc.refs[0];
+      void openSourceDocument({
+        source: doc.source || void 0,
+        source_uri: doc.sourceUri || void 0,
+        source_key: doc.sourceKey || void 0,
+        chunk_text: top?.text || void 0,
+        original_start: top?.original_char_start,
+        original_end: top?.original_char_end
+      });
+    });
+  });
+  scope.querySelectorAll(".sources-card-minimize").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const card = btn.closest(".sources-card");
+      if (!card) return;
+      const collapsed = card.classList.toggle("collapsed");
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      btn.setAttribute("title", collapsed ? "Expand" : "Minimize");
+      btn.innerHTML = collapsed ? "&#9660;" : "&#9650;";
+    });
+  });
+  scope.querySelectorAll(".sources-card-action").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.action;
+      const key = btn.dataset.docKey;
+      if (!key) return;
+      const doc = docMap.get(key);
+      if (!doc) return;
+      if (action === "relevant") void markRelevant(doc);
+      else if (action === "hide") void hideDoc(doc);
+      else if (action === "reset") void clearDocState(doc);
+    });
+  });
+}
+async function markRelevant(doc) {
+  const cid = state.activeConversationId;
+  if (!cid) {
+    showToast("Select a conversation first");
+    return;
+  }
+  _relevantDocIds.add(doc.docKey);
+  _ignoredDocIds.delete(doc.docKey);
+  refreshCardActions(doc.docKey);
+  renderRail();
+  try {
+    await api(
+      "DELETE",
+      `/console/conversations/${encodeURIComponent(cid)}/ignore/${encodeURIComponent(doc.docKey)}`
+    );
+    showToast(`Marked relevant: ${doc.name}`);
+  } catch (err) {
+    _relevantDocIds.delete(doc.docKey);
+    renderRail();
+    refreshCardActions(doc.docKey);
+    showToast("Failed to mark relevant: " + String(err));
+  }
+}
+async function clearDocState(doc) {
+  const cid = state.activeConversationId;
+  if (!cid) {
+    showToast("Select a conversation first");
+    return;
+  }
+  const wasRelevant = _relevantDocIds.has(doc.docKey);
+  const wasIgnored = _ignoredDocIds.has(doc.docKey);
+  _relevantDocIds.delete(doc.docKey);
+  _ignoredDocIds.delete(doc.docKey);
+  refreshCardActions(doc.docKey);
+  renderRail();
+  try {
+    await api(
+      "DELETE",
+      `/console/conversations/${encodeURIComponent(cid)}/doc-state/${encodeURIComponent(doc.docKey)}`
+    );
+    showToast(`Reset: ${doc.name}`);
+  } catch (err) {
+    if (wasRelevant) _relevantDocIds.add(doc.docKey);
+    if (wasIgnored) _ignoredDocIds.add(doc.docKey);
+    renderRail();
+    refreshCardActions(doc.docKey);
+    showToast("Failed to reset: " + String(err));
+  }
+}
+async function hideDoc(doc) {
+  const cid = state.activeConversationId;
+  if (!cid) {
+    showToast("Select a conversation first");
+    return;
+  }
+  _ignoredDocIds.add(doc.docKey);
+  _relevantDocIds.delete(doc.docKey);
+  refreshCardActions(doc.docKey);
+  renderRail();
+  try {
+    await api(
+      "POST",
+      `/console/conversations/${encodeURIComponent(cid)}/ignore`,
+      { doc_id: doc.docKey }
+    );
+    showToast(`Hidden: ${doc.name}`);
+  } catch (err) {
+    _ignoredDocIds.delete(doc.docKey);
+    renderRail();
+    refreshCardActions(doc.docKey);
+    showToast("Failed to hide document: " + String(err));
+  }
+}
+function refreshCardActions(docKey) {
+  const selector = `.sources-card[data-doc-key="${CSS.escape(docKey)}"], .citation-card[data-doc-key="${CSS.escape(docKey)}"]`;
+  document.querySelectorAll(selector).forEach((card) => {
+    const isRelevant = _relevantDocIds.has(docKey);
+    const isHidden = _ignoredDocIds.has(docKey);
+    const relBtn = card.querySelector('[data-action="relevant"]');
+    const hideBtn = card.querySelector('[data-action="hide"]');
+    const resetBtn = card.querySelector('[data-action="reset"]');
+    if (relBtn) {
+      relBtn.textContent = isRelevant ? "Relevant \u2713" : "Mark relevant";
+      relBtn.disabled = isRelevant;
+    }
+    if (hideBtn) {
+      hideBtn.textContent = isHidden ? "Hidden" : "Hide";
+      hideBtn.disabled = isHidden;
+    }
+    if (resetBtn) {
+      resetBtn.disabled = !isRelevant && !isHidden;
+    }
+  });
+}
+function wireCitationActions(scope) {
+  scope.querySelectorAll(".citation-card[data-doc-key]").forEach((card) => {
+    const docKey = card.getAttribute("data-doc-key") || "";
+    if (!docKey) return;
+    const docName = card.getAttribute("data-doc-name") || card.querySelector(".citation-name")?.textContent?.trim() || docKey;
+    const cached = _docCache.get(docKey);
+    const stub = {
+      docKey,
+      name: cached?.name || docName,
+      bestScore: 0,
+      excerpt: "",
+      refs: [],
+      sourceUri: cached?.sourceUri || card.getAttribute("data-source-uri") || "",
+      sourceKey: cached?.sourceKey || card.getAttribute("data-source-key") || "",
+      source: cached?.source || card.getAttribute("data-source") || ""
+    };
+    card.querySelectorAll(".citation-card-action").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === "relevant") void markRelevant(stub);
+        else if (action === "hide") void hideDoc(stub);
+        else if (action === "reset") void clearDocState(stub);
+      });
+    });
+    refreshCardActions(docKey);
+  });
+}
+function initRailCollapse() {
+  const rail = document.getElementById("chatRail");
+  const btn = document.getElementById("chatRailToggle");
+  if (!rail || !btn) return;
+  const collapsed = localStorage.getItem(RAIL_COLLAPSED_KEY) === "1";
+  applyRailCollapsed(rail, btn, collapsed);
+  btn.addEventListener("click", () => {
+    const next = !rail.classList.contains("collapsed");
+    applyRailCollapsed(rail, btn, next);
+    localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+  });
+}
+function applyRailCollapsed(rail, btn, collapsed) {
+  rail.classList.toggle("collapsed", collapsed);
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  btn.setAttribute("title", collapsed ? "Expand" : "Collapse");
+  btn.innerHTML = collapsed ? "&#9664;" : "&#9654;";
+}
+function renderRail() {
+  renderRailList("chatRailRelevant", "chatRailRelevantCount", _relevantDocIds, "relevant");
+  renderRailList("chatRailHidden", "chatRailHiddenCount", _ignoredDocIds, "hidden");
+}
+function renderRailList(listId, countId, ids, kind) {
+  const list = document.getElementById(listId);
+  const count = document.getElementById(countId);
+  if (!list || !count) return;
+  count.textContent = String(ids.size);
+  if (!ids.size) {
+    list.innerHTML = `<div class="chat-rail-list-empty">${kind === "relevant" ? "No relevant docs yet." : "Nothing hidden."}</div>`;
+    return;
+  }
+  let html = "";
+  for (const docKey of ids) {
+    const cached = _docCache.get(docKey);
+    const name = escHtml(cached?.name || docKey);
+    const synthetic = !cached;
+    const viewBtn = !synthetic ? `<a href="#" class="chat-rail-item-view" data-doc-key="${escHtml(docKey)}">view</a>` : "";
+    const actionLabel = kind === "relevant" ? "hide" : "restore";
+    const actionAttr = kind === "relevant" ? "hide" : "relevant";
+    html += `
+          <div class="chat-rail-item" data-doc-key="${escHtml(docKey)}">
+            <span class="chat-rail-item-name" title="${name}">${name}</span>
+            ${viewBtn}
+            <button class="chat-rail-item-action" data-action="${actionAttr}" data-doc-key="${escHtml(docKey)}">${actionLabel}</button>
+            <button class="chat-rail-item-action" data-action="reset" data-doc-key="${escHtml(docKey)}" title="Remove from list">reset</button>
+          </div>`;
+  }
+  list.innerHTML = html;
+  wireRailActions(list);
+}
+function wireRailActions(scope) {
+  scope.querySelectorAll(".chat-rail-item-view").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const key = link.dataset.docKey;
+      const cached = key ? _docCache.get(key) : void 0;
+      if (!cached) return;
+      void openSourceDocument({
+        source: cached.source || void 0,
+        source_uri: cached.sourceUri || void 0,
+        source_key: cached.sourceKey || void 0
+      });
+    });
+  });
+  scope.querySelectorAll(".chat-rail-item-action").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.docKey;
+      const action = btn.dataset.action;
+      if (!key) return;
+      const cached = _docCache.get(key);
+      const docStub = {
+        docKey: key,
+        name: cached?.name || key,
+        bestScore: 0,
+        excerpt: "",
+        refs: [],
+        sourceUri: cached?.sourceUri || "",
+        sourceKey: cached?.sourceKey || "",
+        source: cached?.source || ""
+      };
+      if (action === "hide") void hideDoc(docStub);
+      else if (action === "relevant") void markRelevant(docStub);
+      else if (action === "reset") void clearDocState(docStub);
+    });
+  });
+}
+function applyDocState(relevant, ignored) {
+  _relevantDocIds.clear();
+  _ignoredDocIds.clear();
+  relevant.forEach((id) => _relevantDocIds.add(id));
+  ignored.forEach((id) => _ignoredDocIds.add(id));
+  renderRail();
+  [..._relevantDocIds, ..._ignoredDocIds].forEach(refreshCardActions);
+}
+async function fetchAndRenderDocState(conversationId) {
+  try {
+    const data = await api(
+      "GET",
+      `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
+    );
+    applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+  } catch {
+  }
+}
+function isSourcesTurn(turn) {
+  return !turn.content.trim() && !!turn.sources && turn.sources.length > 0;
+}
+
 // src/citations.ts
 async function openSourceDocument(payload) {
   const url = apiBase() + "/console/source-document/view";
@@ -291,15 +806,18 @@ function buildCitationsHtml(results) {
   let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
   results.forEach((r, i) => {
     const meta = r.metadata || {};
-    const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
+    const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
+    const filename = escHtml(filenameRaw);
     const section = escHtml(String(meta.section ?? meta.heading ?? ""));
     const score = Math.round(r.score * 100);
     const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
     const chunkHtml = parseMarkdown(r.text || "");
-    const chunkId = `chunk-${i}-${Date.now()}`;
     const sourceUri = String(meta.source_uri ?? "").trim();
     const source = String(meta.source ?? "").trim();
     const sourceKey = String(meta.source_key ?? "").trim();
+    const docKey = docKeyFromMeta(meta);
+    const cardAttrs = docKey ? ` data-doc-key="${escHtml(docKey)}" data-doc-name="${escHtml(filenameRaw)}"` + (source ? ` data-source="${escHtml(source)}"` : "") + (sourceUri ? ` data-source-uri="${escHtml(sourceUri)}"` : "") + (sourceKey ? ` data-source-key="${escHtml(sourceKey)}"` : "") : "";
+    const actionsHtml = docKey ? `<div class="citation-card-actions" onclick="event.stopPropagation()"><button class="citation-card-action" data-action="relevant">Mark relevant</button><button class="citation-card-action" data-action="hide">Hide</button><button class="citation-card-action" data-action="reset" disabled>Reset</button></div>` : "";
     let viewKey = "";
     if (sourceKey || sourceUri || source) {
       viewKey = `view-${++_viewCounter}`;
@@ -316,7 +834,7 @@ function buildCitationsHtml(results) {
       });
     }
     html += `
-          <div class="citation-card" onclick="toggleCitation(this)">
+          <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
               <span class="citation-icon">&#128196;</span>
               <div class="citation-info">
@@ -330,8 +848,8 @@ function buildCitationsHtml(results) {
               <span class="citation-chevron">&#8964;</span>
             </div>
             <div class="citation-body">
-              <div class="citation-chunk markdown-body" id="${chunkId}">${chunkHtml}</div>
-              <button class="citation-show-more" onclick="event.stopPropagation();toggleChunk(event,'${chunkId}')">Show more</button>
+              <div class="citation-chunk markdown-body">${chunkHtml}</div>
+              ${actionsHtml}
             </div>
           </div>`;
   });
@@ -353,12 +871,6 @@ async function openSourceView(e, viewKey) {
 function toggleCitation(card) {
   card.classList.toggle("expanded");
 }
-function toggleChunk(e, id) {
-  e.stopPropagation();
-  const el = byId(id);
-  el.classList.toggle("show-all");
-  e.target.textContent = el.classList.contains("show-all") ? "Show less" : "Show more";
-}
 function revealCitations(citationsEl) {
   citationsEl.style.display = "block";
   citationsEl.classList.remove("reveal");
@@ -367,7 +879,6 @@ function revealCitations(citationsEl) {
 }
 function initCitations() {
   window["toggleCitation"] = toggleCitation;
-  window["toggleChunk"] = toggleChunk;
   window["openSourceView"] = openSourceView;
 }
 
@@ -739,344 +1250,6 @@ function sourceRefToChunkResult(ref) {
   };
 }
 
-// src/chatMode.ts
-var STORAGE_KEY = "rw_chat_mode";
-var _mode = localStorage.getItem(STORAGE_KEY) === "sources" ? "sources" : "answer";
-var _docCache = /* @__PURE__ */ new Map();
-var _ignoredDocIds = /* @__PURE__ */ new Set();
-var _relevantDocIds = /* @__PURE__ */ new Set();
-function getChatMode() {
-  return _mode;
-}
-function setChatMode(mode) {
-  _mode = mode;
-  localStorage.setItem(STORAGE_KEY, mode);
-  syncToggleUI();
-  applyModeToView();
-  if (mode === "sources" && state.activeConversationId) {
-    void fetchAndRenderDocState(state.activeConversationId);
-  }
-  document.dispatchEvent(new CustomEvent("chat-mode-changed", { detail: { mode } }));
-}
-function syncToggleUI() {
-  const answerBtn = document.getElementById("chatModeAnswer");
-  const sourcesBtn = document.getElementById("chatModeSources");
-  if (answerBtn) {
-    answerBtn.classList.toggle("active", _mode === "answer");
-    answerBtn.setAttribute("aria-selected", _mode === "answer" ? "true" : "false");
-  }
-  if (sourcesBtn) {
-    sourcesBtn.classList.toggle("active", _mode === "sources");
-    sourcesBtn.setAttribute("aria-selected", _mode === "sources" ? "true" : "false");
-  }
-}
-function applyModeToView() {
-  const view = document.getElementById("view-chat");
-  if (view) view.dataset.chatMode = _mode;
-}
-function initChatMode() {
-  const toggle = document.getElementById("chatModeToggle");
-  if (toggle) {
-    toggle.querySelectorAll("[data-mode]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const mode = btn.dataset.mode;
-        if (mode === "answer" || mode === "sources") setChatMode(mode);
-      });
-    });
-  }
-  syncToggleUI();
-  applyModeToView();
-  renderRail();
-  document.addEventListener("conversation-changed", () => {
-    _ignoredDocIds.clear();
-    _relevantDocIds.clear();
-    renderRail();
-    if (_mode === "sources" && state.activeConversationId) {
-      void fetchAndRenderDocState(state.activeConversationId);
-    }
-  });
-}
-function docKeyOf(ref) {
-  return (ref.document_id || ref.source_key || ref.source_uri || ref.source || "").trim();
-}
-function nameOf(ref) {
-  const raw = ref.source || ref.source_uri || ref.source_key || ref.document_id || "Unknown source";
-  const stripped = String(raw).split("/").pop() || String(raw);
-  return stripped;
-}
-function groupSources(sources) {
-  const groups = /* @__PURE__ */ new Map();
-  let synthCounter = 0;
-  for (const ref of sources) {
-    let key = docKeyOf(ref);
-    if (!key) key = `__synth_${synthCounter++}`;
-    const score = ref.score ?? 0;
-    const text = ref.text ?? "";
-    const existing = groups.get(key);
-    if (existing) {
-      existing.refs.push(ref);
-      if (score > existing.bestScore) {
-        existing.bestScore = score;
-        existing.excerpt = text;
-      }
-    } else {
-      groups.set(key, {
-        docKey: key,
-        name: nameOf(ref),
-        bestScore: score,
-        excerpt: text,
-        refs: [ref],
-        sourceUri: ref.source_uri ?? "",
-        sourceKey: ref.source_key ?? "",
-        source: ref.source ?? ""
-      });
-    }
-  }
-  return [...groups.values()].sort((a, b) => b.bestScore - a.bestScore);
-}
-function cacheDocs(groups) {
-  for (const g of groups) {
-    if (!g.docKey || g.docKey.startsWith("__synth_")) continue;
-    _docCache.set(g.docKey, {
-      name: g.name,
-      sourceUri: g.sourceUri,
-      sourceKey: g.sourceKey,
-      source: g.source
-    });
-  }
-}
-function appendSourcesTurn(thread, sources) {
-  const group = document.createElement("div");
-  group.className = "msg-group";
-  const ts = fmtTime(Date.now());
-  const docs = groupSources(sources);
-  cacheDocs(docs);
-  const cardsHtml = docs.length ? docs.map((d) => renderCardHtml(d)).join("") : `<div class="sources-empty">No sources matched.</div>`;
-  group.innerHTML = `
-        <div class="msg-row assistant">
-          <div class="avatar ai-av">AI</div>
-          <div class="bubble-wrap">
-            <div class="sources-turn"><div class="sources-cards">${cardsHtml}</div></div>
-            <div class="msg-meta">Sources \xB7 ${ts}</div>
-          </div>
-        </div>`;
-  thread.appendChild(group);
-  wireCardActions(group, docs);
-  return group;
-}
-function renderCardHtml(d) {
-  const score = Math.round(d.bestScore * 100);
-  const excerptHtml = d.excerpt ? parseMarkdown(d.excerpt) : "";
-  const chunkCount = d.refs.length;
-  const meta = chunkCount > 1 ? `${chunkCount} chunks matched` : `1 chunk matched`;
-  const synthetic = d.docKey.startsWith("__synth_");
-  const viewBtn = !synthetic ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
-  const isRelevant = _relevantDocIds.has(d.docKey);
-  const isHidden = _ignoredDocIds.has(d.docKey);
-  const actionsDisabled = synthetic ? "disabled" : "";
-  const relevantLabel = isRelevant ? "Relevant \u2713" : "Mark relevant";
-  const hideLabel = isHidden ? "Hidden" : "Hide";
-  return `
-      <div class="sources-card" data-doc-key="${escHtml(d.docKey)}">
-        <div class="sources-card-header">
-          <span class="sources-card-name" title="${escHtml(d.name)}">${escHtml(d.name)}</span>
-          <span class="sources-card-score">${score}%</span>
-          ${viewBtn}
-        </div>
-        <div class="sources-card-excerpt markdown-body">${excerptHtml}</div>
-        <div class="sources-card-meta">${meta}</div>
-        <div class="sources-card-actions">
-          <button class="sources-card-action" data-action="relevant" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isRelevant ? "disabled" : "")}>${relevantLabel}</button>
-          <button class="sources-card-action" data-action="hide" data-doc-key="${escHtml(d.docKey)}" ${actionsDisabled || (isHidden ? "disabled" : "")}>${hideLabel}</button>
-        </div>
-      </div>`;
-}
-function wireCardActions(scope, docs) {
-  const docMap = new Map(docs.map((d) => [d.docKey, d]));
-  scope.querySelectorAll(".sources-card-view").forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      const key = link.dataset.docKey;
-      if (!key) return;
-      const doc = docMap.get(key);
-      if (!doc) return;
-      const top = doc.refs[0];
-      void openSourceDocument({
-        source: doc.source || void 0,
-        source_uri: doc.sourceUri || void 0,
-        source_key: doc.sourceKey || void 0,
-        chunk_text: top?.text || void 0,
-        original_start: top?.original_char_start,
-        original_end: top?.original_char_end
-      });
-    });
-  });
-  scope.querySelectorAll(".sources-card-excerpt").forEach((el) => {
-    el.addEventListener("click", () => el.classList.toggle("expanded"));
-  });
-  scope.querySelectorAll(".sources-card-action").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.dataset.action;
-      const key = btn.dataset.docKey;
-      if (!key) return;
-      const doc = docMap.get(key);
-      if (!doc) return;
-      if (action === "relevant") void markRelevant(doc);
-      else if (action === "hide") void hideDoc(doc);
-    });
-  });
-}
-async function markRelevant(doc) {
-  const cid = state.activeConversationId;
-  if (!cid) {
-    showToast("Select a conversation first");
-    return;
-  }
-  _relevantDocIds.add(doc.docKey);
-  _ignoredDocIds.delete(doc.docKey);
-  refreshCardActions(doc.docKey);
-  renderRail();
-  try {
-    await api(
-      "DELETE",
-      `/console/conversations/${encodeURIComponent(cid)}/ignore/${encodeURIComponent(doc.docKey)}`
-    );
-    showToast(`Marked relevant: ${doc.name}`);
-  } catch (err) {
-    _relevantDocIds.delete(doc.docKey);
-    renderRail();
-    refreshCardActions(doc.docKey);
-    showToast("Failed to mark relevant: " + String(err));
-  }
-}
-async function hideDoc(doc) {
-  const cid = state.activeConversationId;
-  if (!cid) {
-    showToast("Select a conversation first");
-    return;
-  }
-  _ignoredDocIds.add(doc.docKey);
-  _relevantDocIds.delete(doc.docKey);
-  refreshCardActions(doc.docKey);
-  renderRail();
-  try {
-    await api(
-      "POST",
-      `/console/conversations/${encodeURIComponent(cid)}/ignore`,
-      { doc_id: doc.docKey }
-    );
-    showToast(`Hidden: ${doc.name}`);
-  } catch (err) {
-    _ignoredDocIds.delete(doc.docKey);
-    renderRail();
-    refreshCardActions(doc.docKey);
-    showToast("Failed to hide document: " + String(err));
-  }
-}
-function refreshCardActions(docKey) {
-  document.querySelectorAll(`.sources-card[data-doc-key="${CSS.escape(docKey)}"]`).forEach((card) => {
-    const isRelevant = _relevantDocIds.has(docKey);
-    const isHidden = _ignoredDocIds.has(docKey);
-    const relBtn = card.querySelector('[data-action="relevant"]');
-    const hideBtn = card.querySelector('[data-action="hide"]');
-    if (relBtn) {
-      relBtn.textContent = isRelevant ? "Relevant \u2713" : "Mark relevant";
-      relBtn.disabled = isRelevant;
-    }
-    if (hideBtn) {
-      hideBtn.textContent = isHidden ? "Hidden" : "Hide";
-      hideBtn.disabled = isHidden;
-    }
-  });
-}
-function renderRail() {
-  renderRailList("chatRailRelevant", "chatRailRelevantCount", _relevantDocIds, "relevant");
-  renderRailList("chatRailHidden", "chatRailHiddenCount", _ignoredDocIds, "hidden");
-}
-function renderRailList(listId, countId, ids, kind) {
-  const list = document.getElementById(listId);
-  const count = document.getElementById(countId);
-  if (!list || !count) return;
-  count.textContent = String(ids.size);
-  if (!ids.size) {
-    list.innerHTML = `<div class="chat-rail-list-empty">${kind === "relevant" ? "No relevant docs yet." : "Nothing hidden."}</div>`;
-    return;
-  }
-  let html = "";
-  for (const docKey of ids) {
-    const cached = _docCache.get(docKey);
-    const name = escHtml(cached?.name || docKey);
-    const synthetic = !cached;
-    const viewBtn = !synthetic ? `<a href="#" class="chat-rail-item-view" data-doc-key="${escHtml(docKey)}">view</a>` : "";
-    const actionLabel = kind === "relevant" ? "hide" : "restore";
-    const actionAttr = kind === "relevant" ? "hide" : "relevant";
-    html += `
-          <div class="chat-rail-item" data-doc-key="${escHtml(docKey)}">
-            <span class="chat-rail-item-name" title="${name}">${name}</span>
-            ${viewBtn}
-            <button class="chat-rail-item-action" data-action="${actionAttr}" data-doc-key="${escHtml(docKey)}">${actionLabel}</button>
-          </div>`;
-  }
-  list.innerHTML = html;
-  wireRailActions(list);
-}
-function wireRailActions(scope) {
-  scope.querySelectorAll(".chat-rail-item-view").forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      const key = link.dataset.docKey;
-      const cached = key ? _docCache.get(key) : void 0;
-      if (!cached) return;
-      void openSourceDocument({
-        source: cached.source || void 0,
-        source_uri: cached.sourceUri || void 0,
-        source_key: cached.sourceKey || void 0
-      });
-    });
-  });
-  scope.querySelectorAll(".chat-rail-item-action").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.docKey;
-      const action = btn.dataset.action;
-      if (!key) return;
-      const cached = _docCache.get(key);
-      const docStub = {
-        docKey: key,
-        name: cached?.name || key,
-        bestScore: 0,
-        excerpt: "",
-        refs: [],
-        sourceUri: cached?.sourceUri || "",
-        sourceKey: cached?.sourceKey || "",
-        source: cached?.source || ""
-      };
-      if (action === "hide") void hideDoc(docStub);
-      else if (action === "relevant") void markRelevant(docStub);
-    });
-  });
-}
-function applyDocState(relevant, ignored) {
-  _relevantDocIds.clear();
-  _ignoredDocIds.clear();
-  relevant.forEach((id) => _relevantDocIds.add(id));
-  ignored.forEach((id) => _ignoredDocIds.add(id));
-  renderRail();
-  [..._relevantDocIds, ..._ignoredDocIds].forEach(refreshCardActions);
-}
-async function fetchAndRenderDocState(conversationId) {
-  try {
-    const data = await api(
-      "GET",
-      `/console/conversations/${encodeURIComponent(conversationId)}/doc-state`
-    );
-    applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
-  } catch {
-  }
-}
-function isSourcesTurn(turn) {
-  return !turn.content.trim() && !!turn.sources && turn.sources.length > 0;
-}
-
 // src/conversations.ts
 function renderConversationList(convs) {
   const container = byId("convList");
@@ -1170,6 +1343,7 @@ async function loadConversationHistory(id) {
         group.className = "msg-group";
         const ts = fmtTime(turn.timestamp_ms ?? Date.now());
         const sources = turn.sources ?? [];
+        if (sources.length) cacheDocsFromSources(sources);
         const citationsHtml = sources.length ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>` : "";
         group.innerHTML = `
                     <div class="msg-row assistant">
@@ -1188,6 +1362,7 @@ async function loadConversationHistory(id) {
           const bubbleEl = group.querySelector(".bubble");
           copyBtn.addEventListener("click", () => copyMsg(copyBtn, bubbleEl.innerText));
         }
+        if (sources.length) wireCitationActions(group);
         refs.thread.appendChild(group);
       }
     });
@@ -1444,7 +1619,13 @@ function buildQueryBody(queryText) {
     memory_enabled: s.memory_enabled !== false,
     conversation_id: state.activeConversationId ?? void 0
   };
-  if (getChatMode() === "sources") body.mode = "retrieval";
+  if (getChatMode() === "sources") {
+    body.mode = "retrieval";
+    body.retrieval_sub_mode = getRetrievalSubMode();
+    const topK = getSourcesTopK();
+    body.rerank_top_k = topK;
+    body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+  }
   return body;
 }
 function chunkToSourceRef(c) {
@@ -1471,6 +1652,9 @@ async function sourcesOnlyQuery(queryText) {
     appendSourcesTurn(refs.thread, sources);
     if (data.relevant_doc_ids || data.ignored_doc_ids) {
       applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+    }
+    if (data.token_budget) {
+      updateContextIndicator(data.token_budget);
     }
     scrollToBottom();
     await loadConversations();
@@ -1610,9 +1794,20 @@ async function streamQuery(queryText) {
             updateContextIndicator(lastBudget);
           }
           const results = data.results ?? [];
+          if (results.length) {
+            const sourceRefs = results.map(chunkToSourceRef);
+            cacheDocsFromSources(sourceRefs);
+          }
           const showCitations = byId("citationsToggle").checked;
           if (showCitations && results.length) {
             citationsEl.innerHTML = buildCitationsHtml(results);
+            wireCitationActions(citationsEl);
+          }
+          if (data.relevant_doc_ids || data.ignored_doc_ids) {
+            applyDocState(
+              data.relevant_doc_ids ?? [],
+              data.ignored_doc_ids ?? []
+            );
           }
         } else if (evtType === "error") {
           errorShown = true;
@@ -1734,8 +1929,12 @@ async function nonStreamQuery(queryText) {
     }
     const showCitations = byId("citationsToggle").checked;
     const results = data.results ?? [];
+    if (results.length) {
+      cacheDocsFromSources(results.map(chunkToSourceRef));
+    }
     if (showCitations && results.length) {
       citationsEl.innerHTML = buildCitationsHtml(results);
+      wireCitationActions(citationsEl);
       revealCitations(citationsEl);
     }
     actionsEl.style.display = "flex";
