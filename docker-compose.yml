@@ -149,6 +149,10 @@ services:
       - RAG_INFERENCE_BACKEND=tei
       - RAG_TEI_EMBED_URL=http://rag-nginx:8081
       - RAG_TEI_RERANK_URL=http://rag-nginx:8082
+      # Allow the console to serve source documents ingested by the local worker.
+      # The worker records absolute host paths; mount them at the same path above.
+      # Override via RAG_CONSOLE_SOURCE_ROOTS in .env to add more dirs.
+      - RAG_CONSOLE_SOURCE_ROOTS=${PWD}/documents:${PWD}/docs
     depends_on:
       temporal:
         condition: service_started
@@ -167,6 +171,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./.runtime:/app/.runtime
+      # Mount host source dirs at their real absolute paths so the console can serve
+      # documents whose paths were recorded by the local worker during ingest.
+      # PWD is the project root — portable across machines and clone paths.
+      - ./documents:${PWD}/documents:ro
+      - ./docs:${PWD}/docs:ro
     healthcheck:
       # Uses Python stdlib (curl was removed from the image in the 2026-04-10 optimization).
       # Works identically under docker-compose and podman-compose.
@@ -697,7 +706,7 @@ services:
       # Self-health on the TEI lane; does not require rag-api or upstreams up.
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/nginx-health 2>/dev/null | grep -q ok"]
       interval: 10s
-      timeout: 3s
+      timeout: 10s
       retries: 5
     restart: unless-stopped
 
