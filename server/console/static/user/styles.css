@@ -130,7 +130,6 @@
       .sidebar.collapsed .sidebar-top-actions { padding: 8px 6px; }
       .sidebar.collapsed .new-chat-btn { justify-content: center; padding: 9px; gap: 0; border-radius: 10px; }
       .sidebar.collapsed .conv-list { display: none; }
-      .sidebar.collapsed .conv-section-list { display: none; }
       .sidebar.collapsed .sidebar-nav-item { justify-content: center; padding: 10px 0; }
       .sidebar.collapsed .sidebar-footer { padding: 8px 6px; overflow: visible; }
       .sidebar.collapsed .settings-btn { justify-content: center; padding: 9px; gap: 0; overflow: visible; }
@@ -396,7 +395,6 @@
       font-size: 12px; color: var(--code-text); white-space: pre; overflow-x: auto;
     }
     .bubble.error-bubble { background: var(--err-bg); border-color: var(--err-brd); color: var(--err-text); }
-    .error-icon { color: var(--err-icon); margin-right: 6px; }
 
     .msg-actions { display: flex; gap: 4px; margin-top: 4px; opacity: 0; transition: opacity 0.15s; }
     .msg-row:hover .msg-actions { opacity: 1; }
@@ -862,7 +860,6 @@
     .kb-item:hover { background: var(--bg-elevated); color: var(--text); }
     .kb-item input[type=checkbox] { accent-color: var(--accent); flex-shrink: 0; }
     .kb-item-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .kb-item-meta { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
     .kb-footer {
       padding: 8px 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;
     }
@@ -948,20 +945,6 @@
     /* Error message bubble */
     .bubble.error-bubble {
       background: var(--err-bg); border: 1px solid var(--err-brd); color: var(--err-text);
-    }
-
-    /* Settings text inputs */
-    .settings-input {
-      width: 100%; padding: 8px 10px; background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 8px; color: var(--text); font-size: 13px; box-sizing: border-box;
-    }
-    .settings-input:focus { outline: none; border-color: var(--accent); }
-
-    /* No-auth notice */
-    .no-auth-notice {
-      background: var(--err-bg); border: 1px solid var(--err-brd); color: var(--err-text);
-      font-size: 12px; padding: 8px 14px; border-radius: 8px; margin-bottom: 8px;
-      text-align: center;
     }
 
     /* ── Conversation right-click bubble menu ── */
@@ -1110,15 +1093,6 @@
     }
     .ingest-selected-item .remove:hover { color: var(--text); }
 
-    .ingest-advanced { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
-    .ingest-advanced summary { padding: 12px 14px; cursor: pointer; font-size: 13px; color: var(--text-2); user-select: none; }
-    .ingest-advanced[open] summary { border-bottom: 1px solid var(--border); }
-    .ingest-advanced-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-    .ingest-toggle-row {
-      display: flex; justify-content: space-between; align-items: center; gap: 12px;
-      font-size: 13px; color: var(--text-2);
-    }
-    .ingest-toggle-label { flex: 1; }
     .ingest-input {
       width: 110px; padding: 6px 8px; background: var(--bg);
       border: 1px solid var(--border); border-radius: 6px; color: var(--text);
@@ -1382,12 +1356,6 @@
     .sources-card.collapsed .sources-card-meta,
     .sources-card.collapsed .sources-card-chunks,
     .sources-card.collapsed .sources-card-actions { display: none; }
-    .sources-card-excerpt {
-      font-size: 12px; color: var(--text-2); line-height: 1.5;
-      max-height: 5.4em; overflow: hidden;
-    }
-    .sources-card-excerpt.expanded { max-height: none; }
-
     /* Per-chunk rendering inside a doc card */
     .sources-card-chunks {
       display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
