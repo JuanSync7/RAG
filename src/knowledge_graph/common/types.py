@@ -16,6 +16,8 @@ validates and deserialises ``config/kg_schema.yaml``.
 from __future__ import annotations
 
 import logging
+import os
+
 import yaml
 
 from dataclasses import dataclass, field
@@ -188,11 +190,21 @@ class KGConfig:
     community_summary_max_workers: int = 4
     """ThreadPoolExecutor worker count for parallel summarization."""
 
-    # Phase 2: Neo4j backend
-    neo4j_uri: str = "bolt://localhost:7687"
-    neo4j_auth_user: str = "neo4j"
-    neo4j_auth_password: str = field(default="", repr=False)
-    neo4j_database: str = "neo4j"
+    # Phase 2: Neo4j backend — defaults consult env so dataclass instances
+    # built without explicit overrides still honour deployment configuration.
+    neo4j_uri: str = field(
+        default_factory=lambda: os.environ.get("RAG_KG_NEO4J_URI", "bolt://localhost:7687")
+    )
+    neo4j_auth_user: str = field(
+        default_factory=lambda: os.environ.get("RAG_KG_NEO4J_AUTH_USER", "neo4j")
+    )
+    neo4j_auth_password: str = field(
+        default_factory=lambda: os.environ.get("RAG_KG_NEO4J_AUTH_PASSWORD", ""),
+        repr=False,
+    )
+    neo4j_database: str = field(
+        default_factory=lambda: os.environ.get("RAG_KG_NEO4J_DATABASE", "neo4j")
+    )
 
     # Phase 2: Optional parsers
     enable_python_parser: bool = False
