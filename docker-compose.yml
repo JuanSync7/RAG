@@ -151,7 +151,7 @@ services:
       - RAG_TEI_RERANK_URL=http://rag-nginx:8082
       # Allow the console to serve source documents ingested by the local worker.
       # The worker records absolute host paths; mount them at the same path above.
-      # PWD is the project root — portable across machines and clone paths.
+      # Override via RAG_CONSOLE_SOURCE_ROOTS in .env to add more dirs.
       - RAG_CONSOLE_SOURCE_ROOTS=${PWD}/documents:${PWD}/docs
     depends_on:
       temporal:
