@@ -48,8 +48,8 @@ RUN apt-get update \
 COPY --from=builder /install /usr/local
 
 RUN groupadd --system app && useradd --system --gid app --create-home app \
-    && mkdir -p /home/app/.litellm /app/logs \
-    && chown -R app:app /home/app /app/logs
+    && mkdir -p /home/app/.litellm /app/logs /app/documents \
+    && chown -R app:app /home/app /app/logs /app/documents
 
 COPY --chown=app:app config /app/config
 COPY --chown=app:app src /app/src
