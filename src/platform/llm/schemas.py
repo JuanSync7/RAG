@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 _OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
+_DEFAULT_API_BASE = os.environ.get(
+    "RAG_LLM_API_BASE",
+    os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_OLLAMA_PORT}"),
+)
 
 
 @dataclass(frozen=True)
@@ -23,7 +27,7 @@ class LLMConfig:
     """Resolved LLM configuration built from env vars or YAML Router config."""
 
     model: str = "ollama/qwen2.5:3b"
-    api_base: Optional[str] = f"http://localhost:{_OLLAMA_PORT}"
+    api_base: Optional[str] = _DEFAULT_API_BASE
     api_key: Optional[str] = None
     max_tokens: int = 2048
     temperature: float = 0.2

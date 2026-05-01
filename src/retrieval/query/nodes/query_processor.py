@@ -37,7 +37,7 @@ from config.settings import (
     QUERY_MAX_LENGTH,
     QUERY_PROCESSING_TEMPERATURE,
 )
-from src.platform.llm import get_llm_provider
+from src.platform.llm import call_oneshot, get_llm_provider
 from src.platform.observability import get_tracer
 from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
 from src.retrieval.common import parse_json_object
@@ -417,29 +417,15 @@ def _detect_suppress_memory(query: str) -> bool:
 
 
 def _call_llm(prompt: str, system: str = "") -> Optional[str]:
-    """Call LLM via LLMProvider. Returns response text or None on failure."""
-    messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
+    """Call LLM via the platform-layer one-shot helper, wrapped in a tracing span."""
     with get_tracer().span("query_processor.call_llm", {"model_alias": "query"}):
-        try:
-            provider = get_llm_provider()
-            response = provider.generate(
-                messages,
-                model_alias="query",
-                temperature=QUERY_PROCESSING_TEMPERATURE,
-                max_tokens=256,
-            )
-            return response.content or None
-        except Exception as e:
-            logger.warning("LLM call failed: %s", e)
-            return None
-
-
-# Backward-compatible alias
-_call_ollama = _call_llm
+        return call_oneshot(
+            prompt,
+            system=system,
+            model_alias="query",
+            temperature=QUERY_PROCESSING_TEMPERATURE,
+            max_tokens=256,
+        )
 
 
 def _check_llm_available() -> bool:

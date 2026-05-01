@@ -276,6 +276,18 @@ class ConversationMemoryProvider:
         """Move a single doc_id from ignored → relevant. Idempotent."""
         raise NotImplementedError
 
+    def clear_doc_state(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        """Remove a doc_id from both relevant and ignored lists (neutral). Idempotent."""
+        raise NotImplementedError
+
     def get_seen_doc_ids(
         self,
         *,
@@ -433,6 +445,22 @@ class NoopConversationMemory(ConversationMemoryProvider):
         )
 
     def restore_to_relevant(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id or "",
+        )
+
+    def clear_doc_state(
         self,
         *,
         tenant_id: str,
@@ -635,7 +663,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         query_id: str = "",
         sources: list | None = None,
     ) -> None:
-        if not content.strip():
+        if not content.strip() and not (sources or []):
             return
         meta = self.ensure_conversation(
             tenant_id=tenant_id,
@@ -921,6 +949,32 @@ class RedisConversationMemory(ConversationMemoryProvider):
             new_relevant = relevant + [doc_id]
         else:
             new_relevant = relevant
+        if new_relevant != relevant or new_ignored != ignored:
+            self._persist_doc_lists(meta_key, new_relevant, new_ignored)
+        meta.relevant_doc_ids = new_relevant
+        meta.ignored_doc_ids = new_ignored
+        return meta
+
+    def clear_doc_state(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        doc_id: str,
+    ) -> ConversationMeta:
+        meta = self.ensure_conversation(
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, meta.conversation_id)
+        relevant, ignored = self._load_doc_lists(meta_key)
+        new_relevant = [d for d in relevant if d != doc_id]
+        new_ignored = [d for d in ignored if d != doc_id]
         if new_relevant != relevant or new_ignored != ignored:
             self._persist_doc_lists(meta_key, new_relevant, new_ignored)
         meta.relevant_doc_ids = new_relevant

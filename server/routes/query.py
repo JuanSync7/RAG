@@ -99,9 +99,11 @@ def _source_refs(results: list) -> list[dict]:
         ref: dict = {
             "source": meta.get("source", ""),
             "source_uri": meta.get("source_uri", ""),
+            "source_key": meta.get("source_key", ""),
+            "document_id": meta.get("document_id", ""),
             "section": meta.get("section") or meta.get("heading", ""),
             "score": score,
-            "text": text[:200] if text else "",
+            "text": text[:400] if text else "",
         }
         start = meta.get("original_char_start")
         end = meta.get("original_char_end")
@@ -131,12 +133,14 @@ def _stream_llm(
     memory_context: str | None = None,
     memory_recent_turns: list[dict] | None = None,
 ):
-    """Stream generation tokens via LLMProvider (provider-agnostic)."""
+    """Stream generation tokens via LLMProvider (provider-agnostic).
+
+    Delegates prompt assembly to `OllamaGenerator.build_messages` so the
+    streaming and non-streaming paths share a single source of truth for
+    prompt shape (system prompt, doc-context layout, memory framing).
+    """
     from src.platform.llm import get_llm_provider
-    from src.retrieval.generation.nodes import (
-        _build_user_prompt,
-        _get_system_prompt,
-    )
+    from src.retrieval.generation.nodes import OllamaGenerator
 
     def _record_stage(stage: str, bucket: str, started_at: float) -> None:
         if stage_timings is None:
@@ -146,36 +150,15 @@ def _stream_llm(
         )
 
     prep_start = time.perf_counter()
-    if scores:
-        context = "\n\n".join(
-            f"[{i+1}] (relevance: {score:.0%}) {chunk}"
-            for i, (chunk, score) in enumerate(zip(context_chunks, scores))
-        )
-    else:
-        context = "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks))
-    user_message = _build_user_prompt(context=context, question=query)
-
-    messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
-    if memory_context:
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "Use this conversation context only to resolve follow-up references:\n"
-                    + memory_context
-                ),
-            }
-        )
-    for turn in memory_recent_turns or []:
-        role = str(turn.get("role", "user"))
-        if role not in {"user", "assistant", "system"}:
-            continue
-        content = str(turn.get("content", "")).strip()
-        if content:
-            messages.append({"role": role, "content": content})
-    messages.append({"role": "user", "content": user_message})
-
+    messages = OllamaGenerator.build_messages(
+        query=query,
+        context_chunks=context_chunks,
+        scores=scores,
+        memory_context=memory_context,
+        recent_turns=memory_recent_turns,
+    )
     _record_stage("prompt_prepare", "generation", prep_start)
+
     stream_start = time.perf_counter()
     provider = get_llm_provider()
     for token in provider.generate_stream(
@@ -231,6 +214,8 @@ async def run_query(
         payload = request.model_dump(exclude_none=True)
         payload["tenant_id"] = tenant_id
         payload["conversation_id"] = conv.conversation_id
+        if request.mode == "retrieval":
+            payload["skip_generation"] = True
         # Hard-suppress previously-served docs (relevant ∪ ignored).
         # Lives outside ``memory_enabled`` because doc state tracking is
         # logically separate from chat-history context building — Noop
@@ -306,16 +291,16 @@ async def run_query(
         result["seen_doc_ids"] = list(
             dict.fromkeys([*meta_after.relevant_doc_ids, *meta_after.ignored_doc_ids])
         )
-        # Retrieval mode never writes turns to chat history — retrieval activity
-        # is captured entirely on the conversation's relevant/ignored doc lists.
-        # This keeps the auto-mode rewriter's view of "real" chat clean when the
-        # user later switches back to the Query tab.
-        if request.memory_enabled and request.mode != "retrieval":
+        # Retrieval and chat both write turns now — retrieval turns carry sources
+        # but empty assistant content, so a single conversation can be replayed
+        # under either renderer (citation strip vs doc cards) on the frontend.
+        if request.memory_enabled:
             user_text = request.query.strip()
-            assistant_text = (
-                str(result.get("generated_answer", "")).strip()
-                or str(result.get("clarification_message", "")).strip()
-            )
+            generated = result.get("generated_answer") or ""
+            clarification = result.get("clarification_message") or ""
+            assistant_text = str(generated).strip() or str(clarification).strip()
+            is_retrieval = request.mode == "retrieval"
+            source_refs = _source_refs(result.get("results", []))
             mem_start = time.perf_counter()
             memory.append_turn(
                 tenant_id=tenant_id,
@@ -329,7 +314,11 @@ async def run_query(
             # REQ-1207: Don't store BLOCK/FLAG responses in memory —
             # prevents error echo accumulation across turns.
             post_action = result.get("post_guardrail_action", "")
-            if assistant_text and post_action not in ("block", "flag"):
+            should_write_assistant = (
+                (assistant_text or (is_retrieval and source_refs))
+                and post_action not in ("block", "flag")
+            )
+            if should_write_assistant:
                 memory.append_turn(
                     tenant_id=tenant_id,
                     subject=principal.subject,
@@ -338,7 +327,7 @@ async def run_query(
                     role="assistant",
                     content=assistant_text,
                     query_id=workflow_id,
-                    sources=_source_refs(result.get("results", [])),
+                    sources=source_refs,
                 )
             MEMORY_OP_MS.labels(operation="append_turn").observe(
                 (time.perf_counter() - mem_start) * 1000

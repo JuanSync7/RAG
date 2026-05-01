@@ -4,13 +4,14 @@
 // paths plus the conversation-history replay in conversations.ts.
 // @end-summary
 
-import { byId, escHtml } from "./dom";
+import { escHtml } from "./dom";
 import { parseMarkdown } from "./markdown";
 import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
+import { docKeyFromMeta } from "./chatMode";
 import type { ChunkResult } from "./user-types";
 
-interface ViewPayload {
+export interface ViewPayload {
     source?: string;
     source_uri?: string;
     source_key?: string;
@@ -22,73 +23,7 @@ interface ViewPayload {
     provenance_confidence?: number;
 }
 
-const _viewPayloads = new Map<string, ViewPayload>();
-let _viewCounter = 0;
-
-export function buildCitationsHtml(results: ChunkResult[]): string {
-    if (!results.length) return "";
-    let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
-    results.forEach((r, i) => {
-        const meta = r.metadata || {};
-        const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
-        const section = escHtml(String(meta.section ?? meta.heading ?? ""));
-        const score = Math.round(r.score * 100);
-        const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
-        const chunkHtml = parseMarkdown(r.text || "");
-        const chunkId = `chunk-${i}-${Date.now()}`;
-        const sourceUri = String(meta.source_uri ?? "").trim();
-        const source = String(meta.source ?? "").trim();
-        const sourceKey = String(meta.source_key ?? "").trim();
-        let viewKey = "";
-        if (sourceKey || sourceUri || source) {
-            viewKey = `view-${++_viewCounter}`;
-            _viewPayloads.set(viewKey, {
-                source: source || undefined,
-                source_uri: sourceUri || undefined,
-                source_key: sourceKey || undefined,
-                chunk_text: r.text || undefined,
-                original_start: numOrUndef(meta.original_char_start),
-                original_end: numOrUndef(meta.original_char_end),
-                refactored_start: numOrUndef(meta.refactored_char_start),
-                refactored_end: numOrUndef(meta.refactored_char_end),
-                provenance_confidence: numOrUndef(meta.provenance_confidence),
-            });
-        }
-        html += `
-          <div class="citation-card" onclick="toggleCitation(this)">
-            <div class="citation-header">
-              <span class="citation-icon">&#128196;</span>
-              <div class="citation-info">
-                <div class="citation-filename"><span class="citation-name">${filename}</span>${viewKey ? `<a href="#" class="citation-view" onclick="event.stopPropagation();openSourceView(event,'${viewKey}')">[view]</a>` : ""}</div>
-                ${section ? `<div class="citation-section">${section}</div>` : ""}
-              </div>
-              <div class="relevance-bar-wrap">
-                <span class="relevance-pct ${scoreClass}">${score}%</span>
-                <div class="relevance-bar"><div class="relevance-fill ${scoreClass}" style="width:${score}%"></div></div>
-              </div>
-              <span class="citation-chevron">&#8964;</span>
-            </div>
-            <div class="citation-body">
-              <div class="citation-chunk markdown-body" id="${chunkId}">${chunkHtml}</div>
-              <button class="citation-show-more" onclick="event.stopPropagation();toggleChunk(event,'${chunkId}')">Show more</button>
-            </div>
-          </div>`;
-    });
-    return html;
-}
-
-function numOrUndef(v: unknown): number | undefined {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-}
-
-async function openSourceView(e: Event, viewKey: string): Promise<void> {
-    e.preventDefault();
-    const payload = _viewPayloads.get(viewKey);
-    if (!payload) {
-        showToast("Citation context lost — try re-running the query.");
-        return;
-    }
+export async function openSourceDocument(payload: ViewPayload): Promise<void> {
     const url = apiBase() + "/console/source-document/view";
     try {
         const res = await fetch(url, {
@@ -113,15 +48,92 @@ async function openSourceView(e: Event, viewKey: string): Promise<void> {
     }
 }
 
-function toggleCitation(card: HTMLElement): void {
-    card.classList.toggle("expanded");
+const _viewPayloads = new Map<string, ViewPayload>();
+let _viewCounter = 0;
+
+export function buildCitationsHtml(results: ChunkResult[]): string {
+    if (!results.length) return "";
+    let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
+    results.forEach((r, i) => {
+        const meta = r.metadata || {};
+        const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
+        const filename = escHtml(filenameRaw);
+        const section = escHtml(String(meta.section ?? meta.heading ?? ""));
+        const score = Math.round(r.score * 100);
+        const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
+        const chunkHtml = parseMarkdown(r.text || "");
+        const sourceUri = String(meta.source_uri ?? "").trim();
+        const source = String(meta.source ?? "").trim();
+        const sourceKey = String(meta.source_key ?? "").trim();
+        const docKey = docKeyFromMeta(meta as Record<string, unknown>);
+        const cardAttrs = docKey
+            ? ` data-doc-key="${escHtml(docKey)}" data-doc-name="${escHtml(filenameRaw)}"`
+                + (source ? ` data-source="${escHtml(source)}"` : "")
+                + (sourceUri ? ` data-source-uri="${escHtml(sourceUri)}"` : "")
+                + (sourceKey ? ` data-source-key="${escHtml(sourceKey)}"` : "")
+            : "";
+        const actionsHtml = docKey
+            ? `<div class="citation-card-actions" onclick="event.stopPropagation()">`
+                + `<button class="citation-card-action" data-action="relevant">Mark relevant</button>`
+                + `<button class="citation-card-action" data-action="hide">Hide</button>`
+                + `<button class="citation-card-action" data-action="reset" disabled>Reset</button>`
+                + `</div>`
+            : "";
+        let viewKey = "";
+        if (sourceKey || sourceUri || source) {
+            viewKey = `view-${++_viewCounter}`;
+            _viewPayloads.set(viewKey, {
+                source: source || undefined,
+                source_uri: sourceUri || undefined,
+                source_key: sourceKey || undefined,
+                chunk_text: r.text || undefined,
+                original_start: numOrUndef(meta.original_char_start),
+                original_end: numOrUndef(meta.original_char_end),
+                refactored_start: numOrUndef(meta.refactored_char_start),
+                refactored_end: numOrUndef(meta.refactored_char_end),
+                provenance_confidence: numOrUndef(meta.provenance_confidence),
+            });
+        }
+        html += `
+          <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
+            <div class="citation-header">
+              <span class="citation-icon">&#128196;</span>
+              <div class="citation-info">
+                <div class="citation-filename"><span class="citation-name">${filename}</span>${viewKey ? `<a href="#" class="citation-view" onclick="event.stopPropagation();openSourceView(event,'${viewKey}')">[view]</a>` : ""}</div>
+                ${section ? `<div class="citation-section">${section}</div>` : ""}
+              </div>
+              <div class="relevance-bar-wrap">
+                <span class="relevance-pct ${scoreClass}">${score}%</span>
+                <div class="relevance-bar"><div class="relevance-fill ${scoreClass}" style="width:${score}%"></div></div>
+              </div>
+              <span class="citation-chevron">&#8964;</span>
+            </div>
+            <div class="citation-body">
+              <div class="citation-chunk markdown-body">${chunkHtml}</div>
+              ${actionsHtml}
+            </div>
+          </div>`;
+    });
+    return html;
 }
 
-function toggleChunk(e: Event, id: string): void {
-    e.stopPropagation();
-    const el = byId(id);
-    el.classList.toggle("show-all");
-    (e.target as HTMLElement).textContent = el.classList.contains("show-all") ? "Show less" : "Show more";
+function numOrUndef(v: unknown): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+async function openSourceView(e: Event, viewKey: string): Promise<void> {
+    e.preventDefault();
+    const payload = _viewPayloads.get(viewKey);
+    if (!payload) {
+        showToast("Citation context lost — try re-running the query.");
+        return;
+    }
+    await openSourceDocument(payload);
+}
+
+function toggleCitation(card: HTMLElement): void {
+    card.classList.toggle("expanded");
 }
 
 export function revealCitations(citationsEl: HTMLElement): void {
@@ -134,6 +146,5 @@ export function revealCitations(citationsEl: HTMLElement): void {
 
 export function initCitations(): void {
     (window as unknown as Record<string, unknown>)["toggleCitation"] = toggleCitation;
-    (window as unknown as Record<string, unknown>)["toggleChunk"] = toggleChunk;
     (window as unknown as Record<string, unknown>)["openSourceView"] = openSourceView;
 }

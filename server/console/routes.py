@@ -870,6 +870,35 @@ def create_console_router(
             },
         )
 
+    @router.delete(
+        "/console/conversations/{conversation_id}/doc-state/{doc_id}",
+        response_model=ConsoleEnvelope,
+        responses=standard_error_responses,
+    )
+    async def console_conversation_clear_doc_state(
+        request: Request,
+        conversation_id: str,
+        doc_id: str,
+        principal: Principal = Depends(authenticate_request),
+    ):
+        require_role(principal, "query")
+        memory = get_conversation_memory()
+        meta = memory.clear_doc_state(
+            tenant_id=principal.tenant_id,
+            subject=principal.subject,
+            project_id=principal.project_id,
+            conversation_id=conversation_id,
+            doc_id=doc_id,
+        )
+        return console_ok(
+            request,
+            {
+                "conversation_id": conversation_id,
+                "relevant_doc_ids": list(meta.relevant_doc_ids),
+                "ignored_doc_ids": list(meta.ignored_doc_ids),
+            },
+        )
+
     @router.post("/console/ingest", response_model=ConsoleEnvelope, responses=standard_error_responses)
     async def console_ingest(
         request: Request,

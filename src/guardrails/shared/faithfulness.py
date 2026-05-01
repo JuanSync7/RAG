@@ -250,9 +250,9 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes import _call_ollama
+            from src.platform.llm import call_oneshot
 
-            response = _call_ollama(
+            response = call_oneshot(
                 prompt,
                 system=(
                     "You are a faithfulness evaluator. Output only a number "
@@ -298,10 +298,10 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes import _call_ollama
+            from src.platform.llm import call_oneshot
             from src.common import parse_json_object
 
-            response = _call_ollama(
+            response = call_oneshot(
                 prompt,
                 system="You are a faithfulness evaluator. Output only JSON.",
             )

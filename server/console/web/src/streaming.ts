@@ -15,17 +15,69 @@ import { buildCitationsHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import type { ChunkResult, StreamEventData, TokenBudget } from "./user-types";
+import { getChatMode, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions } from "./chatMode";
+import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
     const s = getSettings();
-    return {
+    const body: Record<string, unknown> = {
         query: queryText,
         search_limit: parseInt(String(s.searchLimit ?? "10"), 10),
         rerank_top_k: parseInt(String(s.rerankTopK ?? "5"), 10),
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
+    if (getChatMode() === "sources") {
+        body.mode = "retrieval";
+        body.retrieval_sub_mode = getRetrievalSubMode();
+        const topK = getSourcesTopK();
+        body.rerank_top_k = topK;
+        body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+    }
+    return body;
+}
+
+function chunkToSourceRef(c: ChunkResult): SourceRef {
+    const m = c.metadata || {};
+    return {
+        source: String(m.source ?? ""),
+        source_uri: String(m.source_uri ?? ""),
+        source_key: String(m.source_key ?? ""),
+        document_id: String(m.document_id ?? ""),
+        section: String(m.section ?? m.heading ?? ""),
+        score: c.score,
+        text: c.text,
+        original_char_start: typeof m.original_char_start === "number" ? (m.original_char_start as number) : undefined,
+        original_char_end: typeof m.original_char_end === "number" ? (m.original_char_end as number) : undefined,
+    };
+}
+
+async function sourcesOnlyQuery(queryText: string): Promise<void> {
+    appendUserMsg(queryText);
+    try {
+        const data = await api<{
+            results?: ChunkResult[];
+            conversation_id?: string;
+            relevant_doc_ids?: string[];
+            ignored_doc_ids?: string[];
+            token_budget?: TokenBudget;
+        }>("POST", "/console/query", buildQueryBody(queryText));
+        const cid = String(data.conversation_id ?? "").trim();
+        if (cid) setActiveConversation(cid);
+        const sources = (data.results ?? []).map(chunkToSourceRef);
+        appendSourcesTurn(refs.thread, sources);
+        if (data.relevant_doc_ids || data.ignored_doc_ids) {
+            applyDocState(data.relevant_doc_ids ?? [], data.ignored_doc_ids ?? []);
+        }
+        if (data.token_budget) {
+            updateContextIndicator(data.token_budget);
+        }
+        scrollToBottom();
+        await loadConversations();
+        updateConvTitle();
+    } catch (err) {
+        appendErrorMsg("Sources query failed: " + String(err));
+    }
 }
 
 export async function streamQuery(queryText: string): Promise<void> {
@@ -176,9 +228,20 @@ export async function streamQuery(queryText: string): Promise<void> {
                     }
 
                     const results = (data.results ?? []) as ChunkResult[];
+                    if (results.length) {
+                        const sourceRefs = results.map(chunkToSourceRef);
+                        cacheDocsFromSources(sourceRefs);
+                    }
                     const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
                     if (showCitations && results.length) {
                         citationsEl.innerHTML = buildCitationsHtml(results);
+                        wireCitationActions(citationsEl);
+                    }
+                    if (data.relevant_doc_ids || data.ignored_doc_ids) {
+                        applyDocState(
+                            (data.relevant_doc_ids ?? []) as string[],
+                            (data.ignored_doc_ids ?? []) as string[],
+                        );
                     }
                 } else if (evtType === "error") {
                     errorShown = true;
@@ -330,8 +393,12 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 
         const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
         const results = data.results ?? [];
+        if (results.length) {
+            cacheDocsFromSources(results.map(chunkToSourceRef));
+        }
         if (showCitations && results.length) {
             citationsEl.innerHTML = buildCitationsHtml(results);
+            wireCitationActions(citationsEl);
             revealCitations(citationsEl);
         }
 
@@ -350,6 +417,10 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 }
 
 export async function sendQuery(text: string): Promise<void> {
+    if (getChatMode() === "sources") {
+        await sourcesOnlyQuery(text);
+        return;
+    }
     const s = getSettings();
     const useStreaming = s.streaming !== false;
     if (useStreaming) await streamQuery(text);

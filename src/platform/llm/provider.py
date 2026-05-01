@@ -509,3 +509,36 @@ def get_llm_provider() -> LLMProvider:
     if _provider is None:
         _provider = LLMProvider()
     return _provider
+
+
+def call_oneshot(
+    prompt: str,
+    *,
+    system: str = "",
+    model_alias: str = "query",
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = 256,
+) -> Optional[str]:
+    """One-shot text completion: build messages from (system, prompt), call the
+    provider, return content or None on failure.
+
+    Used by query reformulation and guardrails — callers that need a single
+    short answer from the LLM and don't care about token usage or streaming.
+    Exceptions are swallowed and logged so guardrail/loop callers degrade
+    gracefully when the provider is unreachable.
+    """
+    messages: list[dict[str, Any]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    try:
+        response = get_llm_provider().generate(
+            messages,
+            model_alias=model_alias,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.content or None
+    except Exception as e:
+        logger.warning("call_oneshot failed (alias=%s): %s", model_alias, e)
+        return None
