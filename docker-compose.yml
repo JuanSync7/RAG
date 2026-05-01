@@ -151,7 +151,8 @@ services:
       - RAG_TEI_RERANK_URL=http://rag-nginx:8082
       # Allow the console to serve source documents ingested by the local worker.
       # The worker records absolute host paths; mount them at the same path above.
-      - RAG_CONSOLE_SOURCE_ROOTS=/home/juansync7/RagWeave/documents:/home/juansync7/RagWeave/docs
+      # PWD is the project root — portable across machines and clone paths.
+      - RAG_CONSOLE_SOURCE_ROOTS=${PWD}/documents:${PWD}/docs
     depends_on:
       temporal:
         condition: service_started
@@ -172,8 +173,9 @@ services:
       - ./.runtime:/app/.runtime
       # Mount host source dirs at their real absolute paths so the console can serve
       # documents whose paths were recorded by the local worker during ingest.
-      - ./documents:/home/juansync7/RagWeave/documents:ro
-      - ./docs:/home/juansync7/RagWeave/docs:ro
+      # PWD is the project root — portable across machines and clone paths.
+      - ./documents:${PWD}/documents:ro
+      - ./docs:${PWD}/docs:ro
     healthcheck:
       # Uses Python stdlib (curl was removed from the image in the 2026-04-10 optimization).
       # Works identically under docker-compose and podman-compose.
