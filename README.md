@@ -77,6 +77,25 @@ Ingestion runs as a separate Temporal workflow that writes content + embeddings 
 > it walks every prerequisite install command and the exact gaps in this
 > Quick Start (cloudflared install, nvm/PATH issues, profile combinations).
 
+### Run modes
+
+There are two supported ways to run RagWeave:
+
+| Mode | When to use | What you need | What you skip |
+| --- | --- | --- | --- |
+| **Containers only** (fastest start) | Just trying it out, or running without modifying the API/worker code | Docker + Docker Compose | `make setup`, Python, Node — `rag-api` and `rag-worker` pull from `ghcr.io/juansync7/ragweave-{api,worker}:latest` |
+| **Local dev** (default below) | Iterating on Python or TypeScript code | All prerequisites listed above | Nothing — full local toolchain |
+
+For containers-only:
+
+```bash
+git clone <repo-url> RagWeave && cd RagWeave
+cp .env.example .env
+./scripts/compose.sh --profile app --profile workers up -d
+```
+
+To rebuild app images locally instead of pulling: `./scripts/compose.sh build rag-api rag-worker`. Pin to a specific image tag by setting `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env` (defaults to `latest`).
+
 ### 1. Clone and set up the project
 
 ```bash
