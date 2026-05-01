@@ -76,7 +76,7 @@ services:
     restart: unless-stopped
 
   temporal:
-    image: temporalio/auto-setup:latest
+    image: temporalio/auto-setup:${TEMPORAL_IMAGE_TAG:-1.25.2}
     container_name: rag-temporal
     ports:
       - "${RAG_TEMPORAL_PORT:-7233}:7233"
@@ -95,7 +95,7 @@ services:
     restart: unless-stopped
 
   temporal-ui:
-    image: temporalio/ui:latest
+    image: temporalio/ui:${TEMPORAL_UI_IMAGE_TAG:-2.31.2}
     container_name: rag-temporal-ui
     ports:
       - "${RAG_TEMPORAL_UI_PORT:-8080}:8080"
@@ -108,6 +108,7 @@ services:
 
   rag-api:
     profiles: ["app"]
+    image: ghcr.io/juansync7/ragweave-api:${RAG_API_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.api
@@ -186,6 +187,7 @@ services:
 
   rag-worker:
     profiles: ["workers"]
+    image: ghcr.io/juansync7/ragweave-worker:${RAG_WORKER_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
@@ -254,7 +256,7 @@ services:
     restart: unless-stopped
 
   rag-minio:
-    image: minio/minio:latest
+    image: minio/minio:${RAG_MINIO_IMAGE_TAG:-RELEASE.2025-04-22T22-12-26Z}
     container_name: rag-minio
     command: server /data --console-address ":9001"
     environment:
