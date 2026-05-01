@@ -301,10 +301,10 @@ class InjectionDetector:
             f"<msg>{query}</msg>"
         )
 
-        from src.retrieval.query.nodes import _call_ollama
+        from src.platform.llm import call_oneshot
         from src.common import parse_json_object
 
-        result = _call_ollama(
+        result = call_oneshot(
             prompt, system="You are a security classifier. Output only JSON."
         )
         if result:

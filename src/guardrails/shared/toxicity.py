@@ -147,9 +147,9 @@ class ToxicityFilter:
         else:
             prompt = _SELF_CHECK_INPUT_PROMPT.format(text=text)
 
-        from src.retrieval.query.nodes import _call_ollama
+        from src.platform.llm import call_oneshot
 
-        result = _call_ollama(
+        result = call_oneshot(
             prompt,
             system="You are a content safety classifier. Output only 'yes' or 'no'.",
         )
