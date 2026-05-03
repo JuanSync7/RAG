@@ -18,12 +18,14 @@ from src.ingest.common import (
     quality_score,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.quality_validation")
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+@node_span("quality_validation")
 def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Filter chunks by heuristic quality thresholds and deduplicate text.
 

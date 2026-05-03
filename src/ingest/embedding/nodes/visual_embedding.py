@@ -58,6 +58,7 @@ from src.vector_db.weaviate import (
     delete_visual_by_source_key,
     ensure_visual_collection,
 )
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 
@@ -67,6 +68,7 @@ logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 # ---------------------------------------------------------------------------
 
 
+@node_span("visual_embedding")
 def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Visual embedding pipeline node: extract, store, embed, and index page images.
 

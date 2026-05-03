@@ -17,8 +17,10 @@ logger = logging.getLogger("rag.ingest.embedding.document_storage")
 from src.db import build_document_id, put_document  # noqa: F401 — put_document kept for legacy refs
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 
+@node_span("document_storage")
 def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Compute a stable document_id and STAGE the MinIO write into pipeline state.
 

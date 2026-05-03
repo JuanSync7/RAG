@@ -37,6 +37,7 @@ from src.ingest.support import (
 )
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.pipeline.chunking")
 
@@ -64,6 +65,7 @@ def _normalize_chunk_text(text: str) -> str:
     return _CONTROL_CHAR_RE.sub("", normalized)
 
 
+@node_span("chunking")
 def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Split document into chunks using parser abstraction or legacy markdown fallback.
 

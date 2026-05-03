@@ -255,6 +255,7 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
         source_id=s.source_id,
         connector=s.connector,
         source_version=s.source_version,
+        trace_id=args.staging_batch_id,
     )
 
     errors = list(result.get("errors", []))
@@ -342,6 +343,7 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             clean_text=clean_text,
             clean_hash=clean_hash,
             staging_batch_id=args.staging_batch_id,
+            trace_id=args.staging_batch_id,
             source_hash=source_hash,
         )
 

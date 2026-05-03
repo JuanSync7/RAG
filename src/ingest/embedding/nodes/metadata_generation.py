@@ -20,11 +20,13 @@ from src.ingest.common import (
     extract_keywords_fallback,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 _MAX_TEXT_FOR_METADATA = 10000
 _MAX_SUMMARY_LEN = 240
 
 
+@node_span("metadata_generation")
 def metadata_generation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Generate document summary/keywords and project them into chunk metadata.
 
