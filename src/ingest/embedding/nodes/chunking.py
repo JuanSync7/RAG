@@ -51,6 +51,32 @@ logger = logging.getLogger("rag.ingest.pipeline.chunking")
 _CONTROL_CHAR_RE = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
+def _match_table_artifact(chunk_text: str, tables: list[Any]) -> Any:
+    """Return the TableArtifact whose markdown overlaps ``chunk_text``, else None.
+
+    Uses a cheap "first non-empty row of the rendered table appears in the chunk"
+    heuristic so HybridChunker output (which may wrap the table in surrounding
+    prose) still matches. Returns the first match in document order.
+    """
+    if not tables:
+        return None
+    for tbl in tables:
+        md = getattr(tbl, "markdown", "") or ""
+        if not md:
+            continue
+        # Pick the first non-empty, non-separator row as a fingerprint.
+        signature = ""
+        for line in md.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("|---") or set(stripped) <= {"|", "-", " "}:
+                continue
+            signature = stripped
+            break
+        if signature and signature in chunk_text:
+            return tbl
+    return None
+
+
 def _normalize_chunk_text(text: str) -> str:
     """Apply NFC unicode normalization and remove control characters.
 
@@ -139,22 +165,33 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                     )
 
             # Map Chunk → ProcessedChunk preserving Weaviate payload shape.
+            tables = list(getattr(parse_result, "tables", []) or [])
             total = len(raw_parser_chunks)
-            chunks: list[ProcessedChunk] = [
-                ProcessedChunk(
-                    text=_normalize_chunk_text(c.text),
-                    metadata={
-                        **base_metadata,
-                        "section_path": c.section_path,
-                        "heading": c.heading,
-                        "heading_level": c.heading_level,
-                        "chunk_index": c.chunk_index,
-                        "total_chunks": total,
-                        **c.extra_metadata,
-                    },
-                )
-                for c in raw_parser_chunks
-            ]
+            chunks: list[ProcessedChunk] = []
+            for c in raw_parser_chunks:
+                norm_text = _normalize_chunk_text(c.text)
+                meta: dict[str, Any] = {
+                    **base_metadata,
+                    "section_path": c.section_path,
+                    "heading": c.heading,
+                    "heading_level": c.heading_level,
+                    "chunk_index": c.chunk_index,
+                    "total_chunks": total,
+                    **c.extra_metadata,
+                }
+                table_match = _match_table_artifact(norm_text, tables)
+                if table_match is not None:
+                    meta["chunk_type"] = "table"
+                    meta["table_id"] = table_match.table_id
+                    meta["table_cells"] = table_match.cells
+                    meta["table_num_rows"] = table_match.num_rows
+                    meta["table_num_cols"] = table_match.num_cols
+                    meta["table_has_header"] = table_match.has_header
+                    if table_match.caption:
+                        meta["table_caption"] = table_match.caption
+                else:
+                    meta.setdefault("chunk_type", "text")
+                chunks.append(ProcessedChunk(text=norm_text, metadata=meta))
 
         else:
             # ── Legacy fallback (no parse_result in state) ─────────────────
