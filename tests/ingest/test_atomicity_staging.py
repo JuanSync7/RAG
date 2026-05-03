@@ -76,7 +76,6 @@ def _make_base_state(runtime, **overrides) -> dict:
         "connector": "local_fs",
         "raw_text": "# Hello",
         "cleaned_text": "# Hello",
-        "refactored_text": "",
         "clean_hash": "abc",
         "chunks": [chunk],
         "errors": [],

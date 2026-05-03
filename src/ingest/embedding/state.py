@@ -2,7 +2,7 @@
 # LangGraph TypedDict state contract for the Phase 2 Embedding Pipeline.
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
-# Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
+# Fields: runtime, source_*, raw_text, cleaned_text, clean_hash,
 #   document_id, chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log,
 #   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
@@ -53,8 +53,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
         for compatibility with chunking/enrichment nodes).
     cleaned_text : str
         Same as raw_text for Phase 2 entry point — the clean text is the input.
-    refactored_text : str | None
-        Stored refactored text from Phase 1, if present in CleanDocumentStore meta.
     clean_hash : str
         SHA-256 of the clean text (for change detection on Phase 2 re-runs).
     document_id : str
@@ -91,7 +89,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
     connector: str
     raw_text: str
     cleaned_text: str
-    refactored_text: Optional[str]
     clean_hash: str
     document_id: str
     chunks: list[ProcessedChunk]

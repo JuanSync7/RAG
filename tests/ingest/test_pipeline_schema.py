@@ -58,7 +58,6 @@ def test_ingest_source_marks_unchanged_file_as_skip(tmp_path: Path):
         "processing_log": [],
         "structure": {},
         "multimodal_notes": [],
-        "refactored_text": "",
         "cross_references": [],
         "kg_triples": [],
         "runtime": type("R", (), {"config": IngestionConfig()})(),
@@ -67,8 +66,8 @@ def test_ingest_source_marks_unchanged_file_as_skip(tmp_path: Path):
     assert result["should_skip"] is True
 
 
-def test_pipeline_exposes_15_named_nodes():
-    assert len(PIPELINE_NODE_NAMES) == 15
+def test_pipeline_exposes_14_named_nodes():
+    assert len(PIPELINE_NODE_NAMES) == 14
     assert PIPELINE_NODE_NAMES[0] == "document_ingestion"
     assert PIPELINE_NODE_NAMES[-1] == "knowledge_graph_storage"
 
@@ -144,7 +143,6 @@ def test_chunk_enrichment_sets_source_fields_and_chunk_id():
         "processing_log": [],
         "structure": {},
         "multimodal_notes": [],
-        "refactored_text": "",
         "cross_references": [],
         "kg_triples": [],
         "runtime": type("R", (), {"config": IngestionConfig()})(),
@@ -176,7 +174,6 @@ def test_chunking_node_projects_heading_metadata(monkeypatch):
         "source_version": "1",
         "raw_text": "# Title\n\n## Clock Domain Crossing\n\nBody text here.",
         "cleaned_text": "# Title\n\n## Clock Domain Crossing\n\nBody text here.",
-        "refactored_text": "",
         "processing_log": [],
         "runtime": type(
             "R",

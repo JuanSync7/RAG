@@ -52,7 +52,6 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "vision_api_key",
     "vision_api_path",
     # Pipeline feature toggles (server-side defaults)
-    "enable_document_refactoring",
     "enable_cross_reference_extraction",
     "enable_knowledge_graph_extraction",
     "enable_quality_validation",

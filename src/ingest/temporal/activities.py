@@ -266,7 +266,7 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
     # This is the durable boundary between activities — the workflow
     # contract requires Phase 2 to read from here, not from Temporal payload.
     if not errors and config.clean_store_dir:
-        clean_text = result.get("refactored_text") or result.get("cleaned_text", "")
+        clean_text = result.get("cleaned_text", "")
         clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
         meta = {
             "source_key": s.source_key,
@@ -277,7 +277,6 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
             "source_version": s.source_version,
             "source_hash": source_hash,
             "clean_hash": clean_hash,
-            "refactored": result.get("refactored_text") is not None,
         }
         try:
             CleanDocumentStore(Path(config.clean_store_dir)).write(s.source_key, clean_text, meta)

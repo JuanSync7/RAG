@@ -104,7 +104,6 @@ def _make_chunking_state(
         "source_version": "1",
         "raw_text": raw_text,
         "cleaned_text": raw_text,
-        "refactored_text": "",
         "processing_log": [],
         "runtime": runtime,
     }

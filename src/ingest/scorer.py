@@ -29,7 +29,6 @@ PHASE1_NODES = [
     ROOT / "doc_processing/nodes/structure_detection.py",
     ROOT / "doc_processing/nodes/multimodal_processing.py",
     ROOT / "doc_processing/nodes/text_cleaning.py",
-    ROOT / "doc_processing/nodes/document_refactoring.py",
 ]
 
 PHASE2_NODES = [

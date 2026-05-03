@@ -84,7 +84,6 @@ def run_document_processing(
         "structure": {},
         "multimodal_notes": [],
         "cleaned_text": "",
-        "refactored_text": None,
         "errors": [],
         "processing_log": [],
         "trace_id": trace_id,

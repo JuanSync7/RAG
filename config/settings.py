@@ -461,9 +461,6 @@ RAG_INGESTION_VISION_API_PATH = os.environ.get(
     "RAG_INGESTION_VISION_API_PATH",
     "/v1/chat/completions",
 ).strip()
-RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING = os.environ.get(
-    "RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING", "false"
-).lower() in ("true", "1", "yes")
 RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION = os.environ.get(
     "RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION", "true"
 ).lower() in ("true", "1", "yes")

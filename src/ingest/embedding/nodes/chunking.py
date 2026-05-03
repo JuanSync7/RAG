@@ -3,7 +3,7 @@
 # Primary path: parse_result + parser_instance from state → parser.chunk() or
 #   chunk_with_markdown() depending on config.chunker override.
 # Legacy fallback: when no parse_result is in state, falls back to markdown chunking
-#   on refactored_text/cleaned_text (pre-Phase 3.2 behaviour).
+#   on cleaned_text (pre-Phase 3.2 behaviour).
 # Exports: chunking_node, _normalize_chunk_text
 # Deps: unicodedata, re, src.ingest.embedding.state, src.ingest.common.schemas,
 #       src.ingest.common.shared, src.ingest.support.parser_base,
@@ -74,8 +74,8 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
       - ``config.chunker == "markdown"`` → ``chunk_with_markdown(parse_result, config)``
       - ``config.chunker == "native"`` (default) → ``parser_instance.chunk(parse_result)``
         with auto-fallback to markdown on native chunking failure.
-    - Otherwise the legacy path is used: markdown chunking on ``refactored_text`` or
-      ``cleaned_text`` (identical to pre-Phase 3.2 behaviour).
+    - Otherwise the legacy path is used: markdown chunking on ``cleaned_text``
+      (identical to pre-Phase 3.2 behaviour).
 
     Args:
         state: Embedding pipeline state.
@@ -156,7 +156,7 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
 
         else:
             # ── Legacy fallback (no parse_result in state) ─────────────────
-            # Backward-compat: markdown chunking on refactored_text/cleaned_text.
+            # Backward-compat: markdown chunking on cleaned_text.
             # Preserves pre-Phase 3.2 behaviour exactly.
             chunks = _chunk_with_markdown_legacy(state, config, base_metadata)
             processing_log = append_processing_log(state, "chunking:legacy_markdown")
@@ -187,7 +187,7 @@ def _chunk_with_markdown_legacy(
     semantic_chunking flag, heading normalization, and ProcessedChunk metadata shape.
 
     Args:
-        state: Pipeline state; uses refactored_text or cleaned_text for chunking.
+        state: Pipeline state; uses cleaned_text for chunking.
         config: IngestionConfig; controls semantic_chunking, chunk_size, chunk_overlap.
         base_metadata: Pre-built source metadata dict.
 
@@ -198,9 +198,7 @@ def _chunk_with_markdown_legacy(
         Any exception from the markdown splitters (propagates; markdown path
         failure is fatal for this document).
     """
-    text_for_chunking = normalize_headings_to_markdown(
-        state.get("refactored_text") or state.get("cleaned_text", "")
-    )
+    text_for_chunking = normalize_headings_to_markdown(state.get("cleaned_text", ""))
 
     if config.semantic_chunking:
         raw_chunks = chunk_markdown(

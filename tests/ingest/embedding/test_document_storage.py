@@ -53,7 +53,6 @@ def _make_state(
         "source_version": "1",
         "connector": "local_fs",
         "cleaned_text": cleaned_text,
-        "refactored_text": "",
         "raw_text": "",
         "errors": [],
         "processing_log": [],
