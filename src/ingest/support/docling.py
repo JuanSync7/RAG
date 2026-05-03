@@ -474,6 +474,8 @@ def chunk_markdown_via_docling(
                 heading_level=len(headings),
                 chunk_index=idx,
                 extra_metadata=extra,
+                heading_path=list(headings),
+                page_ref=_page_ref_from_chunk_meta(meta),
             )
         )
     return chunks
@@ -482,6 +484,54 @@ def chunk_markdown_via_docling(
 # ---------------------------------------------------------------------------
 # DoclingParser — DocumentParser protocol implementation (FR-3221–FR-3224)
 # ---------------------------------------------------------------------------
+
+def _page_ref_from_chunk_meta(meta: Any) -> Any:
+    """Derive a PageRef from a HybridChunker chunk's meta.doc_items provenance.
+
+    Uses the first doc_item's first provenance entry as the chunk's primary
+    page (HybridChunker preserves document order). Returns None when meta is
+    missing or no provenance is attached.
+    """
+    from src.ingest.support.parser_base import PageRef
+
+    if meta is None:
+        return None
+    doc_items = getattr(meta, "doc_items", None) or []
+    for item in doc_items:
+        prov = getattr(item, "prov", None) or []
+        for p in prov:
+            page_no = getattr(p, "page_no", None)
+            if page_no is None:
+                continue
+            bbox_obj = getattr(p, "bbox", None)
+            bbox = None
+            if bbox_obj is not None:
+                # Docling BoundingBox: l, t, r, b OR x0, y0, x1, y1
+                try:
+                    bbox = (
+                        float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0))),
+                        float(getattr(bbox_obj, "t", getattr(bbox_obj, "y0", 0.0))),
+                        float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0))),
+                        float(getattr(bbox_obj, "b", getattr(bbox_obj, "y1", 0.0))),
+                    )
+                except Exception:
+                    bbox = None
+            return PageRef(page_no=int(page_no), page_label="", bbox=bbox)
+    return None
+
+
+def _page_ref_from_table_item(tbl: Any) -> Any:
+    """Derive a PageRef from a Docling TableItem's provenance, or None."""
+    from src.ingest.support.parser_base import PageRef
+
+    prov = getattr(tbl, "prov", None) or []
+    for p in prov:
+        page_no = getattr(p, "page_no", None)
+        if page_no is None:
+            continue
+        return PageRef(page_no=int(page_no), page_label="", bbox=None)
+    return None
+
 
 def _extract_table_artifacts(docling_document: Any) -> list:
     """Extract structured table artifacts from a DoclingDocument. FR-3211.
@@ -530,6 +580,7 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     has_header=_detect_header_row(tbl),
                     section_path="",
                     caption=caption.strip(),
+                    page_ref=_page_ref_from_table_item(tbl),
                 )
             )
         except Exception as exc:  # pragma: no cover - defensive
@@ -677,6 +728,7 @@ class DoclingParser:
             heading = headings[-1] if headings else ""
             section_path = " > ".join(headings)
             heading_level = len(headings)
+            page_ref = _page_ref_from_chunk_meta(meta)
 
             chunks.append(
                 Chunk(
@@ -686,6 +738,8 @@ class DoclingParser:
                     heading_level=heading_level,
                     chunk_index=idx,
                     extra_metadata={},
+                    heading_path=headings,
+                    page_ref=page_ref,
                 )
             )
         return chunks
