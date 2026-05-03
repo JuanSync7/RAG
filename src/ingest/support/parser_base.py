@@ -1,6 +1,6 @@
 # @summary
 # Abstract parser protocol and unified data contracts for the Document Parsing Abstraction.
-# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, chunk_with_markdown, validate_extra_metadata
+# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, PageRef, chunk_with_markdown, validate_extra_metadata
 # Deps: dataclasses, pathlib, typing, src.ingest.support.markdown
 # @end-summary
 
@@ -21,6 +21,26 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PageRef:
+    """Reference to a single source page. FR-3212.
+
+    Carried by chunks and table artifacts when the parser exposes per-element
+    page provenance (Docling does; regex/text fallback does not). Consumers
+    use this for citation rendering and per-page retrieval filtering.
+
+    Attributes:
+        page_no: 1-based page number within the source document.
+        page_label: Display label (e.g., "iv", "12a"). Empty when unknown.
+        bbox: Optional bounding box ``(x0, y0, x1, y1)`` in PDF coordinates;
+            ``None`` when not available.
+    """
+
+    page_no: int
+    page_label: str = ""
+    bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -57,6 +77,7 @@ class TableArtifact:
     has_header: bool = False
     section_path: str = ""
     caption: str = ""
+    page_ref: PageRef | None = None
 
 
 @dataclass
@@ -110,6 +131,8 @@ class Chunk:
     heading_level: int
     chunk_index: int
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+    heading_path: list[str] = field(default_factory=list)
+    page_ref: PageRef | None = None
 
 
 @runtime_checkable
@@ -220,14 +243,18 @@ def chunk_with_markdown(parse_result: ParseResult, config: Any) -> list[Chunk]:
     chunks: list[Chunk] = []
     for idx, raw in enumerate(raw_chunks):
         section_meta = _build_section_metadata(raw.get("header_metadata", {}))
+        section_path = section_meta["section_path"]
+        heading_path = [h for h in section_path.split(" > ") if h] if section_path else []
         chunks.append(
             Chunk(
                 text=raw["text"],
-                section_path=section_meta["section_path"],
+                section_path=section_path,
                 heading=section_meta["heading"],
                 heading_level=section_meta["heading_level"],
                 chunk_index=idx,
                 extra_metadata={},
+                heading_path=heading_path,
+                page_ref=None,
             )
         )
     return chunks

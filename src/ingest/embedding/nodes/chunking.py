@@ -175,10 +175,18 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                     "section_path": c.section_path,
                     "heading": c.heading,
                     "heading_level": c.heading_level,
+                    "heading_path": list(getattr(c, "heading_path", []) or []),
                     "chunk_index": c.chunk_index,
                     "total_chunks": total,
                     **c.extra_metadata,
                 }
+                page_ref = getattr(c, "page_ref", None)
+                if page_ref is not None:
+                    meta["page_no"] = page_ref.page_no
+                    if page_ref.page_label:
+                        meta["page_label"] = page_ref.page_label
+                    if page_ref.bbox is not None:
+                        meta["page_bbox"] = list(page_ref.bbox)
                 table_match = _match_table_artifact(norm_text, tables)
                 if table_match is not None:
                     meta["chunk_type"] = "table"
@@ -189,6 +197,8 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                     meta["table_has_header"] = table_match.has_header
                     if table_match.caption:
                         meta["table_caption"] = table_match.caption
+                    if table_match.page_ref is not None and "page_no" not in meta:
+                        meta["page_no"] = table_match.page_ref.page_no
                 else:
                     meta.setdefault("chunk_type", "text")
                 chunks.append(ProcessedChunk(text=norm_text, metadata=meta))
@@ -255,16 +265,24 @@ def _chunk_with_markdown_legacy(
         )
 
     total_chunks = len(raw_chunks)
-    chunks = [
-        ProcessedChunk(
-            text=_normalize_chunk_text(chunk["text"]),
-            metadata={
-                **base_metadata,
-                **_build_section_metadata(chunk.get("header_metadata", {})),
-                "chunk_index": idx,
-                "total_chunks": total_chunks,
-            },
+    chunks: list[ProcessedChunk] = []
+    for idx, chunk in enumerate(raw_chunks):
+        section_meta = _build_section_metadata(chunk.get("header_metadata", {}))
+        section_path = section_meta.get("section_path", "")
+        heading_path = (
+            [h for h in section_path.split(" > ") if h] if section_path else []
         )
-        for idx, chunk in enumerate(raw_chunks)
-    ]
+        chunks.append(
+            ProcessedChunk(
+                text=_normalize_chunk_text(chunk["text"]),
+                metadata={
+                    **base_metadata,
+                    **section_meta,
+                    "heading_path": heading_path,
+                    "chunk_index": idx,
+                    "total_chunks": total_chunks,
+                    "chunk_type": "text",
+                },
+            )
+        )
     return chunks
