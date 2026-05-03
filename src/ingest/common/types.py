@@ -39,7 +39,6 @@ from config.settings import (
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_STRICT,
-    RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING,
     RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION,
     RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE,
     RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING,
@@ -88,7 +87,6 @@ PIPELINE_NODE_NAMES = [
     "structure_detection",
     "multimodal_processing",
     "text_cleaning",
-    "document_refactoring",
     "chunking",
     "vlm_enrichment",
     "chunk_enrichment",
@@ -145,7 +143,6 @@ class IngestionConfig:
     vision_api_base_url: str = RAG_INGESTION_VISION_API_BASE_URL
     vision_api_key: str = RAG_INGESTION_VISION_API_KEY
     vision_api_path: str = RAG_INGESTION_VISION_API_PATH
-    enable_document_refactoring: bool = RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING
     enable_cross_reference_extraction: bool = (
         RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION
     )

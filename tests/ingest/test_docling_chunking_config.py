@@ -337,10 +337,9 @@ class TestPipelineNodeNamesOrdering:
     def test_pipeline_ends_with_knowledge_graph_storage(self):
         assert PIPELINE_NODE_NAMES[-1] == "knowledge_graph_storage"
 
-    def test_pipeline_node_names_has_15_entries(self):
-        """Bumped from 14 to 15 after 'visual_embedding' was inserted between
-        'embedding_storage' and 'knowledge_graph_storage'."""
-        assert len(PIPELINE_NODE_NAMES) == 15
+    def test_pipeline_node_names_has_14_entries(self):
+        """14 after document_refactoring was removed (PR1)."""
+        assert len(PIPELINE_NODE_NAMES) == 14
 
     def test_pipeline_node_names_are_all_strings(self):
         assert all(isinstance(name, str) for name in PIPELINE_NODE_NAMES)

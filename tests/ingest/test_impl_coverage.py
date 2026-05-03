@@ -93,7 +93,7 @@ class TestWriteRefactorMirrorArtifacts:
         chunks = [self._make_chunk(0), self._make_chunk(1)]
         result = {
             "raw_text": "original text",
-            "refactored_text": "refactored text",
+            "cleaned_text": "cleaned text",
             "chunks": chunks,
         }
 
@@ -109,7 +109,9 @@ class TestWriteRefactorMirrorArtifacts:
         assert mapping_path.exists()
 
         assert original_path.read_text(encoding="utf-8") == "original text"
-        assert refactored_path.read_text(encoding="utf-8") == "refactored text"
+        # PR1 redirected the legacy `.refactored.md` mirror file to dump cleaned_text
+        # since the LLM refactoring stage was removed.
+        assert refactored_path.read_text(encoding="utf-8") == "cleaned text"
 
         mapping = json.loads(mapping_path.read_bytes())
         assert mapping["source"] == "test.md"
@@ -134,7 +136,7 @@ class TestWriteRefactorMirrorArtifacts:
             "connector": "local_fs",
             "source_version": "100",
         }
-        result = {"raw_text": "raw", "refactored_text": "ref", "chunks": []}
+        result = {"raw_text": "raw", "cleaned_text": "cleaned", "chunks": []}
 
         _write_refactor_mirror_artifacts(source, result, config)
 
@@ -154,7 +156,7 @@ class TestWriteRefactorMirrorArtifacts:
             "connector": "local_fs",
             "source_version": "0",
         }
-        result = {"raw_text": "", "refactored_text": "", "chunks": []}
+        result = {"raw_text": "", "cleaned_text": "", "chunks": []}
         _write_refactor_mirror_artifacts(source, result, config)
 
         stem = _mirror_file_stem(source["source_name"], source["source_key"])
@@ -250,7 +252,6 @@ class TestIngestFileMirrorPath:
         fake_phase1 = {
             "errors": [],
             "raw_text": "raw",
-            "refactored_text": "ref",
             "cleaned_text": "clean",
             "source_hash": "abc123",
             "processing_log": [],
@@ -691,20 +692,6 @@ class TestFindManifestEntryFallbacks:
 
 class TestVerifyCoreDesignWarnings:
     """Lines 492, 498: verify_core_design warnings paths."""
-
-    def test_mock_verify_core_design_warns_on_refactoring_without_llm(self):
-        """verify_core_design should add warning when refactoring enabled but LLM disabled."""
-        from src.ingest.impl import verify_core_design
-        from src.ingest.common.types import IngestionConfig
-
-        config = IngestionConfig(
-            enable_document_refactoring=True,
-            enable_llm_metadata=False,
-            chunk_overlap=64,
-            chunk_size=512,
-        )
-        result = verify_core_design(config)
-        assert any("refactoring" in w for w in result.warnings)
 
     def test_mock_verify_core_design_error_on_chunk_overlap(self):
         """verify_core_design should return error when chunk_overlap >= chunk_size."""

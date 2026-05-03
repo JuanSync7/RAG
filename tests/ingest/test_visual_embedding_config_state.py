@@ -490,10 +490,10 @@ class TestPipelineNodeNames:
         idx_kg = PIPELINE_NODE_NAMES.index("knowledge_graph_storage")
         assert idx_kg == idx_visual + 1
 
-    def test_total_count_is_fifteen(self):
-        """FR-PN01d: PIPELINE_NODE_NAMES contains exactly 15 entries."""
+    def test_total_count_is_fourteen(self):
+        """PIPELINE_NODE_NAMES contains exactly 14 entries (after PR1 removed document_refactoring)."""
         from src.ingest.common.types import PIPELINE_NODE_NAMES
-        assert len(PIPELINE_NODE_NAMES) == 15
+        assert len(PIPELINE_NODE_NAMES) == 14
 
 
 # ===========================================================================

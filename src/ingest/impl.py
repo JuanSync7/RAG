@@ -166,7 +166,10 @@ def _write_refactor_mirror_artifacts(
     mapping_path = mirror_dir / f"{stem}.mapping.json"
 
     original_path.write_text(str(result.get("raw_text", "")), encoding="utf-8")
-    refactored_path.write_text(str(result.get("refactored_text", "")), encoding="utf-8")
+    # NOTE: legacy mirror file naming retained for back-compat; the refactoring
+    # stage was removed in PR1, so this file now contains cleaned_text (the
+    # chunker's input) rather than an LLM-rewritten variant.
+    refactored_path.write_text(str(result.get("cleaned_text", "")), encoding="utf-8")
 
     mapping_payload = {
         "source": source["source_name"],
@@ -494,8 +497,6 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
         errors.append("knowledge_graph_storage requires knowledge_graph_extraction")
     if config.enable_knowledge_graph_storage and not config.build_kg:
         errors.append("knowledge_graph_storage requires build_kg=True")
-    if config.enable_document_refactoring and not config.enable_llm_metadata:
-        warnings.append("refactoring enabled but LLM disabled; cleaned text used")
     if config.enable_docling_parser and not str(config.docling_model).strip():
         errors.append("docling parser requires a non-empty docling_model")
     if config.enable_vision_processing:
@@ -605,7 +606,7 @@ def ingest_file(
         )
 
     # Determine final clean text
-    clean_text: str = phase1.get("refactored_text") or phase1.get("cleaned_text", "")
+    clean_text: str = phase1.get("cleaned_text", "")
     clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
 
     # ── Debug export (opt-in via export_processed) ────────────────────────
@@ -655,7 +656,6 @@ def ingest_file(
         source_version=source_version,
         clean_text=clean_text,
         clean_hash=clean_hash,
-        refactored_text=phase1.get("refactored_text"),
         docling_document=phase1.get("docling_document"),
         trace_id=phase1.get("trace_id", trace_id),
         batch_id=batch_id,

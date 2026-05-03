@@ -37,12 +37,12 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         updated ``processing_log``.
     """
     t0 = time.monotonic()
-    config = state["runtime"].config
     original_text = state.get("raw_text", "")
-    refactored_text = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
-    origin_label = "refactored" if config.enable_document_refactoring else "original"
+    refactored_text = state.get("cleaned_text") or state.get("raw_text", "")
+    origin_label = "original"
     # Build the edit log once per document so each chunk's offsets can be
-    # projected exactly between refactored and original coordinate systems.
+    # projected back to the raw_text coordinate system. After refactoring was
+    # removed (PR1), this maps cleaned_text positions → raw_text positions.
     edit_log = EditLog.from_diff(original_text, refactored_text)
     original_cursor = 0
     refactored_cursor = 0

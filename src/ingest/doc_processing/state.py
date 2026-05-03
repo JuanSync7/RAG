@@ -3,7 +3,7 @@
 # Exports: DocumentProcessingState
 # Deps: src.ingest.common.types
 # Fields: runtime, source_*, raw_text, structure, multimodal_notes, cleaned_text,
-#   refactored_text, errors, should_skip, processing_log, docling_document (Optional[Any]),
+#   errors, should_skip, processing_log, docling_document (Optional[Any]),
 #   trace_id (str, FR-3051)
 # @end-summary
 
@@ -52,9 +52,8 @@ class DocumentProcessingState(TypedDict, total=False):
     multimodal_notes : list[str]
         Vision-generated notes for figures. Empty list if multimodal disabled.
     cleaned_text : str
-        Boilerplate-stripped, unicode-normalised Markdown text.
-    refactored_text : str | None
-        LLM-rewritten text (self-contained paragraphs). None if refactoring disabled.
+        Boilerplate-stripped, unicode-normalised Markdown text. This is the
+        final Phase 1 output — there is no LLM-rewrite stage.
     errors : list[str]
         Error messages from any node. Non-empty triggers orchestrator failure path.
     should_skip : bool
@@ -76,7 +75,6 @@ class DocumentProcessingState(TypedDict, total=False):
     structure: dict[str, Any]
     multimodal_notes: list[str]
     cleaned_text: str
-    refactored_text: Optional[str]
     errors: list[str]
     should_skip: bool
     processing_log: list[str]

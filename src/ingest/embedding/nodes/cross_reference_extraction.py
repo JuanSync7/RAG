@@ -39,7 +39,7 @@ def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
                 state, "cross_reference_extraction:skipped"
             )
         }
-    text = state.get("refactored_text") or state.get("cleaned_text", "")
+    text = state.get("cleaned_text", "")
     refs = cross_refs(text)
     logger.info("cross_reference_extraction complete: source=%s refs=%d", state.get("source_name", ""), len(refs))
     logger.debug("cross_reference_extraction_node completed in %.3fs", time.monotonic() - t0)

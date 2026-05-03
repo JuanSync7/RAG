@@ -16,6 +16,7 @@ from src.ingest.embedding.nodes.cross_reference_extraction import cross_referenc
 # ---------------------------------------------------------------------------
 
 def _make_state(cleaned="", refactored="", enabled=True):
+    """refactored param accepted for back-compat only; treated as cleaned_text override when set."""
     config = IngestionConfig(enable_cross_reference_extraction=enabled)
     runtime = Runtime(
         config=config,
@@ -24,8 +25,7 @@ def _make_state(cleaned="", refactored="", enabled=True):
         kg_builder=None,
     )
     return {
-        "cleaned_text": cleaned,
-        "refactored_text": refactored,
+        "cleaned_text": refactored or cleaned,
         "cross_references": [],
         "errors": [],
         "processing_log": [],
@@ -157,22 +157,8 @@ def test_repeated_reference_both_returned():
     assert len(matching) == 2
 
 
-def test_prefers_refactored_text():
-    """When refactored_text is non-empty it is used for extraction."""
-    state = _make_state(
-        cleaned="DOC-0001",
-        refactored="See DOC-9876 for details.",
-    )
-    result = cross_reference_extraction_node(state)
-    values = _ref_values(result["cross_references"])
-    # Should find the reference from refactored_text
-    assert any("DOC-9876" in v for v in values)
-    # Should NOT find the reference that only exists in cleaned_text
-    assert not any("DOC-0001" in v for v in values)
-
-
-def test_fallback_to_cleaned_text():
-    """When refactored_text is empty, cleaned_text is used instead."""
+def test_uses_cleaned_text():
+    """cleaned_text is the sole input source after PR1 removed refactoring."""
     state = _make_state(cleaned="See DOC-5555 for details.", refactored="")
     result = cross_reference_extraction_node(state)
     values = _ref_values(result["cross_references"])
@@ -193,10 +179,9 @@ def test_both_texts_empty_returns_empty():
     assert result["cross_references"] == []
 
 
-def test_partial_state_refactored_text_none():
-    """When refactored_text is None (absent optional field) cleaned_text is used."""
+def test_partial_state_no_refactored_field():
+    """State with no refactored_text field still extracts from cleaned_text."""
     state = _make_state(cleaned="See DOC-7777 here.", refactored="")
-    state["refactored_text"] = None  # simulate absent optional upstream field
     result = cross_reference_extraction_node(state)
     values = _ref_values(result.get("cross_references", []))
     assert any("DOC-7777" in v for v in values)

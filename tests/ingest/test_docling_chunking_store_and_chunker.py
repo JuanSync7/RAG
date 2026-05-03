@@ -63,7 +63,6 @@ def _make_chunking_state(
     )
     return {
         "cleaned_text": cleaned,
-        "refactored_text": refactored,
         "raw_text": cleaned,
         "source_name": "test_doc.pdf",
         "source_key": "local_fs:test:1",

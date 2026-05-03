@@ -48,7 +48,7 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "processing_log": append_processing_log(state, f"document_storage:{reason}"),
         }
 
-    content = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
+    content = state.get("cleaned_text") or state.get("raw_text", "")
     metadata = {
         "source_key": state["source_key"],
         "source_name": state["source_name"],

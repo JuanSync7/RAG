@@ -32,7 +32,6 @@ def _make_runtime(tmp_path, **config_overrides):
     """Build a minimal Runtime whose config has every optional stage disabled."""
     config_kwargs = dict(
         enable_multimodal_processing=False,
-        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
         enable_knowledge_graph_extraction=False,
         enable_knowledge_graph_storage=False,
@@ -57,7 +56,6 @@ def _make_config(tmp_path, **overrides):
     """Build a minimal IngestionConfig with every optional stage disabled."""
     config_kwargs = dict(
         enable_multimodal_processing=False,
-        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
         enable_knowledge_graph_extraction=False,
         enable_knowledge_graph_storage=False,
@@ -101,7 +99,6 @@ def _phase1_result(doc: Path, cleaned="clean text"):
         "source_hash": hashlib.sha256(data).hexdigest(),
         "raw_text": data.decode(),
         "cleaned_text": cleaned,
-        "refactored_text": None,
         "errors": [],
         "processing_log": ["document_ingestion:ok"],
         "structure": {"has_figures": False},
@@ -430,7 +427,6 @@ class TestVerifyCoreDesign:
             try:
                 config = IngestionConfig(
                     enable_multimodal_processing=False,
-                    enable_document_refactoring=False,
                     enable_cross_reference_extraction=False,
                     enable_knowledge_graph_extraction=False,
                     enable_knowledge_graph_storage=False,
