@@ -29,8 +29,12 @@ from src.ingest.common.types import IngestionConfig, Runtime
 _PATCH_TARGET = "src.ingest.doc_processing.nodes.document_refactoring._llm_json"
 
 # Mirror the constants from the module under test so assertions stay DRY.
-_REFACTOR_PROMPT = 'Return {"refactored_text":"..."} for:\n'
-_MAX_REFACTOR_INPUT = 10000
+from src.ingest.doc_processing.nodes.document_refactoring import (
+    _DOC_CLOSE,
+    _DOC_OPEN,
+    _MAX_REFACTOR_INPUT,
+    _REFACTOR_PROMPT,
+)
 _REFACTOR_MAX_TOKENS = 900
 
 
@@ -138,7 +142,9 @@ class TestDocumentRefactoringBoundary:
 
         call_args = mock_llm.call_args
         prompt = call_args[0][0]
-        max_expected_len = len(_REFACTOR_PROMPT) + _MAX_REFACTOR_INPUT
+        max_expected_len = (
+            len(_REFACTOR_PROMPT) + len(_DOC_OPEN) + _MAX_REFACTOR_INPUT + len(_DOC_CLOSE)
+        )
         assert len(prompt) <= max_expected_len
 
     def test_refactoring_node_handles_none_cleaned_text(self):
@@ -204,7 +210,10 @@ class TestDocumentRefactoringErrorScenarios:
         call_args = mock_llm.call_args
         prompt = call_args[0][0]
         assert prompt.startswith(_REFACTOR_PROMPT)
-        assert prompt == _REFACTOR_PROMPT + cleaned[:_MAX_REFACTOR_INPUT]
+        assert (
+            prompt
+            == _REFACTOR_PROMPT + _DOC_OPEN + cleaned[:_MAX_REFACTOR_INPUT] + _DOC_CLOSE
+        )
 
     def test_refactoring_node_max_tokens_is_900(self):
         """The third positional argument passed to _llm_json must be 900."""

@@ -54,7 +54,11 @@ def build_document_processing_graph():
         ),
         {"multimodal_processing": "multimodal_processing", "text_cleaning": "text_cleaning", "end": END},
     )
-    graph.add_edge("multimodal_processing", "text_cleaning")
+    graph.add_conditional_edges(
+        "multimodal_processing",
+        lambda state: "end" if state.get("errors") else "text_cleaning",
+        {"text_cleaning": "text_cleaning", "end": END},
+    )
     graph.add_conditional_edges(
         "text_cleaning",
         lambda state: (
