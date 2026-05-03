@@ -193,12 +193,13 @@ class TestStructureDetectionErrorScenarios:
         state = _make_state(enable_docling=False)
         result = structure_detection_node(state)
 
+        # docling_model is only present when a Docling parser was actually
+        # used; non-docling/regex paths omit it to avoid leaky abstraction.
         assert set(result["structure"].keys()) == {
             "has_figures",
             "figures",
             "heading_count",
             "docling_enabled",
-            "docling_model",
             "docling_document_available",
             "parser_strategy",
         }

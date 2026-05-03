@@ -99,3 +99,16 @@ class DocumentProcessingState(TypedDict, total=False):
     The structure dict will contain docling_document_available: bool
     set by structure_detection_node after it runs.
     """
+    parse_result: Optional[Any]
+    """Unified ``ParseResult`` produced by the parser-abstraction path
+    (``src.ingest.support.parser_base.ParseResult``). Set by
+    ``structure_detection_node`` when ``runtime.parser_registry`` is
+    configured. ``None`` on the legacy Docling path or when parsing failed.
+    Consumed by the chunking node for downstream chunk emission.
+    """
+    parser_instance: Optional[Any]
+    """Parser instance retained between ``parse()`` and ``chunk()``.
+    Set by ``structure_detection_node`` on the parser-abstraction path.
+    Encapsulates parser-internal state (e.g. ``DoclingDocument``); the
+    pipeline must not inspect or serialise this object.
+    """
