@@ -17,10 +17,12 @@ logger = logging.getLogger("rag.ingest.docproc.text_cleaning")
 from src.ingest.support import clean_document
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
+from src.ingest.common.observability import node_span
 
 _FIGURE_NOTES_HEADER = "\n\n## Figure Notes\n"
 
 
+@node_span("text_cleaning")
 def text_cleaning_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Normalize source text and append generated multimodal notes.
 

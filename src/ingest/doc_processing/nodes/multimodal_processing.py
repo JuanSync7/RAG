@@ -18,8 +18,10 @@ logger = logging.getLogger("rag.ingest.docproc.multimodal_processing")
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support import generate_vision_notes
+from src.ingest.common.observability import node_span
 
 
+@node_span("multimodal_processing")
 def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Generate multimodal notes when figure references are detected and enabled.
 

@@ -21,8 +21,10 @@ from src.ingest.common import (
     map_chunk_provenance,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 
+@node_span("chunk_enrichment")
 def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Attach stable chunk IDs and enriched content fields to chunk metadata.
 

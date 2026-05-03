@@ -17,10 +17,12 @@ logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_extraction")
 from src.core import EntityExtractor
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 _EXTRACTOR = EntityExtractor()
 
 
+@node_span("knowledge_graph_extraction")
 def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Extract entity relations and stage triples for downstream KG storage.
 

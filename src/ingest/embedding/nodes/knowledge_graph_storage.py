@@ -16,8 +16,10 @@ logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_storage")
 
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 
+@node_span("knowledge_graph_storage")
 def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Stage chunk texts for KG add_chunk replay at commit_node (Issue #42).
 

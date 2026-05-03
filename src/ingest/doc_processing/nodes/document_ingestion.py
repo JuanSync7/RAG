@@ -18,8 +18,10 @@ logger = logging.getLogger("rag.ingest.docproc.document_ingestion")
 from src.ingest.common import append_processing_log
 from src.ingest.common.utils import decode_with_fallbacks, sha256_bytes
 from src.ingest.doc_processing.state import DocumentProcessingState
+from src.ingest.common.observability import node_span
 
 
+@node_span("document_ingestion")
 def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Read source content and compute SHA-256 hash.
 

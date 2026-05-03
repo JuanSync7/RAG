@@ -22,6 +22,7 @@ from typing import Any
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support import parse_with_docling
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.docproc.structure_detection")
 
@@ -32,6 +33,7 @@ _HEADING_PATTERN = re.compile(
 _MAX_FIGURES = 32
 
 
+@node_span("structure_detection")
 def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Extract structural signals via parser abstraction or legacy fallback.
 

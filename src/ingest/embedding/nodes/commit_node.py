@@ -18,6 +18,7 @@ from src.vector_db import add_documents, delete_by_source_key
 from src.vector_db.weaviate.store import delete_documents_by_staging_batch
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.commit")
 
@@ -72,6 +73,7 @@ def _rollback(
             )
 
 
+@node_span("commit")
 def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Flush staged MinIO + Weaviate + KG writes; rollback all on any failure.
 
