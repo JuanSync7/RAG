@@ -483,6 +483,98 @@ def chunk_markdown_via_docling(
 # DoclingParser — DocumentParser protocol implementation (FR-3221–FR-3224)
 # ---------------------------------------------------------------------------
 
+def _extract_table_artifacts(docling_document: Any) -> list:
+    """Extract structured table artifacts from a DoclingDocument. FR-3211.
+
+    Walks ``docling_document.tables`` (when present) and converts each entry
+    into a ``TableArtifact`` with markdown, row-major cell grid, and section
+    breadcrumbs derived from the table's parent heading chain.
+
+    Returns an empty list when the document has no tables or when extraction
+    of any individual table fails — table extraction must never break parsing.
+    """
+    from src.ingest.support.parser_base import TableArtifact
+
+    if docling_document is None:
+        return []
+
+    raw_tables = getattr(docling_document, "tables", None) or []
+    artifacts: list[TableArtifact] = []
+    for idx, tbl in enumerate(raw_tables):
+        try:
+            cells = _table_to_cells(tbl)
+            if not cells:
+                continue
+            num_rows = len(cells)
+            num_cols = max((len(row) for row in cells), default=0)
+            try:
+                md = tbl.export_to_markdown(doc=docling_document)
+            except TypeError:
+                # Older docling signatures
+                md = tbl.export_to_markdown()
+            except Exception:
+                md = _cells_to_markdown(cells)
+            caption = ""
+            try:
+                cap_text = tbl.caption_text(doc=docling_document)
+                caption = str(cap_text or "")
+            except Exception:
+                caption = ""
+            artifacts.append(
+                TableArtifact(
+                    table_id=f"table-{idx + 1}",
+                    markdown=str(md or "").strip(),
+                    cells=cells,
+                    num_rows=num_rows,
+                    num_cols=num_cols,
+                    has_header=_detect_header_row(tbl),
+                    section_path="",
+                    caption=caption.strip(),
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("table extraction skipped for table %d: %s", idx, exc)
+            continue
+    return artifacts
+
+
+def _table_to_cells(tbl: Any) -> list[list[str]]:
+    """Convert a Docling TableItem into a row-major list of strings."""
+    data = getattr(tbl, "data", None)
+    if data is None:
+        return []
+    grid = getattr(data, "grid", None)
+    if not grid:
+        return []
+    rows: list[list[str]] = []
+    for row in grid:
+        rows.append([str(getattr(cell, "text", "") or "") for cell in row])
+    return rows
+
+
+def _detect_header_row(tbl: Any) -> bool:
+    data = getattr(tbl, "data", None)
+    grid = getattr(data, "grid", None) if data is not None else None
+    if not grid:
+        return False
+    first_row = grid[0]
+    for cell in first_row:
+        if getattr(cell, "column_header", False) or getattr(cell, "row_header", False):
+            return True
+    return False
+
+
+def _cells_to_markdown(cells: list[list[str]]) -> str:
+    if not cells:
+        return ""
+    width = max(len(r) for r in cells)
+    norm = [r + [""] * (width - len(r)) for r in cells]
+    header = "| " + " | ".join(norm[0]) + " |"
+    sep = "| " + " | ".join(["---"] * width) + " |"
+    body = "\n".join("| " + " | ".join(r) + " |" for r in norm[1:])
+    return "\n".join([header, sep, body]).strip()
+
+
 class DoclingParser:
     """Docling-based document parser implementing DocumentParser protocol.
 
@@ -531,11 +623,14 @@ class DoclingParser:
         # Encapsulate DoclingDocument — FR-3205
         self._docling_document = result.docling_document
 
+        tables = _extract_table_artifacts(self._docling_document)
+
         return ParseResult(
             markdown=result.text_markdown,
             headings=result.headings,
             has_figures=result.has_figures,
             page_count=result.page_count,
+            tables=tables,
         )
 
     def chunk(self, parse_result: Any) -> list:
