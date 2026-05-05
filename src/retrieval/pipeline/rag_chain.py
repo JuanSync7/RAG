@@ -1144,7 +1144,7 @@ class RAGChain:
             if (
                 RAG_CONFIDENCE_ROUTING_ENABLED
                 and generated_answer
-                and reranked
+                and (reranked or generation_source == "memory")
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
@@ -1153,6 +1153,9 @@ class RAGChain:
                     from src.retrieval.generation.confidence import route_by_confidence
                     from src.retrieval.generation.confidence import PostGuardrailAction
 
+                    # #8: Memory path has no retrieval signal — reranker_scores=[] gives
+                    # retrieval_score=0.0 by design.  Composite still provides meaningful
+                    # signal via LLM self-report and citation marker presence/absence.
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (
                         gen_result.confidence if gen_result is not None else "medium"
@@ -1249,7 +1252,7 @@ class RAGChain:
 
                         retry_answer = generated_answer
                         if retry_reranked and self._generator:
-                            retry_answer = self._generator.generate(
+                            retry_gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=[r.text for r in retry_reranked],
                                 scores=[r.score for r in retry_reranked],
@@ -1257,16 +1260,16 @@ class RAGChain:
                                 recent_turns=None,
                                 graph_context=graph_context,
                             )
+                            retry_answer = retry_gen_result.answer or None
+                            retry_confidence = retry_gen_result.confidence
+                        else:
+                            retry_confidence = "medium"
 
                         retry_breakdown = None
                         if retry_reranked and retry_answer:
                             retry_breakdown = compute_composite_confidence(
                                 reranker_scores=[r.score for r in retry_reranked],
-                                llm_confidence_text=(
-                                    self._generator._last_llm_confidence
-                                    if self._generator
-                                    else "medium"
-                                ),
+                                llm_confidence_text=retry_confidence,
                                 answer=retry_answer,
                                 retrieved_texts=[r.text for r in retry_reranked],
                                 retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,

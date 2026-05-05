@@ -98,11 +98,16 @@ def _make_chain():
     chain._weaviate_client = None
     chain._persistent_weaviate = False
 
+    from src.retrieval.generation.nodes import GenerationResult
+
     mock_gen = MagicMock()
     mock_gen.is_available.return_value = True
-    mock_gen._last_llm_confidence = "medium"
-    mock_gen._last_response = None
-    mock_gen.generate.return_value = "Generated answer."
+    mock_gen.generate.return_value = GenerationResult(
+        answer="Generated answer.",
+        confidence="medium",
+        raw_response=None,
+        error=None,
+    )
     chain._generator = mock_gen
 
     return chain
