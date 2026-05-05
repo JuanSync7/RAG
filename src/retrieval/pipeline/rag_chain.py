@@ -3,6 +3,10 @@
 # visual retrieval, and LLM generation.  KG graph_context (REQ-KG-794, REQ-KG-796) is
 # threaded from expansion to the generator prompt, placed before document chunks when
 # non-empty and omitted entirely when empty.
+# Stage 7.5 implements a bounded internal re-retrieval loop (REQ-706 option B): when
+# composite confidence is below the high threshold and retry budget remains, the chain
+# re-runs search+rerank+generate+score with broader params (alpha-=0.15, limit+=5) and
+# returns whichever attempt scores higher. Surfaces both scores in RAGResponse.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -1135,6 +1139,7 @@ class RAGChain:
             verification_warning = None
             re_retrieval_suggested = False
             re_retrieval_params = None
+            first_composite = None
 
             if (
                 RAG_CONFIDENCE_ROUTING_ENABLED
@@ -1202,28 +1207,108 @@ class RAGChain:
                     breakdown.citation_score,
                 )
 
-                # Act on routing decision (non-blocking: return first response
-                # immediately, suggest re-retrieval for caller to request)
+                # Act on routing decision.
                 re_retrieval_suggested = False
                 re_retrieval_params = None
 
                 if action == PostGuardrailAction.RE_RETRIEVE and generation_source != "memory":
-                    # Don't block — return the first answer and suggest re-retrieval.
-                    # The caller (UI/API) can request a second attempt with these
-                    # broader params. The user sees both side-by-side and chooses.
-                    # Skip when generation_source is "memory" — no docs to re-retrieve.
-                    re_retrieval_suggested = True
-                    re_retrieval_params = {
-                        "alpha": max(0.0, alpha - 0.15),
-                        "search_limit": search_limit + 5,
-                        "rerank_top_k": rerank_top_k,
-                        "fast_path": True,
-                    }
-                    verification_warning = (
-                        "This answer has moderate confidence. A broader search "
-                        "may yield better results — re-retrieval is available."
+                    # Bounded internal re-retrieval loop (REQ-706, option B).
+                    # Re-run search + rerank + generate + score with broader params.
+                    # Reuses already-embedded query to avoid redundant model calls.
+                    # Input-rails and PII gate are NOT re-run (query is already clean).
+                    first_composite = breakdown.composite
+                    retry_alpha = max(0.0, alpha - 0.15)
+                    retry_search_limit = search_limit + 5
+                    retry_bm25_query = bm25_query
+
+                    with self.tracer.span("rag_chain.re_retrieval", parent=root_span) as rr_span:
+                        rr_span.set_attribute("retry_alpha", retry_alpha)
+                        rr_span.set_attribute("retry_search_limit", retry_search_limit)
+
+                        retry_search_results = self.retry_provider.execute(
+                            operation_name="weaviate_hybrid_search_re_retrieval",
+                            fn=lambda: self._do_search(
+                                retry_bm25_query,
+                                query_embedding,
+                                retry_alpha,
+                                retry_search_limit,
+                                filters or None,
+                            ),
+                            policy=self.retry_policy,
+                            idempotency_key=(
+                                f"re_retrieve:{processed_query}:{source_filter}:"
+                                f"{heading_filter}:{retry_search_limit}"
+                            ),
+                        )
+
+                        if retry_search_results:
+                            retry_reranked = self.reranker.rerank(
+                                query=processed_query,
+                                documents=retry_search_results,
+                                top_k=rerank_top_k,
+                            )
+                        else:
+                            retry_reranked = []
+
+                        retry_answer = generated_answer
+                        if retry_reranked and self._generator:
+                            retry_gen_result = self._generator.generate(
+                                query=processed_query,
+                                context_chunks=[r.text for r in retry_reranked],
+                                scores=[r.score for r in retry_reranked],
+                                memory_context=None,
+                                recent_turns=None,
+                                graph_context=graph_context,
+                            )
+                            retry_answer = retry_gen_result.answer or None
+                            retry_confidence = retry_gen_result.confidence
+                        else:
+                            retry_confidence = "medium"
+
+                        retry_breakdown = None
+                        if retry_reranked and retry_answer:
+                            retry_breakdown = compute_composite_confidence(
+                                reranker_scores=[r.score for r in retry_reranked],
+                                llm_confidence_text=retry_confidence,
+                                answer=retry_answer,
+                                retrieved_texts=[r.text for r in retry_reranked],
+                                retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+                                llm_weight=RAG_CONFIDENCE_LLM_WEIGHT,
+                                citation_weight=RAG_CONFIDENCE_CITATION_WEIGHT,
+                            )
+
+                    if retry_breakdown is not None and retry_breakdown.composite >= breakdown.composite:
+                        reranked = retry_reranked
+                        generated_answer = retry_answer
+                        breakdown = retry_breakdown
+                        composite_confidence = retry_breakdown.composite
+                        confidence_breakdown_dict = {
+                            "retrieval_score": retry_breakdown.retrieval_score,
+                            "llm_score": retry_breakdown.llm_score,
+                            "citation_score": retry_breakdown.citation_score,
+                            "composite": retry_breakdown.composite,
+                            "retrieval_weight": retry_breakdown.retrieval_weight,
+                            "llm_weight": retry_breakdown.llm_weight,
+                            "citation_weight": retry_breakdown.citation_weight,
+                        }
+
+                    action = route_by_confidence(
+                        composite=breakdown.composite,
+                        retry_count=retry_count + 1,
+                        high_threshold=RAG_CONFIDENCE_HIGH_THRESHOLD,
+                        low_threshold=RAG_CONFIDENCE_LOW_THRESHOLD,
+                        max_retries=RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
                     )
-                elif action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
+                    post_guardrail_action = action.value
+
+                    logger.info(
+                        "Re-retrieval loop: first=%.2f second=%.2f final_action=%s",
+                        first_composite,
+                        breakdown.composite,
+                        action.value,
+                    )
+
+                if action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
                     # REQ-1203: Re-retrieval not applicable on memory path — re-route to FLAG
                     verification_warning = (
                         "This answer was generated from conversation history and has limited confidence. "
@@ -1235,6 +1320,19 @@ class RAGChain:
                         f"⚠️ {verification_warning}"
                     )
                     post_guardrail_action = PostGuardrailAction.FLAG.value
+                elif action == PostGuardrailAction.RE_RETRIEVE:
+                    # Retries exhausted — advisory flag for caller-driven broader pass.
+                    re_retrieval_suggested = True
+                    re_retrieval_params = {
+                        "alpha": max(0.0, alpha - 0.15),
+                        "search_limit": search_limit + 5,
+                        "rerank_top_k": rerank_top_k,
+                        "fast_path": True,
+                    }
+                    verification_warning = (
+                        "This answer has moderate confidence. A broader search "
+                        "may yield better results — re-retrieval is available."
+                    )
                 elif action == PostGuardrailAction.BLOCK:
                     generated_answer = (
                         "Insufficient documentation found to provide a reliable answer. "
@@ -1250,6 +1348,14 @@ class RAGChain:
                         f"---\n"
                         f"⚠️ {verification_warning}"
                     )
+                    if first_composite is not None:
+                        re_retrieval_suggested = True
+                        re_retrieval_params = {
+                            "alpha": max(0.0, alpha - 0.15),
+                            "search_limit": search_limit + 5,
+                            "rerank_top_k": rerank_top_k,
+                            "fast_path": True,
+                        }
 
             # Extract LLM self-reported confidence as structured data.
             # Display formatting is the UI/console layer's responsibility.
@@ -1292,6 +1398,7 @@ class RAGChain:
                 retrieval_quality_note=retrieval_quality_note,
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
+                first_composite=first_composite if RAG_CONFIDENCE_ROUTING_ENABLED else None,
                 visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
