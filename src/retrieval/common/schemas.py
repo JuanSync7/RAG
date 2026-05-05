@@ -1,6 +1,7 @@
 # @summary
 # Pipeline boundary contracts: input/output schemas and the cross-cutting wire type.
 # Exports: RAGRequest, RAGResponse, RankedResult, VisualPageResult
+# RAGResponse includes first_composite (initial confidence before internal re-retrieval loop).
 # Deps: dataclasses, typing
 # @end-summary
 """Pipeline-level schema contracts — what enters and exits the RAG pipeline."""
@@ -99,6 +100,7 @@ class RAGResponse:
     retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
     re_retrieval_params: Optional[dict[str, Any]] = None
+    first_composite: Optional[float] = None
     visual_results: Optional[list["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)
