@@ -131,13 +131,46 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _is_boundary_marker(line: str) -> bool:
-    """Check if a line is a document boundary marker."""
-    return any(marker in line for marker in _BOUNDARY_MARKERS)
+    """Check if a line is a document boundary marker.
+
+    Requires the marker to appear at column 0 (line starts with the marker
+    prefix). For the '--- Document N ---' format, additionally validates that
+    the numeric portion consists only of digits and that the line ends with
+    ' ---', so embedded mentions in legitimate prose are not flagged.
+    """
+    if not line.startswith("--- Document "):
+        for marker in ("--- VERSION CONFLICT WARNING ---", "[CONTENT_FILTERED]"):
+            if line == marker:
+                return True
+        return False
+
+    # Shape check for '--- Document N ---': everything between the prefix and
+    # the trailing ' ---' must be digits.
+    prefix = "--- Document "
+    suffix = " ---"
+    if not line.endswith(suffix):
+        return False
+    middle = line[len(prefix) : len(line) - len(suffix)]
+    return bool(middle) and middle.isdigit()
 
 
 def _is_template_artifact(line: str) -> bool:
-    """Check if a line contains unreplaced template variables."""
-    return any(artifact in line for artifact in _TEMPLATE_ARTIFACTS)
+    """Check if a line is an unreplaced template variable placeholder.
+
+    A line is flagged only when it consists of nothing but the placeholder
+    token (plus optional surrounding punctuation). Legitimate prose that
+    references a placeholder by name is not flagged.
+
+    Braces are not stripped so that '{context}' is preserved as-is for
+    comparison against _TEMPLATE_ARTIFACTS. Only edge whitespace and
+    non-brace punctuation are removed.
+    """
+    words = line.split()
+    if len(words) != 1:
+        return False
+    brace_safe_strip = _EDGE_PUNCT.replace("{", "").replace("}", "")
+    candidate = words[0].strip(brace_safe_strip)
+    return candidate in _TEMPLATE_ARTIFACTS
 
 
 def _is_prompt_fragment(
