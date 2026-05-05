@@ -1252,7 +1252,7 @@ class RAGChain:
 
                         retry_answer = generated_answer
                         if retry_reranked and self._generator:
-                            retry_answer = self._generator.generate(
+                            retry_gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=[r.text for r in retry_reranked],
                                 scores=[r.score for r in retry_reranked],
@@ -1260,16 +1260,16 @@ class RAGChain:
                                 recent_turns=None,
                                 graph_context=graph_context,
                             )
+                            retry_answer = retry_gen_result.answer or None
+                            retry_confidence = retry_gen_result.confidence
+                        else:
+                            retry_confidence = "medium"
 
                         retry_breakdown = None
                         if retry_reranked and retry_answer:
                             retry_breakdown = compute_composite_confidence(
                                 reranker_scores=[r.score for r in retry_reranked],
-                                llm_confidence_text=(
-                                    self._generator._last_llm_confidence
-                                    if self._generator
-                                    else "medium"
-                                ),
+                                llm_confidence_text=retry_confidence,
                                 answer=retry_answer,
                                 retrieved_texts=[r.text for r in retry_reranked],
                                 retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
