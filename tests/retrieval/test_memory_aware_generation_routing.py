@@ -196,7 +196,12 @@ class TestGenerationSourceRouting:
         dummy_generator = MagicMock()
         dummy_generator.is_available.return_value = True
         dummy_generator.model = "llama3"
-        dummy_generator.generate.return_value = generator_answer
+        from src.retrieval.generation.nodes.generator import GenerationResult
+        dummy_generator.generate.return_value = GenerationResult(
+            answer=generator_answer or "",
+            confidence="medium",
+            raw_response=None,
+        )
         chain._generator = dummy_generator
 
         return chain.run(
