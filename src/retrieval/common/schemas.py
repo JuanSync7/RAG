@@ -102,6 +102,9 @@ class RAGResponse:
     visual_results: Optional[list["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)
+    # Typed generation failure (issue #7). Carries kind/user_message/internal_detail
+    # so front-ends can render a meaningful message instead of a blank answer.
+    generation_error: Optional[dict[str, Any]] = None
     # Retrieval-tab explainability — populated by the auto-mode rewriter in
     # S4. ``history_decision`` reports which strategy the LLM picked
     # ("use_as_is" | "partial_history" | "full_history" | "hard_query").

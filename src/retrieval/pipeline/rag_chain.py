@@ -954,6 +954,7 @@ class RAGChain:
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
+            gen_result = None  # type: ignore[assignment]
             generation_source = None
             if not skip_generation and self._generator and not tp.budget_exhausted and (
                 reranked or (query_result.has_backward_reference and (memory_context or memory_recent_turns))
@@ -1020,7 +1021,7 @@ class RAGChain:
                     # (skip_generation may be set by fresh-convo guard above)
                     if not skip_generation:
                         if formatted_context_str:
-                            generated_answer = self._generator.generate(
+                            gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=[formatted_context_str],
                                 scores=None,
@@ -1029,13 +1030,18 @@ class RAGChain:
                                 graph_context=graph_context,
                             )
                         else:
-                            generated_answer = self._generator.generate(
+                            gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=context_chunks,
                                 scores=scores,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
                                 graph_context=graph_context,
+                            )
+                        generated_answer = gen_result.answer or None
+                        if gen_result.error is not None:
+                            generate_span.set_attribute(
+                                "generation_error_kind", gen_result.error.kind.value
                             )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
@@ -1054,7 +1060,7 @@ class RAGChain:
                     model=self._generator.model if self._generator else None,
                 )
                 # Enrich with actual token usage from the LLM response
-                actual_resp = getattr(self._generator, "_last_response", None) if self._generator else None
+                actual_resp = gen_result.raw_response if gen_result is not None else None
                 if actual_resp and actual_resp.prompt_tokens:
                     snapshot = TokenBudgetSnapshot(
                         input_tokens=snapshot.input_tokens,
@@ -1147,9 +1153,7 @@ class RAGChain:
                     # signal via LLM self-report and citation marker presence/absence.
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (
-                        self._generator._last_llm_confidence
-                        if self._generator
-                        else "medium"
+                        gen_result.confidence if gen_result is not None else "medium"
                     )
                     context_texts = [r.text for r in reranked]
 
@@ -1249,9 +1253,12 @@ class RAGChain:
 
             # Extract LLM self-reported confidence as structured data.
             # Display formatting is the UI/console layer's responsibility.
-            llm_confidence = None
-            if self._generator:
-                llm_confidence = getattr(self._generator, "_last_llm_confidence", None)
+            llm_confidence = gen_result.confidence if gen_result is not None else None
+            generation_error_payload = (
+                gen_result.error.to_dict()
+                if (gen_result is not None and gen_result.error is not None)
+                else None
+            )
 
             tp.log_summary()
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
@@ -1288,6 +1295,7 @@ class RAGChain:
                 visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
+                generation_error=generation_error_payload,
                 history_decision=query_result.history_decision,
                 history_turns_used=query_result.history_turns_used,
             )

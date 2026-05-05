@@ -174,6 +174,14 @@ class QueryResponse(BaseModel):
     clarification_message: Optional[str] = None
     kg_expanded_terms: Optional[list[str]] = None
     generated_answer: Optional[str] = None
+    generation_error: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Typed generation failure. Shape: "
+            "{kind, user_message, internal_detail}. "
+            "Front-ends should render `user_message` when set."
+        ),
+    )
     llm_confidence: Optional[str] = None  # "high" | "medium" | "low"
     generation_source: Optional[str] = None  # "retrieval" | "memory" | "retrieval+memory"
     workflow_id: Optional[str] = None
