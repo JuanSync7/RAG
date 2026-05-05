@@ -53,9 +53,10 @@ logs/*.log
 # User documents (keep sample docs, ignore user-added files)
 # documents/
 
-# Model cache (incl. host symlink at repo root pointing to ~/models)
-models
-models/
+# Model cache (incl. host symlink at repo root pointing to ~/models).
+# Anchored to root so it does not match source packages like src/guardrails/models/.
+/models
+/models/
 
 # TLS certs (generated locally via mkcert)
 certs/*

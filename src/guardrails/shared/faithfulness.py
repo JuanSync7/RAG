@@ -23,6 +23,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from src.guardrails.common import RailVerdict
+from src.guardrails.models import (
+    GuardianModel,
+    GuardianRisk,
+    GuardianUnavailable,
+)
+from src.platform.llm import call_oneshot
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
@@ -128,6 +134,7 @@ class FaithfulnessChecker:
         threshold: float = 0.5,
         action: str = "flag",
         use_self_check: bool = True,
+        guardian: Optional[GuardianModel] = None,
     ) -> None:
         """Initialize a faithfulness checker.
 
@@ -137,10 +144,15 @@ class FaithfulnessChecker:
             action: Behavior when below threshold ("reject" or "flag").
             use_self_check: Whether to run a quick self-check prompt in
                 addition to claim scoring.
+            guardian: Optional :class:`GuardianModel` to consult for
+                ``GROUNDEDNESS``. When supplied and supported, replaces the
+                ``call_oneshot`` self-check; on ``GuardianUnavailable`` the
+                rail falls through to the legacy LLM scorer.
         """
         self._threshold = threshold
         self._action = action  # "reject" or "flag"
         self._use_self_check = use_self_check
+        self._guardian = guardian
 
     def check(
         self,
@@ -177,7 +189,12 @@ class FaithfulnessChecker:
             from concurrent.futures import ThreadPoolExecutor
 
             with ThreadPoolExecutor(max_workers=2, thread_name_prefix="faith") as pool:
-                fut_self = pool.submit(self._self_check_facts, answer, formatted_context)
+                fut_self = pool.submit(
+                    self._compute_overall_score,
+                    answer,
+                    context_chunks,
+                    formatted_context,
+                )
                 fut_claims = pool.submit(self._score_claims, answer, formatted_context)
                 self_check_score = fut_self.result()
                 claim_scores = fut_claims.result()
@@ -223,6 +240,43 @@ class FaithfulnessChecker:
             hallucinated_entities=hallucinated,
         )
 
+    def _compute_overall_score(
+        self,
+        answer: str,
+        context_chunks: list[str],
+        formatted_context: str,
+    ) -> Optional[float]:
+        """Return overall faithfulness in [0, 1]. Guardian first, LLM second.
+
+        Granite Guardian's ``GROUNDEDNESS`` returns the probability the
+        answer is *ungrounded*; we invert that for the overall score so a
+        perfectly grounded answer scores 1.0. On ``GuardianUnavailable``
+        we fall through to the legacy ``call_oneshot`` self-check so the
+        rail still produces a number even when the guardian is offline.
+        """
+        if self._guardian is not None and self._guardian.supports(
+            GuardianRisk.GROUNDEDNESS
+        ):
+            try:
+                verdict = self._guardian.classify(
+                    answer,
+                    risk=GuardianRisk.GROUNDEDNESS,
+                    context=context_chunks,
+                    direction="output",
+                )
+                score = max(0.0, min(1.0, 1.0 - verdict.score))
+                logger.info(
+                    "Faithfulness via guardian(%s): score=%.2f",
+                    self._guardian.name, score,
+                )
+                return score
+            except GuardianUnavailable as e:
+                logger.warning(
+                    "Guardian %s unavailable (%s) — using call_oneshot self-check",
+                    self._guardian.name, e,
+                )
+        return self._self_check_facts(answer, formatted_context)
+
     def _self_check_facts(
         self, answer: str, formatted_context: str
     ) -> Optional[float]:
@@ -250,8 +304,6 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.platform.llm import call_oneshot
-
             response = call_oneshot(
                 prompt,
                 system=(
@@ -298,7 +350,6 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.platform.llm import call_oneshot
             from src.common import parse_json_object
 
             response = call_oneshot(

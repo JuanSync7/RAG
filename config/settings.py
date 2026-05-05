@@ -705,6 +705,23 @@ RAG_NEMO_PII_GLINER_ENABLED = os.environ.get(
     "RAG_NEMO_PII_GLINER_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
 
+# --- Guardian classifier (shared judge model used by multiple rails) ---
+# RAG_GUARDIAN_PROVIDER picks the judge model. Valid: "granite", "self_check", "".
+# Granite Guardian is preferred in production; self_check uses the project LLM.
+RAG_GUARDIAN_ENABLED = os.environ.get(
+    "RAG_GUARDIAN_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+RAG_GUARDIAN_PROVIDER = os.environ.get("RAG_GUARDIAN_PROVIDER", "granite")
+# "transformers" loads the model locally; "vllm" calls an OpenAI-compat endpoint.
+RAG_GUARDIAN_MODE = os.environ.get("RAG_GUARDIAN_MODE", "vllm")
+RAG_GUARDIAN_MODEL_ID = os.environ.get(
+    "RAG_GUARDIAN_MODEL_ID", "ibm-granite/granite-guardian-3.2-5b"
+)
+RAG_GUARDIAN_ENDPOINT = os.environ.get("RAG_GUARDIAN_ENDPOINT", "")
+RAG_GUARDIAN_API_KEY = os.environ.get("RAG_GUARDIAN_API_KEY", "")
+RAG_GUARDIAN_TIMEOUT_S = float(os.environ.get("RAG_GUARDIAN_TIMEOUT_S", "5.0"))
+RAG_GUARDIAN_THRESHOLD = float(os.environ.get("RAG_GUARDIAN_THRESHOLD", "0.5"))
+
 # --- Composite Confidence Routing ---
 RAG_CONFIDENCE_ROUTING_ENABLED = os.environ.get(
     "RAG_CONFIDENCE_ROUTING_ENABLED", "false"

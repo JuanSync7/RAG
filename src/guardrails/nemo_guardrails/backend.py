@@ -60,6 +60,7 @@ class NemoBackend(GuardrailBackend):
             RAG_NEMO_TOXICITY_ENABLED,
             RAG_NEMO_TOXICITY_THRESHOLD,
         )
+        from src.guardrails.models import build_guardian
         from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
         from src.guardrails.nemo_guardrails.executor import InputRailExecutor, OutputRailExecutor
         from src.guardrails.shared import FaithfulnessChecker
@@ -73,6 +74,10 @@ class NemoBackend(GuardrailBackend):
         runtime = GuardrailsRuntime.get()
         runtime.initialize(RAG_NEMO_CONFIG_DIR)
 
+        # One guardian instance shared across rails. ``None`` when disabled —
+        # rails fall through to their deterministic floors.
+        guardian = build_guardian()
+
         intent_classifier = IntentClassifier(
             confidence_threshold=RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
             runtime=runtime,
@@ -85,7 +90,9 @@ class NemoBackend(GuardrailBackend):
                 enable_model_classifier=RAG_NEMO_INJECTION_MODEL_ENABLED,
                 lp_threshold=RAG_NEMO_INJECTION_LP_THRESHOLD,
                 ps_ppl_threshold=RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
-                runtime=runtime,
+                # Guardian replaces the legacy NeMo LLM layer when supported.
+                runtime=runtime if guardian is None else None,
+                guardian=guardian,
             )
             if RAG_NEMO_INJECTION_ENABLED
             else None
@@ -103,7 +110,10 @@ class NemoBackend(GuardrailBackend):
         toxicity_filter = (
             ToxicityFilter(
                 threshold=RAG_NEMO_TOXICITY_THRESHOLD,
-                runtime=runtime,
+                guardian=guardian,
+                # ``runtime`` retained for callers without a configured guardian;
+                # ToxicityFilter falls back to SelfCheckGuardian internally.
+                runtime=runtime if guardian is None else None,
             )
             if RAG_NEMO_TOXICITY_ENABLED
             else None
@@ -131,6 +141,7 @@ class NemoBackend(GuardrailBackend):
                 threshold=RAG_NEMO_FAITHFULNESS_THRESHOLD,
                 action=RAG_NEMO_FAITHFULNESS_ACTION,
                 use_self_check=RAG_NEMO_FAITHFULNESS_SELF_CHECK,
+                guardian=guardian,
             )
             if RAG_NEMO_FAITHFULNESS_ENABLED
             else None
