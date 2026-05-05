@@ -2,7 +2,7 @@
 # Output sanitization for generated answers: removes system prompt leakage,
 # document boundary markers, and template artifacts.
 # Exports: sanitize_answer
-# Deps: logging
+# Deps: logging, string
 # @end-summary
 """Output sanitization for generated answers (REQ-704).
 
@@ -17,9 +17,23 @@ All functions are deterministic and side-effect-free.
 from __future__ import annotations
 
 import logging
+import string
 from typing import Optional
 
 logger = logging.getLogger("rag.output_sanitizer")
+
+# Characters stripped from the edges of each token during normalisation.
+# Includes all ASCII punctuation plus common Unicode smart-quote / ellipsis
+# characters that may surround words in LLM output. Hyphens that appear
+# *inside* a token (e.g. "well-formed") survive because str.strip only
+# removes characters from the leading/trailing edge.
+_EDGE_PUNCT = (
+    string.punctuation
+    + "\u201c\u201d"  # left/right double quotation marks
+    + "\u2018\u2019"  # left/right single quotation marks
+    + "\u2026"         # horizontal ellipsis
+    + "\u00ab\u00bb"  # guillemets
+)
 
 # Document boundary markers used by the pipeline's formatting stages.
 # If any of these appear in the generated answer, they are artifacts
@@ -94,6 +108,28 @@ def sanitize_answer(
     return result
 
 
+def _tokenize(text: str) -> list[str]:
+    """Split text into lowercase tokens with leading/trailing punctuation stripped.
+
+    Punctuation is removed from the edges of each whitespace-delimited word
+    only, so intra-word punctuation (hyphens in "well-formed", apostrophes in
+    contractions) is preserved as part of the token identity.
+
+    Args:
+        text: Raw text to tokenize.
+
+    Returns:
+        List of normalised tokens; empty tokens produced by stripping are
+        discarded.
+    """
+    tokens = []
+    for word in text.lower().split():
+        token = word.strip(_EDGE_PUNCT)
+        if token:
+            tokens.append(token)
+    return tokens
+
+
 def _is_boundary_marker(line: str) -> bool:
     """Check if a line is a document boundary marker."""
     return any(marker in line for marker in _BOUNDARY_MARKERS)
@@ -111,11 +147,11 @@ def _is_prompt_fragment(
 ) -> bool:
     """Check if a line is a leaked fragment of the system prompt.
 
-    Uses word-level contiguous sequence matching: the line must be an
-    exact run of consecutive words from the prompt to be flagged. This
-    avoids the false-positive risk of character-level substring matching,
-    where a legitimate answer containing any 40-character span that happens
-    to appear in a long system prompt would be incorrectly stripped.
+    Uses word-level contiguous sequence matching after stripping edge
+    punctuation from each token. This means a line like "Answer the question."
+    matches the prompt phrase "Answer the question" even though the raw words
+    differ. Intra-word punctuation (hyphens, apostrophes) is preserved so that
+    "well-formed" only matches "well-formed" and not "well formed".
 
     Args:
         line: A single line from the answer.
@@ -124,23 +160,23 @@ def _is_prompt_fragment(
             Lines shorter than this are never flagged.
 
     Returns:
-        True if the line's words form a verbatim contiguous run within
-        the prompt's word sequence.
+        True if the line's tokens form a verbatim contiguous run within
+        the prompt's token sequence.
     """
     if len(line) < min_fragment_length:
         return False
 
-    line_words = line.lower().split()
-    if not line_words:
+    line_tokens = _tokenize(line)
+    if not line_tokens:
         return False
 
-    prompt_words = system_prompt.lower().split()
-    line_len = len(line_words)
+    prompt_tokens = _tokenize(system_prompt)
+    line_len = len(line_tokens)
 
-    # Slide a window of len(line_words) across prompt_words looking for
+    # Slide a window of len(line_tokens) across prompt_tokens looking for
     # an exact contiguous match. O(n * m) but prompt and line are both
     # short in practice (< 500 words / < 30 words respectively).
-    for i in range(len(prompt_words) - line_len + 1):
-        if prompt_words[i : i + line_len] == line_words:
+    for i in range(len(prompt_tokens) - line_len + 1):
+        if prompt_tokens[i : i + line_len] == line_tokens:
             return True
     return False
