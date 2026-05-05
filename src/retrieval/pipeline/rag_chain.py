@@ -1133,7 +1133,7 @@ class RAGChain:
             if (
                 RAG_CONFIDENCE_ROUTING_ENABLED
                 and generated_answer
-                and reranked
+                and (reranked or generation_source == "memory")
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
@@ -1142,6 +1142,9 @@ class RAGChain:
                     from src.retrieval.generation.confidence import route_by_confidence
                     from src.retrieval.generation.confidence import PostGuardrailAction
 
+                    # #8: Memory path has no retrieval signal — reranker_scores=[] gives
+                    # retrieval_score=0.0 by design.  Composite still provides meaningful
+                    # signal via LLM self-report and citation marker presence/absence.
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (
                         self._generator._last_llm_confidence
