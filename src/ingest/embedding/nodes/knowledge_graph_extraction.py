@@ -35,7 +35,11 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
         entry.
     """
     t0 = time.monotonic()
-    if not state["runtime"].config.enable_knowledge_graph_extraction:
+    config = state["runtime"].config
+    if (
+        not config.enable_knowledge_graph_extraction
+        or getattr(config, "enable_kg_phase2b", False)
+    ):
         return {
             "processing_log": append_processing_log(
                 state, "knowledge_graph_extraction:skipped"

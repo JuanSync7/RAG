@@ -462,7 +462,7 @@ def _build_minio_store() -> Optional[Any]:
 
 def _open_kg_client() -> Optional[Any]:
     try:
-        from src.knowledge_graph import get_graph_backend  # type: ignore[attr-defined]
+        from kgweave.knowledge_graph import get_graph_backend  # type: ignore[attr-defined]
 
         return get_graph_backend()
     except Exception as exc:

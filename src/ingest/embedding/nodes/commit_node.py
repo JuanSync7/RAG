@@ -144,9 +144,14 @@ def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                 collection=collection,
             )
 
-        # 3) KG (in-memory, per-document — no rollback needed)
+        # 3) KG (in-memory, per-document — no rollback needed).
+        # Phase 2b owns KG ingest when the feature flag is on; skip the replay.
         kg_builder = runtime.kg_builder
-        if kg_builder is not None and staged_kg:
+        if (
+            kg_builder is not None
+            and staged_kg
+            and not getattr(runtime.config, "enable_kg_phase2b", False)
+        ):
             for text, source_name in staged_kg:
                 kg_builder.add_chunk(text, source=source_name)
 

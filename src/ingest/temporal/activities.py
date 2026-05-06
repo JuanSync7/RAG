@@ -174,6 +174,37 @@ class DeleteSourceArgs:
 
 
 @dataclass
+class RecordPhaseStatusArgs:
+    """Input for record_phase_status_activity (Step 10).
+
+    Wraps :meth:`CleanDocumentStore.record_attempt` so the workflow can
+    write per-phase outcomes to the durable status ledger without holding
+    a Python handle to the store.
+    """
+
+    clean_store_dir: str
+    source_key: str
+    phase: str  # "phase2a" or "phase2b"
+    success: bool
+    error: Optional[str] = None
+    error_class: Optional[str] = None  # "transient" | "document" | "system"
+    max_attempts: int = 10
+
+
+@dataclass
+class ListPendingPhase2bArgs:
+    """Input for list_pending_phase2b_activity (Step 11).
+
+    Used by the backfill workflow to discover sources that need a bounded
+    KG retry. ``status`` defaults to ``failed_pending_retry`` — permanent
+    failures stay out so they can be triaged.
+    """
+
+    clean_store_dir: str
+    status: str = "failed_pending_retry"
+
+
+@dataclass
 class DeleteSourceResult:
     """Output of delete_source_activity."""
     weaviate_deleted: int
@@ -404,4 +435,49 @@ async def delete_source_activity(args: DeleteSourceArgs) -> DeleteSourceResult:
         weaviate_deleted=weaviate_deleted,
         minio_deleted=minio_deleted,
         errors=errors,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2b status / backfill activities (Step 10/11)
+# ---------------------------------------------------------------------------
+
+
+@activity.defn
+async def record_phase_status_activity(
+    args: RecordPhaseStatusArgs,
+) -> dict[str, Any]:
+    """Persist a per-phase ingest outcome to the CleanDocumentStore ledger.
+
+    Called by ``IngestDocumentWorkflow`` after each attempt at the KG
+    activity. Returns the updated phase entry so the workflow can include
+    it in its result. Failures here are local FS errors; let them bubble
+    up so Temporal retries the activity.
+    """
+    store = CleanDocumentStore(Path(args.clean_store_dir))
+    return store.record_attempt(
+        args.source_key,
+        phase=args.phase,
+        success=args.success,
+        error=args.error,
+        error_class=args.error_class,
+        max_attempts=args.max_attempts,
+    )
+
+
+@activity.defn
+async def list_pending_phase2b_activity(
+    args: ListPendingPhase2bArgs,
+) -> list[str]:
+    """Return source_keys whose ``phase2b`` status equals ``args.status``.
+
+    Backfill workflow drains ``failed_pending_retry`` on each tick.
+    Returns an empty list when the store directory does not exist (so the
+    workflow is safe to schedule before the first ingest).
+    """
+    store_path = Path(args.clean_store_dir)
+    if not store_path.exists():
+        return []
+    return CleanDocumentStore(store_path).list_pending(
+        phase="phase2b", status=args.status,
     )

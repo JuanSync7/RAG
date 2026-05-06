@@ -56,6 +56,7 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "enable_knowledge_graph_extraction",
     "enable_quality_validation",
     "enable_knowledge_graph_storage",
+    "enable_kg_phase2b",
     # Quality thresholds
     "min_chunk_chars",
     "min_quality_score",

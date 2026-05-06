@@ -626,7 +626,7 @@ def _resolve_minio_bucket() -> str:
 def _open_neo4j_client() -> Optional[Any]:
     """Return the active KG backend, or None if unavailable."""
     try:
-        from src.knowledge_graph import get_graph_backend
+        from kgweave.knowledge_graph import get_graph_backend
 
         return get_graph_backend()
     except Exception as exc:

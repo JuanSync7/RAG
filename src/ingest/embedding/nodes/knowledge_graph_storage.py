@@ -38,7 +38,11 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any
     t0 = time.monotonic()
     config = state["runtime"].config
     kg_builder = state["runtime"].kg_builder
-    if not config.enable_knowledge_graph_storage or kg_builder is None:
+    if (
+        not config.enable_knowledge_graph_storage
+        or kg_builder is None
+        or getattr(config, "enable_kg_phase2b", False)
+    ):
         logger.debug("knowledge_graph_storage_node skipped in %.3fs", time.monotonic() - t0)
         return {
             "staged_kg_chunks": [],

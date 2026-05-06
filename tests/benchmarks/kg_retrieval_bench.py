@@ -71,7 +71,7 @@ def test_typed_traversal_latency():
 def test_formatting_latency(token_budget: int):
     """REQ-KG-1212: Context formatting P95 <= 100ms for <= 500 tokens."""
     from tests.benchmarks.fixtures import build_synthetic_graph
-    from src.knowledge_graph.query.context_formatter import GraphContextFormatter
+    from kgweave.knowledge_graph.query.context_formatter import GraphContextFormatter
 
     backend = build_synthetic_graph(num_nodes=1000)  # smaller for formatting
 
@@ -96,7 +96,7 @@ def test_formatting_latency(token_budget: int):
 def test_benchmark_imports():
     """Smoke test: verify benchmark modules can be imported (runs in CI)."""
     from tests.benchmarks.fixtures import build_synthetic_graph
-    from src.knowledge_graph.query.context_formatter import GraphContextFormatter
+    from kgweave.knowledge_graph.query.context_formatter import GraphContextFormatter
 
     # Just verify imports work
     assert callable(build_synthetic_graph)

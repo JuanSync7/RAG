@@ -10,8 +10,8 @@ from __future__ import annotations
 import random
 from typing import List
 
-from src.knowledge_graph.backends.networkx_backend import NetworkXBackend
-from src.knowledge_graph.common import Entity, Triple
+from kgweave.knowledge_graph.backends.networkx_backend import NetworkXBackend
+from kgweave.knowledge_graph.common import Entity, Triple
 
 
 # Edge type distribution matching realistic ASIC design graph

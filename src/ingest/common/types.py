@@ -151,6 +151,11 @@ class IngestionConfig:
     )
     enable_quality_validation: bool = RAG_INGESTION_ENABLE_QUALITY_VALIDATION
     enable_knowledge_graph_storage: bool = RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE
+    enable_kg_phase2b: bool = False
+    """When True, the embedding LangGraph delegates KG ingest to the Phase 2b
+    sibling consumer (KGPhase2bRunner). The in-pipeline knowledge_graph_extraction
+    and knowledge_graph_storage nodes short-circuit, and commit_node skips the
+    kg_builder.add_chunk replay. Default: False (legacy in-pipeline behavior)."""
     min_chunk_chars: int = 40
     min_quality_score: float = 0.45
     build_kg: bool = True

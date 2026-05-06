@@ -22,14 +22,12 @@ import logging
 import os
 import re
 import time
-from collections import defaultdict
 from typing import Optional
 
 from langgraph.graph import END, StateGraph
 
 from config.settings import (
     DOMAIN_DESCRIPTION,
-    KG_PATH,
     MAX_SANITIZATION_ITERATIONS,
     PROMPTS_DIR,
     QUERY_CONFIDENCE_THRESHOLD,
@@ -197,57 +195,17 @@ def _retrieval_auto_rewrite(
 # Knowledge graph vocabulary (loaded once, used for reformulation context)
 # ---------------------------------------------------------------------------
 
-_KG_TERMS: Optional[list[str]] = None
-_KG_WORD_INDEX: Optional[dict[str, list[str]]] = None
-
-
 def _get_kg_terms() -> tuple:
-    """Load entity names from the knowledge graph JSON (if available).
+    """Return (terms_list, word_index) from the KG facade.
 
-    Returns (terms_list, word_index) where word_index maps lowercase words
-    to the terms containing them. Both are built once and cached.
+    Thin shim around ``src.knowledge_graph.get_term_index`` to keep the
+    retrieval-side call sites unchanged. The facade owns caching and graph
+    backend access — this module no longer reads the storage file directly.
     """
-    global _KG_TERMS, _KG_WORD_INDEX
-    if _KG_TERMS is not None:
-        return _KG_TERMS, _KG_WORD_INDEX
+    from kgweave.knowledge_graph import get_term_index  # noqa: PLC0415
 
-    _t0 = time.perf_counter()
-    _KG_TERMS = []
-    _KG_WORD_INDEX = defaultdict(list)
-
-    if not KG_PATH.exists():
-        logger.debug(
-            "_get_kg_terms: no KG file at %s (%.2fms)",
-            KG_PATH, (time.perf_counter() - _t0) * 1000,
-        )
-        return _KG_TERMS, _KG_WORD_INDEX
-
-    try:
-        with open(KG_PATH, "rb") as f:
-            kg_data = orjson.loads(f.read())
-        nodes = kg_data.get("nodes", [])
-        # Sort by mention count, filter out noisy short/long entries
-        valid = [
-            n for n in nodes
-            if 2 <= len(n.get("id", "")) <= 60 and n.get("mention_count", 0) >= 1
-        ]
-        valid.sort(key=lambda n: n.get("mention_count", 0), reverse=True)
-        _KG_TERMS = [n["id"] for n in valid]
-
-        # Build inverted index: word -> [term1, term2, ...]
-        for term in _KG_TERMS:
-            for word in term.lower().split():
-                if len(word) >= 3:
-                    _KG_WORD_INDEX[word].append(term)
-
-        logger.info(
-            "Loaded %d KG terms (%d index keys) for reformulation context in %.1fms",
-            len(_KG_TERMS), len(_KG_WORD_INDEX), (time.perf_counter() - _t0) * 1000,
-        )
-    except (orjson.JSONDecodeError, KeyError) as e:
-        logger.warning("Failed to load KG terms: %s", e)
-
-    return _KG_TERMS, _KG_WORD_INDEX
+    index = get_term_index()
+    return index.terms, index.word_index
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.core.embeddings import LocalBGEEmbeddings, TEIEmbeddings, get_embedding_provider
-from src.core.knowledge_graph import (
+from kgweave.core.knowledge_graph import (
     EntityExtractor,
     GraphQueryExpander,
     KnowledgeGraphBuilder,

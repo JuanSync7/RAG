@@ -579,7 +579,7 @@ class TestValidationCLIHelpers:
         import logging
         from src.ingest.lifecycle import validation as val_mod
 
-        with patch.dict("sys.modules", {"src.knowledge_graph": None}):
+        with patch.dict("sys.modules", {"kgweave.knowledge_graph": None}):
             with caplog.at_level(logging.WARNING):
                 result = val_mod._open_kg_client()
         assert result is None
@@ -774,7 +774,7 @@ class TestValidationCLIHelperSuccessPaths:
         fake_kg = MagicMock()
         fake_kg.get_graph_backend = lambda: fake_backend
 
-        with patch.dict("sys.modules", {"src.knowledge_graph": fake_kg}):
+        with patch.dict("sys.modules", {"kgweave.knowledge_graph": fake_kg}):
             try:
                 result = val_mod._open_kg_client()
                 assert result is fake_backend

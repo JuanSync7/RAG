@@ -238,6 +238,31 @@ services:
       # so `ingest_directory(/app/opentitan_data/...)` finds the files.
       - ./opentitan_data:/app/opentitan_data:ro
 
+  # KGWeave Phase 2b worker — separate image, separate Temporal queue
+  # (kgweave-default). RagWeave's IngestDocumentWorkflow dispatches by
+  # activity name to this worker, so the two fleets scale independently.
+  # Set KGWEAVE_REPO_PATH in .env (default: ../KGWeave sibling checkout).
+  # See docs/kgweave_deployment.md for topology, scaling, and rollout.
+  kgweave-worker:
+    profiles: ["workers", "kgweave"]
+    image: ghcr.io/juansync7/kgweave-worker:${KGWEAVE_IMAGE_TAG:-latest}
+    build:
+      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
+      dockerfile: containers/Dockerfile.kgweave-worker
+    environment:
+      # Shared Temporal cluster — same host:port as the RagWeave worker.
+      - TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      # Slot budget — independent of RAG_WORKER_CONCURRENCY (FR-3562 spirit:
+      # KGWeave never starves the RagWeave worker and vice versa).
+      - KG_WORKER_SLOTS=${KG_WORKER_SLOTS:-4}
+      # Regex extractor by default; flip to 1 to enable GLiNER (image must
+      # have been built with --build-arg KGWEAVE_EXTRAS=gliner).
+      - KG_USE_GLINER=${KG_USE_GLINER:-0}
+    depends_on:
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
   dozzle:
     # Always-on: web UI for container visibility + start/stop/restart actions.
     # Companion to scripts/stack.sh (CLI). Browse to http://localhost:9999.
