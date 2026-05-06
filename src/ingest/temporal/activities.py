@@ -36,8 +36,8 @@ from config.settings import (
     RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
 )
 from langchain_core.embeddings import Embeddings
-from src.core import get_embedding_provider
-from src.core import KnowledgeGraphBuilder
+from src.core.embeddings import get_embedding_provider
+from kgweave.core.knowledge_graph import KnowledgeGraphBuilder
 from src.ingest.common import (
     CleanDocumentStore,
     IngestionConfig,

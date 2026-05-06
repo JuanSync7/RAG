@@ -14,7 +14,7 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_extraction")
 
-from src.core import EntityExtractor
+from kgweave.core.knowledge_graph import EntityExtractor
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span

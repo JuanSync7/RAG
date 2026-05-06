@@ -47,8 +47,8 @@ from config.settings import (
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
-from src.core import get_embedding_provider
-from src.core import (
+from src.core.embeddings import get_embedding_provider
+from kgweave.core.knowledge_graph import (
     KnowledgeGraphBuilder,
     export_obsidian,
 )

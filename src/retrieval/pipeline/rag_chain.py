@@ -18,10 +18,10 @@ import logging
 import statistics
 import time
 
-from src.core import get_embedding_provider
+from src.core.embeddings import get_embedding_provider
 from src.retrieval.query.nodes import get_reranker_provider
 from src.retrieval.query.nodes import process_query
-from src.core import (
+from kgweave.core.knowledge_graph import (
     GraphQueryExpander,
     KnowledgeGraphBuilder,
 )
