@@ -94,6 +94,20 @@ from config.settings import (
     RAG_VISUAL_RETRIEVAL_ENABLED,
     RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS,
 )
+from config.settings import (
+    RAG_TREE_RETRIEVAL_ENABLED,
+    RAG_TREE_DESCENT_TOP_K,
+    RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+    RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+    RAG_TREE_LIFT_SEED_K,
+    RAG_TREE_LIFT_SIBLINGS,
+    RAG_STAGE_BUDGET_TREE_DESCENT_MS,
+    RAG_STAGE_BUDGET_TREE_LIFT_MS,
+)
+import os as _os
+RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
+    "RAG_TREE_SCHEMA_PRESENT", "true"
+).lower() in ("true", "1", "yes")
 
 logger = logging.getLogger("rag.rag_chain")
 
@@ -392,6 +406,206 @@ class RAGChain:
                 (time.perf_counter() - _t0) * 1000, exc,
             )
             raise
+
+    # ─── Tree retrieval helpers (TREE_RETRIEVAL_DESIGN.md §4) ────────────
+    @staticmethod
+    def _build_leaf_only_filter_clauses(schema_present: bool) -> list:
+        """Return the default Stage-4 filter clauses that pin retrieval to leaves.
+
+        When ``schema_present`` is True (post-1.2.0 collections), section nodes
+        live in the same collection as leaf chunks. Without an explicit
+        ``node_kind="chunk"`` filter, section text would surface as low-quality
+        evidence whenever the retrieval flag is off — see the design doc's
+        section-leak analysis. Operators on legacy collections that haven't
+        run the 1.2.0 migration set ``schema_present=False`` to skip the
+        filter (which would otherwise fail with "no such property").
+        """
+        if not schema_present:
+            return []
+        return [SearchFilter(property="node_kind", operator="eq", value="chunk")]
+
+    def _expand_sections_to_leaves(
+        self,
+        section_parent_ids: list[str],
+        per_section_limit: int,
+        base_filters,
+    ) -> list:
+        """Default expansion: fetch leaf chunks under each section's id.
+
+        Tests stub this method; the real implementation reads from the vector
+        store via ``fetch_chunks_by_parent_section``.
+        """
+        from src.vector_db.weaviate.store import fetch_chunks_by_parent_section
+        if self._weaviate_client is None:
+            return []
+        raw = fetch_chunks_by_parent_section(
+            self._weaviate_client,
+            section_parent_ids,
+            limit_per_section=per_section_limit,
+        )
+        return [
+            type("E", (), {"text": r["text"], "score": 0.0,
+                           "metadata": r["metadata"], "collection": "default"})()
+            for r in raw
+        ]
+
+    def _fetch_siblings(
+        self,
+        parent_ids: list[str],
+        per_group_limit: int,
+        base_filters,
+    ) -> list:
+        """Fetch sibling chunks under each parent_section_id (Stage 4c lift).
+
+        Tests stub this method to avoid hitting Weaviate; the real
+        implementation routes through the same store helper as descent
+        expansion.
+        """
+        return self._expand_sections_to_leaves(
+            parent_ids, per_group_limit, base_filters
+        )
+
+    def _run_tree_descent(
+        self,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        descent_top_k: int,
+        leaves_per_section: int,
+        base_filters,
+    ) -> list:
+        """Stage 4b — search section nodes, then expand to their leaves."""
+        section_filter = SearchFilter(
+            property="node_kind", operator="eq", value="section"
+        )
+        filters = list(base_filters or []) + [section_filter]
+        section_hits = self._do_search(
+            bm25_query, query_embedding, alpha, descent_top_k, filters
+        )
+        # Each section node carries its own parent_section_id (the hash of
+        # document_id + heading_path[:-1]); to fetch a section's *leaves* we
+        # use the section's own id which we deterministically derive from
+        # heading_path. We expose that via metadata['parent_section_id'] on
+        # section hits as well, so callers can use it directly.
+        parent_ids = [
+            (h.metadata.get("parent_section_id") or "")
+            for h in section_hits
+        ]
+        return self._expand_sections_to_leaves(
+            parent_ids, leaves_per_section, base_filters
+        )
+
+    def _run_tree_lift(
+        self,
+        seed_results: list,
+        seed_top_k: int,
+        siblings_per_group: int,
+        base_filters,
+    ) -> list:
+        """Stage 4c — for the top seeds, fetch siblings under their parent."""
+        seeds = list(seed_results)[:seed_top_k]
+        parent_ids: list[str] = []
+        seen: set[str] = set()
+        for seed in seeds:
+            psid = (seed.metadata or {}).get("parent_section_id") or ""
+            if not psid or psid in seen:
+                continue
+            seen.add(psid)
+            parent_ids.append(psid)
+        if not parent_ids:
+            return []
+        return self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+
+    def _collect_candidates(
+        self,
+        *,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        search_limit: int,
+        base_filters: list,
+        tree_enabled: bool,
+        schema_present: bool,
+        descent_top_k: int,
+        leaves_per_section: int,
+        lift_seed_k: int,
+        siblings_per_group: int,
+        doc_diversity_top_per_doc: int,
+    ) -> list:
+        """Run Stage 4 + (optionally) 4b descent + 4c lift; return merged list.
+
+        Always applies the leaf-only filter to Stage 4 when ``schema_present``.
+        Tree sub-stages run only when ``tree_enabled`` is True. Descent results
+        are doc-diversity capped before merge so one verbose document cannot
+        dominate the final candidate pool.
+        """
+        leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
+            schema_present=schema_present
+        )
+        leaf_results = self._do_search(
+            bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
+        )
+
+        if not tree_enabled:
+            return list(leaf_results)
+
+        descent = self._run_tree_descent(
+            bm25_query=bm25_query,
+            query_embedding=query_embedding,
+            alpha=alpha,
+            descent_top_k=descent_top_k,
+            leaves_per_section=leaves_per_section,
+            base_filters=base_filters,
+        )
+        descent_capped = self._apply_doc_diversity_cap(
+            descent, top_per_doc=doc_diversity_top_per_doc
+        )
+
+        lift = self._run_tree_lift(
+            seed_results=list(leaf_results),
+            seed_top_k=lift_seed_k,
+            siblings_per_group=siblings_per_group,
+            base_filters=base_filters,
+        )
+
+        # Merge with uuid (preferred) / text fallback dedup, preserving the
+        # first occurrence's score so Stage 4 hits keep their hybrid scores.
+        merged: list = []
+        seen: set[str] = set()
+        for src in (leaf_results, descent_capped, lift):
+            for item in src:
+                key = ""
+                meta = getattr(item, "metadata", None) or {}
+                key = (
+                    str(getattr(item, "uuid", "") or "")
+                    or str(meta.get("uuid", "") or "")
+                    or str(meta.get("chunk_id", "") or "")
+                    or getattr(item, "text", "")
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+        return merged
+
+    @staticmethod
+    def _apply_doc_diversity_cap(hits: list, top_per_doc: int) -> list:
+        """Keep at most ``top_per_doc`` hits per document_id, in score order.
+
+        Stable: input order is preserved across survivors, so callers that
+        already sorted by score get a top-per-doc-capped list still sorted by
+        score.
+        """
+        kept: list = []
+        per_doc: dict[str, int] = {}
+        for h in hits:
+            doc_id = (h.metadata or {}).get("document_id") or ""
+            count = per_doc.get(doc_id, 0)
+            if count >= top_per_doc:
+                continue
+            per_doc[doc_id] = count + 1
+            kept.append(h)
+        return kept
 
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
@@ -754,13 +968,25 @@ class RAGChain:
             with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
                 search_results = self.retry_provider.execute(
                     operation_name="weaviate_hybrid_search",
-                    fn=lambda: self._do_search(
-                        bm25_query, query_embedding, alpha, search_limit, filters or None,
+                    fn=lambda: self._collect_candidates(
+                        bm25_query=bm25_query,
+                        query_embedding=query_embedding,
+                        alpha=alpha,
+                        search_limit=search_limit,
+                        base_filters=filters,
+                        tree_enabled=RAG_TREE_RETRIEVAL_ENABLED,
+                        schema_present=RAG_TREE_SCHEMA_PRESENT,
+                        descent_top_k=RAG_TREE_DESCENT_TOP_K,
+                        leaves_per_section=RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+                        lift_seed_k=RAG_TREE_LIFT_SEED_K,
+                        siblings_per_group=RAG_TREE_LIFT_SIBLINGS,
+                        doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
                     ),
                     policy=self.retry_policy,
-                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
+                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={RAG_TREE_RETRIEVAL_ENABLED}",
                 )
                 search_span.set_attribute("search_result_count", len(search_results))
+                search_span.set_attribute("tree_retrieval_enabled", RAG_TREE_RETRIEVAL_ENABLED)
             tp.record("hybrid_search", "retrieval", started_at=t0)
             if tp.check_stage_budget("hybrid_search"):
                 tp.mark_budget_exhausted("hybrid_search")

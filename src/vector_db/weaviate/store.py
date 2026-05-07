@@ -404,8 +404,17 @@ def hybrid_search(
                 "heading": obj.properties.get("heading", ""),
                 "heading_level": obj.properties.get("heading_level", 0),
                 "tenant_id": obj.properties.get("tenant_id", "default"),
+                # Tree retrieval fields (TREE_RETRIEVAL_DESIGN.md §3.1).
+                # Default to "chunk" when absent so legacy collections behave like leaves.
+                "node_kind": obj.properties.get("node_kind", "chunk"),
+                "tree_level": obj.properties.get("tree_level", 0),
+                "heading_path": obj.properties.get("heading_path", []) or [],
+                "parent_section_id": obj.properties.get("parent_section_id", ""),
+                "child_count": obj.properties.get("child_count", 0),
+                "document_id": obj.properties.get("document_id", ""),
             },
             "score": obj.metadata.score if obj.metadata else 0.0,
+            "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",
         })
     span.set_attribute("result_count", len(documents))
     span.end(status="ok")
@@ -494,6 +503,89 @@ def get_source_hash(
     except Exception:
         logger.debug("get_source_hash query failed for %s", source_key, exc_info=True)
         return None
+
+
+def fetch_chunks_by_parent_section(
+    client: weaviate.WeaviateClient,
+    parent_section_ids: list[str],
+    limit_per_section: int = 4,
+    extra_filters: Optional[Filter] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> list[dict]:
+    """Fetch leaf chunks under each given parent_section_id (Stage 4c lift).
+
+    One filtered fetch per parent_section_id, capped at ``limit_per_section``.
+    Always restricts to ``node_kind="chunk"`` so section nodes never leak into
+    lift results. Returns the same dict shape as ``hybrid_search``, but with
+    score=0.0 (lift results are unscored — the reranker computes the score).
+
+    Args:
+        client: Live Weaviate client.
+        parent_section_ids: Parent section ids to fetch siblings for. Empty
+            strings are skipped.
+        limit_per_section: Max siblings per parent section.
+        extra_filters: Optional Filter combined via AND with the parent and
+            node_kind clauses (e.g. tenant_id, source_filter).
+        collection: Target collection.
+    """
+    span = tracer.start_span(
+        "vector_store.fetch_chunks_by_parent_section",
+        {"parent_count": len(parent_section_ids), "limit_per": limit_per_section},
+    )
+    try:
+        if not client.collections.exists(collection):
+            span.end(status="ok")
+            return []
+        col = client.collections.get(collection)
+        documents: list[dict] = []
+        seen_uuids: set[str] = set()
+        for psid in parent_section_ids:
+            if not psid:
+                continue
+            base = (
+                Filter.by_property("parent_section_id").equal(psid)
+                & Filter.by_property("node_kind").equal("chunk")
+            )
+            flt = base & extra_filters if extra_filters is not None else base
+            response = col.query.fetch_objects(filters=flt, limit=limit_per_section)
+            for obj in response.objects:
+                obj_uuid = str(obj.uuid) if getattr(obj, "uuid", None) else ""
+                if obj_uuid and obj_uuid in seen_uuids:
+                    continue
+                if obj_uuid:
+                    seen_uuids.add(obj_uuid)
+                documents.append({
+                    "text": obj.properties.get("text", ""),
+                    "metadata": {
+                        "source": obj.properties.get("source", "unknown"),
+                        "source_key": obj.properties.get("source_key", ""),
+                        "source_uri": obj.properties.get("source_uri", ""),
+                        "title": obj.properties.get("title", ""),
+                        "author": obj.properties.get("author", ""),
+                        "date": obj.properties.get("date", ""),
+                        "tags": obj.properties.get("tags", ""),
+                        "chunk_index": obj.properties.get("chunk_index", 0),
+                        "total_chunks": obj.properties.get("total_chunks", 0),
+                        "section_path": obj.properties.get("section_path", ""),
+                        "heading": obj.properties.get("heading", ""),
+                        "heading_level": obj.properties.get("heading_level", 0),
+                        "tenant_id": obj.properties.get("tenant_id", "default"),
+                        "node_kind": "chunk",
+                        "tree_level": obj.properties.get("tree_level", 0),
+                        "heading_path": obj.properties.get("heading_path", []) or [],
+                        "parent_section_id": obj.properties.get("parent_section_id", ""),
+                        "child_count": obj.properties.get("child_count", 0),
+                        "document_id": obj.properties.get("document_id", ""),
+                    },
+                    "score": 0.0,
+                    "uuid": obj_uuid,
+                })
+        span.set_attribute("result_count", len(documents))
+        span.end(status="ok")
+        return documents
+    except Exception:
+        span.end(status="error")
+        raise
 
 
 def delete_documents_by_source_key(

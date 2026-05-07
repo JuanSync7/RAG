@@ -867,6 +867,47 @@ RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS: int = int(
 # NOTE: RAG_INGESTION_COLQWEN_MODEL is reused for retrieval-time model
 # selection (FR-109). No separate retrieval model key exists.
 
+# ─── Tree retrieval (TREE_RETRIEVAL_DESIGN.md §5) ─────────────────────────
+RAG_TREE_RETRIEVAL_ENABLED: bool = os.environ.get(
+    "RAG_TREE_RETRIEVAL_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Enable Stage 4b (descent) and Stage 4c (lift) sub-stages. When False
+(default), retrieval behaviour matches pre-1.2.0 — leaf-only hybrid search."""
+
+RAG_TREE_DESCENT_TOP_K: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_TOP_K", "5")
+))
+"""Top-K section nodes returned by Stage 4b descent search."""
+
+RAG_TREE_DESCENT_LEAVES_PER_SECTION: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_LEAVES_PER_SECTION", "3")
+))
+"""Number of leaf chunks pulled from each top-K section during descent expansion."""
+
+RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC", "2")
+))
+"""Per-document cap applied to descent section hits before expansion. Prevents
+one verbose document from dominating cross-document descent."""
+
+RAG_TREE_LIFT_SEED_K: int = max(1, int(
+    os.environ.get("RAG_TREE_LIFT_SEED_K", "5")
+))
+"""Number of top Stage 4 chunk hits used as seeds for Stage 4c sibling lift."""
+
+RAG_TREE_LIFT_SIBLINGS: int = max(1, int(
+    os.environ.get("RAG_TREE_LIFT_SIBLINGS", "2")
+))
+"""Per-seed cap on sibling chunks fetched during lift. Chip-design profile
+recommends 4 (see TREE_RETRIEVAL_DESIGN.md §4.2.1)."""
+
+RAG_STAGE_BUDGET_TREE_DESCENT_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_TREE_DESCENT_MS", "200")
+)
+RAG_STAGE_BUDGET_TREE_LIFT_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_TREE_LIFT_MS", "200")
+)
+
 
 def validate_visual_retrieval_config() -> None:
     """Validate visual retrieval configuration at startup.
