@@ -1,0 +1,6 @@
+{
+  "q_read_qfs": ["r_araddr", "r_arlen", "r_rdata", "r_rresp"],
+  "q_write_qfs": ["w_awaddr", "w_wdata", "w_wstrb", "w_bresp"],
+  "q_arlen_factoid": ["r_arlen"],
+  "q_wstrb_factoid": ["w_wstrb"]
+}
