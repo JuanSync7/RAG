@@ -135,6 +135,42 @@ def ensure_collection(
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
             Property(name="document_id", data_type=DataType.TEXT),
+            # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3.1) --
+            Property(
+                name="node_kind",
+                data_type=DataType.TEXT,
+                description='"chunk" (leaf) or "section" (internal tree node)',
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="tree_level",
+                data_type=DataType.INT,
+                description="Depth in the heading hierarchy; len(heading_path) for leaves",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="heading_path",
+                data_type=DataType.TEXT_ARRAY,
+                description="Ordered ancestor headings from root to this node",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="parent_section_id",
+                data_type=DataType.TEXT,
+                description="Stable hash(document_id, heading_path[:-1]); enables sibling lookup",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="child_count",
+                data_type=DataType.INT,
+                description="(sections only) Number of direct children; 0 for leaf chunks",
+                index_filterable=True,
+                index_searchable=False,
+            ),
             # -- Cross-document dedup (FR-3430, FR-3431, FR-3432, FR-3433) --
             Property(
                 name="content_hash",
@@ -184,6 +220,21 @@ def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
     """Deterministic UUID chunk ID for idempotent upserts."""
     payload = f"{source}:{chunk_index}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def build_parent_section_id(document_id: str, heading_path: list[str]) -> str:
+    """Stable hash for a section's parent — `(document_id, heading_path[:-1])`.
+
+    Used by tree-retrieval Stage 4c (lift) for sibling lookup. Returns "" for
+    root-level chunks (no parent section). See TREE_RETRIEVAL_DESIGN.md §3.1.
+    """
+    if not heading_path:
+        return ""
+    parent_path = heading_path[:-1]
+    if not parent_path:
+        return ""
+    payload = f"{document_id}:{'>'.join(parent_path)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
 def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text: str) -> str:
@@ -262,6 +313,30 @@ def add_documents(
                 "staging_batch_id": metadata.get("staging_batch_id", ""),
                 "source_hash": metadata.get("source_hash", ""),
             }
+            # Tree-retrieval fields. Backfilled here from existing chunk metadata
+            # so legacy ingests gain `node_kind`/`tree_level`/`heading_path`/
+            # `parent_section_id` without code changes upstream. Tree-aware ingest
+            # nodes can override `node_kind` and `child_count` explicitly.
+            heading_path_meta = metadata.get("heading_path") or []
+            if not isinstance(heading_path_meta, list):
+                heading_path_meta = []
+            optional.update(
+                {
+                    "node_kind": metadata.get("node_kind", "chunk"),
+                    "tree_level": int(
+                        metadata.get("tree_level", len(heading_path_meta))
+                    ),
+                    "heading_path": [str(h) for h in heading_path_meta],
+                    "parent_section_id": metadata.get(
+                        "parent_section_id",
+                        build_parent_section_id(
+                            str(metadata.get("document_id", "")),
+                            [str(h) for h in heading_path_meta],
+                        ),
+                    ),
+                    "child_count": int(metadata.get("child_count", 0)),
+                }
+            )
             for key, val in optional.items():
                 if key in collection_props:
                     properties[key] = val
