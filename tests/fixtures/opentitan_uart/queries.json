@@ -1,0 +1,32 @@
+[
+  {
+    "qid": "q_reception_qfs",
+    "text": "How does the UART receiver oversample and recover data?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_baud_qfs",
+    "text": "How is the UART baud rate computed and configured?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_frame_err_qfs",
+    "text": "Describe the rx_frame_err interrupt and its conditions.",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_wdata_factoid",
+    "text": "What is the WDATA register offset and reset default?",
+    "qtype": "factoid"
+  },
+  {
+    "qid": "q_parity_en_factoid",
+    "text": "What does CTRL.PARITY_EN do?",
+    "qtype": "factoid"
+  },
+  {
+    "qid": "q_status_factoid",
+    "text": "What is the UART STATUS register?",
+    "qtype": "factoid"
+  }
+]

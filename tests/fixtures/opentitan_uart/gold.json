@@ -1,0 +1,24 @@
+{
+  "q_reception_qfs": [
+    "2ee7b195e804830b94949661",
+    "937570beec702d20594c6c0d",
+    "c02e2b2410fefb2f909e148b",
+    "8ea22830eee81d9dea66d0d6"
+  ],
+  "q_baud_qfs": [
+    "56931e1eeae0e91a30b8252a",
+    "210d79b6dbae7cfe8954e30f",
+    "d5b2f7ab600588caa054a2a4",
+    "ddfadfc252c597ce6a33220d",
+    "30747109ff1a2219e097bee9"
+  ],
+  "q_frame_err_qfs": [
+    "59512d568e9d45646081b341",
+    "6a5b1c021d75e428dbbc0de3",
+    "9c897235b878909a29f38339",
+    "fe77f45ad3c8cdb1aafe7878"
+  ],
+  "q_wdata_factoid": ["e76e774836d44f9568f5ceb1"],
+  "q_parity_en_factoid": ["af101e36e97d036764a80a8a"],
+  "q_status_factoid": ["8487b87778d4946d4b001df5"]
+}
