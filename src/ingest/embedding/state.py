@@ -3,7 +3,7 @@
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
 # Fields: runtime, source_*, raw_text, cleaned_text, clean_hash,
-#   document_id, chunks, metadata_*, cross_references, kg_triples,
+#   document_id, chunks, metadata_*, cross_references,
 #   stored_count, errors, processing_log,
 #   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
 #   parser_instance (Any, transient parser instance for chunk() call — never serialised),
@@ -11,7 +11,7 @@
 #   trace_id (str, FR-3052), batch_id (str, FR-3053),
 #   staging_batch_id (str, Issue #42 atomicity), source_hash (str, Issue #42),
 #   staged_minio (Optional[dict], Issue #42), staged_weaviate_records (list, Issue #42),
-#   staged_weaviate_delete_old (bool, Issue #42), staged_kg_chunks (list, Issue #42)
+#   staged_weaviate_delete_old (bool, Issue #42)
 # NOTE: docling_document field removed (Phase 3.2 / FR-3205 AC 2). It was in-memory
 #   only and was never persisted. Replaced by parse_result + parser_instance.
 # @end-summary
@@ -64,9 +64,7 @@ class EmbeddingPipelineState(TypedDict, total=False):
     metadata_keywords : list[str]
         Extracted keywords from metadata_generation_node (node 8).
     cross_references : list[dict[str, str]]
-        Pattern-matched cross-references from cross_reference_extraction_node (node 9).
-    kg_triples : list[dict[str, Any]]
-        Extracted KG triples (subject/predicate/object) from kg_extraction_node (node 10).
+        Pattern-matched cross-references from cross_reference_extraction_node.
     stored_count : int
         Number of chunks successfully stored in Weaviate from embedding_storage_node (node 12).
     errors : list[str]
@@ -95,7 +93,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
     metadata_summary: str
     metadata_keywords: list[str]
     cross_references: list[dict[str, str]]
-    kg_triples: list[dict[str, Any]]
     stored_count: int
     errors: list[str]
     processing_log: list[str]
@@ -141,5 +138,3 @@ class EmbeddingPipelineState(TypedDict, total=False):
     """List of DocumentRecord objects staged for Weaviate flush at commit_node."""
     staged_weaviate_delete_old: bool
     """Whether to delete-by-source_key before flushing (update_mode path)."""
-    staged_kg_chunks: list[Any]
-    """List of (text, source_name) tuples staged for KG add_chunk replay at commit_node."""

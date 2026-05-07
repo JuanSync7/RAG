@@ -126,6 +126,9 @@ _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     "pytest": {"pytest"},
     "pytest-mock": {"pytest_mock"},
     "import-mend": {"import_mend"},
+    # Sibling package — installed via [tool.uv.sources] editable path entry.
+    "kgweave": {"kgweave"},
+    "markdown-it-py": {"markdown_it"},
 }
 
 # All importable names that pyproject.toml covers

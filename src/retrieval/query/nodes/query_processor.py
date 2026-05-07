@@ -195,17 +195,21 @@ def _retrieval_auto_rewrite(
 # Knowledge graph vocabulary (loaded once, used for reformulation context)
 # ---------------------------------------------------------------------------
 
-def _get_kg_terms() -> tuple:
-    """Return (terms_list, word_index) from the KG facade.
+def _kg_query_match(query: str, max_terms: int) -> list[str]:
+    """Return KG terms relevant to *query* via the kgweave client facade.
 
-    Thin shim around ``src.knowledge_graph.get_term_index`` to keep the
-    retrieval-side call sites unchanged. The facade owns caching and graph
-    backend access — this module no longer reads the storage file directly.
+    Delegates word-level matching + top-N fallback to the KGWeave service
+    (in-process by default; HTTP when ``KGWEAVE_API_URL`` is set). Returns
+    an empty list when the graph is unavailable or empty.
     """
-    from kgweave.knowledge_graph import get_term_index  # noqa: PLC0415
+    from kgweave.client import get_client  # noqa: PLC0415
 
-    index = get_term_index()
-    return index.terms, index.word_index
+    try:
+        result = get_client().match_kg_query(query, max_terms=max_terms)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("kg match_kg_query unavailable: %s", exc)
+        return []
+    return list(result.matched)
 
 
 # ---------------------------------------------------------------------------
@@ -471,37 +475,15 @@ def sanitize_node(state: QueryState) -> dict:
 
 
 def _match_kg_terms(query: str, max_terms: int = 20) -> str:
-    """Find KG terms relevant to the query using inverted index lookup.
+    """Find KG terms relevant to the query and format them for prompt injection.
 
-    Returns a formatted string for injection into the reformulator prompt.
-    Uses pre-built word→terms index for O(query_words) lookup instead of
-    scanning all terms. Scales to 10k+ KG nodes with <1ms lookup.
+    Match logic (word-level lookup + top-N fallback) lives in
+    ``KGQueryService.match_kg_query`` so it can serve both in-process and
+    remote callers identically.
     """
-    kg_terms, word_index = _get_kg_terms()
-    if not kg_terms:
-        return ""
-
-    query_words = {w.lower() for w in query.split() if len(w) >= 3}
-    if not query_words:
-        return ""
-
-    # Collect candidate terms from index, preserving mention-count order
-    seen = set()
-    matched = []
-    for word in query_words:
-        for term in word_index.get(word, []):
-            if term not in seen:
-                seen.add(term)
-                matched.append(term)
-                if len(matched) >= max_terms:
-                    break
-        if len(matched) >= max_terms:
-            break
-
+    matched = _kg_query_match(query, max_terms=max_terms)
     if not matched:
-        # No direct matches — fall back to top terms by mention count
-        matched = kg_terms[:max_terms]
-
+        return ""
     return "Known terms in the knowledge base: " + ", ".join(matched)
 
 

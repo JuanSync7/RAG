@@ -112,6 +112,8 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.api
+      additional_contexts:
+        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
@@ -191,6 +193,8 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
+      additional_contexts:
+        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
     command: python -m server.worker
     environment:
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
@@ -261,6 +265,31 @@ services:
     depends_on:
       temporal:
         condition: service_started
+    restart: unless-stopped
+
+  # KGWeave HTTP API — read-side query service (Step C). Stateless, scales
+  # horizontally; intended for non-Python consumers and external access.
+  # Writes still flow through the Temporal worker above.
+  kgweave-api:
+    profiles: ["kgweave", "kgweave-api"]
+    image: ghcr.io/juansync7/kgweave-api:${KGWEAVE_IMAGE_TAG:-latest}
+    build:
+      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
+      dockerfile: containers/Dockerfile.kgweave-api
+    ports:
+      - "${KGWEAVE_API_HOST_PORT:-8090}:8080"
+    environment:
+      - KG_GRAPH_PATH=${KG_GRAPH_PATH:-/data/graph.json}
+      - KGWEAVE_API_TOKEN=${KGWEAVE_API_TOKEN:-}
+      - KGWEAVE_API_WORKERS=${KGWEAVE_API_WORKERS:-1}
+    volumes:
+      - kgweave-graph:/data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/v1/health', timeout=2).status == 200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   dozzle:
@@ -770,3 +799,4 @@ volumes:
   langfuse-minio-data:
   prometheus-data:
   grafana-data:
+  kgweave-graph:

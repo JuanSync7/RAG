@@ -26,7 +26,6 @@ def _make_runtime(store_documents: bool, minio_client=None, target_bucket: str =
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
         db_client=minio_client,  # node accesses minio_client via runtime.db_client
     )
 

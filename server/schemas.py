@@ -305,11 +305,10 @@ class ConsoleQueryRequest(BaseModel):
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.
 # Used by to_config() and contract tests.  Only non-None Optional fields
-# are overlaid — fields with required defaults (update_mode, build_kg, …)
-# are always forwarded.
+# are overlaid — fields with required defaults (update_mode, …) are always
+# forwarded.
 INGESTION_REQUEST_FIELD_MAP: dict[str, str] = {
     "update_mode": "update_mode",
-    "build_kg": "build_kg",
     "semantic_chunking": "semantic_chunking",
     "export_processed": "export_processed",
     "verbose_stages": "verbose_stage_logs",
@@ -353,8 +352,6 @@ class ConsoleIngestionRequest(BaseModel):
     )
     # ── Pipeline behavioral knobs ───────────────────────────────────────
     update_mode: bool = Field(default=True)
-    build_kg: bool = Field(default=True)
-    export_obsidian: bool = Field(default=False)
     semantic_chunking: bool = Field(default=True)
     export_processed: bool = Field(default=False)
     verbose_stages: Optional[bool] = None

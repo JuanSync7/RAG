@@ -7,8 +7,6 @@ from src.ingest.embedding.nodes.commit_node import commit_node
 from src.ingest.embedding.nodes.cross_reference_extraction import cross_reference_extraction_node
 from src.ingest.embedding.nodes.document_storage_node import document_storage_node
 from src.ingest.embedding.nodes.embedding_storage import embedding_storage_node
-from src.ingest.embedding.nodes.knowledge_graph_extraction import knowledge_graph_extraction_node
-from src.ingest.embedding.nodes.knowledge_graph_storage import knowledge_graph_storage_node
 from src.ingest.embedding.nodes.metadata_generation import metadata_generation_node
 from src.ingest.embedding.nodes.quality_validation import quality_validation_node
 from src.ingest.embedding.nodes.visual_embedding import visual_embedding_node

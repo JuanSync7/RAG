@@ -12,7 +12,7 @@ operations tooling for observability, backup/restore, and scaling.
 
 ### What It Does
 
-- **Ingests anything** — PDFs, DOCX, PPTX, HTML, Markdown, images, tables, and code. A 13-node LangGraph pipeline handles parsing (via Docling), structure detection, VLM figure captioning, text cleaning, semantic chunking, metadata extraction, knowledge graph triples, and quality validation.
+- **Ingests anything** — PDFs, DOCX, PPTX, HTML, Markdown, images, tables, and code. A LangGraph pipeline handles parsing (via Docling), structure detection, VLM figure captioning, text cleaning, semantic chunking, metadata extraction, and quality validation. Knowledge-graph ingest is owned by **KGWeave** and dispatched out-of-process via the Temporal Phase 2b handoff (`KG_PHASE2B_ACTIVITY` on `KG_TASK_QUEUE`).
 - **Dual-track embeddings** — Text chunks are embedded with BGE-M3 (1024-dim dense vectors). Document pages are visually embedded with ColQwen2 (128-dim patch vectors via a 4-bit quantized Qwen2-VL backbone). Both tracks are stored in Weaviate and searched simultaneously at query time.
 - **Hybrid retrieval + reranking** — Combines BM25 keyword search with dense vector search (configurable alpha blend), expands queries with knowledge graph terms, reranks with a BGE cross-encoder, and merges visual page results via ColQwen2 MaxSim scoring.
 - **Confidence-aware generation** — A 3-signal composite score (retrieval confidence, LLM self-assessment, citation coverage) routes each answer to RETURN, RE_RETRIEVE, FLAG, or BLOCK — no silent hallucinations.
@@ -46,7 +46,7 @@ Ingestion runs as a separate Temporal workflow that writes content + embeddings 
 
 | Directory | Purpose |
 | --- | --- |
-| `src/ingest/` | 13-node LangGraph ingestion pipeline (node-per-file + shared helpers) |
+| `src/ingest/` | LangGraph ingestion pipeline (node-per-file + shared helpers); KG ingest delegated to KGWeave via Temporal |
 | `src/retrieval/` | Query processing, retrieval orchestration, reranking, generation |
 | `src/platform/` | Cross-cutting services: auth, quotas/rate limits, cache, metrics, observability |
 | `src/common/` | Deterministic helpers shared across ingestion/retrieval |
@@ -87,9 +87,12 @@ For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.
 ```bash
 git clone <repo-url> RagWeave && cd RagWeave
 cp .env.example .env
+./scripts/bootstrap_kgweave.sh   # clones the KGWeave sibling repo to ../KGWeave
 ```
 
 You will edit `.env` in steps 3–4. Defaults work for local dev with the bundled containerised LLM and storage.
+
+> **Why bootstrap?** The knowledge-graph subsystem lives in the separate [KGWeave](https://github.com/JuanSync7/KGWeave) repo. Both the editable Python install (`pyproject.toml` -> `[tool.uv.sources]`) and the Docker builds (compose `additional_contexts`) resolve it from `../KGWeave`. Override the path with `KGWEAVE_REPO_PATH=/elsewhere` if you keep it somewhere else.
 
 ### Step 2 — Install Python + web console
 

@@ -78,8 +78,7 @@ def _make_chain():
          patch("src.retrieval.pipeline.rag_chain.get_embedding_provider"), \
          patch("src.retrieval.pipeline.rag_chain.get_reranker_provider"), \
          patch("src.retrieval.pipeline.rag_chain.OllamaGenerator"), \
-         patch("src.retrieval.pipeline.rag_chain.GraphQueryExpander"), \
-         patch("src.retrieval.pipeline.rag_chain.KnowledgeGraphBuilder"):
+         patch("src.retrieval.pipeline.rag_chain._get_kg_client"):
         chain = RAGChain(persistent_weaviate=False)
 
     chain.embeddings = MagicMock()

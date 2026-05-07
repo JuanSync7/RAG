@@ -51,7 +51,6 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=weaviate_client or MagicMock(),
-        kg_builder=None,
     )
     return {
         "chunks": chunks,

@@ -29,7 +29,6 @@ from typing import Any, Optional
 from temporalio import activity
 
 from config.settings import (
-    GLINER_ENABLED,
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
@@ -37,7 +36,6 @@ from config.settings import (
 )
 from langchain_core.embeddings import Embeddings
 from src.core.embeddings import get_embedding_provider
-from kgweave.core.knowledge_graph import KnowledgeGraphBuilder
 from src.ingest.common import (
     CleanDocumentStore,
     IngestionConfig,
@@ -273,7 +271,6 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
         config=config,
         embedder=_get_embedder(),   # not used in Phase 1 but required by Runtime
         weaviate_client=None,       # not needed for doc processing
-        kg_builder=None,
         db_client=None,
     )
 
@@ -358,8 +355,6 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             config=config,
             embedder=_get_embedder(),
             weaviate_client=wv_client,
-            kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
-            if config.build_kg else None,
             db_client=_get_db_client() if config.store_documents else None,
         )
 

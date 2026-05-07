@@ -59,31 +59,17 @@ def test_ingest_source_marks_unchanged_file_as_skip(tmp_path: Path):
         "structure": {},
         "multimodal_notes": [],
         "cross_references": [],
-        "kg_triples": [],
         "runtime": type("R", (), {"config": IngestionConfig()})(),
     }
     result = document_ingestion_node(state)
     assert result["should_skip"] is True
 
 
-def test_pipeline_exposes_14_named_nodes():
-    assert len(PIPELINE_NODE_NAMES) == 14
+def test_pipeline_exposes_named_nodes_without_kg_in_pipeline():
+    """KG ingest is owned by KGWeave (out-of-process Phase 2b); not a pipeline node."""
     assert PIPELINE_NODE_NAMES[0] == "document_ingestion"
-    assert PIPELINE_NODE_NAMES[-1] == "knowledge_graph_storage"
-
-
-def test_verify_core_design_detects_invalid_kg_configuration():
-    cfg = IngestionConfig(
-        build_kg=False,
-        enable_knowledge_graph_extraction=False,
-        enable_knowledge_graph_storage=True,
-    )
-    report = verify_core_design(cfg)
-    assert report.ok is False
-    assert any(
-        "knowledge_graph_storage requires build_kg=True" in error
-        for error in report.errors
-    )
+    assert "knowledge_graph_extraction" not in PIPELINE_NODE_NAMES
+    assert "knowledge_graph_storage" not in PIPELINE_NODE_NAMES
 
 
 def test_verify_core_design_requires_docling_model_when_enabled():
@@ -144,7 +130,6 @@ def test_chunk_enrichment_sets_source_fields_and_chunk_id():
         "structure": {},
         "multimodal_notes": [],
         "cross_references": [],
-        "kg_triples": [],
         "runtime": type("R", (), {"config": IngestionConfig()})(),
     }
 

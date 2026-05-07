@@ -21,10 +21,7 @@ import time
 from src.core.embeddings import get_embedding_provider
 from src.retrieval.query.nodes import get_reranker_provider
 from src.retrieval.query.nodes import process_query
-from kgweave.core.knowledge_graph import (
-    GraphQueryExpander,
-    KnowledgeGraphBuilder,
-)
+from kgweave.client import get_client as _get_kg_client, KGQueryService
 from src.vector_db import (
     create_persistent_client,
     get_client,
@@ -56,7 +53,7 @@ from src.platform.token_budget import calculate_budget, get_capabilities, TokenB
 from src.retrieval.generation.nodes import get_system_prompt
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
-    KG_PATH, KG_ENABLED, GENERATION_ENABLED,
+    KG_ENABLED, GENERATION_ENABLED,
     RETRY_BACKOFF_MULTIPLIER,
     RETRY_INITIAL_BACKOFF_SECONDS,
     RETRY_MAX_ATTEMPTS,
@@ -127,22 +124,28 @@ class RAGChain:
 
         # GPU models must load sequentially (parallel .to(cuda) causes meta
         # tensor errors), but KG + generator can load concurrently with them.
-        def _load_kg() -> Optional[GraphQueryExpander]:
+        def _load_kg() -> Optional[KGQueryService]:
+            # Returns the KG read-side service. In-process by default; flips
+            # to HTTP transparently when KGWEAVE_API_URL is set.
             _t0 = time.perf_counter()
-            result: Optional[GraphQueryExpander] = None
+            result: Optional[KGQueryService] = None
             try:
-                if KG_ENABLED and KG_PATH.exists():
-                    try:
-                        builder = KnowledgeGraphBuilder.load(KG_PATH)
-                        stats = builder.stats()
-                        logger.info("Knowledge graph loaded: %s nodes, %s edges", stats["nodes"], stats["edges"])
-                        result = GraphQueryExpander(builder.graph)
-                    except Exception as e:
-                        logger.warning("Could not load knowledge graph: %s", e)
-                elif not KG_ENABLED:
+                if not KG_ENABLED:
                     logger.info("Knowledge graph disabled (set RAG_KG_ENABLED=true to enable).")
-                else:
-                    logger.info("No knowledge graph found (run ingest.py first to build it).")
+                    return None
+                try:
+                    service = _get_kg_client()
+                    health = service.health()
+                    stats = health.stats or {}
+                    logger.info(
+                        "KG service ready (%s): %s nodes, %s edges",
+                        health.backend,
+                        stats.get("nodes", "?"),
+                        stats.get("edges", "?"),
+                    )
+                    result = service
+                except Exception as e:
+                    logger.warning("Could not initialize KG service: %s", e)
                 return result
             finally:
                 logger.info("_load_kg elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
@@ -190,7 +193,7 @@ class RAGChain:
             fut_gen = pool.submit(_load_generator)
 
             self.embeddings, self.reranker = fut_models.result()
-            self._kg_expander: Optional[GraphQueryExpander] = fut_kg.result()
+            self._kg_expander: Optional[KGQueryService] = fut_kg.result()
             self._generator: Optional[OllamaGenerator] = fut_gen.result()
 
         # Embedding LRU cache — avoids re-computing embeddings for repeated

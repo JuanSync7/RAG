@@ -1,11 +1,12 @@
 # @summary
-# Terminal LangGraph node that atomically commits staged writes (MinIO, Weaviate, KG).
+# Terminal LangGraph node that atomically commits staged writes (MinIO, Weaviate).
 # On any failure, rolls back Weaviate via delete_documents_by_staging_batch and
-# MinIO via delete_document. KG builder is per-document and discarded — no rollback.
+# MinIO via delete_document. KG ingest is owned by KGWeave and dispatched via
+# Temporal Phase 2b (KG_TASK_QUEUE) — no in-process KG writes happen here.
 # Exports: commit_node, _rollback
 # Deps: src.db, src.vector_db, src.ingest.embedding.state, src.ingest.common
 # @end-summary
-"""Terminal commit node — flushes all staged writes atomically (Issue #42)."""
+"""Terminal commit node — flushes staged MinIO + Weaviate writes atomically."""
 
 from __future__ import annotations
 
@@ -109,7 +110,6 @@ def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     staged_minio = state.get("staged_minio")
     staged_records = state.get("staged_weaviate_records", []) or []
     delete_old = bool(state.get("staged_weaviate_delete_old", False))
-    staged_kg = state.get("staged_kg_chunks", []) or []
 
     bucket = runtime.config.target_bucket or None
     collection = runtime.config.target_collection or None
@@ -144,16 +144,8 @@ def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                 collection=collection,
             )
 
-        # 3) KG (in-memory, per-document — no rollback needed).
-        # Phase 2b owns KG ingest when the feature flag is on; skip the replay.
-        kg_builder = runtime.kg_builder
-        if (
-            kg_builder is not None
-            and staged_kg
-            and not getattr(runtime.config, "enable_kg_phase2b", False)
-        ):
-            for text, source_name in staged_kg:
-                kg_builder.add_chunk(text, source=source_name)
+        # KG ingest happens out-of-process: IngestDocumentWorkflow dispatches
+        # KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE after embedding succeeds.
 
     except Exception as exc:
         logger.error(

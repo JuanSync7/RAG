@@ -24,7 +24,7 @@ class DocumentProcessingState(TypedDict, total=False):
     Fields
     ------
     runtime : Runtime
-        Shared runtime dependencies (config, embedder, weaviate, kg_builder).
+        Shared runtime dependencies (config, embedder, weaviate, db_client).
     source_path : str
         Absolute path to the source file.
     source_name : str

@@ -62,7 +62,6 @@ def test_mock_ingest_builds_config():
             documents_dir=Path("/docs"),
             fresh=True,
             update=False,
-            build_kg=False,
             semantic_chunking=False,
             export_processed=True,
         )
@@ -70,10 +69,7 @@ def test_mock_ingest_builds_config():
         # IngestionConfig was constructed with expected kwargs
         call_kwargs = mock_cfg_cls.call_args[1]
         assert call_kwargs["semantic_chunking"] is False
-        assert call_kwargs["build_kg"] is False
         assert call_kwargs["export_processed"] is True
-        assert call_kwargs["enable_knowledge_graph_extraction"] is False
-        assert call_kwargs["enable_knowledge_graph_storage"] is False
 
         # ingest_directory called with the right arguments
         mock_ingest_dir.assert_called_once()
@@ -274,28 +270,6 @@ def test_mock_main_file_not_found(tmp_path, monkeypatch):
     # argparse.error() raises SystemExit
     with pytest.raises(SystemExit):
         main()
-
-
-# ---------------------------------------------------------------------------
-# test_mock_main_no_kg_flag
-# ---------------------------------------------------------------------------
-
-
-def test_mock_main_no_kg_flag(monkeypatch):
-    """Test main() with --no-kg sets build_kg=False."""
-    from src.ingest.cli import main
-
-    monkeypatch.setattr(sys, "argv", ["cli.py", "--no-kg"])
-
-    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
-        "src.ingest.cli.validate_documents_dir"
-    ) as mock_validate:
-        mock_validate.return_value = Path("/docs")
-
-        main()
-
-        call_kwargs = mock_ingest.call_args[1]
-        assert call_kwargs["build_kg"] is False
 
 
 # ---------------------------------------------------------------------------

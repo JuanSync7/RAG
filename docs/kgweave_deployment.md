@@ -50,22 +50,21 @@ team boundary (what's separated, what isn't yet).
 | KG library (extractors, backends, query expander, term index) | **KGWeave** | `kgweave` package, consumed via `pyproject.toml` path/version pin |
 | Wire contract | KGWeave | `kgweave.contracts` is the single source — no vendored copy in RagWeave |
 
-## Future: shipping KGWeave as a service product (Step C)
+## KGWeave product surfaces
 
-Today KGWeave ships two product surfaces:
+KGWeave now ships three product surfaces:
 
-1. **Worker fleet** (Step 13) — Temporal activities for Phase 2b ingest
+1. **Worker fleet** (Step 13) — Temporal activities for Phase 2b ingest on `kgweave-default`
 2. **Python library** (Step 14) — `kgweave` package for in-process retrieval-side use
+3. **HTTP API** (Step C) — FastAPI service exposing the read-side query
+   surface for non-Python consumers and external access. Shipped via
+   `containers/Dockerfile.kgweave-api` and the `kgweave-api` compose entry
+   (profiles: `kgweave`, `kgweave-api`). See
+   [`KGWeave/docs/api_engineering_guide.md`](../../KGWeave/docs/api_engineering_guide.md).
 
-A future Step C adds a third: **HTTP/gRPC service** for non-Python consumers. See
-`docs/kgweave_step_c_plan.md` — it would wrap the same `kgweave.knowledge_graph`
-read-side API in a FastAPI server, share the same Docker image, and add minimal
-operational surface. Step 14 deliberately positioned the library so Step C is a
-~200-LOC wrapper.
-
-Removing `src/knowledge_graph/` from RagWeave (Step 14) requires migrating
-the retrieval-side term-index lookup to a KGWeave query API (Temporal
-activity or HTTP). Until then, RagWeave keeps a working in-tree copy.
+Consumers can switch between in-process and HTTP transports via
+`kgweave.client.get_client()` — the in-process service is the default;
+setting `KGWEAVE_API_URL` flips to the HTTP client transparently.
 
 ## Environment
 
@@ -76,6 +75,10 @@ activity or HTTP). Until then, RagWeave keeps a working in-tree copy.
 | `KG_USE_GLINER` | `0` | KGWeave worker — `1` to enable GLiNER extractor |
 | `KGWEAVE_IMAGE_TAG` | `latest` | compose pull tag |
 | `KGWEAVE_REPO_PATH` | `../KGWeave` | compose build context (sibling checkout) |
+| `KGWEAVE_API_HOST_PORT` | `8090` | HTTP API host port (compose) |
+| `KGWEAVE_API_TOKEN` | unset | HTTP API bearer token (unset = open access) |
+| `KGWEAVE_API_WORKERS` | `1` | uvicorn worker count |
+| `KGWEAVE_API_URL` | unset | RagWeave-side: route reads through HTTP API instead of in-process |
 
 Image build extras:
 

@@ -65,7 +65,6 @@ def _make_state(
         config=config,
         embedder=mock_embedder,
         weaviate_client=mock_weaviate,
-        kg_builder=None,
     )
     return {
         "chunks": chunks or [],
@@ -83,13 +82,11 @@ def _safe_cfg(**overrides) -> IngestionConfig:
     defaults = dict(
         chunk_size=512,
         chunk_overlap=64,
-        build_kg=False,
         enable_docling_parser=False,
         vlm_mode="disabled",
         enable_multimodal_processing=False,
         enable_vision_processing=False,
         enable_visual_embedding=False,
-        enable_knowledge_graph_storage=False,
         parser_strategy="auto",
         chunker="native",
     )

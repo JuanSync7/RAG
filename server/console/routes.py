@@ -926,10 +926,7 @@ def create_console_router(
 
         cfg_kwargs = {
             "semantic_chunking": payload.semantic_chunking,
-            "build_kg": payload.build_kg,
             "export_processed": payload.export_processed,
-            "enable_knowledge_graph_extraction": payload.build_kg,
-            "enable_knowledge_graph_storage": payload.build_kg,
             "update_mode": payload.update_mode,
         }
         if payload.verbose_stages is not None:
@@ -971,7 +968,6 @@ def create_console_router(
             config=cfg,
             fresh=not payload.update_mode,
             update=payload.update_mode,
-            obsidian_export=payload.export_obsidian,
             selected_sources=selected_sources,
         )
         return console_ok(

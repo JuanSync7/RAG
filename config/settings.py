@@ -1,8 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
-# Exports (retrieval): RAG_KG_RETRIEVAL_EDGE_TYPES, RAG_KG_RETRIEVAL_PATH_PATTERNS,
-#   RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET, RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -101,56 +99,11 @@ DOMAIN_DESCRIPTION = os.environ.get(
     "Interpret all acronyms and abbreviations in this domain context.",
 )
 
-# --- Knowledge Graph ---
-# Set to False to disable KG query expansion (pure hybrid search only)
+# --- Knowledge Graph (retrieval-side flag) ---
+# Set to False to disable KG query expansion at retrieval time (pure hybrid search only).
+# Ingest-side KG behavior lives in KGWeave; see RAG_INGESTION_ENABLE_KG_PHASE2B for the
+# RagWeave→KGWeave Temporal handoff toggle.
 KG_ENABLED = os.environ.get("RAG_KG_ENABLED", "true").lower() in ("true", "1", "yes")
-KG_PATH = PROJECT_ROOT / ".knowledge_graph.json"
-KG_OBSIDIAN_EXPORT_DIR = PROJECT_ROOT / "obsidian_graph"
-
-# KG Retrieval enhancements (REQ-KG-1200..1206)
-# Edge type whitelist for typed traversal. Comma-separated in env; empty = untyped.
-RAG_KG_RETRIEVAL_EDGE_TYPES: list[str] = [
-    e.strip()
-    for e in os.environ.get("RAG_KG_RETRIEVAL_EDGE_TYPES", "").split(",")
-    if e.strip()
-]
-# Path patterns: JSON-encoded list of edge-type sequences, e.g. '[["instantiates","specified_by"]]'.
-# Empty list = no pattern matching.
-import json as _json
-try:
-    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = _json.loads(
-        os.environ.get("RAG_KG_RETRIEVAL_PATH_PATTERNS", "[]")
-    )
-except (ValueError, TypeError):
-    logging.getLogger(__name__).warning(
-        "RAG_KG_RETRIEVAL_PATH_PATTERNS is not valid JSON; defaulting to []"
-    )
-    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = []
-# Max tokens for the graph context block injected into the generation prompt.
-RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET: int = int(
-    os.environ.get("RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET", "500")
-)
-# Master toggle for graph context injection. False = skip all retrieval enhancements.
-RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION: bool = os.environ.get(
-    "RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION", "false"
-).lower() in ("true", "1", "yes")
-# Community context token budget (REQ-KG-1320). 0 = community context disabled.
-RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET: int = int(
-    os.environ.get("RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET", "200")
-)
-# Graph context section marker style (REQ-KG-1322). "markdown" | "xml" | "plain".
-RAG_KG_GRAPH_CONTEXT_MARKER_STYLE: str = os.environ.get(
-    "RAG_KG_GRAPH_CONTEXT_MARKER_STYLE", "markdown"
-)
-# Max entities explored per hop in path pattern evaluation (REQ-KG-1324).
-RAG_KG_MAX_HOP_FANOUT: int = int(
-    os.environ.get("RAG_KG_MAX_HOP_FANOUT", "50")
-)
-# LLM extraction rate-limit retry policy
-RAG_KG_LLM_RATE_LIMIT_RETRIES = int(os.environ.get("RAG_KG_LLM_RATE_LIMIT_RETRIES", "3"))
-RAG_KG_LLM_RATE_LIMIT_BACKOFF_S = float(os.environ.get("RAG_KG_LLM_RATE_LIMIT_BACKOFF_S", "1.0"))
-# GLiNER entity prediction confidence threshold
-RAG_KG_GLINER_THRESHOLD = float(os.environ.get("RAG_KG_GLINER_THRESHOLD", "0.5"))
 
 # --- Semantic Chunking ---
 SEMANTIC_CHUNKING_ENABLED = os.environ.get(
@@ -160,18 +113,12 @@ SEMANTIC_SIMILARITY_THRESHOLD = float(
     os.environ.get("RAG_SEMANTIC_THRESHOLD", "0.75")
 )
 
-# --- GLiNER Entity Extraction ---
-GLINER_ENABLED = os.environ.get(
-    "RAG_GLINER_ENABLED", "true"
-).lower() in ("true", "1", "yes")
+# --- GLiNER (PII detector) ---
+# Used only by the NeMo Guardrails PII shim (src/guardrails/shared/gliner_pii.py).
 GLINER_MODEL_PATH = os.environ.get(
     "RAG_GLINER_MODEL",
     os.path.expanduser("~/models/gliner/gliner_medium-v2.1"),
 )
-GLINER_ENTITY_LABELS = [
-    "technology", "algorithm", "framework", "concept",
-    "programming language", "data structure",
-]
 
 # --- Service Ports (canonical defaults — override via .env) ---
 _OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
@@ -464,14 +411,14 @@ RAG_INGESTION_VISION_API_PATH = os.environ.get(
 RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION = os.environ.get(
     "RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION", "true"
 ).lower() in ("true", "1", "yes")
-RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION = os.environ.get(
-    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION", "true"
-).lower() in ("true", "1", "yes")
 RAG_INGESTION_ENABLE_QUALITY_VALIDATION = os.environ.get(
     "RAG_INGESTION_ENABLE_QUALITY_VALIDATION", "true"
 ).lower() in ("true", "1", "yes")
-RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE = os.environ.get(
-    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE", "true"
+# Production default: KG runs via Temporal handoff (KGWeave worker fleet on
+# KG_TASK_QUEUE). Set to false to skip the KG phase entirely — used by the
+# offline CLI ingest and benchmark scripts that don't run a Temporal cluster.
+RAG_INGESTION_ENABLE_KG_PHASE2B = os.environ.get(
+    "RAG_INGESTION_ENABLE_KG_PHASE2B", "true"
 ).lower() in ("true", "1", "yes")
 RAG_INGESTION_VERBOSE_STAGE_LOGS = os.environ.get(
     "RAG_INGESTION_VERBOSE_STAGE_LOGS", "false"

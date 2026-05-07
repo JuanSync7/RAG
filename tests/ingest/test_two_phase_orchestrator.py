@@ -11,8 +11,6 @@ def _make_runtime(tmp_path, store_subdir="store"):
     config = IngestionConfig(
         enable_multimodal_processing=False,
         enable_cross_reference_extraction=False,
-        enable_knowledge_graph_extraction=False,
-        enable_knowledge_graph_storage=False,
         enable_quality_validation=False,
         enable_docling_parser=False,
         enable_llm_metadata=False,
@@ -23,7 +21,6 @@ def _make_runtime(tmp_path, store_subdir="store"):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
 
 
@@ -49,7 +46,6 @@ def _phase2_result():
         "errors": [],
         "processing_log": ["chunking:ok", "embedding_storage:ok"],
         "chunks": [],
-        "kg_triples": [],
     }
 
 

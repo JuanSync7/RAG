@@ -1,7 +1,7 @@
 # @summary
 # Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
-# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding,
+# Deps: src.vector_db, src.core.embeddings, src.ingest.embedding,
 #       src.ingest.doc_processing, src.ingest.support.parser_registry
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
 #   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
@@ -39,19 +39,12 @@ from typing import Any, Optional
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|]')
 
 from config.settings import (
-    GLINER_ENABLED,
-    KG_OBSIDIAN_EXPORT_DIR,
-    KG_PATH,
     LLM_ROUTER_CONFIG,
     PROCESSED_DIR,
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
 from src.core.embeddings import get_embedding_provider
-from kgweave.core.knowledge_graph import (
-    KnowledgeGraphBuilder,
-    export_obsidian,
-)
 from src.vector_db import (
     delete_collection,
     delete_by_source_key,
@@ -493,10 +486,6 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     warnings: list[str] = []
     if config.chunk_overlap >= config.chunk_size:
         errors.append("chunk_overlap must be < chunk_size")
-    if config.enable_knowledge_graph_storage and not config.enable_knowledge_graph_extraction:
-        errors.append("knowledge_graph_storage requires knowledge_graph_extraction")
-    if config.enable_knowledge_graph_storage and not config.build_kg:
-        errors.append("knowledge_graph_storage requires build_kg=True")
     if config.enable_docling_parser and not str(config.docling_model).strip():
         errors.append("docling parser requires a non-empty docling_model")
     if config.enable_vision_processing:
@@ -678,18 +667,16 @@ def ingest_directory(
     config: Optional[IngestionConfig] = None,
     fresh: bool = True,
     update: bool = False,
-    obsidian_export: bool = False,
     selected_sources: Optional[list[Path]] = None,
     batch_id: str = "",
 ) -> IngestionRunSummary:
-    """Ingest a directory of documents and persist vectors/KG artifacts.
+    """Ingest a directory of documents and persist vector artifacts.
 
     Args:
         documents_dir: Directory containing source documents.
         config: Optional ingestion configuration. When omitted, defaults are used.
         fresh: Whether to start from a fresh vector store collection.
         update: Whether to run in incremental mode using the manifest.
-        obsidian_export: Whether to export the knowledge graph to an Obsidian vault.
         selected_sources: Optional explicit list of files to ingest.
         batch_id: Optional batch grouping ID (FR-3053). When provided, all files in
             this run share the same batch_id in their manifests and Weaviate metadata.
@@ -790,9 +777,6 @@ def ingest_directory(
             config=config,
             embedder=get_embedding_provider(tier="ingest"),
             weaviate_client=client,
-            kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
-            if config.build_kg
-            else None,
             db_client=_db_client,
             parser_registry=_parser_registry,
         )
@@ -910,10 +894,9 @@ def ingest_directory(
                 errors.append(f"unhandled:{source.get('source_name', 'unknown')}:{exc}")
                 continue
 
-        if runtime.kg_builder is not None:
-            runtime.kg_builder.save(KG_PATH)
-            if obsidian_export:
-                export_obsidian(runtime.kg_builder.graph, KG_OBSIDIAN_EXPORT_DIR)
+        # KG persistence owned by KGWeave: no graph save/export here. The
+        # CLI ``--obsidian-export`` switch is now a no-op for the in-process
+        # path; export is performed by the KGWeave worker on its own backend.
 
         if _db_client is not None:
             from src.db import close_client as _db_close_client

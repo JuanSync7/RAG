@@ -86,7 +86,6 @@ def run_embedding_pipeline(
         "metadata_summary": "",
         "metadata_keywords": [],
         "cross_references": [],
-        "kg_triples": [],
         "stored_count": 0,
         "errors": [],
         "processing_log": [],
@@ -98,7 +97,6 @@ def run_embedding_pipeline(
         "staged_minio": None,
         "staged_weaviate_records": [],
         "staged_weaviate_delete_old": False,
-        "staged_kg_chunks": [],
     }
     try:
         final_state = _GRAPH.invoke(initial_state)

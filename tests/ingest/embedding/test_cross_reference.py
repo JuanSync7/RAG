@@ -22,7 +22,6 @@ def _make_state(cleaned="", refactored="", enabled=True):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     return {
         "cleaned_text": refactored or cleaned,

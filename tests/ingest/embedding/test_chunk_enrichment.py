@@ -35,7 +35,6 @@ def _make_state(chunks=None) -> dict:
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     return {
         "chunks": chunks if chunks is not None else [],

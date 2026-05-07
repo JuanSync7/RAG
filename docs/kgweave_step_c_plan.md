@@ -1,10 +1,21 @@
 # KGWeave Step C — Service Product (HTTP / gRPC)
 
 <!-- @summary
-Forward-looking plan for shipping KGWeave as a network service in addition
-to its current Python-library + Temporal-worker product surfaces. Not
-implemented; this is the design + scoping doc.
+Plan + status doc for KGWeave's HTTP API surface. The HTTP variant is now
+SHIPPED (Step C v1, FastAPI). gRPC variant remains optional/future. See
+KGWeave/docs/api_engineering_guide.md for the engineering-level reference.
 @end-summary -->
+
+## Status
+
+| Variant | State | Notes |
+|---|---|---|
+| **C-1 FastAPI / HTTP+JSON** | **Shipped** | 5 read-side endpoints; bearer auth; container + compose entry live |
+| C-2 gRPC | Deferred | Adopt only when a consumer hits scale that justifies the protobuf duplication |
+| RagWeave thin facade swap | Available | `kgweave.client.get_client()` returns in-process or HTTP based on `KGWEAVE_API_URL`; RagWeave can opt in per call site |
+
+Authoritative reference: [`KGWeave/docs/api_engineering_guide.md`](../../KGWeave/docs/api_engineering_guide.md).
+
 
 ## Why a third surface
 

@@ -25,10 +25,8 @@ def _make_runtime(
     *,
     store_documents: bool = True,
     update_mode: bool = False,
-    enable_kg: bool = False,
     db_client=None,
     weaviate_client=None,
-    kg_builder=None,
     target_bucket: str = "test-bucket",
     target_collection: str = "TestCol",
 ):
@@ -41,7 +39,6 @@ def _make_runtime(
     config = IngestionConfig(
         store_documents=store_documents,
         update_mode=update_mode,
-        enable_knowledge_graph_storage=enable_kg,
         target_bucket=target_bucket,
         target_collection=target_collection,
     )
@@ -49,7 +46,6 @@ def _make_runtime(
         config=config,
         embedder=embedder,
         weaviate_client=weaviate_client or MagicMock(),
-        kg_builder=kg_builder,
         db_client=db_client or MagicMock(),
     )
 
@@ -89,7 +85,6 @@ def _make_base_state(runtime, **overrides) -> dict:
         "staged_minio": None,
         "staged_weaviate_records": [],
         "staged_weaviate_delete_old": False,
-        "staged_kg_chunks": [],
     }
     state.update(overrides)
     return state
@@ -104,19 +99,11 @@ class TestStorageNodesStageOnly:
     """Storage nodes MUST NOT call DB sinks; they only populate staged_* keys."""
 
     def test_storage_nodes_stage_only_no_db_writes(self, monkeypatch):
-        """Run all 3 storage nodes; assert no live DB calls, staged_* populated."""
+        """Run storage nodes; assert no live DB calls, staged_* populated."""
         from src.ingest.embedding.nodes.document_storage_node import document_storage_node
         from src.ingest.embedding.nodes.embedding_storage import embedding_storage_node
-        from src.ingest.embedding.nodes.knowledge_graph_storage import (
-            knowledge_graph_storage_node,
-        )
 
-        kg_builder = MagicMock()
-        runtime = _make_runtime(
-            store_documents=True,
-            enable_kg=True,
-            kg_builder=kg_builder,
-        )
+        runtime = _make_runtime(store_documents=True)
         state = _make_base_state(runtime)
 
         # Patch direct-write helpers at their import sites.
@@ -124,26 +111,18 @@ class TestStorageNodesStageOnly:
             patch("src.ingest.embedding.nodes.document_storage_node.put_document") as mock_put,
             patch("src.ingest.embedding.nodes.embedding_storage.add_documents") as mock_add,
         ):
-            # Run document storage node
             ds_result = document_storage_node(state)
             state = {**state, **ds_result}
 
-            # Stub embedder to return fake vectors for all chunks
             runtime.embedder.embed_documents.return_value = [[0.1, 0.2]]
 
-            # Run embedding storage node
             es_result = embedding_storage_node(state)
             state = {**state, **es_result}
-
-            # Run KG storage node
-            kg_result = knowledge_graph_storage_node(state)
-            state = {**state, **kg_result}
 
         # --- Assertions ---
         # 1) No live writes happened in any storage node
         mock_put.assert_not_called(), "put_document must NOT be called during document_storage_node"
         mock_add.assert_not_called(), "add_documents must NOT be called during embedding_storage_node"
-        kg_builder.add_chunk.assert_not_called(), "kg_builder.add_chunk must NOT be called during kg_storage_node"
 
         # 2) staged_* keys are populated in state
         assert state.get("staged_minio") is not None, "staged_minio must be populated"
@@ -153,10 +132,6 @@ class TestStorageNodesStageOnly:
 
         assert state.get("staged_weaviate_records"), "staged_weaviate_records must be populated"
         assert len(state["staged_weaviate_records"]) > 0
-
-        assert isinstance(state.get("staged_kg_chunks"), list)
-        assert len(state["staged_kg_chunks"]) > 0
-        assert state["staged_kg_chunks"][0][0] == "hello world"  # (text, source_name)
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +163,6 @@ class TestCommitNodeFlushes:
             },
             staged_weaviate_records=[record],
             staged_weaviate_delete_old=False,
-            staged_kg_chunks=[("chunk text", "test.md")],
         )
         return state
 
@@ -202,15 +176,10 @@ class TestCommitNodeFlushes:
             patch("src.ingest.embedding.nodes.commit_node.put_document") as mock_put,
             patch("src.ingest.embedding.nodes.commit_node.add_documents", return_value=1) as mock_add,
         ):
-            kg_builder = MagicMock()
-            state["runtime"].kg_builder = kg_builder
-            state["runtime"].config.enable_knowledge_graph_storage = True
-
             result = commit_node(state)
 
         mock_put.assert_called_once()
         mock_add.assert_called_once()
-        kg_builder.add_chunk.assert_called_once_with("chunk text", source="test.md")
 
         assert result["stored_count"] == 1
         assert not result.get("errors"), f"Unexpected errors: {result.get('errors')}"
@@ -247,7 +216,6 @@ class TestCommitNodeRollbackOnWeaviateFailure:
                 "bucket": "test-bucket",
             },
             staged_weaviate_records=[record],
-            staged_kg_chunks=[],
         )
 
         with (
@@ -311,7 +279,6 @@ class TestCommitNodeRollbackOnMinIOFailure:
                 "bucket": "test-bucket",
             },
             staged_weaviate_records=[record],
-            staged_kg_chunks=[],
         )
 
         with (
@@ -405,7 +372,6 @@ class TestCommitNodeNoMinIOWhenStoreDisabled:
             runtime,
             staged_minio=None,  # store_documents=False → no MinIO staged
             staged_weaviate_records=[record],
-            staged_kg_chunks=[],
         )
 
         with (
@@ -452,7 +418,6 @@ def _make_conn_drop_state(*, n_records: int = 10, staging_batch_id: str = "batch
             "bucket": "test-bucket",
         },
         staged_weaviate_records=records,
-        staged_kg_chunks=[],
     )
     return state
 
@@ -596,7 +561,6 @@ class TestCommitConnectionDrop:
             staging_batch_id="batch-no-minio",
             staged_minio=None,  # store_documents=False → MinIO never committed
             staged_weaviate_records=records,
-            staged_kg_chunks=[],
         )
 
         with (
