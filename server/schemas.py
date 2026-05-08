@@ -100,6 +100,15 @@ class QueryRequest(BaseModel):
             "the current build."
         ),
     )
+    tree_retrieval: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Per-request override for hierarchical (tree) retrieval. "
+            "``None`` (default) uses the ``RAG_TREE_RETRIEVAL_ENABLED`` "
+            "config setting. ``true``/``false`` force on/off for this "
+            "request only. See TREE_RETRIEVAL_DESIGN.md §6."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -301,6 +310,7 @@ class ConsoleQueryRequest(BaseModel):
     mode: Literal["query", "retrieval"] = Field(default="query")
     retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
     extra_processing: bool = Field(default=False)
+    tree_retrieval: Optional[bool] = Field(default=None)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.

@@ -90,6 +90,10 @@ def execute_rag_query(request: dict) -> dict:
     mode: str = str(request.get("mode") or "query")
     retrieval_sub_mode: str = str(request.get("retrieval_sub_mode") or "auto")
     extra_processing: bool = bool(request.get("extra_processing") or False)
+    # Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
+    # Only treat as override when explicitly present and bool-typed; else None.
+    _tree = request.get("tree_retrieval")
+    tree_retrieval: Optional[bool] = _tree if isinstance(_tree, bool) else None
     # Retrieval mode skips answer generation by definition. The route
     # handler may also set skip_generation directly (e.g. for streaming);
     # union both signals so neither path accidentally enables generation.
@@ -116,6 +120,7 @@ def execute_rag_query(request: dict) -> dict:
         "mode": mode,
         "retrieval_sub_mode": retrieval_sub_mode,
         "extra_processing": extra_processing,
+        "tree_retrieval": tree_retrieval,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
@@ -150,6 +155,7 @@ def execute_rag_query(request: dict) -> dict:
         mode=mode,
         retrieval_sub_mode=retrieval_sub_mode,
         extra_processing=extra_processing,
+        tree_retrieval=tree_retrieval,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 

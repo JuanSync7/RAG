@@ -68,6 +68,12 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         intent="toggle_verbose",
     ),
     CommandSpec(
+        name="tree",
+        description="Cycle hierarchical (tree) retrieval: default → on → off",
+        modes=(MODE_QUERY_CLI, MODE_SERVER_CLI, MODE_CONSOLE_QUERY),
+        intent="cycle_tree_retrieval",
+    ),
+    CommandSpec(
         name="quit",
         description="Exit current interactive session",
         modes=(MODE_QUERY_CLI, MODE_INGEST_CLI, MODE_SERVER_CLI),

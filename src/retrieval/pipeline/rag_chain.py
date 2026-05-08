@@ -643,6 +643,7 @@ class RAGChain:
         mode: str = "query",
         retrieval_sub_mode: str = "auto",
         extra_processing: bool = False,
+        tree_retrieval: Optional[bool] = None,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -963,6 +964,12 @@ class RAGChain:
             if tenant_id and tenant_id != "default":
                 filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
+            # Per-request override beats config default (P4 §6).
+            tree_enabled_effective = (
+                RAG_TREE_RETRIEVAL_ENABLED
+                if tree_retrieval is None
+                else bool(tree_retrieval)
+            )
             with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
                 search_results = self.retry_provider.execute(
                     operation_name="weaviate_hybrid_search",
@@ -972,7 +979,7 @@ class RAGChain:
                         alpha=alpha,
                         search_limit=search_limit,
                         base_filters=filters,
-                        tree_enabled=RAG_TREE_RETRIEVAL_ENABLED,
+                        tree_enabled=tree_enabled_effective,
                         schema_present=RAG_TREE_SCHEMA_PRESENT,
                         descent_top_k=RAG_TREE_DESCENT_TOP_K,
                         leaves_per_section=RAG_TREE_DESCENT_LEAVES_PER_SECTION,
@@ -981,10 +988,14 @@ class RAGChain:
                         doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
                     ),
                     policy=self.retry_policy,
-                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={RAG_TREE_RETRIEVAL_ENABLED}",
+                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={tree_enabled_effective}",
                 )
                 search_span.set_attribute("search_result_count", len(search_results))
-                search_span.set_attribute("tree_retrieval_enabled", RAG_TREE_RETRIEVAL_ENABLED)
+                search_span.set_attribute("tree_retrieval_enabled", tree_enabled_effective)
+                search_span.set_attribute(
+                    "tree_retrieval_source",
+                    "request" if tree_retrieval is not None else "config",
+                )
             tp.record("hybrid_search", "retrieval", started_at=t0)
             if tp.check_stage_budget("hybrid_search"):
                 tp.mark_budget_exhausted("hybrid_search")

@@ -458,6 +458,141 @@ class TestCollectCandidates:
         )
         assert captured["tree_enabled_seen"] is True
 
+    def test_activity_unpacks_tree_retrieval_field(self, monkeypatch):
+        """End-to-end: server activity unpacks tree_retrieval from the request
+        dict and forwards to ``rag.run`` (TREE_RETRIEVAL_DESIGN.md §6)."""
+        from server import activities as activities_module
+
+        captured: dict = {}
+
+        class _FakeChain:
+            def run(self, **kwargs):
+                captured.update(kwargs)
+                from src.retrieval.common.schemas import RAGResponse
+                return RAGResponse(
+                    query=kwargs.get("query", ""),
+                    processed_query=kwargs.get("query", ""),
+                    query_confidence=1.0,
+                    action="search",
+                )
+
+        monkeypatch.setattr(
+            activities_module, "get_rag_chain", lambda: _FakeChain()
+        )
+
+        # Bypass cache so we hit the run path.
+        monkeypatch.setattr(activities_module._cache, "get", lambda *_a, **_kw: None)
+        monkeypatch.setattr(activities_module._cache, "set", lambda *_a, **_kw: None)
+
+        request = {"query": "hello", "tree_retrieval": True}
+        activities_module.execute_rag_query(request)
+        assert captured.get("tree_retrieval") is True, (
+            f"expected tree_retrieval=True passed to rag.run, got {captured}"
+        )
+
+        captured.clear()
+        request_off = {"query": "hello off", "tree_retrieval": False}
+        activities_module.execute_rag_query(request_off)
+        assert captured.get("tree_retrieval") is False
+
+        captured.clear()
+        request_default = {"query": "hello default"}
+        activities_module.execute_rag_query(request_default)
+        assert captured.get("tree_retrieval") is None, (
+            "missing field must arrive as None to use config default"
+        )
+
+    def test_tree_cycle_state_transitions(self):
+        """P4 §6 CLI: /tree cycles default → on → off → default."""
+        from src.platform.tree_session import cycle_tree_state
+
+        assert cycle_tree_state(None) is True       # default → on
+        assert cycle_tree_state(True) is False      # on → off
+        assert cycle_tree_state(False) is None      # off → default
+
+    def test_rag_request_has_tree_retrieval_field(self):
+        """P4 §6: API surface — RAGRequest carries an optional tree toggle."""
+        from src.retrieval.common.schemas import RAGRequest
+
+        req = RAGRequest(query="hello")
+        assert hasattr(req, "tree_retrieval")
+        assert req.tree_retrieval is None  # default = use config
+        req2 = RAGRequest(query="hello", tree_retrieval=True)
+        assert req2.tree_retrieval is True
+
+    def test_per_request_tree_retrieval_override(self, monkeypatch):
+        """P4: ``run(tree_retrieval=True/False/None)`` overrides the global
+        flag for that one call. None = use config default. True/False = force.
+        """
+        from src.retrieval.query.schemas import QueryAction, QueryResult
+
+        chain = _make_chain()
+        chain._kg_expander = None
+        chain._generator = None
+        chain.reranker = None
+        chain._guardrails_input_executor = None
+        chain._guardrails_output_executor = None
+        chain._guardrails_merge_gate = None
+        chain._visual_retrieval_enabled = False
+        chain._visual_model = None
+        chain._visual_processor = None
+
+        class _Embeddings:
+            def embed_query(self, _q): return [0.1, 0.2, 0.3]
+        chain.embeddings = _Embeddings()
+
+        monkeypatch.setattr(
+            "src.retrieval.pipeline.rag_chain.process_query",
+            lambda *a, **kw: QueryResult(
+                processed_query="processed", confidence=0.9,
+                action=QueryAction.SEARCH, clarification_message=None,
+                iterations=1,
+            ),
+        )
+
+        captured: dict = {}
+        chain._collect_candidates = (  # type: ignore
+            lambda *, tree_enabled, **kwargs: (
+                captured.update(tree_enabled_seen=tree_enabled) or []
+            )
+        )
+
+        # Global default OFF; per-request override TRUE → tree enabled.
+        monkeypatch.setattr(
+            "src.retrieval.pipeline.rag_chain.RAG_TREE_RETRIEVAL_ENABLED",
+            False,
+        )
+        chain.run(
+            "q", skip_generation=True,
+            stage_budget_overrides={"query_processing": 100_000},
+            tree_retrieval=True,
+        )
+        assert captured["tree_enabled_seen"] is True, (
+            "tree_retrieval=True must override config-off"
+        )
+
+        # Global default ON; per-request override FALSE → tree disabled.
+        monkeypatch.setattr(
+            "src.retrieval.pipeline.rag_chain.RAG_TREE_RETRIEVAL_ENABLED",
+            True,
+        )
+        chain.run(
+            "q", skip_generation=True,
+            stage_budget_overrides={"query_processing": 100_000},
+            tree_retrieval=False,
+        )
+        assert captured["tree_enabled_seen"] is False, (
+            "tree_retrieval=False must override config-on"
+        )
+
+        # None → falls back to config default.
+        chain.run(
+            "q", skip_generation=True,
+            stage_budget_overrides={"query_processing": 100_000},
+            tree_retrieval=None,
+        )
+        assert captured["tree_enabled_seen"] is True
+
     def test_legacy_schema_omits_node_kind_filter(self):
         chain = _make_chain()
         captured = self._wire(chain, leaf_hits=[])
