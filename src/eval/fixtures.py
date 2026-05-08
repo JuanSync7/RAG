@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-from src.vector_db.weaviate.store import build_parent_section_id
+from src.vector_db.weaviate.store import build_section_node_id
 
 
 @dataclass
@@ -54,9 +54,21 @@ def _enrich_chunk(chunk: dict, document_id: str) -> dict:
     enriched["heading_path"] = heading_path
     enriched["tree_level"] = len(heading_path)
     enriched.setdefault("node_kind", "chunk")
-    enriched["parent_section_id"] = build_parent_section_id(
-        document_id, heading_path
-    )
+    # Per TREE_RETRIEVAL_DESIGN.md §4.1: a leaf's parent_section_id points
+    # to the chunk_id of its containing section node. For section nodes
+    # themselves, parent_section_id points one level UP in the tree (used
+    # by Stage 4c lift to gather sibling sections), and chunk_id is
+    # canonicalised to the deterministic section-node id so descent's
+    # ``section.chunk_id`` lookup matches leaf.parent_section_id.
+    if enriched["node_kind"] == "section":
+        enriched["chunk_id"] = build_section_node_id(document_id, heading_path)
+        enriched["parent_section_id"] = build_section_node_id(
+            document_id, heading_path[:-1]
+        )
+    else:
+        enriched["parent_section_id"] = build_section_node_id(
+            document_id, heading_path
+        )
     return enriched
 
 

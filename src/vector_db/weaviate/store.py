@@ -237,6 +237,19 @@ def build_parent_section_id(document_id: str, heading_path: list[str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
+def build_section_node_id(document_id: str, heading_path: list[str]) -> str:
+    """Stable id for the section node owning ``heading_path``.
+
+    A leaf chunk under section S has ``parent_section_id ==
+    build_section_node_id(doc, S.heading_path)`` (= S's own ``chunk_id``).
+    See TREE_RETRIEVAL_DESIGN.md §3.2/§4.1.
+    """
+    if not heading_path:
+        return ""
+    payload = f"{document_id}:{'>'.join(heading_path)}>__SECTION__"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
 def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text: str) -> str:
     if candidate is not None:
         raw = str(candidate).strip()
@@ -327,9 +340,13 @@ def add_documents(
                         metadata.get("tree_level", len(heading_path_meta))
                     ),
                     "heading_path": [str(h) for h in heading_path_meta],
+                    # Legacy-fallback: a leaf's parent_section_id is the
+                    # canonical section-node id for its heading_path
+                    # (TREE_RETRIEVAL_DESIGN §4.1). Tree-aware ingest nodes
+                    # set this explicitly for sections (their *own* parent).
                     "parent_section_id": metadata.get(
                         "parent_section_id",
-                        build_parent_section_id(
+                        build_section_node_id(
                             str(metadata.get("document_id", "")),
                             [str(h) for h in heading_path_meta],
                         ),

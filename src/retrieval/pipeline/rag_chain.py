@@ -482,13 +482,11 @@ class RAGChain:
         section_hits = self._do_search(
             bm25_query, query_embedding, alpha, descent_top_k, filters
         )
-        # Each section node carries its own parent_section_id (the hash of
-        # document_id + heading_path[:-1]); to fetch a section's *leaves* we
-        # use the section's own id which we deterministically derive from
-        # heading_path. We expose that via metadata['parent_section_id'] on
-        # section hits as well, so callers can use it directly.
+        # Per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under section S have
+        # parent_section_id == S.chunk_id. So descent expansion uses each
+        # section's own chunk_id as the lookup key.
         parent_ids = [
-            (h.metadata.get("parent_section_id") or "")
+            (h.metadata.get("chunk_id") or "")
             for h in section_hits
         ]
         return self._expand_sections_to_leaves(

@@ -150,15 +150,52 @@ class TestTreeDescent:
             and getattr(f, "value", None) == "section"
             for f in flt
         )
-        # Expansion must be called with the descent hits' parent_section_ids
-        # (sections expose their *own* id via parent_section_id of the leaves
-        # underneath; in the descent helper we use the section's pseudo
-        # parent_section_id metadata as the expansion key).
+        # Expansion must be called with the descent hits' chunk_ids — the
+        # section's own id (per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under
+        # a section have parent_section_id == section.chunk_id).
         assert expand_calls
         assert expand_calls[0]["per_section_limit"] == 3
+        assert expand_calls[0]["parent_ids"] == ["sec-a", "sec-b"], (
+            f"descent should use section.chunk_id for expansion, got "
+            f"{expand_calls[0]['parent_ids']}"
+        )
         # Result is the expansion output (leaves), not the section hits.
         assert all(r.metadata.get("node_kind") == "chunk" for r in result)
         assert len(result) == 2
+
+    def test_descent_uses_chunk_id_not_parent_section_id(self):
+        """Regression for the P2.5 fix: descent expansion key must be
+        ``section.chunk_id``, not ``section.parent_section_id``. The two are
+        only the same value for a leaf attached at the section's own depth;
+        otherwise descent silently fetches sibling sections rather than the
+        section's own children."""
+        chain = _make_chain()
+
+        section_hit = _hit(
+            "Section text", score=0.9, node_kind="section",
+            chunk_id="SECTION-CHUNK-ID",
+            parent_section_id="GRANDPARENT-PSID",
+            heading_path=["A", "B"],
+            document_id="doc-A",
+        )
+
+        chain._do_search = lambda *a, **kw: [section_hit]  # type: ignore[assignment]
+        captured: dict = {}
+
+        def fake_expand(parent_ids, per_section_limit, base_filters):
+            captured["parent_ids"] = list(parent_ids)
+            return []
+
+        chain._expand_sections_to_leaves = fake_expand  # type: ignore[attr-defined]
+
+        chain._run_tree_descent(
+            bm25_query="q", query_embedding=None, alpha=0.5,
+            descent_top_k=5, leaves_per_section=3, base_filters=None,
+        )
+        assert captured["parent_ids"] == ["SECTION-CHUNK-ID"], (
+            "descent must expand using section.chunk_id (the section's own id)"
+            f" — got {captured['parent_ids']}"
+        )
 
 
 # ─── Stage 4c lift ──────────────────────────────────────────────────────

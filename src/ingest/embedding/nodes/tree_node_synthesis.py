@@ -25,7 +25,10 @@ from typing import Any
 from src.ingest.common import ProcessedChunk, append_processing_log
 from src.ingest.common.observability import node_span
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.vector_db.weaviate.store import build_parent_section_id
+from src.vector_db.weaviate.store import (
+    build_parent_section_id,
+    build_section_node_id,
+)
 
 logger = logging.getLogger("rag.ingest.embedding.tree_node_synthesis")
 
@@ -57,7 +60,7 @@ def _child_snippet(text: str, meta: dict[str, Any], cap: int) -> str:
 
 def _section_id_for(document_id: str, heading_path: list[str]) -> str:
     """Deterministic section node id (document-scoped)."""
-    return build_parent_section_id(document_id, heading_path + ["__SECTION__"])
+    return build_section_node_id(document_id, heading_path)
 
 
 @node_span("tree_node_synthesis")
@@ -181,8 +184,10 @@ def tree_node_synthesis_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "heading_path": prefix_list,
             "node_kind": "section",
             "tree_level": len(prefix_list),
-            "parent_section_id": build_parent_section_id(
-                document_id, prefix_list
+            # Section's parent: the section one level up (or "" at root).
+            # Used by Stage 4c lift to find sibling sections.
+            "parent_section_id": build_section_node_id(
+                document_id, prefix_list[:-1]
             ),
             "child_count": child_count,
             # chunk_index / total_chunks are leaf-domain — sections sit outside
