@@ -144,6 +144,35 @@ class TestEvalRunner:
         assert report.ndcg_at_k == pytest.approx(1.0)
         assert report.n_queries == 1
 
+    def test_pool_metrics_reflect_pre_rerank_candidates(self):
+        """Pool metrics measure tree-retrieval's contribution at the candidate
+        pool level (before any reranker collapses gold below distractors).
+        The retriever signals "give me the pool" via ``return_pool=True``.
+        """
+        from src.eval.tree_retrieval_eval import run_eval
+
+        queries = [{"qid": "q1", "text": "x", "qtype": "qfs"}]
+        gold = {"q1": {"a", "b", "c"}}
+
+        # Pool contains all 3 gold (perfect pool recall);
+        # final ranking buries 2 of them past k=2 (poor final recall).
+        def retriever(query_text: str, *, tree_enabled: bool,
+                      return_pool: bool = False):
+            if return_pool:
+                return ["a", "b", "c", "x"]
+            return ["x", "a", "y", "b", "c"]
+
+        report = run_eval(
+            retriever=retriever, queries=queries, gold=gold,
+            tree_enabled=True, k_recall=2, k_ndcg=2, compute_pool=True,
+        )
+        # Final recall@2 = 1/3 (only "a" in top-2).
+        assert report.recall_at_k == pytest.approx(1 / 3)
+        # Pool recall@2 = 2/3 (top-2 of pool is {a,b}).
+        assert report.pool_recall_at_k == pytest.approx(2 / 3)
+        # Pool nDCG@2 with gold at ranks 1,2 in pool — perfect.
+        assert report.pool_ndcg_at_k == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # P3.5 — design-doc gate: tree_on beats tree_off on QFS, ≤ baseline on factoid

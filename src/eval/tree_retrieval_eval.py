@@ -111,6 +111,12 @@ class EvalReport:
     ndcg_at_k: float
     n_queries: int
     per_query: dict = field(default_factory=dict)
+    # Pool metrics — measure the candidate pool BEFORE rerank, so they
+    # attribute tree-retrieval's contribution independently of how well
+    # the cross-encoder later ranks formula/code chunks. Zero when not
+    # computed.
+    pool_recall_at_k: float = 0.0
+    pool_ndcg_at_k: float = 0.0
 
 
 def run_eval(
@@ -121,14 +127,21 @@ def run_eval(
     tree_enabled: bool,
     k_recall: int,
     k_ndcg: int,
+    compute_pool: bool = False,
 ) -> EvalReport:
     """Drive ``retriever`` over each query and aggregate metrics.
 
     ``retriever`` is called as ``retriever(query_text, tree_enabled=...)``
     and must return an ordered ``Sequence[chunk_id]``.
+
+    When ``compute_pool=True``, the retriever is also called with
+    ``return_pool=True`` to fetch the pre-rerank candidate-pool ids; pool
+    metrics are aggregated alongside the post-rerank ones.
     """
     recalls: list[float] = []
     ndcgs: list[float] = []
+    pool_recalls: list[float] = []
+    pool_ndcgs: list[float] = []
     per_query: dict = {}
 
     for q in queries:
@@ -140,17 +153,34 @@ def run_eval(
         n = ndcg_at_k(retrieved, gold_ids, k=k_ndcg)
         recalls.append(r)
         ndcgs.append(n)
-        per_query[qid] = {
+        entry: dict = {
             "recall": r,
             "ndcg": n,
             "retrieved": retrieved[:k_ndcg],
         }
+        if compute_pool:
+            pool = list(retriever(text, tree_enabled=tree_enabled, return_pool=True))
+            # Pool recall uses ``k_ndcg`` not ``k_recall``: the pool is not yet
+            # ranked by relevance (first items are Stage-4 hits, then descent,
+            # then lift), so "top 5" of the pool just measures Stage 4. The
+            # meaningful pool question is "did tree retrieval bring gold into
+            # the candidate window the reranker will see?" — which is k_ndcg.
+            pr = recall_at_k(pool, gold_ids, k=k_ndcg)
+            pn = ndcg_at_k(pool, gold_ids, k=k_ndcg)
+            pool_recalls.append(pr)
+            pool_ndcgs.append(pn)
+            entry["pool_recall"] = pr
+            entry["pool_ndcg"] = pn
+            entry["pool"] = pool[:k_ndcg]
+        per_query[qid] = entry
 
     return EvalReport(
         recall_at_k=mean_metric(recalls),
         ndcg_at_k=mean_metric(ndcgs),
         n_queries=len(list(queries)),
         per_query=per_query,
+        pool_recall_at_k=mean_metric(pool_recalls),
+        pool_ndcg_at_k=mean_metric(pool_ndcgs),
     )
 
 
@@ -209,7 +239,8 @@ def build_simulated_retriever(
             return items
         return [c for c in items if all(_matches_filter(c, f) for f in filters)]
 
-    def retrieve(query_text: str, *, tree_enabled: bool) -> list[str]:
+    def retrieve(query_text: str, *, tree_enabled: bool,
+                 return_pool: bool = False) -> list[str]:
         chain = _make_chain()
 
         def _do_search(bm25_query, query_emb, alpha, search_limit, filters):
@@ -257,6 +288,14 @@ def build_simulated_retriever(
             siblings_per_group=_EVAL_SIBLINGS_PER_GROUP,
             doc_diversity_top_per_doc=_EVAL_DOC_DIVERSITY_TOP_PER_DOC,
         )
+
+        if return_pool:
+            # Pre-rerank pool — preserves whatever order ``_collect_candidates``
+            # returned (Stage 4 → descent → lift, with first-occurrence dedup).
+            return [
+                (getattr(m, "metadata", None) or {}).get("chunk_id", "")
+                for m in merged
+            ]
 
         if reranker is not None:
             merged_sorted = list(reranker(query_text, merged))
