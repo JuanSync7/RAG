@@ -225,6 +225,27 @@ class TestTreeRetrievalGate:
             f"tree_off={off.ndcg_at_k:.3f}"
         )
 
+    def test_custom_reranker_is_used(self):
+        """Pluggable reranker: when supplied, the simulator must order
+        results by the reranker's scores, not by the lexical fallback.
+        """
+        from src.eval.tree_retrieval_eval import build_simulated_retriever
+
+        fx = self._load()
+
+        def reverse_alpha_reranker(query: str, items):
+            # Sort by chunk_id descending — purely structural, ignores query.
+            return sorted(
+                items,
+                key=lambda it: (getattr(it, "metadata", None) or {}).get("chunk_id", ""),
+                reverse=True,
+            )
+
+        retriever = build_simulated_retriever(fx, reranker=reverse_alpha_reranker)
+        retrieved = retriever("anything", tree_enabled=False)
+        # All retrieved IDs must be in descending chunk_id order.
+        assert retrieved == sorted(retrieved, reverse=True)
+
     def test_factoid_no_regression(self):
         from src.eval.tree_retrieval_eval import (
             build_simulated_retriever,

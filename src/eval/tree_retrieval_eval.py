@@ -167,15 +167,25 @@ _EVAL_SIBLINGS_PER_GROUP = 4
 _EVAL_DOC_DIVERSITY_TOP_PER_DOC = 10
 
 
-def build_simulated_retriever(fixture: Fixture):
+def build_simulated_retriever(
+    fixture: Fixture,
+    *,
+    reranker: Callable[[str, list], list] | None = None,
+):
     """Return ``retrieve(query_text, *, tree_enabled) -> [chunk_id, ...]``.
 
     The simulator stubs ``_do_search`` (lexical scoring + filter application),
     ``_expand_sections_to_leaves`` and ``_fetch_siblings`` (in-memory
     parent-section index lookup), then calls the live
-    ``RAGChain._collect_candidates``. The merged candidate list is reranked
-    with a deterministic score (text_jaccard + 0.5*heading_jaccard) before
-    chunk_ids are returned.
+    ``RAGChain._collect_candidates``.
+
+    Args:
+        fixture: hydrated ``Fixture`` (corpus + queries + gold).
+        reranker: optional ``(query_text, items) -> sorted_items`` callable.
+            When None (default), candidates are sorted by a lexical fallback
+            (text_jaccard + 0.5 * heading_jaccard) — fast, dependency-free,
+            adequate for synthetic gates. Pass ``TEIRerankerAdapter`` (or any
+            callable) to score with a real cross-encoder for real-data evals.
     """
     chunks: list[dict] = list(fixture.all_chunks())
 
@@ -248,17 +258,63 @@ def build_simulated_retriever(fixture: Fixture):
             doc_diversity_top_per_doc=_EVAL_DOC_DIVERSITY_TOP_PER_DOC,
         )
 
-        def _rerank_score(item) -> float:
-            text_score = _jaccard(query_text, getattr(item, "text", ""))
-            meta = getattr(item, "metadata", None) or {}
-            heading_text = " ".join(meta.get("heading_path") or [])
-            head_score = _jaccard(query_text, heading_text)
-            return text_score + 0.5 * head_score
+        if reranker is not None:
+            merged_sorted = list(reranker(query_text, merged))
+        else:
+            def _rerank_score(item) -> float:
+                text_score = _jaccard(query_text, getattr(item, "text", ""))
+                meta = getattr(item, "metadata", None) or {}
+                heading_text = " ".join(meta.get("heading_path") or [])
+                head_score = _jaccard(query_text, heading_text)
+                return text_score + 0.5 * head_score
 
-        merged_sorted = sorted(merged, key=_rerank_score, reverse=True)
+            merged_sorted = sorted(merged, key=_rerank_score, reverse=True)
         return [
             (getattr(m, "metadata", None) or {}).get("chunk_id", "")
             for m in merged_sorted
         ]
 
     return retrieve
+
+
+# ─── TEI HTTP reranker adapter ─────────────────────────────────────────────
+
+
+class TEIRerankerAdapter:
+    """Reranker callable backed by TEI's ``/rerank`` HTTP endpoint.
+
+    Matches the production ``TEIReranker`` wire protocol (POST /rerank with
+    ``{query, texts, truncate}``; response is a list of ``{index, score}``
+    sorted descending). Stays in this module so the eval harness has no
+    runtime dependency on the production retrieval modules — keeps the eval
+    layer cleanly importable from anywhere.
+
+    Usage::
+
+        from src.eval.tree_retrieval_eval import (
+            TEIRerankerAdapter, build_simulated_retriever,
+        )
+        rer = TEIRerankerAdapter(base_url="http://localhost:8082")
+        retriever = build_simulated_retriever(fx, reranker=rer)
+    """
+
+    def __init__(self, base_url: str = "http://localhost:8082", timeout: float = 30.0):
+        import httpx  # local import — eval is otherwise pure-python
+
+        self._client = httpx.Client(timeout=timeout)
+        self._base_url = base_url.rstrip("/")
+
+    def __call__(self, query: str, items: list) -> list:
+        if not items:
+            return []
+        texts = [getattr(it, "text", "") for it in items]
+        resp = self._client.post(
+            f"{self._base_url}/rerank",
+            json={"query": query, "texts": texts, "truncate": True},
+        )
+        resp.raise_for_status()
+        ranked = resp.json()  # [{"index": i, "score": s}, ...] desc by score
+        return [items[entry["index"]] for entry in ranked]
+
+    def close(self) -> None:
+        self._client.close()
