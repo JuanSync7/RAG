@@ -161,7 +161,7 @@ def run_eval(
 # defaults so tree-retrieval signal isn't capped before the rerank can sort).
 _EVAL_SEARCH_LIMIT = 6
 _EVAL_DESCENT_TOP_K = 5
-_EVAL_LEAVES_PER_SECTION = 10
+_EVAL_LEAVES_PER_SECTION = 3
 _EVAL_LIFT_SEED_K = 5
 _EVAL_SIBLINGS_PER_GROUP = 4
 _EVAL_DOC_DIVERSITY_TOP_PER_DOC = 10
