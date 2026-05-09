@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "domain": "asic",
+  "corpus": "opentitan",
+  "_note": "Single-aspect, single-fact lookups. Goal: bound DR's LLM-call cost where it offers no recall gain. Tracks llm_calls per query.",
+  "queries": [
+    {
+      "id": "dr-eff-001-gpio-checklist",
+      "query": "What does the GPIO IP design checklist require?",
+      "category": "single_aspect",
+      "expected_topics": ["gpio"],
+      "expected_chunks": [
+        {"source": "hw/ip_templates/gpio/doc/checklist.md"}
+      ],
+      "notes": "Reused from golden dr-003. Baseline pulls it cleanly; DR should not over-decompose."
+    },
+    {
+      "id": "dr-eff-002-lint-tools-list",
+      "query": "Which lint tools does OpenTitan integrate?",
+      "category": "single_aspect",
+      "expected_topics": ["lint"],
+      "expected_chunks": [
+        {"source": "hw/lint/README.md", "text_contains": "ascentlint"},
+        {"source": "hw/lint/README.md", "text_contains": "verible"}
+      ],
+      "notes": "Single-aspect enumeration."
+    },
+    {
+      "id": "dr-eff-003-dvsim-purpose",
+      "query": "What is dvsim used for?",
+      "category": "single_aspect",
+      "expected_topics": ["dvsim"],
+      "expected_chunks": [
+        {"source": "hw/lint/README.md", "text_contains": "dvsim"}
+      ],
+      "notes": "Single fact — DR should be one or two LLM calls, not exhaust budget."
+    },
+    {
+      "id": "dr-eff-004-dv-readme-purpose",
+      "query": "What is OpenTitan's DV contributing guide about?",
+      "category": "single_aspect",
+      "expected_topics": ["verification"],
+      "expected_chunks": [
+        {"source": "doc/contributing/dv/README.md", "heading_contains": "Contributing to Verification"}
+      ],
+      "notes": "Single-document lookup."
+    }
+  ]
+}

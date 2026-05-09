@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "domain": "asic",
+  "corpus": "opentitan",
+  "_note": "Routing fixture — exercises the confidence/ask_user gate ordering when deep_research=True. Unlike golden_queries.json, these run in mode='query' so the LLM confidence loop is reachable. Messy-but-answerable queries should NOT route to ask_user when DR is on; one control vague query should still route to ask_user.",
+  "queries": [
+    {
+      "id": "ask-user-routing-001-no-punct",
+      "query": "what does open titan use for verification",
+      "category": "messy_answerable",
+      "expected_action": "retrieve",
+      "expected_topics": ["verification"],
+      "expected_chunks": [
+        {"source": "doc/contributing/dv/README.md"}
+      ],
+      "notes": "Sloppy lowercase, no punctuation, project name split. Answerable from the verification README."
+    },
+    {
+      "id": "ask-user-routing-002-terse-dvsim",
+      "query": "tell me about dvsim",
+      "category": "messy_answerable",
+      "expected_action": "retrieve",
+      "expected_topics": ["dvsim"],
+      "expected_chunks": [
+        {"source": "hw/lint/README.md", "text_contains": "dvsim"}
+      ],
+      "notes": "Terse but answerable — dvsim is referenced in hw/lint/README.md. The LLM confidence loop is prone to flag this as too vague."
+    },
+    {
+      "id": "ask-user-routing-003-word-salad",
+      "query": "lint flow opentitan how",
+      "category": "messy_answerable",
+      "expected_action": "retrieve",
+      "expected_topics": ["lint"],
+      "expected_chunks": [
+        {"source": "hw/lint/README.md", "heading_contains": "Linting"}
+      ],
+      "notes": "Ungrammatical word-salad ordering. Answerable from the lint README."
+    },
+    {
+      "id": "ask-user-routing-004-empty-control",
+      "query": "   ",
+      "category": "empty_control",
+      "expected_action": "ask_user",
+      "notes": "Whitespace-only — the sanitizer's empty-query path fires before the LangGraph loop. With DR on this MUST still route to ask_user (the bypass intentionally honours sanitizer rejections so genuinely-broken inputs are never silently retrieved)."
+    }
+  ]
+}
