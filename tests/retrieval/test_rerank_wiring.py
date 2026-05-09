@@ -224,3 +224,94 @@ def test_collect_bm25_ranks_failure_returns_all_none():
     assert out == [None]
 
 
+# ─── R1.3 anchor metadata threading ────────────────────────────────────────
+
+
+def test_anchor_metadata_threaded_through_descent():
+    """Descent leaves should carry an ``_anchor_rank`` matching the section
+    they were expanded from (0-indexed)."""
+    chain = _make_chain()
+
+    section_hits = [
+        types.SimpleNamespace(
+            text="sec0", score=0.9,
+            metadata={"node_kind": "section", "chunk_id": "p0",
+                      "document_id": "doc-A", "heading_path": ["A"]},
+            collection="default",
+        ),
+        types.SimpleNamespace(
+            text="sec1", score=0.7,
+            metadata={"node_kind": "section", "chunk_id": "p1",
+                      "document_id": "doc-A", "heading_path": ["B"]},
+            collection="default",
+        ),
+    ]
+    l0 = _hit("leaf0", chunk_id="L0")
+    l0.metadata["parent_section_id"] = "p0"
+    l1 = _hit("leaf1", chunk_id="L1")
+    l1.metadata["parent_section_id"] = "p1"
+    leaves_by_parent = {"p0": [l0], "p1": [l1]}
+
+    def fake_search(bm25_query, qe, alpha, limit, filters):
+        if any(getattr(f, "value", None) == "section" for f in (filters or [])):
+            return section_hits
+        return []
+
+    def fake_expand(parent_ids, per_section_limit, base_filters):
+        out = []
+        for pid in parent_ids:
+            for c in leaves_by_parent.get(pid, []):
+                out.append(c)
+        return out
+
+    chain._do_search = fake_search
+    chain._expand_sections_to_leaves = fake_expand
+    chain._fetch_siblings = fake_expand
+
+    leaves = chain._run_tree_descent(
+        bm25_query="q",
+        query_embedding=None,
+        alpha=0.5,
+        descent_top_k=2,
+        leaves_per_section=1,
+        base_filters=[],
+    )
+    metas = [l.metadata for l in leaves]
+    assert metas[0].get("_anchor_rank") == 0
+    assert metas[1].get("_anchor_rank") == 1
+
+
+def test_anchor_metadata_threaded_through_lift():
+    """Lift siblings should carry the anchor rank of the seed that supplied
+    their parent section."""
+    chain = _make_chain()
+
+    seeds = [
+        _hit("seedA", chunk_id="A0"),
+        _hit("seedB", chunk_id="B0"),
+    ]
+    seeds[0].metadata["parent_section_id"] = "pA"
+    seeds[1].metadata["parent_section_id"] = "pB"
+
+    def fake_expand(parent_ids, per_group_limit, base_filters):
+        out = []
+        for pid in parent_ids:
+            sib = _hit(f"sib-{pid}", chunk_id=f"sib-{pid}")
+            sib.metadata["parent_section_id"] = pid
+            out.append(sib)
+        return out
+
+    chain._expand_sections_to_leaves = fake_expand
+    chain._fetch_siblings = fake_expand
+
+    siblings = chain._run_tree_lift(
+        seed_results=seeds,
+        seed_top_k=2,
+        siblings_per_group=1,
+        base_filters=[],
+    )
+    metas = [s.metadata for s in siblings]
+    assert metas[0].get("_anchor_rank") == 0   # supplied by seeds[0]
+    assert metas[1].get("_anchor_rank") == 1   # supplied by seeds[1]
+
+

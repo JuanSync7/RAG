@@ -487,7 +487,14 @@ class RAGChain:
         leaves_per_section: int,
         base_filters,
     ) -> list:
-        """Stage 4b — search section nodes, then expand to their leaves."""
+        """Stage 4b — search section nodes, then expand to their leaves.
+
+        Each expanded leaf is tagged with ``_anchor_rank`` (private metadata
+        key, leading underscore) — the 0-indexed rank of the section that
+        produced it within ``section_hits``. The rerank-fusion module
+        consumes this signal when its anchor-confidence component is
+        enabled (R1.3).
+        """
         section_filter = SearchFilter(
             property="node_kind", operator="eq", value="section"
         )
@@ -502,9 +509,32 @@ class RAGChain:
             (h.metadata.get("chunk_id") or "")
             for h in section_hits
         ]
-        return self._expand_sections_to_leaves(
+        # Map each parent_section_id → its 0-indexed rank in the section
+        # search. The leaves returned by ``_expand_sections_to_leaves`` will
+        # be tagged with the rank of the section that produced them, looked
+        # up by their ``parent_section_id`` metadata (which production
+        # ingest writes for every leaf — see store.py prepare_object).
+        anchor_rank_by_pid: dict[str, int] = {}
+        for rank, pid in enumerate(parent_ids):
+            if pid and pid not in anchor_rank_by_pid:
+                anchor_rank_by_pid[pid] = rank
+
+        leaves = self._expand_sections_to_leaves(
             parent_ids, leaves_per_section, base_filters
         )
+        for leaf in leaves:
+            meta = getattr(leaf, "metadata", None)
+            if meta is None:
+                meta = {}
+                try:
+                    leaf.metadata = meta
+                except AttributeError:  # pragma: no cover
+                    continue
+            pid = meta.get("parent_section_id") or ""
+            ar = anchor_rank_by_pid.get(pid)
+            if ar is not None:
+                meta["_anchor_rank"] = ar
+        return leaves
 
     def _run_tree_lift(
         self,
@@ -513,7 +543,13 @@ class RAGChain:
         siblings_per_group: int,
         base_filters,
     ) -> list:
-        """Stage 4c — for the top seeds, fetch siblings under their parent."""
+        """Stage 4c — for the top seeds, fetch siblings under their parent.
+
+        Each sibling is tagged with ``_anchor_rank`` — the 0-indexed rank
+        of the seed that supplied its parent section. Siblings whose
+        parent_section comes from the strongest seed score the highest
+        anchor-confidence boost in the rerank-fusion stage (R1.3).
+        """
         seeds = list(seed_results)[:seed_top_k]
         parent_ids: list[str] = []
         seen: set[str] = set()
@@ -525,7 +561,23 @@ class RAGChain:
             parent_ids.append(psid)
         if not parent_ids:
             return []
-        return self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+        anchor_rank_by_pid: dict[str, int] = {
+            pid: rank for rank, pid in enumerate(parent_ids)
+        }
+        siblings = self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+        for sib in siblings:
+            meta = getattr(sib, "metadata", None)
+            if meta is None:
+                meta = {}
+                try:
+                    sib.metadata = meta
+                except AttributeError:  # pragma: no cover
+                    continue
+            pid = meta.get("parent_section_id") or ""
+            ar = anchor_rank_by_pid.get(pid)
+            if ar is not None:
+                meta["_anchor_rank"] = ar
+        return siblings
 
     def _collect_candidates(
         self,

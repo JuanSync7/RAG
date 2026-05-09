@@ -271,8 +271,78 @@ Cost: order-of-magnitude more LLM tokens at ingest. Defer until v1 evaluation sa
 
 ---
 
+## R1 — Rerank Fusion (BM25-RRF + heading + anchor)
+
+After the v1 ship, the eval surfaced two systematic miss classes:
+
+1. **Lexical-heavy factoid queries** that the cross-encoder under-ranks
+   (e.g. queries naming a specific register field, where the gold leaf
+   is *all* about that field but doesn't paraphrase it).
+2. **Heading-mention QFS queries** (`q_intr_handling_qfs`,
+   `q_fifo_ctrl_qfs`) where the section's heading lexically matches the
+   query but the body text doesn't.
+
+R1 layers a thin scoring stage on top of the cross-encoder rerank that
+fuses three signals:
+
+```
+final = ce_score
+      + λ_rrf  · (1 / (k + ce_rank) + 1 / (k + bm25_rank))
+      + λ_head · heading_match_score(query, heading_path)
+      + λ_anch · 1 / (anchor_k + anchor_rank)        # tree-leaves only
+```
+
+Implemented in `src/retrieval/query/nodes/rerank_fusion.py` as four pure
+functions (`compute_bm25_rrf`, `heading_match_score`, `anchor_confidence`,
+`fuse_scores`). Wired into the rerank stage of `rag_chain.py` after the CE
+call. Toggleable via `RAG_RERANK_FUSION_ENABLED`.
+
+### Key implementation choices
+
+- **BM25 plumbing**: a parallel `alpha=0.0` Weaviate hybrid call alongside
+  the main hybrid search. Weaviate v4's hybrid query exposes only the
+  fused score (and a free-text `explain_score`); a second BM25-only call
+  is cheap (BM25 hits the inverted index, no vector compute) and gives a
+  clean, deterministic rank list. Failure of the BM25 call degrades
+  gracefully to "all `None`", so RRF contributes only the CE side.
+- **Heading match** uses substring matching after stopword filtering — no
+  external NLP dependency. Fraction of content tokens that appear in any
+  heading segment.
+- **Anchor confidence** is private metadata (`_anchor_rank` with a leading
+  underscore). Tagged in `_run_tree_descent` and `_run_tree_lift` from
+  the rank of the section/seed that supplied each leaf. Stage-4 leaves
+  carry `None` and contribute zero to this signal.
+
+### Default weights (per `config/settings.py`)
+
+| Key | Default | Notes |
+| --- | ---: | --- |
+| `RAG_RERANK_FUSION_ENABLED` | `True` | Master switch — `False` = legacy CE-only |
+| `RAG_RERANK_RRF_K` | `60` | RRF dampening — canonical default |
+| `RAG_RERANK_RRF_LAMBDA` | `1.0` | RRF weight |
+| `RAG_RERANK_HEADING_LAMBDA` | `0.15` | Heading-match weight |
+| `RAG_RERANK_ANCHOR_LAMBDA` | `0.10` | Anchor-confidence weight (tree-only) |
+| `RAG_RERANK_ANCHOR_K` | `10` | Anchor dampening |
+
+### Eval gate (OpenTitan UART fixture, simulator)
+
+| Phase | QFS R@5 (off→on) | QFS nDCG@10 | Factoid R@5 (off→on) | Factoid nDCG@10 |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-R1 baseline | 0.304 → 0.304 | 0.402 → 0.494 | 0.000 → 0.000 | 0.000 → 0.105 |
+| R1.1 (RRF only) | 0.304 → 0.304 | 0.402 → 0.494 | 0.000 → 0.000 | 0.000 → 0.105 |
+| R1.1 + R1.2 | 0.304 → 0.304 | 0.402 → 0.494 | 0.000 → **0.333** | 0.000 → **0.129** |
+| R1 default | 0.304 → **0.346** | 0.402 → **0.495** | 0.000 → **0.333** | 0.000 → 0.129 |
+
+R1.1 alone shows zero delta in this lexical simulator because the
+CE-stand-in and the BM25 signal both reduce to text-jaccard — RRF can't
+reorder identical rank lists. In production with a real cross-encoder
+the two signals are independent, and RRF is expected to recover lexical
+hits the CE drops. R1.2 lifts factoid recall@5 +33pp on tree-on (the
+designed targets), and R1.3 adds a further +4pp on QFS recall@5.
+
 ## References
 
 - TreeRAG (Tao et al., ACL Findings 2025): <https://aclanthology.org/2025.findings-acl.20/>
 - RAPTOR (Sarthi et al., 2024): <https://arxiv.org/abs/2401.18059>
 - RagFlow GraphRAG (for contrast): <https://ragflow.io/blog/ragflow-support-graphrag>
+- Reciprocal Rank Fusion (Cormack, Clarke, Buettcher 2009): <https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf>
