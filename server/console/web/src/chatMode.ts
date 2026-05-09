@@ -21,6 +21,7 @@ export type RetrievalSubMode = "hard" | "auto";
 
 const STORAGE_KEY = "rw_chat_mode";
 const SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
+const DEEP_RESEARCH_STORAGE_KEY = "rw_deep_research";
 const RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
 const TOPK_STORAGE_KEY = "rw_sources_top_k";
 const DEFAULT_TOPK = 5;
@@ -63,6 +64,59 @@ export function setRetrievalSubMode(sub: RetrievalSubMode): void {
     _subMode = sub;
     localStorage.setItem(SUBMODE_STORAGE_KEY, sub);
     syncSubmodeUI();
+}
+
+let _deepResearch: boolean = localStorage.getItem(DEEP_RESEARCH_STORAGE_KEY) === "1";
+
+export function getDeepResearch(): boolean {
+    return _deepResearch;
+}
+
+export function setDeepResearch(enabled: boolean): void {
+    _deepResearch = enabled;
+    localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY, enabled ? "1" : "0");
+    syncDeepResearchUI();
+}
+
+function syncDeepResearchUI(): void {
+    const btn = document.getElementById("chatDeepResearch");
+    if (btn) {
+        btn.setAttribute("aria-pressed", _deepResearch ? "true" : "false");
+        btn.classList.toggle("active", _deepResearch);
+    }
+}
+
+let _lastSuggestedQuery: string = "";
+type ResubmitFn = (text: string) => void | Promise<void>;
+let _resubmit: ResubmitFn | null = null;
+
+export function registerDrSuggestionResubmit(fn: ResubmitFn): void {
+    _resubmit = fn;
+}
+
+export function showDrSuggestionChip(forQuery: string): void {
+    if (_deepResearch) return;
+    const chip = document.getElementById("drSuggestChip");
+    if (!chip) return;
+    _lastSuggestedQuery = forQuery;
+    chip.removeAttribute("hidden");
+}
+
+export function hideDrSuggestionChip(): void {
+    const chip = document.getElementById("drSuggestChip");
+    if (!chip) return;
+    chip.setAttribute("hidden", "");
+}
+
+function initDrSuggestionChip(): void {
+    const chip = document.getElementById("drSuggestChip");
+    if (!chip) return;
+    chip.addEventListener("click", () => {
+        const q = _lastSuggestedQuery.trim();
+        hideDrSuggestionChip();
+        setDeepResearch(true);
+        if (q && _resubmit) void _resubmit(q);
+    });
 }
 
 function syncSubmodeUI(): void {
@@ -140,10 +194,16 @@ export function initChatMode(): void {
             });
         });
     }
+    const drBtn = document.getElementById("chatDeepResearch");
+    if (drBtn) {
+        drBtn.addEventListener("click", () => setDeepResearch(!_deepResearch));
+    }
+    initDrSuggestionChip();
     initRailCollapse();
     initTopKInput();
     syncToggleUI();
     syncSubmodeUI();
+    syncDeepResearchUI();
     applyModeToView();
     renderRail();
 

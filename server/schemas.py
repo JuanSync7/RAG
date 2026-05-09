@@ -100,6 +100,18 @@ class QueryRequest(BaseModel):
             "the current build."
         ),
     )
+    deep_research: bool = Field(
+        default=False,
+        description=(
+            "Opt-in deep-research retrieval. Replaces the linear "
+            "kg_expand → embed → hybrid_search → rerank stages with a "
+            "recursive topic-grouped loop: the LLM checks whether the "
+            "evidence answers the original question, decomposes into "
+            "sub-questions when not, and gathers chunks across multiple "
+            "rounds. Uses substantially more LLM/retrieval calls; intended "
+            "for analytical / multi-aspect questions."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -215,6 +227,33 @@ class QueryResponse(BaseModel):
             "actually consumed when shaping the processed query."
         ),
     )
+    dr_suggestion: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Advisory hint for the UI when the user ran in baseline mode "
+            "but cheap heuristics indicate Deep Research would have done "
+            "better. Shape: {suggest: bool, reason: str|None}. None on the "
+            "DR path (suggesting DR while DR is already on is meaningless)."
+        ),
+    )
+    ask_user_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Typed reason carried whenever action == 'ask_user'. One of: "
+            "'sanitizer_reject', 'injection_blocked', 'vague_query', "
+            "'budget_exhausted', 'no_results'. None for any other action. "
+            "Front-ends should switch on this to render a reason-specific "
+            "clarification message."
+        ),
+    )
+    degraded: bool = Field(
+        default=False,
+        description=(
+            "True when the chain took a degraded fallback path (eg. BM25-only "
+            "re-search after the primary hybrid call returned 0 hits) but "
+            "still produced usable results."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -301,6 +340,7 @@ class ConsoleQueryRequest(BaseModel):
     mode: Literal["query", "retrieval"] = Field(default="query")
     retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
     extra_processing: bool = Field(default=False)
+    deep_research: bool = Field(default=False)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.
