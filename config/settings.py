@@ -908,6 +908,43 @@ RAG_STAGE_BUDGET_TREE_LIFT_MS: int = int(
     os.environ.get("RAG_STAGE_BUDGET_TREE_LIFT_MS", "200")
 )
 
+# ─── Rerank fusion (R1 — BM25-RRF + heading-aware + anchor confidence) ─────
+# These knobs control the post-CE fusion layer in
+# ``src.retrieval.query.nodes.rerank_fusion``. Disabling fusion (or setting
+# every weight to 0) returns the rerank stage to pure cross-encoder behavior.
+
+RAG_RERANK_FUSION_ENABLED: bool = os.environ.get(
+    "RAG_RERANK_FUSION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for rerank-time fusion. When False, the rerank stage uses
+pure cross-encoder scores (legacy behavior). Defaults True."""
+
+RAG_RERANK_RRF_K: int = max(1, int(
+    os.environ.get("RAG_RERANK_RRF_K", "60")
+))
+"""Reciprocal Rank Fusion dampening constant ``k``. 60 is the canonical default."""
+
+RAG_RERANK_RRF_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_RRF_LAMBDA", "1.0")
+)
+"""Weight applied to the BM25-RRF component when fusion is enabled."""
+
+RAG_RERANK_HEADING_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_HEADING_LAMBDA", "0.15")
+)
+"""Weight applied to heading-match score (lambda_heading)."""
+
+RAG_RERANK_ANCHOR_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_ANCHOR_LAMBDA", "0.10")
+)
+"""Weight applied to anchor-confidence (tree-mode only). Ignored when
+the candidate is not a tree-retrieved leaf (``_anchor_rank is None``)."""
+
+RAG_RERANK_ANCHOR_K: int = max(1, int(
+    os.environ.get("RAG_RERANK_ANCHOR_K", "10")
+))
+"""Anchor-confidence dampening constant: ``confidence = 1 / (k + rank)``."""
+
 
 def validate_visual_retrieval_config() -> None:
     """Validate visual retrieval configuration at startup.
