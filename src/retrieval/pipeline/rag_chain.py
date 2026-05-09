@@ -104,6 +104,19 @@ from config.settings import (
     RAG_STAGE_BUDGET_TREE_DESCENT_MS,
     RAG_STAGE_BUDGET_TREE_LIFT_MS,
 )
+from config.settings import (
+    RAG_RERANK_FUSION_ENABLED,
+    RAG_RERANK_RRF_K,
+    RAG_RERANK_RRF_LAMBDA,
+    RAG_RERANK_HEADING_LAMBDA,
+    RAG_RERANK_ANCHOR_LAMBDA,
+    RAG_RERANK_ANCHOR_K,
+)
+from src.retrieval.query.nodes.rerank_fusion import (
+    anchor_confidence,
+    fuse_scores,
+    heading_match_score,
+)
 import os as _os
 RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
     "RAG_TREE_SCHEMA_PRESENT", "true"
@@ -605,6 +618,145 @@ class RAGChain:
             kept.append(h)
         return kept
 
+    # ─── Rerank fusion helpers (R1 — BM25-RRF + heading + anchor) ────────
+    @staticmethod
+    def _candidate_key(item) -> str:
+        """Stable identifier for a candidate across BM25 + CE pools.
+
+        Uses the same precedence as ``_collect_candidates`` dedup so a
+        candidate seen in both pools matches by key.
+        """
+        meta = getattr(item, "metadata", None) or {}
+        return (
+            str(getattr(item, "uuid", "") or "")
+            or str(meta.get("uuid", "") or "")
+            or str(meta.get("chunk_id", "") or "")
+            or getattr(item, "text", "")
+        )
+
+    def _collect_bm25_ranks(
+        self,
+        bm25_query: str,
+        query_embedding,
+        search_limit: int,
+        base_filters: list,
+        candidates: list,
+    ) -> list[Optional[int]]:
+        """Run a BM25-only Weaviate search and assign 0-indexed ranks to ``candidates``.
+
+        Implementation note: Weaviate v4's hybrid query exposes only the
+        fused score (and a free-text ``explain_score``). Rather than parse
+        explain-score we run a parallel ``alpha=0.0`` (BM25-only) hybrid
+        search with the same query and filters. The cost is low because
+        BM25 is the fast path on the inverted index.
+
+        Returns:
+            Same-length list as ``candidates``: a 0-indexed BM25 rank, or
+            ``None`` for candidates that did not appear in the BM25 pool
+            (e.g., descent/lift leaves never seen by BM25).
+        """
+        try:
+            bm25_hits = self._do_search(
+                bm25_query, query_embedding, 0.0, search_limit, base_filters
+            )
+        except Exception as exc:  # pragma: no cover — defensive only
+            logger.warning(
+                "_collect_bm25_ranks: BM25-only search failed (%s); "
+                "ranks will be None for all candidates", exc,
+            )
+            return [None] * len(candidates)
+        rank_by_key: dict[str, int] = {}
+        for rank, hit in enumerate(bm25_hits):
+            key = self._candidate_key(hit)
+            if key and key not in rank_by_key:
+                rank_by_key[key] = rank
+        return [
+            rank_by_key.get(self._candidate_key(c)) for c in candidates
+        ]
+
+    @staticmethod
+    def _heading_scores_for(query: str, candidates: list) -> list[float]:
+        return [
+            heading_match_score(
+                query,
+                ((getattr(c, "metadata", None) or {}).get("heading_path") or []),
+            )
+            for c in candidates
+        ]
+
+    @staticmethod
+    def _anchor_confs_for(candidates: list, anchor_k: int) -> list[float]:
+        out: list[float] = []
+        for c in candidates:
+            meta = getattr(c, "metadata", None) or {}
+            out.append(anchor_confidence(meta.get("_anchor_rank"), anchor_k=anchor_k))
+        return out
+
+    def _apply_rerank_fusion(
+        self,
+        *,
+        query: str,
+        candidates: list,
+        reranked: list[RankedResult],
+        bm25_ranks: list[Optional[int]],
+        rerank_top_k: int,
+    ) -> list[RankedResult]:
+        """Refine reranker output using the fusion module.
+
+        ``reranked`` is the cross-encoder's top-K (already CE-sorted). We
+        rebuild a positional alignment with ``candidates``/``bm25_ranks``
+        by candidate key, compute fused scores, re-sort, and slice. When
+        fusion is disabled, returns ``reranked`` unchanged so behavior is
+        bit-identical to the legacy path.
+        """
+        if not RAG_RERANK_FUSION_ENABLED or not reranked:
+            return reranked
+
+        # Map original candidates → BM25 rank via key.
+        cand_key_to_bm25: dict[str, Optional[int]] = {}
+        for c, br in zip(candidates, bm25_ranks):
+            cand_key_to_bm25[self._candidate_key(c)] = br
+
+        # Build the parallel arrays in CE order (the order of ``reranked``).
+        ce_scores: list[float] = []
+        bm25_aligned: list[Optional[int]] = []
+        heading_aligned: list[float] = []
+        anchor_aligned: list[float] = []
+        for r in reranked:
+            key = self._candidate_key(r)
+            ce_scores.append(float(r.score))
+            bm25_aligned.append(cand_key_to_bm25.get(key))
+            heading_aligned.append(
+                heading_match_score(query, (r.metadata or {}).get("heading_path") or [])
+            )
+            anchor_aligned.append(
+                anchor_confidence(
+                    (r.metadata or {}).get("_anchor_rank"),
+                    anchor_k=RAG_RERANK_ANCHOR_K,
+                )
+            )
+
+        fused = fuse_scores(
+            ce_scores=ce_scores,
+            bm25_ranks=bm25_aligned,
+            heading_scores=heading_aligned,
+            anchor_confs=anchor_aligned,
+            weights={
+                "rrf": RAG_RERANK_RRF_LAMBDA,
+                "heading": RAG_RERANK_HEADING_LAMBDA,
+                "anchor": RAG_RERANK_ANCHOR_LAMBDA,
+            },
+            k_rrf=RAG_RERANK_RRF_K,
+        )
+
+        # Apply fused scores back onto the existing RankedResults and resort.
+        rescored = [
+            RankedResult(text=r.text, score=fused[i], metadata=r.metadata)
+            for i, r in enumerate(reranked)
+        ]
+        rescored.sort(key=lambda r: r.score, reverse=True)
+        return rescored[:rerank_top_k]
+
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
         """Convert search results into a sorted RankedResult list."""
@@ -1031,14 +1183,40 @@ class RAGChain:
                     conversation_id=conversation_id,
                 )
 
-            # Stage 5: Reranking
+            # Stage 5: Reranking (cross-encoder + fusion R1)
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
+                # 5a. BM25-only rank lookup, used by the RRF fusion component.
+                #     Run in parallel-style alongside CE scoring; if fusion is
+                #     disabled at config level, skip the extra round-trip.
+                bm25_ranks: list[Optional[int]] = []
+                if RAG_RERANK_FUSION_ENABLED:
+                    bm25_ranks = self._collect_bm25_ranks(
+                        bm25_query=bm25_query,
+                        query_embedding=query_embedding,
+                        search_limit=search_limit,
+                        base_filters=filters,
+                        candidates=list(search_results),
+                    )
+
+                # 5b. Cross-encoder rerank — the heavy lifter.
                 reranked = self.reranker.rerank(
                     query=processed_query,
                     documents=search_results,
-                    top_k=rerank_top_k,
+                    top_k=max(rerank_top_k, len(search_results)) if RAG_RERANK_FUSION_ENABLED else rerank_top_k,
                 )
+
+                # 5c. Apply fusion (BM25-RRF + heading + anchor) on top of CE.
+                if RAG_RERANK_FUSION_ENABLED:
+                    reranked = self._apply_rerank_fusion(
+                        query=processed_query,
+                        candidates=list(search_results),
+                        reranked=reranked,
+                        bm25_ranks=bm25_ranks,
+                        rerank_top_k=rerank_top_k,
+                    )
+                    rerank_span.set_attribute("fusion_enabled", True)
+
                 scores = [r.score for r in reranked]
                 if scores:
                     rerank_span.set_attribute("rerank_score_min", min(scores))

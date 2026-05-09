@@ -201,6 +201,8 @@ def build_simulated_retriever(
     fixture: Fixture,
     *,
     reranker: Callable[[str, list], list] | None = None,
+    apply_fusion: bool = False,
+    fusion_weights: dict | None = None,
 ):
     """Return ``retrieve(query_text, *, tree_enabled) -> [chunk_id, ...]``.
 
@@ -216,6 +218,12 @@ def build_simulated_retriever(
             (text_jaccard + 0.5 * heading_jaccard) — fast, dependency-free,
             adequate for synthetic gates. Pass ``TEIRerankerAdapter`` (or any
             callable) to score with a real cross-encoder for real-data evals.
+        apply_fusion: When True, the production rerank-fusion module is
+            applied on top of the reranker's output (BM25-RRF + heading
+            + anchor). Lets the harness measure fusion deltas in the
+            same lexical sandbox.
+        fusion_weights: Override fusion weights, e.g. ``{"rrf": 1.0,
+            "heading": 0.0, "anchor": 0.0}`` to isolate a single signal.
     """
     chunks: list[dict] = list(fixture.all_chunks())
 
@@ -297,17 +305,76 @@ def build_simulated_retriever(
                 for m in merged
             ]
 
+        # Compute per-candidate CE-stand-in scores in the same order as the
+        # candidate list. We want them deterministic so fusion math is exact.
+        def _ce_score(item) -> float:
+            text_score = _jaccard(query_text, getattr(item, "text", ""))
+            meta = getattr(item, "metadata", None) or {}
+            heading_text = " ".join(meta.get("heading_path") or [])
+            head_score = _jaccard(query_text, heading_text)
+            return text_score + 0.5 * head_score
+
         if reranker is not None:
+            # Trust an external reranker (e.g. TEI cross-encoder); we still
+            # carry its output into fusion when ``apply_fusion`` is True.
             merged_sorted = list(reranker(query_text, merged))
         else:
-            def _rerank_score(item) -> float:
-                text_score = _jaccard(query_text, getattr(item, "text", ""))
-                meta = getattr(item, "metadata", None) or {}
-                heading_text = " ".join(meta.get("heading_path") or [])
-                head_score = _jaccard(query_text, heading_text)
-                return text_score + 0.5 * head_score
+            merged_sorted = sorted(merged, key=_ce_score, reverse=True)
 
-            merged_sorted = sorted(merged, key=_rerank_score, reverse=True)
+        if apply_fusion:
+            # Local import keeps eval module otherwise-pure.
+            from src.retrieval.query.nodes.rerank_fusion import (  # noqa: PLC0415
+                anchor_confidence,
+                fuse_scores,
+                heading_match_score,
+            )
+
+            # BM25-only ranks: re-sort the merged candidates by raw BM25
+            # (text-only jaccard) to mimic Weaviate's BM25-only side-call.
+            bm25_sorted = sorted(
+                merged,
+                key=lambda c: _jaccard(query_text, getattr(c, "text", "")),
+                reverse=True,
+            )
+            bm25_rank_by_key: dict[str, int] = {}
+            for r, h in enumerate(bm25_sorted):
+                meta = getattr(h, "metadata", None) or {}
+                key = str(meta.get("chunk_id", "")) or getattr(h, "text", "")
+                if key and key not in bm25_rank_by_key:
+                    bm25_rank_by_key[key] = r
+
+            ce_scores: list[float] = []
+            bm25_aligned: list[int | None] = []
+            heading_aligned: list[float] = []
+            anchor_aligned: list[float] = []
+            for item in merged_sorted:
+                meta = getattr(item, "metadata", None) or {}
+                key = str(meta.get("chunk_id", "")) or getattr(item, "text", "")
+                ce_scores.append(_ce_score(item))
+                bm25_aligned.append(bm25_rank_by_key.get(key))
+                heading_aligned.append(
+                    heading_match_score(query_text, meta.get("heading_path") or [])
+                )
+                anchor_aligned.append(
+                    anchor_confidence(meta.get("_anchor_rank"), anchor_k=10)
+                )
+
+            weights = fusion_weights or {
+                "rrf": 1.0, "heading": 0.15, "anchor": 0.10,
+            }
+            fused = fuse_scores(
+                ce_scores=ce_scores,
+                bm25_ranks=bm25_aligned,
+                heading_scores=heading_aligned,
+                anchor_confs=anchor_aligned,
+                weights=weights,
+                k_rrf=60,
+            )
+            paired = sorted(
+                zip(merged_sorted, fused), key=lambda kv: kv[1], reverse=True
+            )
+            merged_sorted = [item for item, _ in paired]
+
         return [
             (getattr(m, "metadata", None) or {}).get("chunk_id", "")
             for m in merged_sorted
