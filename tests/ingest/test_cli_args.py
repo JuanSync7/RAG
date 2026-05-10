@@ -30,6 +30,37 @@ def test_update_flag_absent_defaults_false():
     assert args.update is False
 
 
+def test_fresh_flag_sets_fresh_true():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh"])
+    assert args.fresh is True
+    assert args.update is False
+
+
+def test_fresh_flag_absent_defaults_false():
+    parser = _build_parser()
+    args = parser.parse_args([])
+    assert args.fresh is False
+
+
+def test_fresh_and_update_are_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--update", "--fresh"])
+
+
+def test_yes_flag_present():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh", "--yes"])
+    assert args.yes is True
+
+
+def test_yes_short_flag_present():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh", "-y"])
+    assert args.yes is True
+
+
 # ---------------------------------------------------------------------------
 # --file / --dir (source selection)
 # ---------------------------------------------------------------------------

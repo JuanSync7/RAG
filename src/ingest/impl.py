@@ -665,8 +665,8 @@ def ingest_file(
 def ingest_directory(
     documents_dir: Path,
     config: Optional[IngestionConfig] = None,
-    fresh: bool = True,
-    update: bool = False,
+    fresh: bool = False,
+    update: bool = True,
     selected_sources: Optional[list[Path]] = None,
     batch_id: str = "",
 ) -> IngestionRunSummary:

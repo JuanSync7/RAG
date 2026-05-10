@@ -571,6 +571,24 @@ def _execute_ingest_run(state: dict) -> None:
     """Execute one ingestion run using the current interactive state."""
     from ingest import ingest as run_ingest
 
+    if not state["update"]:
+        # Destructive path: require typed confirmation.
+        from config.settings import WEAVIATE_COLLECTION_NAME
+        print(
+            f"\n  {B_RED}⚠ FRESH MODE{RESET}: this will DELETE the entire "
+            f"Weaviate collection '{WEAVIATE_COLLECTION_NAME}' before re-ingesting."
+        )
+        try:
+            answer = input(
+                f"  Type the collection name to confirm "
+                f"(or anything else to abort): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer != WEAVIATE_COLLECTION_NAME:
+            print(f"  {B_RED}✗ Aborted{RESET} (fresh-mode confirmation failed)\n")
+            return
+
     print(f"  {B_CYAN}⟡{RESET} {DIM}Running ingestion...{RESET}")
     start = time.time()
     try:
@@ -616,7 +634,7 @@ def run_ingest_cli() -> None:
     state = {
         "documents_dir": validate_documents_dir(DOCUMENTS_DIR, PROJECT_ROOT),
         "selected_file": None,
-        "update": False,
+        "update": True,
         "build_kg": True,
         "semantic_chunking": True,
         "export_processed": False,
