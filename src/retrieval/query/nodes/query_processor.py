@@ -32,7 +32,6 @@ from config.settings import (
     PROMPTS_DIR,
     QUERY_CONFIDENCE_THRESHOLD,
     QUERY_LOG_DIR,
-    QUERY_MAX_LENGTH,
     QUERY_PROCESSING_TEMPERATURE,
 )
 from src.platform.llm import call_oneshot, get_llm_provider
@@ -446,11 +445,6 @@ def sanitize_node(state: QueryState) -> dict:
                 "Your query appears to be empty. Please enter a question."
             ),
         }
-
-    # Length check
-    if len(query) > QUERY_MAX_LENGTH:
-        query = query[:QUERY_MAX_LENGTH]
-        logger.info("Query truncated to %d characters", QUERY_MAX_LENGTH)
 
     # Injection detection
     if _detect_injection(query):

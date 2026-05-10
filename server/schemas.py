@@ -27,7 +27,7 @@ class QueryRequest(BaseModel):
     """Incoming query from a user."""
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(..., min_length=1, max_length=2000, description="The search query")
+    query: str = Field(..., min_length=1, max_length=32000, description="The search query")
     source_filter: Optional[str] = Field(None, description="Filter by source document filename")
     heading_filter: Optional[str] = Field(None, description="Filter by section heading")
     alpha: float = Field(0.5, ge=0.0, le=1.0, description="Hybrid search balance (0=BM25, 1=vector)")
@@ -282,7 +282,7 @@ class ConsoleQueryRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(..., min_length=1, max_length=2000)
+    query: str = Field(..., min_length=1, max_length=32000)
     stream: bool = Field(default=True)
     source_filter: Optional[str] = None
     heading_filter: Optional[str] = None
