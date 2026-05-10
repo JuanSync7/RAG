@@ -16,9 +16,8 @@ Default weights: retrieval=0.50, llm=0.25, citation=0.25.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
-from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown, ConfidenceWeights
+from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown
 
 # Downward correction map for LLM overconfidence bias.
 # LLMs tend to report "high" even when evidence is weak,
@@ -29,147 +28,7 @@ LLM_CONFIDENCE_MAP = {
     "low": 0.25,
 }
 
-# ---------------------------------------------------------------------------
-# Sentence splitting — hand-rolled, no heavy deps
-# ---------------------------------------------------------------------------
-
-# Abbreviations that end with a period but are NOT sentence boundaries.
-# Ordered longest-first to avoid prefix shadowing (e.g. "jr" before "j").
-_ABBREVS: frozenset[str] = frozenset(
-    [
-        "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st",
-        "vs", "etc", "approx", "dept", "est", "govt", "inc",
-        "corp", "ltd", "co", "fig", "vol", "no",
-        "e.g", "i.e", "viz", "cf",
-        "jan", "feb", "mar", "apr", "jun", "jul", "aug",
-        "sep", "oct", "nov", "dec",
-    ]
-)
-
-# Matches a run of digits.digits (decimal) or word.digits (version like v2.0).
-_DECIMAL_RE = re.compile(r"\w\.\d")
-
-# Matches URLs — skip any period inside an http(s):// run.
-_URL_RE = re.compile(r"https?://\S+")
-
-# Terminal punctuation followed by whitespace or newline (the split candidate).
-# We exclude pure ellipsis sequences ("..." or "…") — they indicate continuation,
-# not a sentence boundary, unless followed by a capital letter (handled in loop).
-_TERM_PUNCT_RE = re.compile(r"([.!?…]+)(\s+|\n)")
-
-# Pure ellipsis pattern — "...", "....", "…" — not a sentence boundary.
-_ELLIPSIS_RE = re.compile(r"^\.{2,}$|^…+$")
-
-
-def _is_abbreviation_boundary(text: str, match_start: int) -> bool:
-    """Return True if the period at match_start is an abbreviation, not a sentence end."""
-    # Find the word preceding the period.
-    word_end = match_start
-    word_start = word_end - 1
-    while word_start >= 0 and (text[word_start].isalpha() or text[word_start] == "."):
-        word_start -= 1
-    token = text[word_start + 1 : word_end].lower().rstrip(".")
-    return token in _ABBREVS
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Split text into sentences with a robust hand-rolled splitter.
-
-    Handles:
-      - Common abbreviations (Mr., Dr., etc., e.g., i.e., vs.)
-      - Decimal numbers (3.14, v2.0) — not split
-      - URLs (https://...) — periods inside not split
-      - Ellipses (... or …) — treated as a single boundary
-      - Single newline without trailing space
-      - Double newline as a hard paragraph boundary
-
-    Filters out fragments shorter than 3 words.  If ALL fragments are
-    shorter than 3 words, keeps the longest one to avoid returning an
-    empty list spuriously (a vacuously empty list inflated coverage to
-    1.0 — see #10).
-
-    Args:
-        text: Input text to split.
-
-    Returns:
-        List of sentence strings, each with at least 3 words.
-        Never returns an empty list if the input is non-empty.
-    """
-    if not text or not text.strip():
-        return []
-
-    text = text.strip()
-
-    # Replace URLs with a placeholder to protect periods inside them.
-    url_map: dict[str, str] = {}
-    def _store_url(m: re.Match) -> str:
-        key = f"__URL{len(url_map)}__"
-        url_map[key] = m.group(0)
-        return key
-
-    protected = _URL_RE.sub(_store_url, text)
-
-    # Split on hard paragraph breaks first.
-    paragraphs = re.split(r"\n{2,}", protected)
-
-    raw_sentences: list[str] = []
-    for para in paragraphs:
-        # Within a paragraph, split on terminal punctuation + whitespace/newline.
-        parts: list[str] = []
-        last = 0
-        for m in _TERM_PUNCT_RE.finditer(para):
-            punct = m.group(1)
-            end = m.end()
-            boundary_pos = m.start()
-
-            # Ellipsis check: "..." or "…" indicates continuation, not a sentence end.
-            if _ELLIPSIS_RE.match(punct):
-                continue
-
-            # Decimal / version check: digit.digit — not a boundary.
-            if "." in punct and _DECIMAL_RE.search(para, max(0, boundary_pos - 2)):
-                before_window = para[max(0, boundary_pos - 2): boundary_pos + 2]
-                if _DECIMAL_RE.search(before_window):
-                    continue
-
-            # Abbreviation check (only for single ".").
-            if punct == "." and _is_abbreviation_boundary(para, boundary_pos):
-                continue
-
-            sentence = para[last:end].strip()
-            if sentence:
-                parts.append(sentence)
-            last = end
-
-        tail = para[last:].strip()
-        if tail:
-            parts.append(tail)
-
-        # Also split on single newline within a paragraph (no trailing space needed).
-        expanded: list[str] = []
-        for part in parts:
-            sub = [s.strip() for s in part.split("\n") if s.strip()]
-            expanded.extend(sub)
-
-        raw_sentences.extend(expanded)
-
-    # Restore URLs.
-    restored = []
-    for s in raw_sentences:
-        for key, url in url_map.items():
-            s = s.replace(key, url)
-        restored.append(s)
-
-    # Filter by word count (>= 3).
-    substantive = [s for s in restored if len(s.split()) >= 3]
-    if substantive:
-        return substantive
-
-    # Keep-at-least-one guard: return the longest fragment so the list is
-    # never empty for non-empty input (prevents vacuous coverage=1.0, #10).
-    if restored:
-        return [max(restored, key=lambda s: len(s.split()))]
-    return []
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def compute_retrieval_confidence(
@@ -259,28 +118,22 @@ def compute_citation_coverage(
     """
     sentences = _split_sentences(answer)
     if not sentences:
-        # #10: Return 0.5 (neutral) rather than 1.0 (vacuously perfect).
-        # An answer with no substantive sentences should neither be rewarded
-        # nor penalised — 0.5 keeps the composite in a neutral range while
-        # avoiding the false-confidence of a perfect coverage score.
-        return 0.5
+        return 1.0
 
     num_chunks = len(retrieved_texts)
     valid_indices = set(range(1, num_chunks + 1))  # 1-based
 
-    # Primary: citation marker checking — fractional credit per sentence (#9).
-    # Previously a sentence got full credit if *any* citation was valid.
-    # Now credit = valid_count / total_count (e.g. [1, 99] with 1 chunk → 0.5).
-    citation_credit_sum = 0.0
+    # Primary: citation marker checking
+    cited_count = 0
     for sentence in sentences:
         citations = _CITATION_RE.findall(sentence)
         if citations:
+            # At least one valid citation index
             cited_indices = {int(c) for c in citations}
-            valid_count = len(cited_indices & valid_indices)
-            total_count = len(cited_indices)
-            citation_credit_sum += valid_count / total_count
+            if cited_indices & valid_indices:
+                cited_count += 1
 
-    citation_score = citation_credit_sum / len(sentences)
+    citation_score = cited_count / len(sentences) if sentences else 1.0
 
     # Secondary: n-gram overlap
     overlap_score = _compute_ngram_overlap(sentences, retrieved_texts, min_overlap_words)
@@ -316,9 +169,6 @@ def _compute_ngram_overlap(
     return grounded_count / len(sentences)
 
 
-_DEFAULT_WEIGHTS = ConfidenceWeights(retrieval=0.50, llm=0.25, citation=0.25)
-
-
 def compute_composite_confidence(
     reranker_scores: list[float],
     llm_confidence_text: str,
@@ -327,16 +177,11 @@ def compute_composite_confidence(
     retrieval_weight: float = 0.50,
     llm_weight: float = 0.25,
     citation_weight: float = 0.25,
-    weights: Optional[ConfidenceWeights] = None,
 ) -> ConfidenceBreakdown:
     """Compute the 3-signal composite confidence score.
 
     Combines retrieval quality (objective), LLM self-report (subjective),
     and citation coverage (structural) into a single weighted composite.
-
-    Accepts weights as either a ConfidenceWeights dataclass (preferred, validated
-    once at construction) or as three float kwargs (back-compat).  If both are
-    provided, the dataclass takes precedence.
 
     Args:
         reranker_scores: Reranker scores for retrieved documents.
@@ -346,20 +191,15 @@ def compute_composite_confidence(
         retrieval_weight: Weight for retrieval signal. Default 0.50.
         llm_weight: Weight for LLM signal. Default 0.25.
         citation_weight: Weight for citation signal. Default 0.25.
-        weights: Optional ConfidenceWeights dataclass (takes precedence over
-            individual float kwargs).
 
     Returns:
         ConfidenceBreakdown with all three signals and the composite score.
     """
-    if weights is not None:
-        w = weights
-    else:
-        # Build from kwargs — ConfidenceWeights.__post_init__ validates sum.
-        w = ConfidenceWeights(
-            retrieval=retrieval_weight,
-            llm=llm_weight,
-            citation=citation_weight,
+    total_weight = retrieval_weight + llm_weight + citation_weight
+    if abs(total_weight - 1.0) > 1e-6:
+        raise ValueError(
+            f"Confidence weights must sum to 1.0, got {total_weight:.6f} "
+            f"(retrieval={retrieval_weight}, llm={llm_weight}, citation={citation_weight})"
         )
 
     retrieval_score = compute_retrieval_confidence(reranker_scores)
@@ -367,9 +207,9 @@ def compute_composite_confidence(
     citation_score = compute_citation_coverage(answer, retrieved_texts)
 
     composite = (
-        w.retrieval * retrieval_score
-        + w.llm * llm_score
-        + w.citation * citation_score
+        retrieval_weight * retrieval_score
+        + llm_weight * llm_score
+        + citation_weight * citation_score
     )
     composite = max(0.0, min(1.0, composite))
 
@@ -378,10 +218,28 @@ def compute_composite_confidence(
         llm_score=llm_score,
         citation_score=citation_score,
         composite=composite,
-        retrieval_weight=w.retrieval,
-        llm_weight=w.llm,
-        citation_weight=w.citation,
+        retrieval_weight=retrieval_weight,
+        llm_weight=llm_weight,
+        citation_weight=citation_weight,
     )
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences using punctuation boundaries.
+
+    Filters out very short fragments (< 4 words) that are likely
+    headings, citations, or formatting artifacts rather than claims.
+
+    Args:
+        text: Input text to split.
+
+    Returns:
+        List of sentence strings with at least 4 words each.
+    """
+    if not text or not text.strip():
+        return []
+    raw = _SENTENCE_SPLIT_RE.split(text.strip())
+    return [s.strip() for s in raw if len(s.strip().split()) >= 4]
 
 
 def _has_substantial_overlap(

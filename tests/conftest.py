@@ -378,49 +378,42 @@ def _install_stub_modules() -> None:
         sys.modules["mcp.server.fastmcp"] = mcp_server_fastmcp
 
     if "prometheus_client" not in sys.modules:
-        # Prefer the real prometheus_client package when it's installed — DR
-        # metrics tests rely on the real Counter/Histogram introspection API
-        # (`_name`, `_value`, `collect()`). Fall back to a no-op stub only when
-        # the real package is absent.
-        try:
-            import prometheus_client as _real_prom  # noqa: F401
-        except ImportError:
-            prom = types.ModuleType("prometheus_client")
+        prom = types.ModuleType("prometheus_client")
 
-            class _MetricBase:
-                def __init__(self, *args, **kwargs):
-                    pass
-
-                def labels(self, **kwargs):
-                    return self
-
-                def inc(self, amount=1):
-                    pass
-
-                def dec(self, amount=1):
-                    pass
-
-                def set(self, value):
-                    pass
-
-                def observe(self, value):
-                    pass
-
-            class Counter(_MetricBase):
+        class _MetricBase:
+            def __init__(self, *args, **kwargs):
                 pass
 
-            class Gauge(_MetricBase):
+            def labels(self, **kwargs):
+                return self
+
+            def inc(self, amount=1):
                 pass
 
-            class Histogram(_MetricBase):
+            def dec(self, amount=1):
                 pass
 
-            prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
-            prom.generate_latest = lambda registry=None: b""
-            prom.Counter = Counter
-            prom.Gauge = Gauge
-            prom.Histogram = Histogram
-            sys.modules["prometheus_client"] = prom
+            def set(self, value):
+                pass
+
+            def observe(self, value):
+                pass
+
+        class Counter(_MetricBase):
+            pass
+
+        class Gauge(_MetricBase):
+            pass
+
+        class Histogram(_MetricBase):
+            pass
+
+        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+        prom.generate_latest = lambda registry=None: b""
+        prom.Counter = Counter
+        prom.Gauge = Gauge
+        prom.Histogram = Histogram
+        sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
@@ -590,49 +583,45 @@ def _install_stub_modules() -> None:
         sys.modules["PIL.Image"] = pil_image
 
     if "prometheus_client" not in sys.modules:
-        # Prefer the real prometheus_client when installed (see comment above).
-        try:
-            import prometheus_client as _real_prom2  # noqa: F401
-        except ImportError:
-            prom = types.ModuleType("prometheus_client")
+        prom = types.ModuleType("prometheus_client")
 
-            CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+        CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
-            def generate_latest(*args, **kwargs):
-                return b""
+        def generate_latest(*args, **kwargs):
+            return b""
 
-            class _MetricBase:
-                """Lightweight stub for Counter, Gauge, Histogram."""
+        class _MetricBase:
+            """Lightweight stub for Counter, Gauge, Histogram."""
 
-                def __init__(self, *args, **kwargs):
-                    pass
+            def __init__(self, *args, **kwargs):
+                pass
 
-                def labels(self, *args, **kwargs):
-                    return self
+            def labels(self, *args, **kwargs):
+                return self
 
-                def inc(self, *args, **kwargs):
-                    pass
+            def inc(self, *args, **kwargs):
+                pass
 
-                def dec(self, *args, **kwargs):
-                    pass
+            def dec(self, *args, **kwargs):
+                pass
 
-                def set(self, *args, **kwargs):
-                    pass
+            def set(self, *args, **kwargs):
+                pass
 
-                def observe(self, *args, **kwargs):
-                    pass
+            def observe(self, *args, **kwargs):
+                pass
 
-                def time(self):
-                    import contextlib
-                    return contextlib.nullcontext()
+            def time(self):
+                import contextlib
+                return contextlib.nullcontext()
 
-            prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
-            prom.generate_latest = generate_latest
-            prom.Counter = _MetricBase
-            prom.Gauge = _MetricBase
-            prom.Histogram = _MetricBase
-            prom.Summary = _MetricBase
-            sys.modules["prometheus_client"] = prom
+        prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
+        prom.generate_latest = generate_latest
+        prom.Counter = _MetricBase
+        prom.Gauge = _MetricBase
+        prom.Histogram = _MetricBase
+        prom.Summary = _MetricBase
+        sys.modules["prometheus_client"] = prom
 
     # httpx: prefer the real package if it's installed (litellm + openai depend
     # on it internally, so stubbing over the top breaks their imports). The

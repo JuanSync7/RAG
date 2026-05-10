@@ -1468,7 +1468,7 @@ class TestOpenNeo4jClientExceptionPath:
         import logging
         import src.ingest.lifecycle.gc as gc_mod
 
-        with patch.dict("sys.modules", {"kgweave.knowledge_graph": None}):
+        with patch.dict("sys.modules", {"src.knowledge_graph": None}):
             with caplog.at_level(logging.WARNING):
                 result = gc_mod._open_neo4j_client()
 

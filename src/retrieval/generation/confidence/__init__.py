@@ -1,6 +1,6 @@
 # @summary
 # Composite confidence scoring for RAG pipeline post-generation evaluation.
-# Exports: ConfidenceBreakdown, ConfidenceWeights, PostGuardrailAction, compute_composite_confidence, route_by_confidence
+# Exports: ConfidenceBreakdown, PostGuardrailAction, compute_composite_confidence, route_by_confidence
 # Deps: src.retrieval.generation.confidence.schemas, src.retrieval.generation.confidence.scoring, src.retrieval.generation.confidence.routing
 # @end-summary
 """Composite confidence scoring package.
@@ -12,7 +12,6 @@ composite score used for post-generation routing decisions.
 
 from src.retrieval.generation.confidence.schemas import (
     ConfidenceBreakdown,
-    ConfidenceWeights,
     PostGuardrailAction,
 )
 from src.retrieval.generation.confidence.scoring import compute_composite_confidence
@@ -20,7 +19,6 @@ from src.retrieval.generation.confidence.routing import route_by_confidence
 
 __all__ = [
     "ConfidenceBreakdown",
-    "ConfidenceWeights",
     "PostGuardrailAction",
     "compute_composite_confidence",
     "route_by_confidence",

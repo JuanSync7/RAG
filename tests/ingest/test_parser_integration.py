@@ -65,6 +65,7 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
         parser_registry=registry,
     )
     return {
@@ -90,6 +91,7 @@ def _make_chunking_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
         parser_registry=None,
     )
     state: dict = {
@@ -102,6 +104,7 @@ def _make_chunking_state(
         "source_version": "1",
         "raw_text": raw_text,
         "cleaned_text": raw_text,
+        "refactored_text": "",
         "processing_log": [],
         "runtime": runtime,
     }

@@ -118,6 +118,7 @@ class TestEmbeddingStorageNodeInjectsAtomicityFields:
             config=IngestionConfig(),
             embedder=MagicMock(),
             weaviate_client=MagicMock(),
+            kg_builder=None,
             db_client=None,
         )
 

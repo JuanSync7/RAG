@@ -1,5 +1,5 @@
 <!-- @summary
-Document ingestion package with a two-phase LangGraph pipeline: doc_processing (5 nodes) and embedding (vector path), connected by the Clean Document Store. KG ingest is owned by KGWeave and runs out-of-process via the Temporal Phase 2b handoff.
+Document ingestion package with a two-phase LangGraph pipeline: doc_processing (5 nodes) and embedding (8 nodes), connected by the Clean Document Store.
 @end-summary -->
 
 # ingest
@@ -10,7 +10,7 @@ This package powers embedding ingestion for the RAG system. The pipeline is orga
 
 - `common/`: cross-cutting contracts, state/config types, node helpers, and deterministic utilities
 - `doc_processing/`: Phase 1 pipeline — document ingestion through clean text output (5 LangGraph nodes)
-- `embedding/`: Phase 2 pipeline — chunking through vector storage (LangGraph nodes)
+- `embedding/`: Phase 2 pipeline — chunking through vector and KG storage (8 LangGraph nodes)
 - `clean_store.py`: `CleanDocumentStore` — the Phase 1→2 boundary (atomic read/write)
 - `support/`: node support libraries (document parsing, vision/VLM, LLM helpers, text processing)
 - `impl.py`: pipeline orchestrator — source discovery, idempotency, Phase 1 → Phase 2 coordination
@@ -28,10 +28,10 @@ figure images (caption + OCR + tags), and appends those notes into cleaned text.
 | --- | --- |
 | `common/` | Shared schemas, state/config types, universal node helpers, and deterministic utilities |
 | `doc_processing/` | Phase 1 — document ingestion through clean text output (5 nodes) |
-| `embedding/` | Phase 2 — chunking through vector storage |
+| `embedding/` | Phase 2 — chunking through vector and KG storage (8 nodes) |
 | `clean_store.py` | `CleanDocumentStore` — atomic read/write boundary between Phase 1 and Phase 2 |
 | `support/` | Node support libraries: Docling parsing, vision/VLM, LLM helpers, text processing |
-| `impl.py` | Pipeline orchestrator: source discovery, idempotency checks, Phase 1 → Phase 2 coordination |
+| `impl.py` | Pipeline orchestrator: source discovery, idempotency checks, Phase 1 → Phase 2 coordination, KG export |
 | `temporal/` | Temporal execution subsystem: activities, workflows, and worker entry point for distributed parallel ingestion |
 
 ## Internal Dependencies
@@ -39,7 +39,7 @@ figure images (caption + OCR + tags), and appends those notes into cleaned text.
 - `impl.py` calls `run_document_processing` (from `doc_processing/`) and `run_embedding_pipeline` (from `embedding/`), and reads `common/types.py` for schema/runtime types.
 - `temporal/activities.py` calls the same phase functions (`run_document_processing`, `run_embedding_pipeline`) — Temporal wraps them, it does not replace them.
 - `doc_processing/workflow.py` wires nodes 1–5 with conditional graph transitions for multimodal and refactoring stages.
-- `embedding/workflow.py` wires the embedding stages with conditional graph transitions for optional cross-reference, quality validation, and visual embedding stages.
+- `embedding/workflow.py` wires nodes 6–13 with conditional graph transitions for optional extraction and storage stages.
 - Node modules in both sub-packages consume shared helpers from `common/shared.py`, deterministic helpers from `common/utils.py`, and specialized processing from `support/`.
 
 ## Engineering Documentation

@@ -37,6 +37,7 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {
         "chunks": chunks if chunks is not None else [],
@@ -258,9 +259,10 @@ class TestChunkProjection:
 class TestPartialStateResilience:
     """metadata_generation_node must handle None/absent optional upstream fields."""
 
-    def test_uses_cleaned_text(self):
-        """cleaned_text is the sole input source after PR1 removed refactoring."""
+    def test_refactored_text_none_falls_back_to_cleaned(self):
+        """refactored_text=None must not raise; node falls back to cleaned_text."""
         state = _make_state(enable_llm=True, cleaned="Some content here.")
+        state["refactored_text"] = None  # simulate absent optional upstream field
 
         with (
             patch(_LLM_JSON, return_value={"summary": "ok", "keywords": ["a"]}),
@@ -272,9 +274,10 @@ class TestPartialStateResilience:
         summary = _get("metadata_summary", result, state)
         assert summary is not None
 
-    def test_cleaned_text_empty_no_crash(self):
-        """When cleaned_text is an empty string, node must not raise."""
+    def test_refactored_text_and_cleaned_empty_no_crash(self):
+        """When refactored_text is None and cleaned_text is empty string, node must not raise."""
         state = _make_state(enable_llm=True, cleaned="")
+        state["refactored_text"] = None  # simulate absent optional upstream field
 
         with (
             patch(_LLM_JSON, return_value={}),

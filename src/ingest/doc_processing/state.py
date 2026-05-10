@@ -3,7 +3,7 @@
 # Exports: DocumentProcessingState
 # Deps: src.ingest.common.types
 # Fields: runtime, source_*, raw_text, structure, multimodal_notes, cleaned_text,
-#   errors, should_skip, processing_log, docling_document (Optional[Any]),
+#   refactored_text, errors, should_skip, processing_log, docling_document (Optional[Any]),
 #   trace_id (str, FR-3051)
 # @end-summary
 
@@ -24,7 +24,7 @@ class DocumentProcessingState(TypedDict, total=False):
     Fields
     ------
     runtime : Runtime
-        Shared runtime dependencies (config, embedder, weaviate, db_client).
+        Shared runtime dependencies (config, embedder, weaviate, kg_builder).
     source_path : str
         Absolute path to the source file.
     source_name : str
@@ -52,8 +52,9 @@ class DocumentProcessingState(TypedDict, total=False):
     multimodal_notes : list[str]
         Vision-generated notes for figures. Empty list if multimodal disabled.
     cleaned_text : str
-        Boilerplate-stripped, unicode-normalised Markdown text. This is the
-        final Phase 1 output — there is no LLM-rewrite stage.
+        Boilerplate-stripped, unicode-normalised Markdown text.
+    refactored_text : str | None
+        LLM-rewritten text (self-contained paragraphs). None if refactoring disabled.
     errors : list[str]
         Error messages from any node. Non-empty triggers orchestrator failure path.
     should_skip : bool
@@ -75,6 +76,7 @@ class DocumentProcessingState(TypedDict, total=False):
     structure: dict[str, Any]
     multimodal_notes: list[str]
     cleaned_text: str
+    refactored_text: Optional[str]
     errors: list[str]
     should_skip: bool
     processing_log: list[str]
@@ -96,17 +98,4 @@ class DocumentProcessingState(TypedDict, total=False):
 
     The structure dict will contain docling_document_available: bool
     set by structure_detection_node after it runs.
-    """
-    parse_result: Optional[Any]
-    """Unified ``ParseResult`` produced by the parser-abstraction path
-    (``src.ingest.support.parser_base.ParseResult``). Set by
-    ``structure_detection_node`` when ``runtime.parser_registry`` is
-    configured. ``None`` on the legacy Docling path or when parsing failed.
-    Consumed by the chunking node for downstream chunk emission.
-    """
-    parser_instance: Optional[Any]
-    """Parser instance retained between ``parse()`` and ``chunk()``.
-    Set by ``structure_detection_node`` on the parser-abstraction path.
-    Encapsulates parser-internal state (e.g. ``DoclingDocument``); the
-    pipeline must not inspect or serialise this object.
     """

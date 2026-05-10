@@ -1,7 +1,6 @@
 # @summary
 # Pipeline boundary contracts: input/output schemas and the cross-cutting wire type.
 # Exports: RAGRequest, RAGResponse, RankedResult, VisualPageResult
-# RAGResponse includes first_composite (initial confidence before internal re-retrieval loop).
 # Deps: dataclasses, typing
 # @end-summary
 """Pipeline-level schema contracts — what enters and exits the RAG pipeline."""
@@ -100,34 +99,11 @@ class RAGResponse:
     retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
     re_retrieval_params: Optional[dict[str, Any]] = None
-    first_composite: Optional[float] = None
     visual_results: Optional[list["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)
-    # Typed generation failure (issue #7). Carries kind/user_message/internal_detail
-    # so front-ends can render a meaningful message instead of a blank answer.
-    generation_error: Optional[dict[str, Any]] = None
     # Retrieval-tab explainability — populated by the auto-mode rewriter in
     # S4. ``history_decision`` reports which strategy the LLM picked
     # ("use_as_is" | "partial_history" | "full_history" | "hard_query").
     history_decision: Optional[str] = None
     history_turns_used: int = 0
-    # Advisory hint for the UI: "this baseline-mode query looks multi-topic —
-    # try Deep Research?". Populated only on the baseline path; absent (None)
-    # when DR was already active. Shape: {"suggest": bool, "reason": str|None}.
-    dr_suggestion: Optional[dict[str, Any]] = None
-    # Typed reason carried whenever ``action == "ask_user"``. One of the
-    # ``AskUserReason`` enum string values (sanitizer_reject, injection_blocked,
-    # vague_query, budget_exhausted, no_results). Additive — the existing
-    # ``action == "ask_user"`` string check still works; this enum gives UIs
-    # enough signal to pick a reason-specific clarification message.
-    ask_user_reason: Optional[str] = None
-    # True when the chain took a degraded fallback path (eg. BM25-only re-search
-    # after the primary hybrid returned 0 hits) but still produced results.
-    degraded: bool = False
-    # Free-form structured metadata for observability surfaces (Temporal search
-    # attributes, evals, debug payloads). Keys are namespaced by feature, e.g.
-    # ``metadata["deep_research"] = {"iteration_count": 3, "llm_call_count": 7,
-    # "decomposed": True, "topic_count": 2, "is_unified": False, ...}``.
-    # Always populated for DR runs; empty dict otherwise.
-    metadata: dict = field(default_factory=dict)

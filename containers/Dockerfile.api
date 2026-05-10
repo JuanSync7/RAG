@@ -20,16 +20,7 @@ RUN apt-get update \
 COPY pyproject.toml /app/pyproject.toml
 COPY containers/requirements-api.txt /app/requirements-api.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --prefix=/install -r /app/requirements-api.txt
-
-# KGWeave: extracted to a sibling repo, exposed via Compose `additional_contexts`
-# (or `docker build --build-context kgweave=../KGWeave`). Installed as a
-# regular non-editable package — the container has no access to the host
-# source tree at runtime, so editable mode would break.
-COPY --from=kgweave . /tmp/kgweave
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --prefix=/install /tmp/kgweave \
-    && rm -rf /tmp/kgweave \
+    uv pip install --system --prefix=/install -r /app/requirements-api.txt \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \

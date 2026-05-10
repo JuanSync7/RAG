@@ -175,6 +175,7 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {
         "raw_text": raw_text,

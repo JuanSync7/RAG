@@ -4,7 +4,7 @@
 # All operations are read-only (no mutations).
 # Exports: SyncEngine
 # Deps: src.ingest.common.schemas, src.ingest.lifecycle.schemas,
-#       src.ingest.common.minio_clean_store, src.vector_db
+#       src.ingest.common.minio_clean_store, src.vector_db, src.knowledge_graph
 # @end-summary
 """Four-store inventory and orphan-detection engine (FR-3000, FR-3002).
 

@@ -2,8 +2,8 @@
 # LangGraph TypedDict state contract for the Phase 2 Embedding Pipeline.
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
-# Fields: runtime, source_*, raw_text, cleaned_text, clean_hash,
-#   document_id, chunks, metadata_*, cross_references,
+# Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
+#   document_id, chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log,
 #   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
 #   parser_instance (Any, transient parser instance for chunk() call — never serialised),
@@ -11,7 +11,7 @@
 #   trace_id (str, FR-3052), batch_id (str, FR-3053),
 #   staging_batch_id (str, Issue #42 atomicity), source_hash (str, Issue #42),
 #   staged_minio (Optional[dict], Issue #42), staged_weaviate_records (list, Issue #42),
-#   staged_weaviate_delete_old (bool, Issue #42)
+#   staged_weaviate_delete_old (bool, Issue #42), staged_kg_chunks (list, Issue #42)
 # NOTE: docling_document field removed (Phase 3.2 / FR-3205 AC 2). It was in-memory
 #   only and was never persisted. Replaced by parse_result + parser_instance.
 # @end-summary
@@ -53,6 +53,8 @@ class EmbeddingPipelineState(TypedDict, total=False):
         for compatibility with chunking/enrichment nodes).
     cleaned_text : str
         Same as raw_text for Phase 2 entry point — the clean text is the input.
+    refactored_text : str | None
+        Stored refactored text from Phase 1, if present in CleanDocumentStore meta.
     clean_hash : str
         SHA-256 of the clean text (for change detection on Phase 2 re-runs).
     document_id : str
@@ -64,7 +66,9 @@ class EmbeddingPipelineState(TypedDict, total=False):
     metadata_keywords : list[str]
         Extracted keywords from metadata_generation_node (node 8).
     cross_references : list[dict[str, str]]
-        Pattern-matched cross-references from cross_reference_extraction_node.
+        Pattern-matched cross-references from cross_reference_extraction_node (node 9).
+    kg_triples : list[dict[str, Any]]
+        Extracted KG triples (subject/predicate/object) from kg_extraction_node (node 10).
     stored_count : int
         Number of chunks successfully stored in Weaviate from embedding_storage_node (node 12).
     errors : list[str]
@@ -87,12 +91,14 @@ class EmbeddingPipelineState(TypedDict, total=False):
     connector: str
     raw_text: str
     cleaned_text: str
+    refactored_text: Optional[str]
     clean_hash: str
     document_id: str
     chunks: list[ProcessedChunk]
     metadata_summary: str
     metadata_keywords: list[str]
     cross_references: list[dict[str, str]]
+    kg_triples: list[dict[str, Any]]
     stored_count: int
     errors: list[str]
     processing_log: list[str]
@@ -138,3 +144,5 @@ class EmbeddingPipelineState(TypedDict, total=False):
     """List of DocumentRecord objects staged for Weaviate flush at commit_node."""
     staged_weaviate_delete_old: bool
     """Whether to delete-by-source_key before flushing (update_mode path)."""
+    staged_kg_chunks: list[Any]
+    """List of (text, source_name) tuples staged for KG add_chunk replay at commit_node."""

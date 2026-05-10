@@ -108,9 +108,6 @@
         <span class="chat-topk-label">top_k</span>
         <input class="chat-topk-input" id="chatTopkInput" type="text" inputmode="numeric" pattern="[0-9]*" value="5">
       </label>
-      <button type="button" class="chat-deep-research-btn" id="chatDeepResearch" aria-pressed="false" title="Deep research: recursive topic-grouped retrieval. Slower (10–30s) but better for multi-aspect questions.">
-        <span class="dr-icon" aria-hidden="true">&#9737;</span><span class="dr-label">Deep research</span>
-      </button>
       <div class="ctx-chip" id="ctxChip">
         <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
         <span id="ctxPct">—</span>
@@ -197,10 +194,6 @@
       </div>
 
       <div class="attach-chips" id="attachChips"></div>
-      <button type="button" class="dr-suggest-chip" id="drSuggestChip" hidden title="Re-run with deep research enabled">
-        <span class="dr-suggest-icon" aria-hidden="true">&#10024;</span>
-        <span class="dr-suggest-text">This looks like a multi-topic question — try Deep Research?</span>
-      </button>
       <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md" style="display:none">
 
       <div class="input-wrap">

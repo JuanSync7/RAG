@@ -19,12 +19,11 @@ from src.ingest.common.types import IngestionConfig, Runtime
 
 def _make_state(
     cleaned: str = "# H1\nText",
-    refactored: str = "",  # legacy param, ignored; kept for back-compat with existing tests
+    refactored: str = "",
     semantic: bool = False,
     embedder=None,
 ) -> dict:
     """Return a minimal ingest state dict for chunking_node tests."""
-    del refactored
     config = IngestionConfig(
         semantic_chunking=semantic,
         chunk_size=500,
@@ -34,9 +33,11 @@ def _make_state(
         config=config,
         embedder=embedder or MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {
         "cleaned_text": cleaned,
+        "refactored_text": refactored,
         "raw_text": "raw content",
         "source_name": "test.md",
         "source_key": "local_fs:1",
@@ -79,10 +80,29 @@ _METADATA_TO_DICT = "src.ingest.embedding.nodes.chunking.metadata_to_dict"
 # ---------------------------------------------------------------------------
 
 class TestTextSourceSelection:
-    """chunking_node always uses cleaned_text (refactoring removed in PR1)."""
+    """chunking_node picks refactored_text when non-empty, else cleaned_text."""
 
-    def test_chunking_uses_cleaned_text(self):
-        """chunk_markdown called with cleaned_text."""
+    def test_chunking_uses_refactored_text_when_present(self):
+        """chunk_markdown called with refactored_text when non-empty."""
+        from src.ingest.embedding.nodes.chunking import chunking_node
+
+        refactored = "# Refactored\nRefactored body."
+        state = _make_state(cleaned="# Original\nOriginal body.", refactored=refactored)
+
+        with (
+            patch(_EXTRACT_METADATA, return_value=MagicMock()),
+            patch(_METADATA_TO_DICT, return_value={}),
+            patch(_NORMALIZE_HEADINGS, side_effect=lambda t: t) as mock_norm,
+            patch(_CHUNK_MARKDOWN, return_value=_fake_chunk_dicts()) as mock_chunk,
+        ):
+            chunking_node(state)
+
+        # normalize_headings_to_markdown should have received the refactored text
+        call_arg = mock_norm.call_args[0][0]
+        assert call_arg == refactored
+
+    def test_chunking_falls_back_to_cleaned_text(self):
+        """chunk_markdown called with cleaned_text when refactored_text is empty."""
         from src.ingest.embedding.nodes.chunking import chunking_node
 
         cleaned = "# Cleaned\nCleaned body."
@@ -279,11 +299,13 @@ class TestChunkingExceptionHandling:
 class TestPartialStateResilience:
     """Chunking node must handle None/absent optional upstream fields gracefully."""
 
-    def test_cleaned_text_used_when_only_field_set(self):
-        """cleaned_text is the sole input source after PR1 removed refactoring."""
+    def test_refactored_text_none_uses_cleaned_text(self):
+        """When refactored_text is None (not just empty), cleaned_text is used."""
         from src.ingest.embedding.nodes.chunking import chunking_node
 
-        state = _make_state(cleaned="# Cleaned\nCleaned body.")
+        state = _make_state(cleaned="# Cleaned\nCleaned body.", refactored="")
+        # Replace with explicit None to simulate absent optional field.
+        state["refactored_text"] = None
 
         with (
             patch(_EXTRACT_METADATA, return_value=MagicMock()),

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
 from server.common import ApiErrorResponse
@@ -27,7 +27,6 @@ from server.console.services import (
     read_clean_document_from_minio,
     render_source_document_html,
     resolve_console_static_asset,
-    is_remote_view_uri,
     resolve_console_source_path,
     resolve_user_console_static_asset,
     tail_log_lines,
@@ -541,14 +540,6 @@ def create_console_router(
             except HTTPException as exc:
                 minio_error = exc
 
-        # Remote-origin redirect (SharePoint/Drive/etc.): when the source URI is
-        # http(s) and the operator has opted in via RAG_CONSOLE_REMOTE_VIEW_ENABLED,
-        # 302 to the origin so SSO handles auth/render. We only reach here when
-        # MinIO did not have a clean rendering, so origin is the best fallback.
-        remote = is_remote_view_uri(source_uri)
-        if remote:
-            return RedirectResponse(url=remote, status_code=302)
-
         # Fallback: raw file from an allowed source root.
         try:
             target = resolve_console_source_path(source, source_uri)
@@ -606,9 +597,6 @@ def create_console_router(
     ):
         """Stream raw bytes for a source document. Used by the PDF iframe preview."""
         require_role(principal, "query")
-        remote = is_remote_view_uri(source_uri)
-        if remote:
-            return RedirectResponse(url=remote, status_code=302)
         target = resolve_console_source_path(source, source_uri)
         ext = target.suffix.lower()
         media_type = {
@@ -938,7 +926,10 @@ def create_console_router(
 
         cfg_kwargs = {
             "semantic_chunking": payload.semantic_chunking,
+            "build_kg": payload.build_kg,
             "export_processed": payload.export_processed,
+            "enable_knowledge_graph_extraction": payload.build_kg,
+            "enable_knowledge_graph_storage": payload.build_kg,
             "update_mode": payload.update_mode,
         }
         if payload.verbose_stages is not None:
@@ -980,6 +971,7 @@ def create_console_router(
             config=cfg,
             fresh=not payload.update_mode,
             update=payload.update_mode,
+            obsidian_export=payload.export_obsidian,
             selected_sources=selected_sources,
         )
         return console_ok(

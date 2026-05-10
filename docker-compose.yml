@@ -25,14 +25,14 @@ services:
     container_name: rag-postgres
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
-      POSTGRES_USER: ${RAG_POSTGRES_USER:-litellm}
-      POSTGRES_PASSWORD: ${RAG_POSTGRES_PASSWORD:-litellm}
-      POSTGRES_DB: ${RAG_POSTGRES_DB:-litellm}
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
     volumes:
       - rag-postgres-data:/var/lib/postgresql/data
       - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${RAG_POSTGRES_USER:-litellm}"]
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -44,10 +44,10 @@ services:
     image: postgres:16-alpine
     container_name: rag-pg-maintenance
     environment:
-      - PGPASSWORD=${RAG_POSTGRES_PASSWORD:-litellm}
+      - PGPASSWORD=litellm
       - PGHOST=rag-postgres
-      - PGUSER=${RAG_POSTGRES_USER:-litellm}
-      - PGDATABASE=${RAG_POSTGRES_DB:-litellm}
+      - PGUSER=litellm
+      - PGDATABASE=litellm
       - LITELLM_LOG_RETENTION_DAYS=${LITELLM_LOG_RETENTION_DAYS:-90}
     volumes:
       - ./ops/postgres/litellm-maintenance.sh:/litellm-maintenance.sh:ro
@@ -62,14 +62,14 @@ services:
     container_name: rag-temporal-db
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
-      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
-      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal}
-      POSTGRES_DB: ${TEMPORAL_POSTGRES_DB:-temporal}
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
       - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal}"]
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -83,8 +83,8 @@ services:
     environment:
       - DB=postgres12
       - DB_PORT=5432
-      - POSTGRES_USER=${TEMPORAL_POSTGRES_USER:-temporal}
-      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD:-temporal}
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-db
       # Workflow history retention. Temporal auto-deletes histories older than this.
       # Default is 72h (3 days); 720h = 30 days is typical for production.
@@ -112,8 +112,6 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.api
-      additional_contexts:
-        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
@@ -193,8 +191,6 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
-      additional_contexts:
-        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
     command: python -m server.worker
     environment:
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
@@ -242,56 +238,6 @@ services:
       # so `ingest_directory(/app/opentitan_data/...)` finds the files.
       - ./opentitan_data:/app/opentitan_data:ro
 
-  # KGWeave Phase 2b worker — separate image, separate Temporal queue
-  # (kgweave-default). RagWeave's IngestDocumentWorkflow dispatches by
-  # activity name to this worker, so the two fleets scale independently.
-  # Set KGWEAVE_REPO_PATH in .env (default: ../KGWeave sibling checkout).
-  # See docs/kgweave_deployment.md for topology, scaling, and rollout.
-  kgweave-worker:
-    profiles: ["workers", "kgweave"]
-    image: ghcr.io/juansync7/kgweave-worker:${KGWEAVE_IMAGE_TAG:-latest}
-    build:
-      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
-      dockerfile: containers/Dockerfile.kgweave-worker
-    environment:
-      # Shared Temporal cluster — same host:port as the RagWeave worker.
-      - TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
-      # Slot budget — independent of RAG_WORKER_CONCURRENCY (FR-3562 spirit:
-      # KGWeave never starves the RagWeave worker and vice versa).
-      - KG_WORKER_SLOTS=${KG_WORKER_SLOTS:-4}
-      # Regex extractor by default; flip to 1 to enable GLiNER (image must
-      # have been built with --build-arg KGWEAVE_EXTRAS=gliner).
-      - KG_USE_GLINER=${KG_USE_GLINER:-0}
-    depends_on:
-      temporal:
-        condition: service_started
-    restart: unless-stopped
-
-  # KGWeave HTTP API — read-side query service (Step C). Stateless, scales
-  # horizontally; intended for non-Python consumers and external access.
-  # Writes still flow through the Temporal worker above.
-  kgweave-api:
-    profiles: ["kgweave", "kgweave-api"]
-    image: ghcr.io/juansync7/kgweave-api:${KGWEAVE_IMAGE_TAG:-latest}
-    build:
-      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
-      dockerfile: containers/Dockerfile.kgweave-api
-    ports:
-      - "${KGWEAVE_API_HOST_PORT:-8090}:8080"
-    environment:
-      - KG_GRAPH_PATH=${KG_GRAPH_PATH:-/data/graph.json}
-      - KGWEAVE_API_TOKEN=${KGWEAVE_API_TOKEN:-}
-      - KGWEAVE_API_WORKERS=${KGWEAVE_API_WORKERS:-1}
-    volumes:
-      - kgweave-graph:/data:ro
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/v1/health', timeout=2).status == 200 else 1)\""]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-
   dozzle:
     # Always-on: web UI for container visibility + start/stop/restart actions.
     # Companion to scripts/stack.sh (CLI). Browse to http://localhost:9999.
@@ -337,16 +283,8 @@ services:
       - "${RAG_WEAVIATE_HTTP_HOST_PORT:-8090}:8080"
       - "${RAG_WEAVIATE_GRPC_HOST_PORT:-50051}:50051"
     environment:
-      QUERY_DEFAULTS_LIMIT: "${RAG_WEAVIATE_QUERY_LIMIT:-25}"
-      # SECURITY: anonymous access is enabled by default for local dev. Set to
-      # "false" and configure AUTHENTICATION_APIKEY_* / AUTHORIZATION_ADMINLIST_*
-      # below for any non-local deployment.
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "${RAG_WEAVIATE_ANON_ACCESS:-true}"
-      AUTHENTICATION_APIKEY_ENABLED: "${RAG_WEAVIATE_APIKEY_ENABLED:-false}"
-      AUTHENTICATION_APIKEY_ALLOWED_KEYS: "${RAG_WEAVIATE_APIKEY_ALLOWED:-}"
-      AUTHENTICATION_APIKEY_USERS: "${RAG_WEAVIATE_APIKEY_USERS:-}"
-      AUTHORIZATION_ADMINLIST_ENABLED: "${RAG_WEAVIATE_ADMIN_ENABLED:-false}"
-      AUTHORIZATION_ADMINLIST_USERS: "${RAG_WEAVIATE_ADMIN_USERS:-}"
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       DEFAULT_VECTORIZER_MODULE: "none"
       ENABLE_MODULES: ""
@@ -366,20 +304,7 @@ services:
     profiles: ["app", "workers", "monitoring"]
     image: redis:7-alpine
     container_name: rag-redis
-    # If RAG_REDIS_AUTH is set, enforce password auth. Default empty = no auth
-    # (preserves prior behavior). When auth is enabled, RAG_CACHE_REDIS_URL /
-    # RAG_MEMORY_REDIS_URL must include the password: redis://:PWD@host:port/0
-    command:
-      - sh
-      - -c
-      - |
-        if [ -n "$$RAG_REDIS_AUTH" ]; then
-          exec redis-server --appendonly yes --requirepass "$$RAG_REDIS_AUTH"
-        else
-          exec redis-server --appendonly yes
-        fi
-    environment:
-      - RAG_REDIS_AUTH=${RAG_REDIS_AUTH:-}
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "${RAG_REDIS_PORT:-6379}:6379"
     volumes:
@@ -503,7 +428,7 @@ services:
     volumes:
       - langfuse-minio-data:/data
     ports:
-      - "${LANGFUSE_MINIO_HOST_PORT:-9090}:9000"
+      - "${MINIO_HOST_PORT:-9090}:9000"
     restart: unless-stopped
 
   langfuse-worker:
@@ -624,10 +549,10 @@ services:
     # warmup pass preallocates activation memory at max-batch-tokens, so
     # 8192 spikes to ~5 GB — too tight when Windows is co-tenant on the card.
     # 2048 keeps peak ~2 GB (weights ~1.1 GB + activations ~800 MB + CUDA
-    # ctx ~400 MB). Raise on dedicated GPUs via env. Auto-truncate avoids 413s.
+    # ctx ~400 MB). Raise on dedicated GPUs. Auto-truncate avoids 413s.
     command: >
-      --max-batch-tokens ${RAG_TEI_EMBED_MAX_BATCH_TOKENS:-2048}
-      --max-concurrent-requests ${RAG_TEI_EMBED_MAX_CONCURRENT:-8}
+      --max-batch-tokens 2048
+      --max-concurrent-requests 8
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
@@ -661,8 +586,8 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
       - HF_ENDPOINT=https://huggingface.co
     command: >
-      --max-batch-tokens ${RAG_TEI_EMBED_CPU_MAX_BATCH_TOKENS:-1024}
-      --max-concurrent-requests ${RAG_TEI_EMBED_CPU_MAX_CONCURRENT:-4}
+      --max-batch-tokens 1024
+      --max-concurrent-requests 4
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
@@ -691,8 +616,8 @@ services:
     # VRAM stays bounded when both share the 6 GB card with Ollama.
     # Fall back to cpu-1.8 + remove deploy block if VRAM contention OOMs.
     command: >
-      --max-batch-tokens ${RAG_TEI_RERANK_MAX_BATCH_TOKENS:-2048}
-      --max-concurrent-requests ${RAG_TEI_RERANK_MAX_CONCURRENT:-4}
+      --max-batch-tokens 2048
+      --max-concurrent-requests 4
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
@@ -799,4 +724,3 @@ volumes:
   langfuse-minio-data:
   prometheus-data:
   grafana-data:
-  kgweave-graph:

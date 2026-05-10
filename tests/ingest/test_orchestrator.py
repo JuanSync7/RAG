@@ -32,12 +32,16 @@ def _make_runtime(tmp_path, **config_overrides):
     """Build a minimal Runtime whose config has every optional stage disabled."""
     config_kwargs = dict(
         enable_multimodal_processing=False,
+        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
+        enable_knowledge_graph_extraction=False,
+        enable_knowledge_graph_storage=False,
         enable_quality_validation=False,
         enable_docling_parser=False,
         enable_llm_metadata=False,
         persist_refactor_mirror=False,
         clean_store_dir=str(tmp_path / "store"),
+        build_kg=False,
     )
     config_kwargs.update(config_overrides)
     config = IngestionConfig(**config_kwargs)
@@ -45,6 +49,7 @@ def _make_runtime(tmp_path, **config_overrides):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
 
 
@@ -52,12 +57,16 @@ def _make_config(tmp_path, **overrides):
     """Build a minimal IngestionConfig with every optional stage disabled."""
     config_kwargs = dict(
         enable_multimodal_processing=False,
+        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
+        enable_knowledge_graph_extraction=False,
+        enable_knowledge_graph_storage=False,
         enable_quality_validation=False,
         enable_docling_parser=False,
         enable_llm_metadata=False,
         persist_refactor_mirror=False,
         clean_store_dir=str(tmp_path / "store"),
+        build_kg=False,
         store_documents=False,
     )
     config_kwargs.update(overrides)
@@ -92,6 +101,7 @@ def _phase1_result(doc: Path, cleaned="clean text"):
         "source_hash": hashlib.sha256(data).hexdigest(),
         "raw_text": data.decode(),
         "cleaned_text": cleaned,
+        "refactored_text": None,
         "errors": [],
         "processing_log": ["document_ingestion:ok"],
         "structure": {"has_figures": False},
@@ -108,6 +118,7 @@ def _phase2_result(**overrides):
         "errors": [],
         "processing_log": ["chunking:ok", "embedding_storage:ok"],
         "chunks": [],
+        "kg_triples": [],
     }
     r.update(overrides)
     return r
@@ -136,6 +147,7 @@ class TestIngestDirectoryNewFiles:
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
              patch("src.ingest.impl.get_embedding_provider"), \
+             patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file",
                    return_value=_mock_ingest_result()) as mock_if:
 
@@ -185,6 +197,7 @@ class TestIngestDirectorySkipUnchanged:
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
              patch("src.ingest.impl.get_embedding_provider"), \
+             patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file") as mock_if:
 
             summary = ingest_directory(
@@ -225,6 +238,7 @@ class TestIngestDirectoryRemoveDeleted:
              patch("src.ingest.impl.ensure_collection"), \
              patch("src.ingest.impl.delete_by_source_key") as mock_del, \
              patch("src.ingest.impl.get_embedding_provider"), \
+             patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file",
                    return_value=_mock_ingest_result()):
 
@@ -261,6 +275,7 @@ class TestIngestDirectoryPartialFailure:
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
              patch("src.ingest.impl.get_embedding_provider"), \
+             patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file", side_effect=_selective_ingest):
 
             summary = ingest_directory(documents_dir=src_dir, config=config, fresh=False)
@@ -271,15 +286,20 @@ class TestIngestDirectoryPartialFailure:
 
 class TestIngestDirectoryInvalidConfig:
     def test_ingest_directory_raises_on_invalid_config(self, tmp_path):
-        """verify_core_design fires before any infrastructure is touched;
+        """enable_knowledge_graph_storage=True with build_kg=False raises ValueError.
+
+        verify_core_design fires before any infrastructure is touched;
         ingest_file must not be called.
         """
         src_dir = tmp_path / "docs"
         src_dir.mkdir()
         (src_dir / "doc.txt").write_text("irrelevant")
 
-        # chunk_overlap >= chunk_size is a fast-fail in verify_core_design.
-        config = _make_config(tmp_path, chunk_size=100, chunk_overlap=200)
+        config = _make_config(
+            tmp_path,
+            enable_knowledge_graph_storage=True,
+            build_kg=False,
+        )
 
         with patch("src.ingest.impl.ingest_file") as mock_if, \
              pytest.raises(ValueError):
@@ -398,8 +418,8 @@ class TestVerifyCoreDesign:
         including contradictory ones — it must never raise an exception.
         """
         contradictory_configs = [
-            # chunk_overlap >= chunk_size
-            dict(chunk_size=100, chunk_overlap=200),
+            # KG storage enabled but no builder
+            dict(enable_knowledge_graph_storage=True, build_kg=False),
             # Docling parser enabled but no model path / flag
             dict(enable_docling_parser=True),
             # Multimodal enabled
@@ -410,12 +430,16 @@ class TestVerifyCoreDesign:
             try:
                 config = IngestionConfig(
                     enable_multimodal_processing=False,
+                    enable_document_refactoring=False,
                     enable_cross_reference_extraction=False,
+                    enable_knowledge_graph_extraction=False,
+                    enable_knowledge_graph_storage=False,
                     enable_quality_validation=False,
                     enable_docling_parser=False,
                     enable_llm_metadata=False,
                     persist_refactor_mirror=False,
                     clean_store_dir=str(tmp_path / "store"),
+                    build_kg=False,
                     **overrides,
                 )
             except Exception:

@@ -262,7 +262,6 @@ async function api(method, path, body) {
 // src/chatMode.ts
 var STORAGE_KEY = "rw_chat_mode";
 var SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
-var DEEP_RESEARCH_STORAGE_KEY = "rw_deep_research";
 var RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
 var TOPK_STORAGE_KEY = "rw_sources_top_k";
 var DEFAULT_TOPK = 5;
@@ -297,49 +296,6 @@ function setRetrievalSubMode(sub) {
   _subMode = sub;
   localStorage.setItem(SUBMODE_STORAGE_KEY, sub);
   syncSubmodeUI();
-}
-var _deepResearch = localStorage.getItem(DEEP_RESEARCH_STORAGE_KEY) === "1";
-function getDeepResearch() {
-  return _deepResearch;
-}
-function setDeepResearch(enabled) {
-  _deepResearch = enabled;
-  localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY, enabled ? "1" : "0");
-  syncDeepResearchUI();
-}
-function syncDeepResearchUI() {
-  const btn = document.getElementById("chatDeepResearch");
-  if (btn) {
-    btn.setAttribute("aria-pressed", _deepResearch ? "true" : "false");
-    btn.classList.toggle("active", _deepResearch);
-  }
-}
-var _lastSuggestedQuery = "";
-var _resubmit = null;
-function registerDrSuggestionResubmit(fn) {
-  _resubmit = fn;
-}
-function showDrSuggestionChip(forQuery) {
-  if (_deepResearch) return;
-  const chip = document.getElementById("drSuggestChip");
-  if (!chip) return;
-  _lastSuggestedQuery = forQuery;
-  chip.removeAttribute("hidden");
-}
-function hideDrSuggestionChip() {
-  const chip = document.getElementById("drSuggestChip");
-  if (!chip) return;
-  chip.setAttribute("hidden", "");
-}
-function initDrSuggestionChip() {
-  const chip = document.getElementById("drSuggestChip");
-  if (!chip) return;
-  chip.addEventListener("click", () => {
-    const q = _lastSuggestedQuery.trim();
-    hideDrSuggestionChip();
-    setDeepResearch(true);
-    if (q && _resubmit) void _resubmit(q);
-  });
 }
 function syncSubmodeUI() {
   const hardBtn = document.getElementById("chatSubmodeHard");
@@ -404,16 +360,10 @@ function initChatMode() {
       });
     });
   }
-  const drBtn = document.getElementById("chatDeepResearch");
-  if (drBtn) {
-    drBtn.addEventListener("click", () => setDeepResearch(!_deepResearch));
-  }
-  initDrSuggestionChip();
   initRailCollapse();
   initTopKInput();
   syncToggleUI();
   syncSubmodeUI();
-  syncDeepResearchUI();
   applyModeToView();
   renderRail();
   document.addEventListener("conversation-changed", () => {
@@ -1676,9 +1626,6 @@ function buildQueryBody(queryText) {
     body.rerank_top_k = topK;
     body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
   }
-  if (getDeepResearch()) {
-    body.deep_research = true;
-  }
   return body;
 }
 function chunkToSourceRef(c) {
@@ -1699,7 +1646,6 @@ async function sourcesOnlyQuery(queryText) {
   appendUserMsg(queryText);
   try {
     const data = await api("POST", "/console/query", buildQueryBody(queryText));
-    maybeShowDrChip(data.dr_suggestion, queryText);
     const cid = String(data.conversation_id ?? "").trim();
     if (cid) setActiveConversation(cid);
     const sources = (data.results ?? []).map(chunkToSourceRef);
@@ -1841,8 +1787,6 @@ async function streamQuery(queryText) {
         } else if (evtType === "retrieval") {
           const cid = String(data.conversation_id ?? "").trim();
           if (cid) setActiveConversation(cid);
-          const drSugg = data.dr_suggestion;
-          maybeShowDrChip(drSugg, queryText);
           const clar = String(data.clarification_message ?? "").trim();
           if (clar) pendingClarification = clar;
           if (data.token_budget) {
@@ -1963,7 +1907,6 @@ async function nonStreamQuery(queryText) {
   const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = handles;
   try {
     const data = await api("POST", "/console/query", buildQueryBody(queryText));
-    maybeShowDrChip(data.dr_suggestion, queryText);
     const cid = String(data.conversation_id ?? "").trim();
     if (cid) setActiveConversation(cid);
     attachFeedback(handles.fbUpBtn, handles.fbDownBtn, {
@@ -2008,7 +1951,6 @@ async function nonStreamQuery(queryText) {
   }
 }
 async function sendQuery(text) {
-  hideDrSuggestionChip();
   if (getChatMode() === "sources") {
     await sourcesOnlyQuery(text);
     return;
@@ -2017,12 +1959,6 @@ async function sendQuery(text) {
   const useStreaming = s.streaming !== false;
   if (useStreaming) await streamQuery(text);
   else await nonStreamQuery(text);
-}
-registerDrSuggestionResubmit(sendQuery);
-function maybeShowDrChip(payload, query) {
-  if (!payload || !payload.suggest) return;
-  if (getDeepResearch()) return;
-  showDrSuggestionChip(query);
 }
 
 // src/slash.ts

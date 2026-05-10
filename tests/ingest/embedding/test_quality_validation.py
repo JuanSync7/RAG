@@ -30,6 +30,7 @@ def _make_state(chunks, enabled=True, min_chars=50, min_quality=0.3):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {"chunks": chunks, "errors": [], "processing_log": [], "runtime": runtime}
 

@@ -483,15 +483,17 @@ class TestPipelineNodeNames:
         idx_visual = PIPELINE_NODE_NAMES.index("visual_embedding")
         assert idx_visual == idx_storage + 1
 
-    def test_visual_embedding_is_last_node(self):
-        """KG ingest nodes were extracted to KGWeave; visual_embedding is the tail."""
+    def test_visual_embedding_before_knowledge_graph_storage(self):
+        """FR-PN01c: 'visual_embedding' appears immediately before 'knowledge_graph_storage'."""
         from src.ingest.common.types import PIPELINE_NODE_NAMES
-        assert PIPELINE_NODE_NAMES[-1] == "visual_embedding"
+        idx_visual = PIPELINE_NODE_NAMES.index("visual_embedding")
+        idx_kg = PIPELINE_NODE_NAMES.index("knowledge_graph_storage")
+        assert idx_kg == idx_visual + 1
 
-    def test_total_count_is_twelve(self):
-        """PIPELINE_NODE_NAMES contains exactly 12 entries after KG extraction/storage moved to KGWeave."""
+    def test_total_count_is_fifteen(self):
+        """FR-PN01d: PIPELINE_NODE_NAMES contains exactly 15 entries."""
         from src.ingest.common.types import PIPELINE_NODE_NAMES
-        assert len(PIPELINE_NODE_NAMES) == 12
+        assert len(PIPELINE_NODE_NAMES) == 15
 
 
 # ===========================================================================

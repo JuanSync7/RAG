@@ -1,12 +1,11 @@
 # @summary
-# Terminal LangGraph node that atomically commits staged writes (MinIO, Weaviate).
+# Terminal LangGraph node that atomically commits staged writes (MinIO, Weaviate, KG).
 # On any failure, rolls back Weaviate via delete_documents_by_staging_batch and
-# MinIO via delete_document. KG ingest is owned by KGWeave and dispatched via
-# Temporal Phase 2b (KG_TASK_QUEUE) — no in-process KG writes happen here.
+# MinIO via delete_document. KG builder is per-document and discarded — no rollback.
 # Exports: commit_node, _rollback
 # Deps: src.db, src.vector_db, src.ingest.embedding.state, src.ingest.common
 # @end-summary
-"""Terminal commit node — flushes staged MinIO + Weaviate writes atomically."""
+"""Terminal commit node — flushes all staged writes atomically (Issue #42)."""
 
 from __future__ import annotations
 
@@ -19,7 +18,6 @@ from src.vector_db import add_documents, delete_by_source_key
 from src.vector_db.weaviate.store import delete_documents_by_staging_batch
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.commit")
 
@@ -74,7 +72,6 @@ def _rollback(
             )
 
 
-@node_span("commit")
 def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Flush staged MinIO + Weaviate + KG writes; rollback all on any failure.
 
@@ -110,6 +107,7 @@ def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     staged_minio = state.get("staged_minio")
     staged_records = state.get("staged_weaviate_records", []) or []
     delete_old = bool(state.get("staged_weaviate_delete_old", False))
+    staged_kg = state.get("staged_kg_chunks", []) or []
 
     bucket = runtime.config.target_bucket or None
     collection = runtime.config.target_collection or None
@@ -144,8 +142,11 @@ def commit_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                 collection=collection,
             )
 
-        # KG ingest happens out-of-process: IngestDocumentWorkflow dispatches
-        # KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE after embedding succeeds.
+        # 3) KG (in-memory, per-document — no rollback needed)
+        kg_builder = runtime.kg_builder
+        if kg_builder is not None and staged_kg:
+            for text, source_name in staged_kg:
+                kg_builder.add_chunk(text, source=source_name)
 
     except Exception as exc:
         logger.error(

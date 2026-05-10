@@ -26,11 +26,6 @@ from typing import Optional
 
 from src.common import make_query_hash
 from src.guardrails.common import RailVerdict
-from src.guardrails.models import (
-    GuardianModel,
-    GuardianRisk,
-    GuardianUnavailable,
-)
 
 logger = logging.getLogger("rag.guardrails.injection")
 
@@ -66,19 +61,13 @@ class InjectionResult:
     Attributes:
         verdict: PASS/REJECT/MODIFY verdict for the query.
         detection_source: Optional indicator of which layer made the decision
-            (e.g., "regex", "perplexity_lp", "model", "guardian", "nemo_llm").
+            (e.g., "regex", "perplexity_lp", "model", "nemo_llm").
         message: Optional human-facing message when rejecting/modifying.
-        score: Optional unsafe-confidence in [0, 1]. Populated by layers
-            that produce a calibrated probability (currently the guardian
-            layer); other layers leave it at 0.0. Used for telemetry —
-            the rail's PASS/REJECT decision comes from the layer itself,
-            not this score.
     """
 
     verdict: RailVerdict
     detection_source: Optional[str] = None
     message: Optional[str] = None
-    score: float = 0.0
 
 
 class InjectionDetector:
@@ -106,7 +95,6 @@ class InjectionDetector:
         lp_threshold: float = 89.79,
         ps_ppl_threshold: float = 1845.65,
         runtime=None,
-        guardian: Optional[GuardianModel] = None,
     ) -> None:
         """Initialize the injection detector.
 
@@ -119,13 +107,9 @@ class InjectionDetector:
                 jailbreak classifier (skips gracefully if dependencies missing).
             lp_threshold: Length-per-perplexity heuristic threshold.
             ps_ppl_threshold: Prefix/suffix perplexity heuristic threshold.
-            runtime: Optional ``GuardrailsRuntime`` instance. When provided
-                without a ``guardian``, enables the legacy NeMo LLM layer.
-            guardian: Optional :class:`GuardianModel` to consult for
-                ``JAILBREAK`` classification. When supplied and the model
-                supports JAILBREAK, this replaces the legacy LLM layer; on
-                ``GuardianUnavailable`` the rail falls through to the
-                runtime LLM (if any), then to PASS.
+            runtime: Optional ``GuardrailsRuntime`` instance. When provided,
+                enables the NeMo LLM layer (layer 4). When ``None``, only
+                regex, perplexity, and model-based layers are active.
         """
         threshold = _SENSITIVITY_THRESHOLDS.get(sensitivity)
         if threshold is None:
@@ -138,7 +122,6 @@ class InjectionDetector:
         self._lp_threshold = lp_threshold
         self._ps_ppl_threshold = ps_ppl_threshold
         self._runtime = runtime
-        self._guardian = guardian
 
         # Try to load NeMo jailbreak heuristics
         self._perplexity_available = False
@@ -238,35 +221,7 @@ class InjectionDetector:
             except Exception as e:
                 logger.warning("Model-based jailbreak check failed: %s — skipping", e)
 
-        # Layer 4: dedicated jailbreak guardian (Granite Guardian etc.)
-        if self._guardian is not None and self._guardian.supports(
-            GuardianRisk.JAILBREAK
-        ):
-            try:
-                verdict = self._guardian.classify(
-                    query, risk=GuardianRisk.JAILBREAK, direction="input"
-                )
-                if not verdict.safe:
-                    logger.info(
-                        "Injection detected | source=guardian(%s) | score=%.2f | hash=%s | tenant=%s",
-                        self._guardian.name, verdict.score, query_hash, tenant_id,
-                    )
-                    return InjectionResult(
-                        verdict=RailVerdict.REJECT,
-                        detection_source="guardian",
-                        message=REJECTION_MESSAGE,
-                        score=verdict.score,
-                    )
-                # Guardian said safe → skip the legacy LLM fallback below
-                return InjectionResult(verdict=RailVerdict.PASS, score=verdict.score)
-            except GuardianUnavailable as e:
-                # Guardian missed — fall through to runtime LLM (if any)
-                logger.warning(
-                    "Guardian %s unavailable (%s) — trying NeMo LLM layer",
-                    self._guardian.name, e,
-                )
-
-        # Layer 5: legacy NeMo LLM-based semantic analysis (back-compat)
+        # Layer 4: LLM-based semantic analysis (if NeMo runtime available)
         runtime = self._runtime
         if runtime is not None and runtime.initialized and runtime.rails is not None:
             try:

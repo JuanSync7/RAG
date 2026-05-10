@@ -204,7 +204,7 @@ def _detect_vector_backend() -> str:
 # - source:"path with spaces/file.md"
 # - section:"Clock Domain Crossing"
 _FILTER_PAT = re.compile(
-    r'\b(source|section|deep):(?:"([^"]+)"|(\S+))\s*',
+    r'\b(source|section):(?:"([^"]+)"|(\S+))\s*',
     re.IGNORECASE,
 )
 
@@ -215,13 +215,10 @@ def parse_filters(raw_query: str) -> tuple:
     Supported filters:
         source:<filename>   — filter by source document
         section:<heading>   — filter by section heading
-        deep:<bool>         — toggle deep_research (true/false/yes/no/1/0)
 
     Example:
         "source:sample_doc_3.txt what is RAG?"
         → ("what is RAG?", {"source_filter": "sample_doc_3.txt"})
-        "deep:true compare X to Y"
-        → ("compare X to Y", {"deep_research": True})
     """
     filters = {}
 
@@ -232,8 +229,6 @@ def parse_filters(raw_query: str) -> tuple:
             filters["source_filter"] = value
         elif key == "section":
             filters["heading_filter"] = value
-        elif key == "deep":
-            filters["deep_research"] = value.lower() in ("1", "true", "yes", "on")
         return ""
 
     clean = _FILTER_PAT.sub(_replace, raw_query).strip()
@@ -319,23 +314,7 @@ def display_results(response, elapsed: float) -> None:
     print(f"  {DIM}{'─' * 72}{RESET}")
 
     if response.action == "ask_user":
-        # Per-reason hint badge (CLI parity with the web console). The
-        # reason enum is additive to ``action``: legacy code that only
-        # checks the action string keeps working; reason-aware UIs can
-        # show a typed prefix.
-        reason = getattr(response, "ask_user_reason", None)
-        reason_labels = {
-            "sanitizer_reject": "empty or invalid query",
-            "injection_blocked": "query blocked by safety rails",
-            "vague_query": "query too vague to retrieve",
-            "budget_exhausted": "retrieval timeout",
-            "no_results": "no matching documents",
-        }
-        label = reason_labels.get(reason or "", "ask_user")
-        print(
-            f"\n  {B_YELLOW}?{RESET} [{label}] "
-            f"{response.clarification_message}"
-        )
+        print(f"\n  {B_YELLOW}?{RESET} {response.clarification_message}")
         return
 
     # Show generated answer prominently
@@ -358,14 +337,6 @@ def display_results(response, elapsed: float) -> None:
             print(f"  {DIM}{'─' * 72}{RESET}")
             print(f"  {conf_color}Confidence: {llm_conf}{RESET}")
         print(f"  {DIM}{'─' * 72}{RESET}")
-
-        # CLI/UI parity: surface the same advisory the web chip shows.
-        dr_sugg = getattr(response, "dr_suggestion", None)
-        if isinstance(dr_sugg, dict) and dr_sugg.get("suggest"):
-            print(
-                f"  {B_YELLOW}💡 Multi-topic question detected — "
-                f"try `deep:true` for richer coverage.{RESET}"
-            )
 
     if not response.results:
         print(f"\n  {B_YELLOW}⚠{RESET} No results found.\n")
