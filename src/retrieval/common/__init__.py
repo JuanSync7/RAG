@@ -14,6 +14,14 @@ from src.retrieval.common.schemas import (
 )
 from src.retrieval.common.exceptions import RetrievalError, ModelLoadError
 from src.retrieval.common.utils import parse_json_object
+from src.retrieval.common.terminal import (
+    AskUserReason,
+    StageOutcome,
+    StageStatus,
+    TerminalAction,
+    TerminalDecision,
+    decide_terminal,
+)
 
 __all__ = [
     "RAGRequest",
@@ -23,4 +31,10 @@ __all__ = [
     "RetrievalError",
     "ModelLoadError",
     "parse_json_object",
+    "AskUserReason",
+    "StageOutcome",
+    "StageStatus",
+    "TerminalAction",
+    "TerminalDecision",
+    "decide_terminal",
 ]

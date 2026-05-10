@@ -476,7 +476,20 @@ def display_retrieval(response: dict) -> None:
     print(f"  {DIM}{'─' * 72}{RESET}")
 
     if response["action"] == "ask_user":
-        print(f"\n  {B_YELLOW}?{RESET} {response.get('clarification_message', '')}")
+        # Reason-typed hint (parity with query.py CLI and the web console).
+        reason = response.get("ask_user_reason")
+        reason_labels = {
+            "sanitizer_reject": "empty or invalid query",
+            "injection_blocked": "query blocked by safety rails",
+            "vague_query": "query too vague to retrieve",
+            "budget_exhausted": "retrieval timeout",
+            "no_results": "no matching documents",
+        }
+        label = reason_labels.get(reason or "", "ask_user")
+        print(
+            f"\n  {B_YELLOW}?{RESET} [{label}] "
+            f"{response.get('clarification_message', '')}"
+        )
         return
 
     results = response.get("results", [])

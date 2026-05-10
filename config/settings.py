@@ -863,6 +863,37 @@ RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS: int = int(
     os.environ.get("RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS", "10000")
 )  # FR-617
 
+# ---------------------------------------------------------------------------
+# Deep research (recursive topic-grouped retrieval) — opt-in alternative to
+# the linear kg_expand → embed → hybrid_search → rerank stages. See
+# src/retrieval/pipeline/deep_research.py for the orchestrator.
+# ---------------------------------------------------------------------------
+
+RAG_STAGE_BUDGET_DEEP_RESEARCH_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_DEEP_RESEARCH_MS", "30000")
+)
+RAG_DEEP_RESEARCH_MAX_NODES: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_NODES", "12")
+)
+RAG_DEEP_RESEARCH_MAX_LLM_CALLS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_LLM_CALLS", "24")
+)
+RAG_DEEP_RESEARCH_MAX_DEPTH: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_DEPTH", "3")
+)
+RAG_DEEP_RESEARCH_MAX_TOPICS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_TOPICS", "3")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS", "3")
+)
+RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS", "4000")
+)
+RAG_DEEP_RESEARCH_KB_TOP_PER_NODE: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_KB_TOP_PER_NODE", "10")
+)
+
 # NOTE: RAG_INGESTION_COLQWEN_MODEL is reused for retrieval-time model
 # selection (FR-109). No separate retrieval model key exists.
 

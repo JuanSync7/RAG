@@ -1300,6 +1300,44 @@
       background: var(--bg-elevated); color: var(--text); font-weight: 600;
     }
 
+    /* Deep research pill — toggle button beside top_k */
+    .chat-deep-research-btn {
+      display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
+      padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--bg-card); color: var(--text-2); font-size: 11px;
+      font-weight: 600; cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .chat-deep-research-btn .dr-icon { font-size: 12px; line-height: 1; opacity: 0.85; }
+    .chat-deep-research-btn:hover { color: var(--text); border-color: var(--text-2); }
+    .chat-deep-research-btn[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--accent, #6aa9ff) 18%, var(--bg-card));
+      border-color: var(--accent, #6aa9ff);
+      color: var(--accent, #6aa9ff);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6aa9ff) 35%, transparent) inset;
+    }
+    .chat-deep-research-btn[aria-pressed="true"] .dr-icon { opacity: 1; }
+
+    /* DR suggestion chip — advisory hint above the input bar after a baseline
+       query that the heuristic flags as multi-topic. Click re-runs with DR on. */
+    .dr-suggest-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 4px 0 6px; padding: 5px 11px;
+      background: color-mix(in srgb, var(--accent, #6aa9ff) 12%, var(--bg-card));
+      border: 1px solid color-mix(in srgb, var(--accent, #6aa9ff) 45%, var(--border));
+      border-radius: 999px;
+      color: var(--accent, #6aa9ff); font-size: 12px; font-weight: 600;
+      cursor: pointer; align-self: flex-start;
+      transition: background 0.12s, border-color 0.12s, transform 0.08s;
+    }
+    .dr-suggest-chip:hover {
+      background: color-mix(in srgb, var(--accent, #6aa9ff) 22%, var(--bg-card));
+      border-color: var(--accent, #6aa9ff);
+    }
+    .dr-suggest-chip:active { transform: translateY(1px); }
+    .dr-suggest-chip[hidden] { display: none; }
+    .dr-suggest-icon { font-size: 13px; line-height: 1; }
+
     /* top_k input — only visible in Sources mode */
     .chat-topk {
       display: none; align-items: center; gap: 6px; margin-left: 4px;
