@@ -203,7 +203,10 @@ class InputRailExecutor:
                                 "injection",
                                 rail_result.verdict,
                                 ms,
-                                {"source": rail_result.detection_source or "none"},
+                                {
+                                    "source": rail_result.detection_source or "none",
+                                    "score": rail_result.score,
+                                },
                             )
                         )
                     elif name == "pii":

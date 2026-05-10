@@ -32,7 +32,6 @@ def run_embedding_pipeline(
     source_version: str,
     clean_text: str,
     clean_hash: str,
-    refactored_text: Optional[str] = None,
     docling_document: Optional[Any] = None,
     trace_id: str = "",
     batch_id: str = "",
@@ -51,7 +50,6 @@ def run_embedding_pipeline(
         source_version: Source version string.
         clean_text: Clean Markdown text from CleanDocumentStore.
         clean_hash: SHA-256 of ``clean_text`` for change detection.
-        refactored_text: LLM-refactored text from Phase 1, if available.
         docling_document: Retained for backward compatibility. No longer injected
             into EmbeddingPipelineState (Phase 3.2 removed that field). Parser
             selection and chunk generation are now handled by structure_detection_node
@@ -81,7 +79,6 @@ def run_embedding_pipeline(
         "source_version": source_version,
         "raw_text": clean_text,
         "cleaned_text": clean_text,
-        "refactored_text": refactored_text,
         "clean_hash": clean_hash,
         # parse_result and parser_instance are populated by structure_detection_node
         # at runtime via the ParserRegistry — not set here.
@@ -89,7 +86,6 @@ def run_embedding_pipeline(
         "metadata_summary": "",
         "metadata_keywords": [],
         "cross_references": [],
-        "kg_triples": [],
         "stored_count": 0,
         "errors": [],
         "processing_log": [],
@@ -101,7 +97,6 @@ def run_embedding_pipeline(
         "staged_minio": None,
         "staged_weaviate_records": [],
         "staged_weaviate_delete_old": False,
-        "staged_kg_chunks": [],
     }
     try:
         final_state = _GRAPH.invoke(initial_state)

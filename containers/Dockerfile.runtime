@@ -31,7 +31,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         torch torchvision
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --prefix=/install -r /app/requirements-worker.txt \
+    uv pip install --system --prefix=/install -r /app/requirements-worker.txt
+
+# KGWeave: extracted to a sibling repo, exposed via Compose `additional_contexts`
+# (or `docker build --build-context kgweave=../KGWeave`). Installed as a
+# regular non-editable package.
+COPY --from=kgweave . /tmp/kgweave
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --prefix=/install /tmp/kgweave \
+    && rm -rf /tmp/kgweave \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \

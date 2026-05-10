@@ -1,6 +1,6 @@
 # @summary
 # Abstract parser protocol and unified data contracts for the Document Parsing Abstraction.
-# Exports: DocumentParser, ParseResult, Chunk, chunk_with_markdown, validate_extra_metadata
+# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, PageRef, chunk_with_markdown, validate_extra_metadata
 # Deps: dataclasses, pathlib, typing, src.ingest.support.markdown
 # @end-summary
 
@@ -24,6 +24,63 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class PageRef:
+    """Reference to a single source page. FR-3212.
+
+    Carried by chunks and table artifacts when the parser exposes per-element
+    page provenance (Docling does; regex/text fallback does not). Consumers
+    use this for citation rendering and per-page retrieval filtering.
+
+    Attributes:
+        page_no: 1-based page number within the source document.
+        page_label: Display label (e.g., "iv", "12a"). Empty when unknown.
+        bbox: Optional bounding box ``(x0, y0, x1, y1)`` in PDF coordinates;
+            ``None`` when not available.
+    """
+
+    page_no: int
+    page_label: str = ""
+    bbox: tuple[float, float, float, float] | None = None
+
+
+@dataclass
+class TableArtifact:
+    """Structured table extracted from a parsed document. FR-3211.
+
+    A first-class artifact independent of the chunk stream. Surfaces the
+    table's markdown rendering for embedding/display alongside a structured
+    cell grid for typed retrieval (e.g., column lookups, programmatic joins).
+
+    Tables are emitted by DoclingParser via DoclingDocument.tables. Parsers
+    that do not produce structured tables (text/code/markdown) leave
+    ``ParseResult.tables`` empty.
+
+    Attributes:
+        table_id: Stable per-document identifier (e.g., "table-1").
+        markdown: GitHub-flavored markdown rendering of the table; safe to
+            embed directly into a chunk.
+        cells: Row-major 2D cell grid as plain strings. First row is typically
+            the header row when ``has_header`` is True.
+        num_rows: Total row count (including header if present).
+        num_cols: Column count (max across rows).
+        has_header: True when the parser identified a header row at index 0.
+        section_path: Hierarchical breadcrumb of headings containing this
+            table. Empty when no enclosing heading exists.
+        caption: Caption text if the parser detected one; empty otherwise.
+    """
+
+    table_id: str
+    markdown: str
+    cells: list[list[str]]
+    num_rows: int
+    num_cols: int
+    has_header: bool = False
+    section_path: str = ""
+    caption: str = ""
+    page_ref: PageRef | None = None
+
+
+@dataclass
 class ParseResult:
     """Unified output of parser.parse(). FR-3201.
 
@@ -36,12 +93,15 @@ class ParseResult:
         headings: Heading text in document order.
         has_figures: Whether the parser detected figures or images.
         page_count: Total pages in source. 0 for code/text files.
+        tables: Structured table artifacts extracted by the parser. Empty
+            for parsers without structured-table support. FR-3211.
     """
 
     markdown: str
     headings: list[str]
     has_figures: bool
     page_count: int
+    tables: list[TableArtifact] = field(default_factory=list)
 
 
 @dataclass
@@ -71,6 +131,8 @@ class Chunk:
     heading_level: int
     chunk_index: int
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+    heading_path: list[str] = field(default_factory=list)
+    page_ref: PageRef | None = None
 
 
 @runtime_checkable
@@ -181,14 +243,18 @@ def chunk_with_markdown(parse_result: ParseResult, config: Any) -> list[Chunk]:
     chunks: list[Chunk] = []
     for idx, raw in enumerate(raw_chunks):
         section_meta = _build_section_metadata(raw.get("header_metadata", {}))
+        section_path = section_meta["section_path"]
+        heading_path = [h for h in section_path.split(" > ") if h] if section_path else []
         chunks.append(
             Chunk(
                 text=raw["text"],
-                section_path=section_meta["section_path"],
+                section_path=section_path,
                 heading=section_meta["heading"],
                 heading_level=section_meta["heading_level"],
                 chunk_index=idx,
                 extra_metadata={},
+                heading_path=heading_path,
+                page_ref=None,
             )
         )
     return chunks

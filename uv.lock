@@ -2095,6 +2095,46 @@ wheels = [
 ]
 
 [[package]]
+name = "kgweave"
+version = "0.1.0"
+source = { editable = "../KGWeave" }
+dependencies = [
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "orjson" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "temporalio" },
+    { name = "tree-sitter-python" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.110" },
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.110" },
+    { name = "gliner", marker = "extra == 'gliner'" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "leidenalg", marker = "extra == 'community'" },
+    { name = "mypy", marker = "extra == 'dev'" },
+    { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5" },
+    { name = "networkx" },
+    { name = "orjson" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pytest-mock", marker = "extra == 'dev'" },
+    { name = "python-igraph", marker = "extra == 'community'" },
+    { name = "pyyaml" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "temporalio", specifier = ">=1.5" },
+    { name = "tree-sitter-python", specifier = ">=0.23.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.27" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'dev'", specifier = ">=0.27" },
+]
+provides-extras = ["neo4j", "gliner", "community", "api", "dev"]
+
+[[package]]
 name = "kubernetes"
 version = "35.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5536,6 +5576,7 @@ dependencies = [
     { name = "docling" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "kgweave" },
     { name = "langchain-core" },
     { name = "langchain-text-splitters" },
     { name = "langdetect" },
@@ -5649,6 +5690,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "igraph", marker = "extra == 'kg'" },
     { name = "import-mend", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "kgweave", editable = "../KGWeave" },
     { name = "langchain-core" },
     { name = "langchain-text-splitters" },
     { name = "langdetect" },

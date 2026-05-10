@@ -74,19 +74,14 @@ def validate_optional_dependencies() -> list[str]:
     strings (useful for testing).
     """
     from config.settings import (
-        GLINER_ENABLED,
-        KG_ENABLED,
         RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
         RAG_NEMO_PII_GLINER_ENABLED,
     )
 
+    # KG/GLiNER feature flags moved to the KGWeave package, which runs in its
+    # own container and owns those optional-dep checks. RagWeave only validates
+    # deps it still owns directly (visual embedding, NeMo PII guardrails).
     checks: list[tuple[bool, str, str, str]] = [
-        (
-            GLINER_ENABLED,
-            "gliner",
-            "GLINER_ENABLED=true",
-            "Entity extraction will fall back to regex. Install with: pip install ragweave[gliner]",
-        ),
         (
             RAG_NEMO_PII_GLINER_ENABLED,
             "gliner",
@@ -98,18 +93,6 @@ def validate_optional_dependencies() -> list[str]:
             "colpali_engine",
             "RAG_INGESTION_ENABLE_VISUAL_EMBEDDING=true",
             "Visual embedding will fail at runtime. Install with: pip install ragweave[visual]",
-        ),
-        (
-            KG_ENABLED,
-            "igraph",
-            "KG_ENABLED=true",
-            "Community detection will be disabled. Install with: pip install ragweave[kg]",
-        ),
-        (
-            KG_ENABLED,
-            "leidenalg",
-            "KG_ENABLED=true",
-            "Leiden community detection will be disabled. Install with: pip install ragweave[kg]",
         ),
     ]
 

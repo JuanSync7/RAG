@@ -66,22 +66,6 @@ def test_file_and_dir_are_mutually_exclusive():
 
 
 # ---------------------------------------------------------------------------
-# --no-kg
-# ---------------------------------------------------------------------------
-
-def test_no_kg_flag_sets_no_kg_true():
-    parser = _build_parser()
-    args = parser.parse_args(["--no-kg"])
-    assert args.no_kg is True
-
-
-def test_no_kg_flag_absent_defaults_false():
-    parser = _build_parser()
-    args = parser.parse_args([])
-    assert args.no_kg is False
-
-
-# ---------------------------------------------------------------------------
 # --no-semantic
 # ---------------------------------------------------------------------------
 
@@ -223,22 +207,6 @@ def test_no_vision_auto_pull_flag():
 
 
 # ---------------------------------------------------------------------------
-# --export-obsidian
-# ---------------------------------------------------------------------------
-
-def test_export_obsidian_flag():
-    parser = _build_parser()
-    args = parser.parse_args(["--export-obsidian"])
-    assert args.export_obsidian is True
-
-
-def test_export_obsidian_absent_defaults_false():
-    parser = _build_parser()
-    args = parser.parse_args([])
-    assert args.export_obsidian is False
-
-
-# ---------------------------------------------------------------------------
 # --no-refactor-mirror
 # ---------------------------------------------------------------------------
 
@@ -264,13 +232,11 @@ def test_multiple_flags_together():
     args = parser.parse_args([
         "--dir", "/tmp/docs",
         "--update",
-        "--no-kg",
         "--no-semantic",
         "--export-processed",
     ])
     assert str(args.dir) == "/tmp/docs"
     assert args.update is True
-    assert args.no_kg is True
     assert args.no_semantic is True
     assert args.export_processed is True
 

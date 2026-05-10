@@ -12,7 +12,7 @@ operations tooling for observability, backup/restore, and scaling.
 
 ### What It Does
 
-- **Ingests anything** — PDFs, DOCX, PPTX, HTML, Markdown, images, tables, and code. A 13-node LangGraph pipeline handles parsing (via Docling), structure detection, VLM figure captioning, text cleaning, semantic chunking, metadata extraction, knowledge graph triples, and quality validation.
+- **Ingests anything** — PDFs, DOCX, PPTX, HTML, Markdown, images, tables, and code. A LangGraph pipeline handles parsing (via Docling), structure detection, VLM figure captioning, text cleaning, semantic chunking, metadata extraction, and quality validation. Knowledge-graph ingest is owned by **KGWeave** and dispatched out-of-process via the Temporal Phase 2b handoff (`KG_PHASE2B_ACTIVITY` on `KG_TASK_QUEUE`).
 - **Dual-track embeddings** — Text chunks are embedded with BGE-M3 (1024-dim dense vectors). Document pages are visually embedded with ColQwen2 (128-dim patch vectors via a 4-bit quantized Qwen2-VL backbone). Both tracks are stored in Weaviate and searched simultaneously at query time.
 - **Hybrid retrieval + reranking** — Combines BM25 keyword search with dense vector search (configurable alpha blend), expands queries with knowledge graph terms, reranks with a BGE cross-encoder, and merges visual page results via ColQwen2 MaxSim scoring.
 - **Confidence-aware generation** — A 3-signal composite score (retrieval confidence, LLM self-assessment, citation coverage) routes each answer to RETURN, RE_RETRIEVE, FLAG, or BLOCK — no silent hallucinations.
@@ -46,7 +46,7 @@ Ingestion runs as a separate Temporal workflow that writes content + embeddings 
 
 | Directory | Purpose |
 | --- | --- |
-| `src/ingest/` | 13-node LangGraph ingestion pipeline (node-per-file + shared helpers) |
+| `src/ingest/` | LangGraph ingestion pipeline (node-per-file + shared helpers); KG ingest delegated to KGWeave via Temporal |
 | `src/retrieval/` | Query processing, retrieval orchestration, reranking, generation |
 | `src/platform/` | Cross-cutting services: auth, quotas/rate limits, cache, metrics, observability |
 | `src/common/` | Deterministic helpers shared across ingestion/retrieval |
@@ -57,160 +57,149 @@ Ingestion runs as a separate Temporal workflow that writes content + embeddings 
 | `scripts/` | Ops helpers (stack control, backup/restore, DR drill, smoke test) |
 | `prompts/` | Prompt templates for retrieval query processing |
 
+---
+
 ## Quick Start
+
+The fastest path from clone to working query is **7 steps**. Containers-only users can skip steps 2–4.
 
 ### Prerequisites
 
 - **Python 3.10+** (3.12 recommended)
-- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
-- **Node.js 18+** and **npm** — for the web console TypeScript build
-- **Docker** and **Docker Compose v2** (or **Podman** and **podman-compose**) — for the full container stack (Temporal, Redis, Ollama, Weaviate, …)
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (`pip` is not supported)
+- **Docker** + **Docker Compose v2** (or **Podman** + **podman-compose** — see [Podman Setup](#podman-setup))
+- **Node.js 18+** + **npm** — only for editing the web console (`make setup` builds it for you)
+- **(Optional) `cloudflared`** — for `make tunnel` public URLs. Not in default Ubuntu repos; see [COLD_START_GUIDE §0.5](docs/operations/COLD_START_GUIDE.md).
 
-> **No host Ollama needed.** The LLM runs in the bundled `rag-ollama`
-> container. Cloud LLMs are also supported — see [Step B](#step-b--set-up-your-llm).
+> **First time on a clean Linux box?** Follow [`docs/operations/COLD_START_GUIDE.md`](docs/operations/COLD_START_GUIDE.md) — it walks every prerequisite install command and known gaps (cloudflared install, nvm/PATH, profile combinations).
 
-> **Podman users**: Podman is supported as a drop-in replacement for Docker.
-> See [Podman Setup](#podman-setup) below for one-time configuration.
+### Choose a run mode
 
-> **First time on a clean Linux box?** Follow
-> [docs/operations/COLD_START_GUIDE.md](docs/operations/COLD_START_GUIDE.md) —
-> it walks every prerequisite install command and the exact gaps in this
-> Quick Start (cloudflared install, nvm/PATH issues, profile combinations).
+| Mode | When to use | What you need |
+| --- | --- | --- |
+| **Containers-only** (fastest start) | Just trying it out, or running without modifying Python/TS code | Docker only — `rag-api` / `rag-worker` pull from `ghcr.io/juansync7/ragweave-{api,worker}:latest` |
+| **Local dev** (this guide) | Iterating on Python or TypeScript code | All prerequisites above |
 
-### Run modes
+For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.env`. To rebuild app images locally instead of pulling: `./scripts/compose.sh build rag-api rag-worker`. Pin to a specific image tag via `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env`.
 
-There are two supported ways to run RagWeave:
-
-| Mode | When to use | What you need | What you skip |
-| --- | --- | --- | --- |
-| **Containers only** (fastest start) | Just trying it out, or running without modifying the API/worker code | Docker + Docker Compose | `make setup`, Python, Node — `rag-api` and `rag-worker` pull from `ghcr.io/juansync7/ragweave-{api,worker}:latest` |
-| **Local dev** (default below) | Iterating on Python or TypeScript code | All prerequisites listed above | Nothing — full local toolchain |
-
-For containers-only:
+### Step 1 — Clone & copy environment
 
 ```bash
 git clone <repo-url> RagWeave && cd RagWeave
 cp .env.example .env
-./scripts/compose.sh --profile app --profile workers up -d
+./scripts/bootstrap_kgweave.sh   # clones the KGWeave sibling repo to ../KGWeave
 ```
 
-To rebuild app images locally instead of pulling: `./scripts/compose.sh build rag-api rag-worker`. Pin to a specific image tag by setting `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env` (defaults to `latest`).
+You will edit `.env` in steps 3–4. Defaults work for local dev with the bundled containerised LLM and storage.
 
-### 1. Clone and set up the project
+> **Why bootstrap?** The knowledge-graph subsystem lives in the separate [KGWeave](https://github.com/JuanSync7/KGWeave) repo. Both the editable Python install (`pyproject.toml` -> `[tool.uv.sources]`) and the Docker builds (compose `additional_contexts`) resolve it from `../KGWeave`. Override the path with `KGWEAVE_REPO_PATH=/elsewhere` if you keep it somewhere else.
+
+### Step 2 — Install Python + web console
 
 ```bash
-git clone <repo-url> RagWeave && cd RagWeave
 make setup
 ```
 
-`make setup` runs the full one-shot: creates `.venv/`, installs all runtime + dev dependencies via `uv`, installs web-console npm deps, and compiles the TypeScript console. Run once per clone.
+Creates `.venv/`, installs all deps via `uv sync --extra dev` (respects `uv.lock`), runs `npm install`, and compiles the TypeScript console. Run **once per clone**.
 
-> Prefer explicit steps? `make install` does just the Python deps; `make console-install && make console-build` handles the console. Or skip `make` entirely:
-> `uv sync --extra dev` (auto-creates `.venv/`, respects `uv.lock`). Use `uv` everywhere — plain `pip` is not supported.
+> Prefer explicit steps? `make install` (Python only) + `make console-install && make console-build` (frontend). Or skip `make` entirely with `uv sync --extra dev`. **Never use `pip` directly** — it bypasses the lock file.
 
-#### Optional dependency groups
-
-Some features require extra packages that are not installed by default:
+**Optional dependency groups** (not installed by default):
 
 ```bash
 uv sync --extra pii          # PII detection (presidio, spacy)
 uv sync --extra gliner       # GLiNER entity extraction
-uv sync --extra all          # All optional dependencies
+uv sync --extra all          # Everything
 ```
 
-> **Vector store:** Weaviate is the default and currently the only fully supported backend.
-> ChromaDB, Pinecone, and Qdrant extras (`.[chromadb]`, `.[pinecone]`, `.[qdrant]`) install
-> the client libraries but the backend adapters are not yet implemented — they are planned.
+> **Vector store note:** Weaviate is the default and currently the only fully supported backend. ChromaDB / Pinecone / Qdrant extras install client libs but the adapters are not yet implemented.
 
-### 2. Web console (already built by `make setup`)
+### Step 3 — Choose your LLM
 
-`make setup` already installs and compiles the web console. You only need these targets when iterating on the TypeScript source:
+**Option A — Containerised Ollama (default, no host install).**
+
+The `rag-ollama` container starts automatically as part of the always-on stack. Once Step 5 brings the stack up, pull the model into it:
 
 ```bash
-make console-watch   # rebuild on change (live dev)
-make console-check   # type-check only, no emit
-make console-build   # one-shot production build
+docker exec rag-ollama ollama pull qwen2.5:3b        # generation (required)
+# Optional vision model (only if you ingest images/figures):
+# docker exec rag-ollama ollama pull qwen2.5vl:3b
 ```
 
-### 3. Start infrastructure services
+The container publishes `127.0.0.1:11434` to the host, so `RAG_OLLAMA_URL=http://localhost:11434` (the `.env.example` default) works as-is. Models are cached in `./.ollama_data/` and survive recreation. Stop with `docker compose stop rag-ollama` to free GPU/RAM (retrieval still works; generation fails fast with `ECONNREFUSED`).
+
+**Option B — Cloud provider (OpenRouter, OpenAI, Anthropic, …).** Edit `.env`:
 
 ```bash
-./scripts/compose.sh --profile temporal up -d
+RAG_LLM_MODEL=openrouter/anthropic/claude-3-haiku    # LiteLLM model string
+RAG_LLM_API_BASE=https://openrouter.ai/api/v1
+RAG_LLM_API_KEY=sk-or-v1-...
 ```
 
-This starts the core services: **Temporal** (orchestration) + **Temporal UI** (port 8080).
-The `compose.sh` wrapper auto-detects Docker or Podman — no configuration needed.
+Model strings follow `<provider>/<model-name>`. See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for the full list.
 
-Redis starts automatically when you use the `app` or `workers` profiles (see below).
+### Step 4 — Embedding & reranker models
 
-### 4. Configure environment
+You have two choices. Pick one.
 
-```bash
-cp .env.example .env
-```
+**Choice 1 — Local model files (default for dev).** Requires the `local-embed` extra: `uv sync --extra local-embed`. By default the loader resolves models by HuggingFace repo ID through the local HF cache (`~/.cache/huggingface/`) — first run downloads automatically, no env var needed.
 
-RagWeave will not start correctly without the three steps below. Everything else has a working default.
-
----
-
-#### Step A — Download embedding and reranker models
-
-The worker loads BGE models from your local filesystem — they are not bundled in the image.
+If you prefer to pre-download (offline machines, controlled mirrors) or pin to a specific directory:
 
 ```bash
 uv run --with huggingface-hub huggingface-cli download BAAI/bge-m3             --local-dir ~/models/baai/bge-m3
 uv run --with huggingface-hub huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
 
-# Tell RagWeave where they live (in .env):
+# In .env (only needed if pinning to a directory):
 RAG_MODEL_ROOT=/home/you/models
 ```
 
-Each model is ~570 MB (~1.2 GB total). For alternative download methods (`git-lfs`) or path layouts (`./models` symlink), see [COLD_START_GUIDE.md §3](docs/operations/COLD_START_GUIDE.md).
+Each model is ~570 MB (~1.2 GB total). For `git-lfs` or `./models` symlink layouts, see [COLD_START_GUIDE §3](docs/operations/COLD_START_GUIDE.md).
 
-> **TEI mode?** Set `RAG_INFERENCE_BACKEND=tei` to delegate embedding + reranking to the `rag-embed` / `rag-rerank` containers (always-on; TEI downloads weights into `./.tei_cache/` on first start — Step A is then optional).
+**Choice 2 — TEI containers (no manual download).** Set `RAG_INFERENCE_BACKEND=tei` in `.env`. The `rag-embed` / `rag-rerank` containers are always-on and download weights into `./.tei_cache/` on first start. Skip the manual download.
 
----
-
-#### Step B — Set up your LLM
-
-**Option 1 — Containerised Ollama (default):**
-
-The `rag-ollama` container is part of the always-on compose stack — no
-host-side Ollama install. Once `make start` brings the stack up, pull the
-generation model into it:
+### Step 5 — Start the stack
 
 ```bash
-docker exec rag-ollama ollama pull qwen2.5:3b        # generation model (required)
-# Optional vision model (only if you ingest images/figures):
-# docker exec rag-ollama ollama pull qwen2.5vl:3b
+./scripts/compose.sh --profile app --profile workers up -d
 ```
 
-The container publishes `127.0.0.1:11434` to the host, so the default
-`RAG_OLLAMA_URL=http://localhost:11434` in `.env` works as-is. Models are
-cached in the repo-local `./.ollama_data/` bind mount and survive
-container recreation.
+The wrapper auto-detects Docker or Podman. The `app` profile starts the API + Redis; the `workers` profile starts the Temporal worker(s). **Many other services start automatically without any profile flag** — Postgres, MinIO, Weaviate, Temporal, Ollama, TEI embed/rerank, nginx. See [Container Profiles](#container-profiles) for the full breakdown.
 
-**Disabling generation** (e.g. retrieval-only mode, or to free GPU/RAM): stop
-the container with `docker compose stop rag-ollama`. Retrieval keeps working;
-generation calls fail fast with `ECONNREFUSED`. Bring it back with
-`docker compose start rag-ollama`.
+> First boot pulls images and downloads model weights — expect 5–15 minutes depending on bandwidth. Subsequent boots are seconds.
 
-**Option 2 — Cloud provider (OpenRouter, OpenAI, Anthropic, etc.):**
+### Step 6 — Verify
 
 ```bash
-# In .env:
-RAG_LLM_MODEL=openrouter/anthropic/claude-3-haiku   # LiteLLM model string
-RAG_LLM_API_BASE=https://openrouter.ai/api/v1
-RAG_LLM_API_KEY=sk-or-v1-...
+# All containers should be healthy:
+./scripts/compose.sh ps
+
+# API health:
+curl -s http://localhost:8000/health
+
+# Temporal UI (workflow runs):
+open http://localhost:8080
+
+# MinIO console (default creds: minioadmin / minioadmin):
+open http://localhost:9001
+
+# Web console:
+open http://localhost:8000/console
 ```
 
-LiteLLM model strings follow the pattern `<provider>/<model-name>`. See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for the full list.
+If any container is `unhealthy`, check `docker logs <container-name>` — first-boot 502s on `rag-nginx` are normal until upstreams finish warming.
 
----
+### Step 7 — Ingest and query
 
-#### Step C — (Optional) tune behaviour
+```bash
+python -m src.ingest.cli --dir ./documents     # ingest a folder
+python query.py "What is RAG?"                 # one-shot query
+python cli.py                                  # interactive REPL
+```
 
-These have working defaults but are worth reviewing before production use:
+### Optional — Tune behaviour
+
+These have working defaults but are worth reviewing before production:
 
 | Variable | Default | Notes |
 |----------|---------|-------|
@@ -221,24 +210,120 @@ These have working defaults but are worth reviewing before production use:
 | `RAG_MEMORY_MAX_RECENT_TURNS` | `8` | Conversation history window |
 | `RAG_RETRIEVAL_TIMEOUT_MS` | `30000` | End-to-end query timeout |
 
-See [.env.example](.env.example) for all available settings.
+See [`.env.example`](.env.example) for all available settings.
+
+> **After changing `.env`:** most settings are read at startup. For changes to take effect in the containerised stack, run `make restart-worker` (worker config) or restart the API container. Generation model changes require a worker restart only. Embedding/reranker path changes require `make restart-worker` plus confirming new model files are mounted.
 
 ---
 
-> **After changing `.env`:** most settings are read at startup. For changes to take effect in the containerised stack, run `make restart-worker` (worker config) or restart the API container. Generation model changes (e.g. switching Ollama model) only require a worker restart. Embedding or reranker model path changes require `make restart-worker` and confirming the new model files are mounted.
+## Storage Backends
 
-### 6. Run
+RagWeave ships with four stateful services. **All start automatically with any compose invocation** — they're profile-less, so you do not need a flag for them.
+
+| Service | Container | Default port(s) | Default credentials | Data location | What it stores |
+| --- | --- | --- | --- | --- | --- |
+| **Weaviate** | `rag-weaviate` | 8090 (HTTP), 50051 (gRPC) | anonymous access enabled | `./.weaviate_data/` (bind mount) | Dual-track text + visual embeddings, BM25 indexes |
+| **MinIO** | `rag-minio` | 9000 (S3 API), 9001 (console) | `minioadmin` / `minioadmin` | volume `rag-minio-data` | Document artifacts, intermediate ingest blobs |
+| **Postgres** | `rag-postgres` | 5432 | configured via env | volume `rag-postgres-data` | API metadata, tenancy, audit logs |
+| **Redis** | `rag-redis` | 6379 | none | volume `rag-redis-data` | Conversation memory, query cache, rate-limit counters |
+
+**No setup required.** Buckets are created by workers on first ingest; Weaviate collections are created on first ingest; Postgres schemas are managed by the API on startup.
+
+**Important defaults to change before any non-local deployment:**
+- `RAG_MINIO_ACCESS_KEY` / `RAG_MINIO_SECRET_KEY` — currently `minioadmin / minioadmin`.
+- Weaviate runs with `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`. Disable and configure API keys before exposing it.
+- Postgres credentials are set in `.env`; the defaults are dev-only.
+
+**Resetting state:**
 
 ```bash
-# Ingest documents
-python -m src.ingest.cli --dir ./documents
-
-# Query locally (no server needed)
-python query.py "What is RAG?"
-
-# Or use the interactive CLI
-python cli.py
+./scripts/compose.sh down                      # stop containers, keep data
+./scripts/compose.sh down -v                   # stop AND delete all volumes (DESTRUCTIVE)
+rm -rf .weaviate_data/                         # nuke Weaviate only
+docker volume rm ragweave_rag-minio-data       # nuke MinIO only
 ```
+
+**Backup / restore / DR drill:** see [`scripts/backup_all.sh`](scripts/backup_all.sh), [`scripts/restore_all.sh`](scripts/restore_all.sh), [`scripts/dr_drill.sh`](scripts/dr_drill.sh), and [`docs/operations/`](docs/operations/).
+
+---
+
+## Container Profiles
+
+Compose uses [Docker profiles](https://docs.docker.com/compose/profiles/) to gate optional services. **Services without a profile start on every `compose up`**, regardless of which `--profile` flags you pass.
+
+### Always-on (no profile flag needed)
+
+| Container | Image | Why it's here |
+| --- | --- | --- |
+| `rag-postgres` | `postgres:16-alpine` | Application metadata |
+| `rag-minio` | `minio/minio` | Artifact storage |
+| `rag-weaviate` | `semitechnologies/weaviate:1.28.0` | Vector store |
+| `temporal-db` | `postgres:16-alpine` | Temporal backing store |
+| `temporal` | `temporalio/auto-setup` | Workflow engine |
+| `temporal-ui` | `temporalio/ui` | Workflow inspector (port 8080) |
+| `rag-embed` / `rag-embed-cpu` | `text-embeddings-inference` | TEI embed pool (GPU + CPU fallback) |
+| `rag-rerank` | `text-embeddings-inference` | TEI reranker |
+| `rag-ollama` | `ollama/ollama` | Local LLM serving |
+| `rag-nginx` | `nginx:alpine` | Fronts API + load-balances TEI replicas |
+| `dozzle` | `amir20/dozzle` | Container log viewer |
+
+### Profile-gated
+
+| Profile | Activates | Approx. additional pull |
+|---------|-----------|--------------------------|
+| `app` | `rag-api`, `rag-redis`, `pg-maintenance` | +544 MB |
+| `workers` | `rag-worker`, `rag-redis` | +5.79 GB |
+| `monitoring` | Prometheus, Alertmanager, Grafana | +1.74 GB |
+| `observability` | Langfuse stack (6 containers — Postgres, Redis, ClickHouse, MinIO, web, worker) | +5.93 GB |
+
+```bash
+# Typical local dev:
+./scripts/compose.sh --profile app --profile workers up -d
+
+# Full production-ish stack with metrics + LLM tracing:
+./scripts/compose.sh --profile app --profile workers --profile monitoring --profile observability up -d
+```
+
+> **Note:** older docs referenced `--profile temporal` and `--profile gateway`. Those flags are no-ops today — Temporal and nginx are always-on. The flag namespace is reserved for future use.
+
+---
+
+## Container Images
+
+The stack uses two custom images with strict dependency isolation:
+
+| Image | Size | Contents |
+|---|---|---|
+| `rag-api` | 389 MB | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| `rag-worker` | 5.79 GB | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
+
+Container deps live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would pull every dep listed under `[project.dependencies]`, undoing the isolation. Local dev uses `pyproject.toml` via `make install`; containers bypass it.
+
+**Adding a new dependency:**
+- API server imports it → add to `pyproject.toml` AND `containers/requirements-api.txt`
+- Worker-only → add to `pyproject.toml` AND `containers/requirements-worker.txt`
+- Dev-only (pytest, deptry, …) → `pyproject.toml` only
+
+### Build the images
+
+```bash
+make container-build           # docker (BuildKit) — builds both
+make container-build-podman    # podman (--format docker) — builds both
+make container-probe           # API import probe — catches transitive ML leakage
+make container-sizes           # show current image sizes
+make container-clean           # remove local rag-api / rag-worker images
+```
+
+**Manual:**
+
+```bash
+DOCKER_BUILDKIT=1 docker build -t rag-api    -f containers/Dockerfile.api     .
+DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
+```
+
+Multi-stage builds, BuildKit pip-cache mounts, `.dockerignore`, compose-level healthchecks (podman-friendly), `PYTHONPATH=/app` (no `pip install .`), GPU support in the worker — see [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md) for the full design.
+
+---
 
 ## Running the API Server
 
@@ -247,46 +332,66 @@ python cli.py
 ```bash
 make start    # Terminal 1: infrastructure + containerised workers
 make dev      # Terminal 2: API server with hot-reload
-make worker   # Terminal 3: Temporal worker (needed for ingestion/query workflows)
+make worker   # Terminal 3: Temporal worker (needed for ingest/query workflows)
 ```
 
-> **WSL2 users:** if inter-container networking is broken after a WSL2 restart, run
-> `sudo ./scripts/fix-docker-networking.sh` once, or set up the automatic fix in
-> `/etc/wsl.conf` — see [WSL2 Setup](#wsl2-setup) below.
+> **WSL2 users:** if inter-container networking breaks after a restart, run `sudo ./scripts/fix-docker-networking.sh` once, or wire it into `/etc/wsl.conf` — see [WSL2 Setup](#wsl2-setup).
 
 ### Option B — Fully containerised stack
 
 ```bash
-make restart                  # start (or rebuild + restart) app + workers in containers
-make restart-all              # all profiles (monitoring, gateway, etc.)
+make restart                  # rebuild + restart app + workers
+make restart-all              # all profiles (monitoring, observability, …)
 make scale-workers N=3        # scale workers horizontally
 ```
 
 Then use the CLI client or web console:
 
 ```bash
-# CLI client (targets the API server)
-python -m server.cli_client
-
-# User Console (chat):  open http://localhost:8000/console
-# Admin Console (ops):  open http://localhost:8000/console/admin
+python -m server.cli_client                       # CLI targeting the API
+# User console (chat):  http://localhost:8000/console
+# Admin console (ops):  http://localhost:8000/console/admin
 ```
 
-### Expose publicly via Cloudflare Tunnel (no account needed)
+### Expose publicly via Cloudflare Tunnel (no account required)
 
 ```bash
-make tunnel   # prints a public https://*.trycloudflare.com URL — kill with Ctrl+C
+make tunnel   # prints a public https://*.trycloudflare.com URL — Ctrl+C to kill
 ```
 
-> Requires `cloudflared` system binary — see [Internet access](#internet-access-cloudflare-tunnel) for install instructions.
+Requires `cloudflared` (system binary, not in default Ubuntu repos — see [COLD_START_GUIDE §0.5](docs/operations/COLD_START_GUIDE.md)).
+
+For demos on a different network, you can also tunnel the nginx gateway:
+
+```bash
+cloudflared tunnel --url https://localhost:443 --no-tls-verify
+```
+
+---
+
+## HTTPS Gateway (nginx)
+
+`rag-nginx` runs always-on, but TLS only activates when you provide certs. One-time setup:
+
+```bash
+sudo apt install mkcert            # Debian/Ubuntu (or `brew install mkcert`)
+./scripts/generate-certs.sh        # locally-trusted certs in ./certs/
+echo "127.0.0.1  aion.local" | sudo tee -a /etc/hosts
+```
+
+Then browse `https://aion.local`. See [`certs/README.md`](certs/README.md) for details.
+
+> **Security note:** port 8000 stays directly accessible (bypassing TLS). For LAN demos, set `RAG_API_HOST_PORT=127.0.0.1:8000` in `.env` to restrict direct access to localhost.
+
+---
 
 ## Running Tests
 
 ```bash
-make test                          # full suite (uv run pytest)
+make test                          # full pytest suite (uv run pytest)
 
-# Fast static gates (no test execution). Pick one depending on scope:
-make precommit-check               # runs L1+L2+L3+L4+TS on git-tracked files (skips WIP)
+# Fast static gates (no test execution):
+make precommit-check               # L1+L2+L3+L4+TS on git-tracked files (skips WIP)
 make all-check                     # same, but over the full tree including untracked
 
 # Individual layers:
@@ -296,194 +401,66 @@ make import-check                  # L2 (full tree)
 make dep-check                     # L3: deptry
 make container-dep-check           # L4: requirements-*.txt in sync with pyproject.toml
 
-# Targeted pytest invocations still work directly:
-pytest tests/ingest/ -v            # ingestion tests only
+pytest tests/ingest/ -v            # targeted runs still work directly
 ```
 
-> Neither `precommit-check` nor `all-check` runs the pytest suite — they're fast static gates. Run `make test` separately. **Use `precommit-check` before every `git commit`** so in-progress untracked work doesn't block your commit. **Use `all-check` before releases or as a periodic hygiene sweep** to catch issues in WIP code you haven't committed yet. L4 (`container-dep-check`) catches missing or misplaced deps across `pyproject.toml` and the two container requirements files.
+> Neither `precommit-check` nor `all-check` runs pytest — they're fast static gates. Run `make test` separately. Use `precommit-check` before every `git commit` (skips WIP); use `all-check` before releases or as a periodic hygiene sweep.
 
-## Container Profiles
-
-Two services have no profile and start whenever compose is invoked:
-
-| Container | Image | Size |
-|-----------|-------|------|
-| `rag-postgres` | `postgres:16-alpine` | 395 MB |
-| `rag-minio` | `minio/minio:latest` | 241 MB |
-
-All other services are profile-gated:
-
-| Profile | Use Case | Key containers | Third-party images | Approx. pull |
-|---------|----------|----------------|--------------------|--------------|
-| `temporal` | Temporal orchestration engine + UI | `rag-temporal-db`, `rag-temporal`, `rag-temporal-ui` | `postgres:16-alpine`¹, `temporalio/auto-setup`, `temporalio/ui` | +1.24 GB |
-| `app` | Containerized API server | `rag-api`², `rag-nginx`, `rag-redis`, `pg-maintenance` | `nginx:alpine`, `redis:7-alpine`, `postgres:16-alpine`¹ | +544 MB |
-| `workers` | Containerized ingest/query workers | `rag-worker`² | `redis:7-alpine`¹ | +5.79 GB |
-| `monitoring` | Prometheus + Grafana + Dozzle | `rag-prometheus`, `rag-alertmanager`, `rag-grafana`, `rag-monitor` | `prom/prometheus`, `prom/alertmanager`, `grafana/grafana`, `amir20/dozzle` | +1.74 GB |
-| `observability` | Langfuse LLM tracing (full stack) | `rag-langfuse-*` (6 containers) | `postgres:17`, `redis:7`, `clickhouse/clickhouse-server`, `cgr.dev/chainguard/minio`, `langfuse/langfuse-worker:3`, `langfuse/langfuse:3` | +5.93 GB |
-| `gateway` | nginx HTTPS reverse proxy | `rag-nginx` | `nginx:alpine`¹ | +94 MB |
-
-¹ Shared image — no additional pull if already present from another profile.  
-² Custom-built locally — see [Container Images](#container-images).
-
-```bash
-# Example: full production stack with monitoring
-./scripts/compose.sh --profile temporal --profile app --profile workers --profile monitoring up -d
-```
-
-## Container Images
-
-The stack uses two images with strict dependency isolation:
-
-| Image | Size | Contents |
-|---|---|---|
-| `rag-api` | 389 MB | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
-| `rag-worker` | 5.79 GB | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
-
-Dependencies live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would install every dep listed under `[project.dependencies]`, which undoes the isolation. Local dev still uses `pyproject.toml` via `make install`; containers bypass it.
-
-**Adding a new dependency:**
-- If the API server imports it → add to `pyproject.toml` AND `containers/requirements-api.txt`
-- If only the worker uses it → add to `pyproject.toml` AND `containers/requirements-worker.txt`
-- Dev-only (pytest, deptry, etc.) → `pyproject.toml` only
-
-### Build the images
-
-**With make (recommended):**
-
-```bash
-make container-build          # build both with docker (BuildKit)
-make container-build-podman   # build both with podman (preferred for production)
-make container-probe          # run API import probe — catches transitive ML leakage
-make container-sizes          # show current image sizes
-make container-clean          # remove local rag-api / rag-worker images
-```
-
-**Manual Docker:**
-
-```bash
-DOCKER_BUILDKIT=1 docker build -t rag-api    -f containers/Dockerfile.api .
-DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
-```
-
-**Manual Podman:**
-
-```bash
-# --format docker preserves HEALTHCHECK directives if ever re-added to the Dockerfile
-podman build --format docker -t rag-api    -f containers/Dockerfile.api .
-podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
-```
-
-### Architecture notes
-
-Multi-stage builds, BuildKit pip-cache mounts, `.dockerignore`, compose-level healthchecks (podman-friendly), `PYTHONPATH=/app` (no `pip install .`), and GPU support in the worker image — see [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md) for the full design and 9-iteration optimization history.
-
-## HTTPS Gateway (nginx)
-
-Add HTTPS support in front of the API server using nginx:
-
-### One-time setup
-
-```bash
-# 1. Install mkcert
-sudo apt install mkcert          # Debian/Ubuntu
-# brew install mkcert             # macOS
-
-# 2. Generate locally-trusted certs
-./scripts/generate-certs.sh
-
-# 3. Add hostname to /etc/hosts
-echo "127.0.0.1  aion.local" | sudo tee -a /etc/hosts
-```
-
-### Start with HTTPS
-
-```bash
-./scripts/compose.sh --profile temporal --profile app --profile gateway up -d
-# Browse: https://aion.local
-```
-
-The `gateway` profile requires the `app` profile. See `certs/README.md` for details.
-
-> **Security note:** When the gateway is active, port 8000 remains directly accessible (bypassing TLS). For LAN demos, set `RAG_API_HOST_PORT=127.0.0.1:8000` in `.env` to restrict direct access to localhost only.
-
-### Internet access (Cloudflare Tunnel)
-
-For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL.
-
-Install `cloudflared` once (it's a system binary, not in default Ubuntu repos) — see [COLD_START_GUIDE.md §0.5](docs/operations/COLD_START_GUIDE.md) for the apt-repo install commands. Then:
-
-```bash
-make tunnel                                                        # tunnel local dev API (port 8000)
-cloudflared tunnel --url https://localhost:443 --no-tls-verify     # or tunnel the nginx gateway
-```
-
-Prints a `https://*.trycloudflare.com` URL. Kill with Ctrl+C when done.
+---
 
 ## WSL2 Setup
 
-Docker bridge networking on WSL2 requires a one-time fix per WSL2 session (iptables FORWARD rules are reset when WSL2 restarts). To make it automatic, add a boot command to `/etc/wsl.conf`:
+Docker bridge networking on WSL2 needs a one-time fix per session (iptables FORWARD rules reset on WSL2 restart). Make it automatic via `/etc/wsl.conf`:
 
 ```ini
-# /etc/wsl.conf  (create if it doesn't exist)
+# /etc/wsl.conf  (create if missing)
 [boot]
 command = "service docker start && iptables -P FORWARD ACCEPT"
 ```
 
-After saving, restart WSL2 from PowerShell:
+Then from PowerShell: `wsl --shutdown`.
 
-```powershell
-wsl --shutdown
-```
-
-From that point on, Docker inter-container networking will work automatically on every WSL2 startup. No manual steps needed when cloning the repo on a new WSL2 machine.
-
-**Manual fix (current session only):**
+**Manual fix for the current session:**
 
 ```bash
-sudo ./scripts/fix-docker-networking.sh
+sudo ./scripts/fix-docker-networking.sh   # WSL2-aware; no-ops on Linux/macOS
 ```
 
-The script is WSL2-aware — it no-ops on Linux and macOS.
+---
 
 ## Podman Setup
 
-Podman is supported as a rootless, daemonless alternative to Docker. One-time setup:
+Podman works as a rootless, daemonless drop-in for Docker. One-time:
 
 ```bash
-# 1. Install Podman
-sudo apt-get install -y podman podman-compose   # Debian/Ubuntu
-
-# 2. Enable user socket (needed for Dozzle log viewer)
-systemctl --user enable --now podman.socket
-
-# 3. Verify rootless mode
-podman info | grep -i rootless   # should show: rootless: true
-
-# 4. Set the container socket in .env
-echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env
-
-# 5. Use compose.sh as normal — it auto-detects Podman
-./scripts/compose.sh --profile temporal --profile app up -d
+sudo apt-get install -y podman podman-compose                   # 1. install
+systemctl --user enable --now podman.socket                     # 2. user socket (Dozzle)
+podman info | grep -i rootless                                  # 3. verify rootless: true
+echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env   # 4. tell compose
+./scripts/compose.sh --profile app --profile workers up -d      # 5. go
 ```
 
-For internal design notes (rootless networking, socket detection, image-format trade-offs), see [`docs/operations/PODMAN_SPEC.md`](docs/operations/PODMAN_SPEC.md) — that doc is the implementation spec, not the setup guide. The five steps above are the setup.
+For internal design notes (rootless networking, socket detection, image-format trade-offs), see [`docs/operations/PODMAN_SPEC.md`](docs/operations/PODMAN_SPEC.md).
 
+---
 
 ## Entry Points
 
 | Command | Description |
 |---------|-------------|
-| `python ingest.py --dir ./documents` | CLI for ingestion runs |
+| `python -m src.ingest.cli --dir ./documents` | CLI for ingestion runs |
 | `python query.py "question"` | Local retrieval query CLI |
-| `python cli.py [query\|ingest]` | Unified interactive CLI |
+| `python cli.py` | Unified interactive REPL |
 | `python -m server.worker` | Temporal worker process |
-| `uvicorn server.api:app --host 0.0.0.0 --port 8000` | API server |
+| `uvicorn server.api:app --host 0.0.0.0 --port 8000` | API server (use `make dev` for hot reload) |
 | `python -m server.cli_client` | Interactive client targeting the API server |
 | `python -m server.mcp_adapter` | MCP tooling adapter over the API (`stdio` transport) |
 
+---
+
 ## Make Targets
 
-Run `make help` for this list in the terminal. All targets are also documented in comments in the [Makefile](Makefile) itself.
+Run `make help` for this list in the terminal. All targets are also documented in comments in the [Makefile](Makefile).
 
 | Target | Purpose |
 |---|---|
@@ -519,6 +496,9 @@ Run `make help` for this list in the terminal. All targets are also documented i
 | `make start-all` | Bring up every profile (no rebuild) |
 | `make restart` | Frontend rebuild + recreate base + workers (mirrors `start`, with rebuild) |
 | `make restart-all` | Frontend rebuild + recreate every profile (mirrors `start-all`, with rebuild) |
+| `make tunnel` | Cloudflare tunnel for local API (port 8000) |
+
+---
 
 ## Engineering Docs
 
@@ -536,6 +516,8 @@ Key starting points:
 - Ingestion: `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
 - Retrieval: `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`
 - Server/runtime: `server/README.md`
+
+---
 
 ## License
 

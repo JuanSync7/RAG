@@ -18,8 +18,10 @@ logger = logging.getLogger("rag.ingest.docproc.document_ingestion")
 from src.ingest.common import append_processing_log
 from src.ingest.common.utils import decode_with_fallbacks, sha256_bytes
 from src.ingest.doc_processing.state import DocumentProcessingState
+from src.ingest.common.observability import node_span
 
 
+@node_span("document_ingestion")
 def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Read source content and compute SHA-256 hash.
 
@@ -54,13 +56,28 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
 
     source_hash = sha256_bytes(raw_bytes)
 
-    # Decode with fallbacks (delegates to decode_with_fallbacks for consistency)
-    raw_text = decode_with_fallbacks(raw_bytes)
+    # Only decode for text-like formats. Binary formats (PDF, DOCX, PPTX, images,
+    # archives) are extracted by the structure_detection parser; decoding their
+    # bytes here produces mojibake that can leak into cleaned_text on regex
+    # fallback paths.
+    _TEXT_LIKE_SUFFIXES = {
+        ".txt", ".md", ".markdown", ".rst", ".html", ".htm", ".xml",
+        ".json", ".csv", ".tsv", ".yaml", ".yml", ".log", ".py", ".js",
+        ".ts", ".tsx", ".jsx", ".css", ".scss",
+    }
+    if source_path.suffix.lower() in _TEXT_LIKE_SUFFIXES:
+        raw_text = decode_with_fallbacks(raw_bytes)
+    else:
+        raw_text = ""
 
     logger.info("document_ingestion complete: source=%s hash=%s len=%d", source_path.name, source_hash, len(raw_text))
     logger.debug("document_ingestion completed in %.3fs", time.monotonic() - t0)
+    # Clear raw_bytes from state once we're done with it: keeping the full
+    # binary in graph state through the rest of the pipeline amplifies
+    # checkpoint size and serialisation cost (potentially MBs per transition).
     return {
         "raw_text": raw_text,
         "source_hash": source_hash,
+        "raw_bytes": None,
         "processing_log": append_processing_log(state, "document_ingestion:ok"),
     }

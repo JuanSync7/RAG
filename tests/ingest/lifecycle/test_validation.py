@@ -579,7 +579,7 @@ class TestValidationCLIHelpers:
         import logging
         from src.ingest.lifecycle import validation as val_mod
 
-        with patch.dict("sys.modules", {"src.knowledge_graph": None}):
+        with patch.dict("sys.modules", {"kgweave.admin": None}):
             with caplog.at_level(logging.WARNING):
                 result = val_mod._open_kg_client()
         assert result is None
@@ -774,12 +774,12 @@ class TestValidationCLIHelperSuccessPaths:
         fake_kg = MagicMock()
         fake_kg.get_graph_backend = lambda: fake_backend
 
-        with patch.dict("sys.modules", {"src.knowledge_graph": fake_kg}):
+        with patch.dict("sys.modules", {"kgweave.admin": fake_kg}):
             try:
                 result = val_mod._open_kg_client()
                 assert result is fake_backend
             except Exception:
-                pass  # Test env may not have src.knowledge_graph properly loaded
+                pass  # Test env may not have kgweave.admin properly loaded
 
     def test_mock_load_manifest_cli_success_path(self, monkeypatch):
         """_load_manifest_cli returns manifest data when load_manifest succeeds (line 477)."""

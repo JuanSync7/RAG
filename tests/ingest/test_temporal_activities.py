@@ -394,7 +394,6 @@ class TestEmbeddingPipelineActivity:
         monkeypatch.setattr("src.ingest.temporal.activities._db_client", MagicMock())
         monkeypatch.setattr("src.ingest.temporal.activities.vector_db.get_client", fake_get_client)
         monkeypatch.setattr("src.ingest.temporal.activities.vector_db.ensure_collection", lambda *a, **kw: None)
-        monkeypatch.setattr("src.ingest.temporal.activities.GLINER_ENABLED", False)
         monkeypatch.setattr(
             "src.ingest.temporal.activities.run_embedding_pipeline",
             lambda **kw: fake_embedding_result,
@@ -444,7 +443,6 @@ class TestEmbeddingPipelineActivity:
         monkeypatch.setattr("src.ingest.temporal.activities._db_client", MagicMock())
         monkeypatch.setattr("src.ingest.temporal.activities.vector_db.get_client", fake_get_client)
         monkeypatch.setattr("src.ingest.temporal.activities.vector_db.ensure_collection", lambda *a, **kw: None)
-        monkeypatch.setattr("src.ingest.temporal.activities.GLINER_ENABLED", False)
         monkeypatch.setattr(
             "src.ingest.temporal.activities.run_embedding_pipeline",
             lambda **kw: {
@@ -460,60 +458,7 @@ class TestEmbeddingPipelineActivity:
         assert result.errors == ["weaviate timeout"]
         assert result.stored_count == 0
 
-    def test_mock_embedding_pipeline_activity_with_kg_builder(self, monkeypatch, tmp_path):
-        """embedding_pipeline_activity creates KnowledgeGraphBuilder when build_kg=True."""
-        import asyncio
-        import dataclasses
-        from contextlib import contextmanager
-        from pathlib import Path
-        acts = _import_activities()
-        from src.ingest.common import IngestionConfig
-        from src.ingest.common.clean_store import CleanDocumentStore
-
-        config = IngestionConfig()
-        config.build_kg = True
-        config.store_documents = False
-        config.clean_store_dir = str(tmp_path)
-        config_dict = dataclasses.asdict(config)
-
-        source_args = acts.SourceArgs(
-            source_path="/tmp/doc.pdf",
-            source_name="doc.pdf",
-            source_uri="file:///tmp/doc.pdf",
-            source_key="k",
-            source_id="i",
-            connector="local",
-            source_version="v1",
-        )
-        args = acts.ActivityArgs(source=source_args, config=config_dict)
-
-        CleanDocumentStore(Path(config.clean_store_dir)).write(
-            source_args.source_key, "doc body", {"source_key": source_args.source_key},
-        )
-
-        @contextmanager
-        def fake_get_client():
-            yield MagicMock()
-
-        kg_builder_calls = []
-
-        class FakeKGBuilder:
-            def __init__(self, **kw):
-                kg_builder_calls.append(kw)
-
-        monkeypatch.setattr("src.ingest.temporal.activities._embedder", MagicMock())
-        monkeypatch.setattr("src.ingest.temporal.activities._db_client", MagicMock())
-        monkeypatch.setattr("src.ingest.temporal.activities.vector_db.get_client", fake_get_client)
-        monkeypatch.setattr("src.ingest.temporal.activities.vector_db.ensure_collection", lambda *a, **kw: None)
-        monkeypatch.setattr("src.ingest.temporal.activities.GLINER_ENABLED", False)
-        monkeypatch.setattr("src.ingest.temporal.activities.KnowledgeGraphBuilder", FakeKGBuilder)
-        monkeypatch.setattr(
-            "src.ingest.temporal.activities.run_embedding_pipeline",
-            lambda **kw: {
-                "errors": [], "stored_count": 0, "metadata_summary": "",
-                "metadata_keywords": [], "processing_log": [],
-            },
-        )
-
-        asyncio.run(acts.embedding_pipeline_activity(args))
-        assert len(kg_builder_calls) == 1
+    # Note: in-process KG construction (KnowledgeGraphBuilder) was removed
+    # from embedding_pipeline_activity when KG ingest moved to KGWeave's
+    # worker fleet via KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE. The corresponding
+    # in-process test was deleted in that change.

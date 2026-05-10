@@ -11,7 +11,7 @@ The lifecycle modules under src.ingest.lifecycle.* only depend on:
   - src.ingest.common.minio_clean_store (MinioCleanStore)
   - src.ingest.lifecycle.schemas
   - src.vector_db (public facade)
-  - src.knowledge_graph (public facade)
+  - kgweave.admin (public facade — `get_admin_backend`)
 
 None of these require the full src.ingest pipeline to be loaded. We pre-stub
 src.ingest itself to prevent it from dragging in PIL, colpali, temporal, etc.

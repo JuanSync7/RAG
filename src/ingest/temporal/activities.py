@@ -29,15 +29,13 @@ from typing import Any, Optional
 from temporalio import activity
 
 from config.settings import (
-    GLINER_ENABLED,
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
     RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
 )
 from langchain_core.embeddings import Embeddings
-from src.core import get_embedding_provider
-from src.core import KnowledgeGraphBuilder
+from src.core.embeddings import get_embedding_provider
 from src.ingest.common import (
     CleanDocumentStore,
     IngestionConfig,
@@ -174,6 +172,37 @@ class DeleteSourceArgs:
 
 
 @dataclass
+class RecordPhaseStatusArgs:
+    """Input for record_phase_status_activity (Step 10).
+
+    Wraps :meth:`CleanDocumentStore.record_attempt` so the workflow can
+    write per-phase outcomes to the durable status ledger without holding
+    a Python handle to the store.
+    """
+
+    clean_store_dir: str
+    source_key: str
+    phase: str  # "phase2a" or "phase2b"
+    success: bool
+    error: Optional[str] = None
+    error_class: Optional[str] = None  # "transient" | "document" | "system"
+    max_attempts: int = 10
+
+
+@dataclass
+class ListPendingPhase2bArgs:
+    """Input for list_pending_phase2b_activity (Step 11).
+
+    Used by the backfill workflow to discover sources that need a bounded
+    KG retry. ``status`` defaults to ``failed_pending_retry`` — permanent
+    failures stay out so they can be triaged.
+    """
+
+    clean_store_dir: str
+    status: str = "failed_pending_retry"
+
+
+@dataclass
 class DeleteSourceResult:
     """Output of delete_source_activity."""
     weaviate_deleted: int
@@ -242,7 +271,6 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
         config=config,
         embedder=_get_embedder(),   # not used in Phase 1 but required by Runtime
         weaviate_client=None,       # not needed for doc processing
-        kg_builder=None,
         db_client=None,
     )
 
@@ -255,6 +283,7 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
         source_id=s.source_id,
         connector=s.connector,
         source_version=s.source_version,
+        trace_id=args.staging_batch_id,
     )
 
     errors = list(result.get("errors", []))
@@ -266,7 +295,7 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
     # This is the durable boundary between activities — the workflow
     # contract requires Phase 2 to read from here, not from Temporal payload.
     if not errors and config.clean_store_dir:
-        clean_text = result.get("refactored_text") or result.get("cleaned_text", "")
+        clean_text = result.get("cleaned_text", "")
         clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
         meta = {
             "source_key": s.source_key,
@@ -277,7 +306,6 @@ async def document_processing_activity(args: ActivityArgs) -> DocProcessingResul
             "source_version": s.source_version,
             "source_hash": source_hash,
             "clean_hash": clean_hash,
-            "refactored": result.get("refactored_text") is not None,
         }
         try:
             CleanDocumentStore(Path(config.clean_store_dir)).write(s.source_key, clean_text, meta)
@@ -327,8 +355,6 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             config=config,
             embedder=_get_embedder(),
             weaviate_client=wv_client,
-            kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
-            if config.build_kg else None,
             db_client=_get_db_client() if config.store_documents else None,
         )
 
@@ -343,6 +369,7 @@ async def embedding_pipeline_activity(args: ActivityArgs) -> EmbeddingResult:
             clean_text=clean_text,
             clean_hash=clean_hash,
             staging_batch_id=args.staging_batch_id,
+            trace_id=args.staging_batch_id,
             source_hash=source_hash,
         )
 
@@ -403,4 +430,49 @@ async def delete_source_activity(args: DeleteSourceArgs) -> DeleteSourceResult:
         weaviate_deleted=weaviate_deleted,
         minio_deleted=minio_deleted,
         errors=errors,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2b status / backfill activities (Step 10/11)
+# ---------------------------------------------------------------------------
+
+
+@activity.defn
+async def record_phase_status_activity(
+    args: RecordPhaseStatusArgs,
+) -> dict[str, Any]:
+    """Persist a per-phase ingest outcome to the CleanDocumentStore ledger.
+
+    Called by ``IngestDocumentWorkflow`` after each attempt at the KG
+    activity. Returns the updated phase entry so the workflow can include
+    it in its result. Failures here are local FS errors; let them bubble
+    up so Temporal retries the activity.
+    """
+    store = CleanDocumentStore(Path(args.clean_store_dir))
+    return store.record_attempt(
+        args.source_key,
+        phase=args.phase,
+        success=args.success,
+        error=args.error,
+        error_class=args.error_class,
+        max_attempts=args.max_attempts,
+    )
+
+
+@activity.defn
+async def list_pending_phase2b_activity(
+    args: ListPendingPhase2bArgs,
+) -> list[str]:
+    """Return source_keys whose ``phase2b`` status equals ``args.status``.
+
+    Backfill workflow drains ``failed_pending_retry`` on each tick.
+    Returns an empty list when the store directory does not exist (so the
+    workflow is safe to schedule before the first ingest).
+    """
+    store_path = Path(args.clean_store_dir)
+    if not store_path.exists():
+        return []
+    return CleanDocumentStore(store_path).list_pending(
+        phase="phase2b", status=args.status,
     )

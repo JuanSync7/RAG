@@ -53,9 +53,10 @@ logs/*.log
 # User documents (keep sample docs, ignore user-added files)
 # documents/
 
-# Model cache (incl. host symlink at repo root pointing to ~/models)
-models
-models/
+# Model cache (incl. host symlink at repo root pointing to ~/models).
+# Anchored to root so it does not match source packages like src/guardrails/models/.
+/models
+/models/
 
 # TLS certs (generated locally via mkcert)
 certs/*
@@ -87,6 +88,10 @@ htmlcov/
 
 # Ad-hoc ingest corpora (cloned beside the repo, not source)
 opentitan_data/
+# Staged OpenTitan corpus is a symlink mirror — rebuild via
+# scripts/stage_opentitan_corpus.py
+documents/opentitan/
+documents/opentitan_subset/
 
 # Per-iteration bench result JSONs — ignore everything new; the tracked
 # baselines (cpu-1777015485.json, gpu-1777015578.json, baseline_report.md)

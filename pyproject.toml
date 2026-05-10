@@ -35,6 +35,11 @@ dependencies = [
   "markdownify>=0.13.0",
   "pypandoc>=1.13",
   "tree-sitter-python>=0.23.0",
+  # Knowledge graph subsystem — extracted to its own repo (~/KGWeave) and
+  # consumed as a Python package. Source path is overridden in
+  # [tool.uv.sources] for local development; production builds pin a
+  # version. Step 14 of the KGWeave extraction (see docs/kgweave_deployment.md).
+  "kgweave",
 ]
 
 [project.optional-dependencies]
@@ -173,6 +178,7 @@ asyncio_mode = "auto"
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
     "smoke: end-to-end stack smoke tests requiring docker compose up (run with '-m smoke')",
+    "eval_deep_research: A/B retrieval eval for deep_research mode (run with '-m eval_deep_research')",
 ]
 
 [dependency-groups]
@@ -188,4 +194,8 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
+# KGWeave is consumed as an editable local-path dep during development.
+# CI / production builds should override this entry to point at a pinned
+# git ref or a published wheel.
+kgweave = { path = "../KGWeave", editable = true }
 triton = { index = "pytorch-cu124" }

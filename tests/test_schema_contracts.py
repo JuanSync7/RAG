@@ -52,11 +52,9 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "vision_api_key",
     "vision_api_path",
     # Pipeline feature toggles (server-side defaults)
-    "enable_document_refactoring",
     "enable_cross_reference_extraction",
-    "enable_knowledge_graph_extraction",
     "enable_quality_validation",
-    "enable_knowledge_graph_storage",
+    "enable_kg_phase2b",
     # Quality thresholds
     "min_chunk_chars",
     "min_quality_score",
@@ -96,7 +94,6 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
 INGESTION_REQUEST_ONLY_FIELDS = frozenset({
     "mode",
     "target_path",
-    "export_obsidian",
 })
 
 
@@ -190,7 +187,7 @@ class TestIngestionSchemaContract:
         assert config.hybrid_chunker_max_tokens == default_config.hybrid_chunker_max_tokens
 
     def test_request_only_fields_not_in_field_map(self):
-        """Fields like mode/target_path/export_obsidian should not be in _FIELD_MAP."""
+        """Fields like mode/target_path should not be in _FIELD_MAP."""
         mapped_req_fields = set(self._field_map().keys())
         leaked = INGESTION_REQUEST_ONLY_FIELDS & mapped_req_fields
         assert not leaked, (

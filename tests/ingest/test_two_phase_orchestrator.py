@@ -10,10 +10,7 @@ def _make_runtime(tmp_path, store_subdir="store"):
     from src.ingest.common.types import IngestionConfig, Runtime
     config = IngestionConfig(
         enable_multimodal_processing=False,
-        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
-        enable_knowledge_graph_extraction=False,
-        enable_knowledge_graph_storage=False,
         enable_quality_validation=False,
         enable_docling_parser=False,
         enable_llm_metadata=False,
@@ -24,7 +21,6 @@ def _make_runtime(tmp_path, store_subdir="store"):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
 
 
@@ -35,7 +31,6 @@ def _phase1_result(doc: Path, cleaned="clean text"):
         "source_hash": hashlib.sha256(data).hexdigest(),
         "raw_text": data.decode(),
         "cleaned_text": cleaned,
-        "refactored_text": None,
         "errors": [],
         "processing_log": ["document_ingestion:ok", "structure_detection:ok"],
         "structure": {"has_figures": False},
@@ -51,7 +46,6 @@ def _phase2_result():
         "errors": [],
         "processing_log": ["chunking:ok", "embedding_storage:ok"],
         "chunks": [],
-        "kg_triples": [],
     }
 
 
@@ -117,7 +111,7 @@ def test_phase1_errors_skip_phase2(tmp_path):
 
     phase1_with_error = {
         "source_hash": "", "raw_text": "", "cleaned_text": "",
-        "refactored_text": None, "structure": {}, "multimodal_notes": [],
+        "structure": {}, "multimodal_notes": [],
         "errors": ["read_failed:doc.txt:some error"],
         "processing_log": ["document_ingestion:failed"],
     }

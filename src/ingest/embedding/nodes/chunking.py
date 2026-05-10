@@ -3,7 +3,7 @@
 # Primary path: parse_result + parser_instance from state → parser.chunk() or
 #   chunk_with_markdown() depending on config.chunker override.
 # Legacy fallback: when no parse_result is in state, falls back to markdown chunking
-#   on refactored_text/cleaned_text (pre-Phase 3.2 behaviour).
+#   on cleaned_text (pre-Phase 3.2 behaviour).
 # Exports: chunking_node, _normalize_chunk_text
 # Deps: unicodedata, re, src.ingest.embedding.state, src.ingest.common.schemas,
 #       src.ingest.common.shared, src.ingest.support.parser_base,
@@ -37,6 +37,7 @@ from src.ingest.support import (
 )
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.pipeline.chunking")
 
@@ -48,6 +49,32 @@ logger = logging.getLogger("rag.ingest.pipeline.chunking")
 #   \x0e-\x1f  — SO through US
 #   \x7f       — DEL
 _CONTROL_CHAR_RE = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _match_table_artifact(chunk_text: str, tables: list[Any]) -> Any:
+    """Return the TableArtifact whose markdown overlaps ``chunk_text``, else None.
+
+    Uses a cheap "first non-empty row of the rendered table appears in the chunk"
+    heuristic so HybridChunker output (which may wrap the table in surrounding
+    prose) still matches. Returns the first match in document order.
+    """
+    if not tables:
+        return None
+    for tbl in tables:
+        md = getattr(tbl, "markdown", "") or ""
+        if not md:
+            continue
+        # Pick the first non-empty, non-separator row as a fingerprint.
+        signature = ""
+        for line in md.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("|---") or set(stripped) <= {"|", "-", " "}:
+                continue
+            signature = stripped
+            break
+        if signature and signature in chunk_text:
+            return tbl
+    return None
 
 
 def _normalize_chunk_text(text: str) -> str:
@@ -64,6 +91,7 @@ def _normalize_chunk_text(text: str) -> str:
     return _CONTROL_CHAR_RE.sub("", normalized)
 
 
+@node_span("chunking")
 def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Split document into chunks using parser abstraction or legacy markdown fallback.
 
@@ -74,8 +102,8 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
       - ``config.chunker == "markdown"`` → ``chunk_with_markdown(parse_result, config)``
       - ``config.chunker == "native"`` (default) → ``parser_instance.chunk(parse_result)``
         with auto-fallback to markdown on native chunking failure.
-    - Otherwise the legacy path is used: markdown chunking on ``refactored_text`` or
-      ``cleaned_text`` (identical to pre-Phase 3.2 behaviour).
+    - Otherwise the legacy path is used: markdown chunking on ``cleaned_text``
+      (identical to pre-Phase 3.2 behaviour).
 
     Args:
         state: Embedding pipeline state.
@@ -137,26 +165,47 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                     )
 
             # Map Chunk → ProcessedChunk preserving Weaviate payload shape.
+            tables = list(getattr(parse_result, "tables", []) or [])
             total = len(raw_parser_chunks)
-            chunks: list[ProcessedChunk] = [
-                ProcessedChunk(
-                    text=_normalize_chunk_text(c.text),
-                    metadata={
-                        **base_metadata,
-                        "section_path": c.section_path,
-                        "heading": c.heading,
-                        "heading_level": c.heading_level,
-                        "chunk_index": c.chunk_index,
-                        "total_chunks": total,
-                        **c.extra_metadata,
-                    },
-                )
-                for c in raw_parser_chunks
-            ]
+            chunks: list[ProcessedChunk] = []
+            for c in raw_parser_chunks:
+                norm_text = _normalize_chunk_text(c.text)
+                meta: dict[str, Any] = {
+                    **base_metadata,
+                    "section_path": c.section_path,
+                    "heading": c.heading,
+                    "heading_level": c.heading_level,
+                    "heading_path": list(getattr(c, "heading_path", []) or []),
+                    "chunk_index": c.chunk_index,
+                    "total_chunks": total,
+                    **c.extra_metadata,
+                }
+                page_ref = getattr(c, "page_ref", None)
+                if page_ref is not None:
+                    meta["page_no"] = page_ref.page_no
+                    if page_ref.page_label:
+                        meta["page_label"] = page_ref.page_label
+                    if page_ref.bbox is not None:
+                        meta["page_bbox"] = list(page_ref.bbox)
+                table_match = _match_table_artifact(norm_text, tables)
+                if table_match is not None:
+                    meta["chunk_type"] = "table"
+                    meta["table_id"] = table_match.table_id
+                    meta["table_cells"] = table_match.cells
+                    meta["table_num_rows"] = table_match.num_rows
+                    meta["table_num_cols"] = table_match.num_cols
+                    meta["table_has_header"] = table_match.has_header
+                    if table_match.caption:
+                        meta["table_caption"] = table_match.caption
+                    if table_match.page_ref is not None and "page_no" not in meta:
+                        meta["page_no"] = table_match.page_ref.page_no
+                else:
+                    meta.setdefault("chunk_type", "text")
+                chunks.append(ProcessedChunk(text=norm_text, metadata=meta))
 
         else:
             # ── Legacy fallback (no parse_result in state) ─────────────────
-            # Backward-compat: markdown chunking on refactored_text/cleaned_text.
+            # Backward-compat: markdown chunking on cleaned_text.
             # Preserves pre-Phase 3.2 behaviour exactly.
             chunks = _chunk_with_markdown_legacy(state, config, base_metadata)
             processing_log = append_processing_log(state, "chunking:legacy_markdown")
@@ -187,7 +236,7 @@ def _chunk_with_markdown_legacy(
     semantic_chunking flag, heading normalization, and ProcessedChunk metadata shape.
 
     Args:
-        state: Pipeline state; uses refactored_text or cleaned_text for chunking.
+        state: Pipeline state; uses cleaned_text for chunking.
         config: IngestionConfig; controls semantic_chunking, chunk_size, chunk_overlap.
         base_metadata: Pre-built source metadata dict.
 
@@ -198,9 +247,7 @@ def _chunk_with_markdown_legacy(
         Any exception from the markdown splitters (propagates; markdown path
         failure is fatal for this document).
     """
-    text_for_chunking = normalize_headings_to_markdown(
-        state.get("refactored_text") or state.get("cleaned_text", "")
-    )
+    text_for_chunking = normalize_headings_to_markdown(state.get("cleaned_text", ""))
 
     if config.semantic_chunking:
         raw_chunks = chunk_markdown(
@@ -218,16 +265,24 @@ def _chunk_with_markdown_legacy(
         )
 
     total_chunks = len(raw_chunks)
-    chunks = [
-        ProcessedChunk(
-            text=_normalize_chunk_text(chunk["text"]),
-            metadata={
-                **base_metadata,
-                **_build_section_metadata(chunk.get("header_metadata", {})),
-                "chunk_index": idx,
-                "total_chunks": total_chunks,
-            },
+    chunks: list[ProcessedChunk] = []
+    for idx, chunk in enumerate(raw_chunks):
+        section_meta = _build_section_metadata(chunk.get("header_metadata", {}))
+        section_path = section_meta.get("section_path", "")
+        heading_path = (
+            [h for h in section_path.split(" > ") if h] if section_path else []
         )
-        for idx, chunk in enumerate(raw_chunks)
-    ]
+        chunks.append(
+            ProcessedChunk(
+                text=_normalize_chunk_text(chunk["text"]),
+                metadata={
+                    **base_metadata,
+                    **section_meta,
+                    "heading_path": heading_path,
+                    "chunk_index": idx,
+                    "total_chunks": total_chunks,
+                    "chunk_type": "text",
+                },
+            )
+        )
     return chunks

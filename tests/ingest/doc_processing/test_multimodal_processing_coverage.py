@@ -57,7 +57,6 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     effective_figures = figures if figures is not None else ["Figure 1", "Figure 2"]
     structure = {"has_figures": has_figures, "figures": effective_figures}

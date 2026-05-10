@@ -19,8 +19,10 @@ from src.ingest.common import (
     cross_refs,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 
+@node_span("cross_reference_extraction")
 def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Extract document cross-reference patterns when this stage is enabled.
 
@@ -39,7 +41,7 @@ def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
                 state, "cross_reference_extraction:skipped"
             )
         }
-    text = state.get("refactored_text") or state.get("cleaned_text", "")
+    text = state.get("cleaned_text", "")
     refs = cross_refs(text)
     logger.info("cross_reference_extraction complete: source=%s refs=%d", state.get("source_name", ""), len(refs))
     logger.debug("cross_reference_extraction_node completed in %.3fs", time.monotonic() - t0)

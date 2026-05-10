@@ -1,7 +1,7 @@
 # @summary
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
 # Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, PIPELINE_NODE_NAMES
-# Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
+# Deps: config.settings, src.core.embeddings, src.ingest.common.schemas
 # IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
 #   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
 #   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
@@ -9,7 +9,7 @@
 #   gc_retention_days (int), gc_schedule (str)
 # IngestionConfig new fields (Parser Abstraction Phase 2.2): parser_strategy (str), chunker (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
-# PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
+# KG ingest is owned by KGWeave; in-pipeline KG extraction/storage nodes were removed.
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
 # IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
 # IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
@@ -39,9 +39,7 @@ from config.settings import (
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_STRICT,
-    RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING,
-    RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION,
-    RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE,
+    RAG_INGESTION_ENABLE_KG_PHASE2B,
     RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING,
     RAG_INGESTION_ENABLE_QUALITY_VALIDATION,
     RAG_INGESTION_VISION_AUTO_PULL,
@@ -79,8 +77,7 @@ from config.settings import (
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
     RAG_INGESTION_EMBEDDING_BATCH_SIZE,
 )
-from src.core import LocalBGEEmbeddings
-from src.core import KnowledgeGraphBuilder
+from src.core.embeddings import LocalBGEEmbeddings
 from src.ingest.common.schemas import ProcessedChunk
 
 PIPELINE_NODE_NAMES = [
@@ -88,17 +85,14 @@ PIPELINE_NODE_NAMES = [
     "structure_detection",
     "multimodal_processing",
     "text_cleaning",
-    "document_refactoring",
     "chunking",
     "vlm_enrichment",
     "chunk_enrichment",
     "metadata_generation",
     "cross_reference_extraction",
-    "knowledge_graph_extraction",
     "quality_validation",
     "embedding_storage",
     "visual_embedding",
-    "knowledge_graph_storage",
 ]
 
 
@@ -145,18 +139,18 @@ class IngestionConfig:
     vision_api_base_url: str = RAG_INGESTION_VISION_API_BASE_URL
     vision_api_key: str = RAG_INGESTION_VISION_API_KEY
     vision_api_path: str = RAG_INGESTION_VISION_API_PATH
-    enable_document_refactoring: bool = RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING
     enable_cross_reference_extraction: bool = (
         RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION
     )
-    enable_knowledge_graph_extraction: bool = (
-        RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION
-    )
     enable_quality_validation: bool = RAG_INGESTION_ENABLE_QUALITY_VALIDATION
-    enable_knowledge_graph_storage: bool = RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE
+    enable_kg_phase2b: bool = RAG_INGESTION_ENABLE_KG_PHASE2B
+    """When True (production default), KG ingest is dispatched to the KGWeave
+    worker fleet via Temporal (KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE). When
+    False, KG ingest is skipped entirely — kept as an opt-out for offline
+    CLI / bench runs that don't run a Temporal cluster.
+    Env var: RAG_INGESTION_ENABLE_KG_PHASE2B."""
     min_chunk_chars: int = 40
     min_quality_score: float = 0.45
-    build_kg: bool = True
     export_processed: bool = False
     update_mode: bool = False
     verbose_stage_logs: bool = RAG_INGESTION_VERBOSE_STAGE_LOGS
@@ -321,7 +315,6 @@ class Runtime:
         config: Effective ingestion configuration.
         embedder: Embedding model wrapper used by storage stages.
         weaviate_client: Client used for vector and (optionally) metadata storage.
-        kg_builder: Optional knowledge graph builder used by KG stages.
         db_client: Optional database client for metadata storage.
         parser_registry: Optional ParserRegistry instance. Typed as Any to avoid
             a circular import between types.py and parser_registry.py. Populated
@@ -330,7 +323,6 @@ class Runtime:
     config: IngestionConfig
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
-    kg_builder: Optional[KnowledgeGraphBuilder]
     db_client: Optional[Any] = None
     parser_registry: Optional[Any] = None  # ParserRegistry; typed Any to avoid circular import
 

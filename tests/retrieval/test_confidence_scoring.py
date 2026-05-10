@@ -77,7 +77,8 @@ class TestComputeCitationCoverage:
     """Tests for compute_citation_coverage."""
 
     def test_empty_answer(self):
-        assert compute_citation_coverage("", ["some text"]) == 1.0
+        # #10: Empty answer → 0.5 (neutral), not 1.0 (vacuously perfect).
+        assert compute_citation_coverage("", ["some text"]) == 0.5
 
     def test_empty_chunks(self):
         assert compute_citation_coverage(
@@ -243,18 +244,18 @@ class TestComputeCompositeConfidence:
 
         retrieval = top-1 of [0.8] = 0.8
         llm       = parse_llm_confidence("high") = 0.85
-        citation  = compute_citation_coverage("", [...]) = 1.0  (empty answer → vacuously 1.0)
-        composite = 0.50*0.8 + 0.30*0.85 + 0.20*1.0
-                  = 0.40 + 0.255 + 0.20 = 0.855
+        citation  = compute_citation_coverage("", [...]) = 0.5  (empty answer → neutral 0.5, #10)
+        composite = 0.50*0.8 + 0.30*0.85 + 0.20*0.5
+                  = 0.40 + 0.255 + 0.10 = 0.755
         """
         result = compute_composite_confidence(
             reranker_scores=[0.8],
             llm_confidence_text="high",
-            answer="",           # empty answer → citation_score = 1.0
+            answer="",           # empty answer → citation_score = 0.5 (neutral, #10)
             retrieved_texts=["any text"],
             retrieval_weight=0.50,
             llm_weight=0.30,
             citation_weight=0.20,
         )
-        expected = 0.50 * 0.8 + 0.30 * 0.85 + 0.20 * 1.0
+        expected = 0.50 * 0.8 + 0.30 * 0.85 + 0.20 * 0.5
         assert result.composite == pytest.approx(expected, abs=1e-6)

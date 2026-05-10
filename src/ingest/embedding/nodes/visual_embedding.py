@@ -58,6 +58,7 @@ from src.vector_db.weaviate import (
     delete_visual_by_source_key,
     ensure_visual_collection,
 )
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 
@@ -67,11 +68,13 @@ logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 # ---------------------------------------------------------------------------
 
 
+@node_span("visual_embedding")
 def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Visual embedding pipeline node: extract, store, embed, and index page images.
 
-    Positioned in the LangGraph DAG after embedding_storage, before
-    knowledge_graph_storage (FR-601, FR-604).
+    Positioned in the LangGraph DAG after embedding_storage and before
+    commit_node (FR-601, FR-604). KG ingest is owned by KGWeave and runs
+    out-of-process via the Temporal Phase 2b handoff.
 
     Short-circuit conditions (FR-603, NFR-903):
     - enable_visual_embedding=False

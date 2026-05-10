@@ -22,14 +22,12 @@ import logging
 import os
 import re
 import time
-from collections import defaultdict
 from typing import Optional
 
 from langgraph.graph import END, StateGraph
 
 from config.settings import (
     DOMAIN_DESCRIPTION,
-    KG_PATH,
     MAX_SANITIZATION_ITERATIONS,
     PROMPTS_DIR,
     QUERY_CONFIDENCE_THRESHOLD,
@@ -197,57 +195,21 @@ def _retrieval_auto_rewrite(
 # Knowledge graph vocabulary (loaded once, used for reformulation context)
 # ---------------------------------------------------------------------------
 
-_KG_TERMS: Optional[list[str]] = None
-_KG_WORD_INDEX: Optional[dict[str, list[str]]] = None
+def _kg_query_match(query: str, max_terms: int) -> list[str]:
+    """Return KG terms relevant to *query* via the kgweave client facade.
 
-
-def _get_kg_terms() -> tuple:
-    """Load entity names from the knowledge graph JSON (if available).
-
-    Returns (terms_list, word_index) where word_index maps lowercase words
-    to the terms containing them. Both are built once and cached.
+    Delegates word-level matching + top-N fallback to the KGWeave service
+    (in-process by default; HTTP when ``KGWEAVE_API_URL`` is set). Returns
+    an empty list when the graph is unavailable or empty.
     """
-    global _KG_TERMS, _KG_WORD_INDEX
-    if _KG_TERMS is not None:
-        return _KG_TERMS, _KG_WORD_INDEX
-
-    _t0 = time.perf_counter()
-    _KG_TERMS = []
-    _KG_WORD_INDEX = defaultdict(list)
-
-    if not KG_PATH.exists():
-        logger.debug(
-            "_get_kg_terms: no KG file at %s (%.2fms)",
-            KG_PATH, (time.perf_counter() - _t0) * 1000,
-        )
-        return _KG_TERMS, _KG_WORD_INDEX
+    from kgweave.client import get_client  # noqa: PLC0415
 
     try:
-        with open(KG_PATH, "rb") as f:
-            kg_data = orjson.loads(f.read())
-        nodes = kg_data.get("nodes", [])
-        # Sort by mention count, filter out noisy short/long entries
-        valid = [
-            n for n in nodes
-            if 2 <= len(n.get("id", "")) <= 60 and n.get("mention_count", 0) >= 1
-        ]
-        valid.sort(key=lambda n: n.get("mention_count", 0), reverse=True)
-        _KG_TERMS = [n["id"] for n in valid]
-
-        # Build inverted index: word -> [term1, term2, ...]
-        for term in _KG_TERMS:
-            for word in term.lower().split():
-                if len(word) >= 3:
-                    _KG_WORD_INDEX[word].append(term)
-
-        logger.info(
-            "Loaded %d KG terms (%d index keys) for reformulation context in %.1fms",
-            len(_KG_TERMS), len(_KG_WORD_INDEX), (time.perf_counter() - _t0) * 1000,
-        )
-    except (orjson.JSONDecodeError, KeyError) as e:
-        logger.warning("Failed to load KG terms: %s", e)
-
-    return _KG_TERMS, _KG_WORD_INDEX
+        result = get_client().match_kg_query(query, max_terms=max_terms)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("kg match_kg_query unavailable: %s", exc)
+        return []
+    return list(result.matched)
 
 
 # ---------------------------------------------------------------------------
@@ -513,37 +475,15 @@ def sanitize_node(state: QueryState) -> dict:
 
 
 def _match_kg_terms(query: str, max_terms: int = 20) -> str:
-    """Find KG terms relevant to the query using inverted index lookup.
+    """Find KG terms relevant to the query and format them for prompt injection.
 
-    Returns a formatted string for injection into the reformulator prompt.
-    Uses pre-built word→terms index for O(query_words) lookup instead of
-    scanning all terms. Scales to 10k+ KG nodes with <1ms lookup.
+    Match logic (word-level lookup + top-N fallback) lives in
+    ``KGQueryService.match_kg_query`` so it can serve both in-process and
+    remote callers identically.
     """
-    kg_terms, word_index = _get_kg_terms()
-    if not kg_terms:
-        return ""
-
-    query_words = {w.lower() for w in query.split() if len(w) >= 3}
-    if not query_words:
-        return ""
-
-    # Collect candidate terms from index, preserving mention-count order
-    seen = set()
-    matched = []
-    for word in query_words:
-        for term in word_index.get(word, []):
-            if term not in seen:
-                seen.add(term)
-                matched.append(term)
-                if len(matched) >= max_terms:
-                    break
-        if len(matched) >= max_terms:
-            break
-
+    matched = _kg_query_match(query, max_terms=max_terms)
     if not matched:
-        # No direct matches — fall back to top terms by mention count
-        matched = kg_terms[:max_terms]
-
+        return ""
     return "Known terms in the knowledge base: " + ", ".join(matched)
 
 

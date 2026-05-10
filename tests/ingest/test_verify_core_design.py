@@ -41,26 +41,21 @@ def _cfg(**overrides) -> IngestionConfig:
 
     Safe defaults ensure no pre-existing validators fire accidentally:
     - chunk_size > chunk_overlap
-    - build_kg=False (avoids KG storage cross-checks without storage enabled)
     - enable_docling_parser=False (avoids docling_model empty-string check)
     - vlm_mode="disabled"
     - enable_multimodal_processing=False
     - enable_vision_processing=False
     - enable_visual_embedding=False
-    - enable_knowledge_graph_storage=False
     - parser_strategy="auto", chunker="native"
     """
     defaults = dict(
         chunk_size=512,
         chunk_overlap=64,
-        build_kg=False,
         enable_docling_parser=False,
         vlm_mode="disabled",
         enable_multimodal_processing=False,
         enable_vision_processing=False,
         enable_visual_embedding=False,
-        enable_knowledge_graph_storage=False,
-        enable_knowledge_graph_extraction=False,
         parser_strategy="auto",
         chunker="native",
     )
@@ -329,23 +324,6 @@ class TestVerifyCoreDesignIntegration:
         assert report.ok is False
         # Expect at least: bad parser_strategy, bad chunker, builtin+multimodal conflict
         assert len(report.errors) >= 3
-
-    def test_pre_existing_kg_error_still_reported(self):
-        """Pre-existing KG validation still fires alongside new parser checks."""
-        cfg = _cfg(
-            build_kg=False,
-            enable_knowledge_graph_extraction=False,
-            enable_knowledge_graph_storage=True,
-            parser_strategy="bogus",
-        )
-        report = verify_core_design(cfg)
-
-        assert report.ok is False
-        # Both KG error and parser_strategy error should be present.
-        kg_errors = [e for e in report.errors if "knowledge_graph_storage" in e]
-        ps_errors = [e for e in report.errors if "parser_strategy" in e]
-        assert kg_errors, "KG storage error should still be reported"
-        assert ps_errors, "parser_strategy error should also be reported"
 
     def test_valid_auto_strategy_native_chunker_no_errors(self):
         """The recommended defaults (parser_strategy='auto', chunker='native') produce no errors."""
