@@ -167,6 +167,13 @@ class IngestionConfig:
     """VLM mode: "disabled" | "builtin" | "external". Default: "disabled"."""
     hybrid_chunker_max_tokens: int = RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
     """Max tokens per HybridChunker chunk. Default: 512 (bge-m3 limit)."""
+    hybrid_chunker_tokenizer_model: str | None = None
+    """HF tokenizer repo id (or local path) used by HybridChunker for token
+    counting. When None (default), the chunker resolves the tokenizer from
+    ``EMBEDDING_MODEL_PATH`` so token counts match what the embedder will
+    actually consume. Final fallback is ``BAAI/bge-m3``. Env-driven override
+    is intentionally not wired — set this on IngestionConfig directly when a
+    different tokenizer is desired."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN

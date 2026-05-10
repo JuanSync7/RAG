@@ -6,6 +6,18 @@ import types
 
 
 def _install_stub_modules() -> None:
+    # Prefer real heavyweight ML deps when present (Docling's HybridChunker
+    # tokenizer wrapper transitively needs real torch + transformers; without
+    # them, integration tests can't run). Import order matters: torch must be
+    # real before transformers tries to detect it. If any fail, fall through
+    # to per-module stubs below.
+    for _real_mod in ("torch", "transformers", "sentence_transformers"):
+        if _real_mod not in sys.modules:
+            try:
+                __import__(_real_mod)
+            except Exception:
+                pass
+
     if "sentence_transformers" not in sys.modules:
         st = types.ModuleType("sentence_transformers")
 
@@ -237,29 +249,40 @@ def _install_stub_modules() -> None:
         sys.modules["minio.commonconfig"] = minio_commonconfig
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        # Prefer the real Pillow when available — Docling's chunker/converter
+        # needs PIL.ImageColor / ImageDraw / ImageFont, which a hand-rolled
+        # stub does not provide. Real PIL is a transitive dep of Pillow,
+        # which the project already requires, so this should normally succeed.
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            size = (0, 0)
+            class Image:
+                size = (0, 0)
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            def convert(self, mode):
-                return self
+                def convert(self, mode):
+                    return self
 
-            def tobytes(self):
-                return b""
+                def tobytes(self):
+                    return b""
 
-        # `from PIL import Image` resolves to the PIL.Image module; callers
-        # then call Image.open(...) at module level, not on the class.
-        pil_image.Image = Image
-        pil_image.open = Image.open
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            # `from PIL import Image` resolves to the PIL.Image module; callers
+            # then call Image.open(...) at module level, not on the class.
+            pil_image.Image = Image
+            pil_image.open = Image.open
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     # Only stub temporalio when the real package can't be imported. Tests that
     # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
@@ -551,43 +574,50 @@ def _install_stub_modules() -> None:
         sys.modules["bitsandbytes"] = bnb
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            """Minimal PIL.Image stub."""
+            class Image:
+                """Minimal PIL.Image stub."""
 
-            LANCZOS = 1
+                LANCZOS = 1
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            @staticmethod
-            def new(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def new(*args, **kwargs):
+                    return Image()
 
-            def convert(self, *args, **kwargs):
-                return self
+                def convert(self, *args, **kwargs):
+                    return self
 
-            def resize(self, *args, **kwargs):
-                return self
+                def resize(self, *args, **kwargs):
+                    return self
 
-            def save(self, *args, **kwargs):
-                pass
+                def save(self, *args, **kwargs):
+                    pass
 
-            def tobytes(self, *args, **kwargs):
-                return b""
+                def tobytes(self, *args, **kwargs):
+                    return b""
 
-            @property
-            def size(self):
-                return (100, 100)
+                @property
+                def size(self):
+                    return (100, 100)
 
-        pil_image.Image = Image
-        pil_image.LANCZOS = Image.LANCZOS
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            pil_image.Image = Image
+            pil_image.LANCZOS = Image.LANCZOS
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     if "prometheus_client" not in sys.modules:
         # Prefer the real prometheus_client when installed (see comment above).

@@ -72,8 +72,16 @@ SEARCH_LIMIT = 10
 RERANK_TOP_K = 5
 
 # --- Document Processing ---
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
+# CHUNK_SIZE / CHUNK_OVERLAP apply to the **LangChain fallback** chunker
+# (RecursiveCharacterTextSplitter). They are CHARACTER counts, not token
+# counts. Kept roughly equivalent in tokens to the Docling HybridChunker
+# default RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024 at ~3.5 chars/token
+# for English (BGE-M3 tokenizer). If you change one, check the other.
+# Docling's HybridChunker has no overlap parameter — it splits at structural
+# boundaries and uses heading breadcrumbs to bridge context, so overlap only
+# matters for the char-window fallback path.
+CHUNK_SIZE = 3500
+CHUNK_OVERLAP = 350
 
 # --- Query Processing (LangGraph) ---
 QUERY_CONFIDENCE_THRESHOLD = float(
@@ -439,9 +447,16 @@ Valid values: "disabled", "builtin", "external".
 """
 
 RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS: int = int(
-    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "512")
+    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "1024")
 )
-"""Maximum token count per chunk for HybridChunker (bge-m3 limit is 512)."""
+"""Maximum token count per chunk for HybridChunker.
+
+Default 1024 — empirical sweet spot for technical-doc retrieval. BGE-M3
+itself accepts inputs up to 8192 tokens, but past ~1500–2000 the embedding
+loses specificity (a single dense vector covers too many subtopics) and
+single-sentence chunks (under ~50 tokens) lack contextual grounding.
+1024 keeps natural section units whole while staying comfortably below
+the dilution threshold."""
 
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"

@@ -48,10 +48,10 @@ class TestSettingsDefaults:
         s = _reload_settings()
         assert s.RAG_INGESTION_VLM_MODE == "disabled"
 
-    def test_hybrid_chunker_max_tokens_default_is_512(self, monkeypatch):
+    def test_hybrid_chunker_max_tokens_default_is_1024(self, monkeypatch):
         monkeypatch.delenv("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", raising=False)
         s = _reload_settings()
-        assert s.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS == 512
+        assert s.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS == 1024
 
     def test_hybrid_chunker_max_tokens_default_is_int(self, monkeypatch):
         monkeypatch.delenv("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", raising=False)
@@ -75,7 +75,7 @@ class TestSettingsDefaults:
         monkeypatch.delenv("RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", raising=False)
         s = _reload_settings()
         assert s.RAG_INGESTION_VLM_MODE == "disabled"
-        assert s.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS == 512
+        assert s.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS == 1024
         assert s.RAG_INGESTION_PERSIST_DOCLING_DOCUMENT is True
 
 
@@ -201,9 +201,9 @@ class TestIngestionConfigNewFieldDefaults:
         cfg = IngestionConfig()
         assert cfg.vlm_mode == "disabled"
 
-    def test_default_hybrid_chunker_max_tokens_is_512(self):
+    def test_default_hybrid_chunker_max_tokens_is_1024(self):
         cfg = IngestionConfig()
-        assert cfg.hybrid_chunker_max_tokens == 512
+        assert cfg.hybrid_chunker_max_tokens == 1024
 
     def test_default_persist_docling_document_is_true(self):
         cfg = IngestionConfig()

@@ -589,13 +589,17 @@ class TestDoclingParser:
         mock_docling_core = MagicMock()
         mock_docling_core.transforms.chunker.HybridChunker = mock_hybrid_chunker_cls
 
+        from src.ingest.support import docling as _docling_mod
+
         with patch.dict("sys.modules", {
             "docling_core": mock_docling_core,
             "docling_core.transforms": mock_docling_core.transforms,
             "docling_core.transforms.chunker": MagicMock(
                 HybridChunker=mock_hybrid_chunker_cls
             ),
-        }):
+        }), patch.object(
+            _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
+        ):
             parser = DoclingParser()
             parser._docling_document = mock_doc
             parser._max_tokens = 512
@@ -633,11 +637,15 @@ class TestDoclingParser:
 
         mock_hybrid_chunker_cls = MagicMock(return_value=mock_chunker)
 
+        from src.ingest.support import docling as _docling_mod
+
         with patch.dict("sys.modules", {
             "docling_core.transforms.chunker": MagicMock(
                 HybridChunker=mock_hybrid_chunker_cls
             ),
-        }):
+        }), patch.object(
+            _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
+        ):
             parser = DoclingParser()
             parser._docling_document = mock_doc
             parser._max_tokens = 512
@@ -671,11 +679,15 @@ class TestDoclingParser:
 
         mock_hybrid_chunker_cls = MagicMock(return_value=mock_chunker)
 
+        from src.ingest.support import docling as _docling_mod
+
         with patch.dict("sys.modules", {
             "docling_core.transforms.chunker": MagicMock(
                 HybridChunker=mock_hybrid_chunker_cls
             ),
-        }):
+        }), patch.object(
+            _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
+        ):
             parser = DoclingParser()
             parser._docling_document = mock_doc
             parser._max_tokens = 512
