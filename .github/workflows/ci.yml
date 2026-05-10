@@ -14,6 +14,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # pyproject.toml declares `kgweave = { path = "../KGWeave", editable = true }`
+      # — uv resolves the editable dep against a sibling clone. CI must materialise
+      # one before `uv sync`, otherwise the lockfile entry fails to install.
+      # KGWeave is public; no auth required. Pinning is by-main today; promote to
+      # a tagged ref once KGWeave starts cutting releases.
+      - name: Clone KGWeave (sibling editable dep)
+        run: git clone --depth 1 https://github.com/JuanSync7/KGWeave.git ../KGWeave
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
       - name: Run tests
