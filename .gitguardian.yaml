@@ -1,0 +1,23 @@
+# GitGuardian configuration — see https://docs.gitguardian.com/ggshield-docs/reference/config
+#
+# Scoped allowlist for known-safe placeholder/dev-default values that GG's
+# generic-credential detectors flag. Real secrets must NEVER be added here.
+# Any new entry needs a justification in `name`.
+
+version: 2
+
+secret:
+  # Files that are pure documentation/templates: every value is a placeholder
+  # the operator is expected to overwrite before any non-local deployment.
+  ignored-paths:
+    - .env.example
+
+  # Literal values that match GG's generic-credential heuristic but are
+  # well-known docker-compose dev defaults wired as `${VAR:-default}` fallbacks.
+  # Removing the fallback would break `docker compose up` without a populated
+  # .env, which is the documented quickstart path.
+  ignored-matches:
+    - name: rag-postgres dev-default password (compose fallback ${RAG_POSTGRES_PASSWORD:-litellm})
+      match: litellm
+    - name: temporal-db dev-default password (compose fallback ${TEMPORAL_POSTGRES_PASSWORD:-temporal})
+      match: temporal
