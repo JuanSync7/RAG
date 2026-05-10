@@ -18,6 +18,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from temporalio import activity
+from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
 from src.platform.cache import get_cache
 from src.platform import (
     CACHE_HITS,
@@ -81,7 +82,7 @@ def execute_rag_query(request: dict) -> dict:
     tenant_id: Optional[str] = request.get("tenant_id")
     max_query_iterations: int = int(request.get("max_query_iterations", 3))
     fast_path: Optional[bool] = request.get("fast_path")
-    overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
+    overall_timeout_ms: int = int(request.get("overall_timeout_ms", RAG_RETRIEVAL_TIMEOUT_MS))
     stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
     conversation_id: Optional[str] = request.get("conversation_id")
     memory_context: Optional[str] = request.get("memory_context")
