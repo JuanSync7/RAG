@@ -80,7 +80,7 @@ The fastest path from clone to working query is **7 steps**. Containers-only use
 | **Containers-only** (fastest start) | Just trying it out, or running without modifying Python/TS code | Docker only — `rag-api` / `rag-worker` pull from `ghcr.io/juansync7/ragweave-{api,worker}:latest` |
 | **Local dev** (this guide) | Iterating on Python or TypeScript code | All prerequisites above |
 
-For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.env`. To rebuild app images locally instead of pulling: `./scripts/compose.sh build rag-api rag-worker`. Pin to a specific image tag via `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env`.
+For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.env`. To rebuild app images locally instead of pulling: `make container-build` (writes `:dev`; see [Image tags: `:latest` vs `:dev`](#image-tags-latest-vs-dev)). Pin to a specific image tag via `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env`.
 
 ### Step 1 — Clone & copy environment
 
@@ -322,6 +322,26 @@ DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
 ```
 
 Multi-stage builds, BuildKit pip-cache mounts, `.dockerignore`, compose-level healthchecks (podman-friendly), `PYTHONPATH=/app` (no `pip install .`), GPU support in the worker — see [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md) for the full design.
+
+### Image tags: `:latest` vs `:dev`
+
+`docker-compose.yml` reads `${RAG_{API,WORKER}_IMAGE_REF:-ghcr.io/juansync7/ragweave-{api,worker}}:${RAG_{API,WORKER}_IMAGE_TAG:-latest}`. The Makefile mirrors local builds to the same ref so `compose up` finds your build instead of pulling from GHCR.
+
+Two audiences, two tags:
+
+| You are… | What you want | What to set in `.env` | What runs |
+|---|---|---|---|
+| Fresh-cloning the repo | Whatever CI last published from `main` | _nothing_ (defaults apply) | `docker compose up` pulls `:latest` from GHCR |
+| Hacking locally on a branch | Your freshly-built image, never clobbered by CI's `:latest` | `RAG_API_IMAGE_TAG=dev`<br>`RAG_WORKER_IMAGE_TAG=dev` | `make container-build` writes `:dev`, compose reads `:dev` |
+| CI / prod deploy | Reproducible build | `RAG_*_IMAGE_TAG=<sha-or-version>` | Compose reads the pinned tag |
+
+**Why `:dev` and not just `:latest` everywhere?** A local rebuild and CI's published image share the name `ghcr.io/juansync7/ragweave-worker:latest` but live in different image stores (your laptop vs the GHCR registry). If anything triggers a registry pull (`docker compose pull`, `pull_policy: always`, a teammate running `docker pull`), the registry version overwrites your local build. The `:dev` tag isolates local work from that race — CI never publishes `:dev`, so it can't be clobbered.
+
+Tags are parameterized via Makefile vars (`RAG_API_IMAGE_REF`, `RAG_API_IMAGE_TAG`, `RAG_WORKER_IMAGE_REF`, `RAG_WORKER_IMAGE_TAG`) — override per invocation:
+
+```bash
+make container-build-worker RAG_WORKER_IMAGE_REF=myorg/ragweave-worker RAG_WORKER_IMAGE_TAG=staging
+```
 
 ---
 
