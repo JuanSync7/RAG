@@ -54,12 +54,9 @@ from src.ingest.temporal.activities import (
     delete_source_activity,
     document_processing_activity,
     embedding_pipeline_activity,
-    list_pending_phase2b_activity,
     prewarm_worker_resources,
-    record_phase_status_activity,
 )
 from src.ingest.temporal.workflows import (
-    BackfillKGWorkflow,
     DeleteSourceWorkflow,
     IngestDirectoryWorkflow,
     IngestDocumentWorkflow,
@@ -67,19 +64,8 @@ from src.ingest.temporal.workflows import (
 
 logger = logging.getLogger("rag.ingest.temporal.worker")
 
-_WORKFLOWS = [
-    IngestDirectoryWorkflow,
-    IngestDocumentWorkflow,
-    DeleteSourceWorkflow,
-    BackfillKGWorkflow,
-]
-_ACTIVITIES = [
-    document_processing_activity,
-    embedding_pipeline_activity,
-    delete_source_activity,
-    record_phase_status_activity,
-    list_pending_phase2b_activity,
-]
+_WORKFLOWS = [IngestDirectoryWorkflow, IngestDocumentWorkflow, DeleteSourceWorkflow]
+_ACTIVITIES = [document_processing_activity, embedding_pipeline_activity, delete_source_activity]
 
 # ---------------------------------------------------------------------------
 # Slot allocation helpers (mirrors config/settings.py precedence — until the

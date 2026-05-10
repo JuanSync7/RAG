@@ -93,7 +93,7 @@ class TestWriteRefactorMirrorArtifacts:
         chunks = [self._make_chunk(0), self._make_chunk(1)]
         result = {
             "raw_text": "original text",
-            "cleaned_text": "cleaned text",
+            "refactored_text": "refactored text",
             "chunks": chunks,
         }
 
@@ -109,9 +109,7 @@ class TestWriteRefactorMirrorArtifacts:
         assert mapping_path.exists()
 
         assert original_path.read_text(encoding="utf-8") == "original text"
-        # PR1 redirected the legacy `.refactored.md` mirror file to dump cleaned_text
-        # since the LLM refactoring stage was removed.
-        assert refactored_path.read_text(encoding="utf-8") == "cleaned text"
+        assert refactored_path.read_text(encoding="utf-8") == "refactored text"
 
         mapping = json.loads(mapping_path.read_bytes())
         assert mapping["source"] == "test.md"
@@ -136,7 +134,7 @@ class TestWriteRefactorMirrorArtifacts:
             "connector": "local_fs",
             "source_version": "100",
         }
-        result = {"raw_text": "raw", "cleaned_text": "cleaned", "chunks": []}
+        result = {"raw_text": "raw", "refactored_text": "ref", "chunks": []}
 
         _write_refactor_mirror_artifacts(source, result, config)
 
@@ -156,7 +154,7 @@ class TestWriteRefactorMirrorArtifacts:
             "connector": "local_fs",
             "source_version": "0",
         }
-        result = {"raw_text": "", "cleaned_text": "", "chunks": []}
+        result = {"raw_text": "", "refactored_text": "", "chunks": []}
         _write_refactor_mirror_artifacts(source, result, config)
 
         stem = _mirror_file_stem(source["source_name"], source["source_key"])
@@ -252,6 +250,7 @@ class TestIngestFileMirrorPath:
         fake_phase1 = {
             "errors": [],
             "raw_text": "raw",
+            "refactored_text": "ref",
             "cleaned_text": "clean",
             "source_hash": "abc123",
             "processing_log": [],
@@ -307,6 +306,9 @@ class TestIngestDirectoryPaths:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,
@@ -359,6 +361,87 @@ class TestIngestDirectoryPaths:
 
         # close_client should have been called
         mock_close.assert_called_once_with(fake_db_client)
+
+    def test_mock_kg_saved_when_kg_builder_present(self, tmp_path):
+        """When kg_builder is present, save() is called after all files processed."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config(build_kg=True, enable_knowledge_graph_extraction=True)
+        doc_file = tmp_path / "doc.md"
+        doc_file.write_text("content")
+
+        fake_kg_builder = MagicMock()
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "KnowledgeGraphBuilder", return_value=fake_kg_builder), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            mock_result = MagicMock()
+            mock_result.errors = []
+            mock_result.stored_count = 1
+            mock_result.metadata_summary = ""
+            mock_result.metadata_keywords = []
+            mock_result.processing_log = []
+            mock_result.source_hash = "hash"
+            mock_result.clean_hash = "chash"
+            mock_result.trace_id = "t1"
+            mock_result.validation = {}
+            mock_ingest_file.return_value = mock_result
+
+            from src.ingest.impl import ingest_directory, KG_PATH
+            ingest_directory(tmp_path, config=config)
+
+        fake_kg_builder.save.assert_called_once()
+
+    def test_mock_obsidian_export_called_when_enabled(self, tmp_path):
+        """When obsidian_export=True, export_obsidian is called after KG save."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config(build_kg=True, enable_knowledge_graph_extraction=True)
+        doc_file = tmp_path / "doc.md"
+        doc_file.write_text("content")
+
+        fake_kg_builder = MagicMock()
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "KnowledgeGraphBuilder", return_value=fake_kg_builder), \
+             patch.object(impl_mod, "export_obsidian") as mock_export, \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            mock_result = MagicMock()
+            mock_result.errors = []
+            mock_result.stored_count = 1
+            mock_result.metadata_summary = ""
+            mock_result.metadata_keywords = []
+            mock_result.processing_log = []
+            mock_result.source_hash = "h"
+            mock_result.clean_hash = "ch"
+            mock_result.trace_id = "t2"
+            mock_result.validation = {}
+            mock_ingest_file.return_value = mock_result
+
+            from src.ingest.impl import ingest_directory
+            ingest_directory(tmp_path, config=config, obsidian_export=True)
+
+        mock_export.assert_called_once()
 
     def test_mock_ingest_file_error_continues_loop(self, tmp_path):
         """ingest_file returning errors increments failed counter and continues."""
@@ -609,6 +692,20 @@ class TestFindManifestEntryFallbacks:
 class TestVerifyCoreDesignWarnings:
     """Lines 492, 498: verify_core_design warnings paths."""
 
+    def test_mock_verify_core_design_warns_on_refactoring_without_llm(self):
+        """verify_core_design should add warning when refactoring enabled but LLM disabled."""
+        from src.ingest.impl import verify_core_design
+        from src.ingest.common.types import IngestionConfig
+
+        config = IngestionConfig(
+            enable_document_refactoring=True,
+            enable_llm_metadata=False,
+            chunk_overlap=64,
+            chunk_size=512,
+        )
+        result = verify_core_design(config)
+        assert any("refactoring" in w for w in result.warnings)
+
     def test_mock_verify_core_design_error_on_chunk_overlap(self):
         """verify_core_design should return error when chunk_overlap >= chunk_size."""
         from src.ingest.impl import verify_core_design
@@ -627,6 +724,9 @@ class TestIngestDirectoryDoclingVisionPaths:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,
@@ -683,6 +783,9 @@ class TestIngestDirectorySelectedSources:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,
@@ -763,6 +866,9 @@ class TestIngestDirectoryParserRegistryFailure:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,
@@ -825,6 +931,9 @@ class TestIngestDirectoryExportProcessed:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=True,
             enable_docling_parser=False,
@@ -884,6 +993,9 @@ class TestIngestDirectorySkipKeyMigration:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,
@@ -982,6 +1094,9 @@ class TestIngestDirectoryProcessedKeyMigration:
         base = dict(
             chunk_size=512,
             chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
             store_documents=False,
             export_processed=False,
             enable_docling_parser=False,

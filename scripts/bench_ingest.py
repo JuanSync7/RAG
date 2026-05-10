@@ -82,6 +82,7 @@ def run_benchmark(docs_dir: Path, files: list[Path], device_label: str, params: 
         enable_docling_parser=False,
         enable_vision_processing=False,
         enable_multimodal_processing=False,
+        enable_document_refactoring=False,
         enable_cross_reference_extraction=False,
         enable_knowledge_graph_extraction=False,
         enable_knowledge_graph_storage=False,

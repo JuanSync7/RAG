@@ -334,13 +334,13 @@ class TestPipelineNodeNamesOrdering:
     def test_pipeline_starts_with_document_ingestion(self):
         assert PIPELINE_NODE_NAMES[0] == "document_ingestion"
 
-    def test_pipeline_ends_with_visual_embedding(self):
-        """KG nodes were removed (KGWeave owns KG ingest); visual_embedding is the last node."""
-        assert PIPELINE_NODE_NAMES[-1] == "visual_embedding"
+    def test_pipeline_ends_with_knowledge_graph_storage(self):
+        assert PIPELINE_NODE_NAMES[-1] == "knowledge_graph_storage"
 
-    def test_pipeline_node_names_has_12_entries(self):
-        """12 after KG extraction/storage nodes were extracted to KGWeave."""
-        assert len(PIPELINE_NODE_NAMES) == 12
+    def test_pipeline_node_names_has_15_entries(self):
+        """Bumped from 14 to 15 after 'visual_embedding' was inserted between
+        'embedding_storage' and 'knowledge_graph_storage'."""
+        assert len(PIPELINE_NODE_NAMES) == 15
 
     def test_pipeline_node_names_are_all_strings(self):
         assert all(isinstance(name, str) for name in PIPELINE_NODE_NAMES)

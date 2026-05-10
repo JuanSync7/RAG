@@ -4,7 +4,7 @@
 # Exports: ingest, main
 # Deps: config.settings, src.ingest, src.platform.validation
 # @end-summary
-"""Ingest documents into Weaviate via the two-phase pipeline."""
+"""Ingest documents into Weaviate and optionally build a knowledge graph."""
 
 import argparse
 import logging
@@ -36,6 +36,8 @@ def ingest(
     documents_dir: Path = DOCUMENTS_DIR,
     fresh: bool = True,
     update: bool = False,
+    build_kg: bool = True,
+    obsidian_export: bool = False,
     semantic_chunking: bool = True,
     export_processed: bool = False,
     selected_file: Optional[Path] = None,
@@ -60,6 +62,8 @@ def ingest(
     Args:
         documents_dir: Path to the directory containing documents.
         fresh: If True, delete existing collection before ingesting.
+        build_kg: If True, build a knowledge graph from the chunks.
+        obsidian_export: If True, export KG as Obsidian-compatible markdown files.
         semantic_chunking: If True, use semantic similarity for chunk splitting.
         export_processed: If True, save cleaned docs and chunks to processed/ dir.
         selected_file: Optional single file to ingest instead of all files.
@@ -69,7 +73,10 @@ def ingest(
     documents_dir = validate_documents_dir(documents_dir, PROJECT_ROOT)
     cfg_kwargs = {
         "semantic_chunking": semantic_chunking,
+        "build_kg": build_kg,
         "export_processed": export_processed,
+        "enable_knowledge_graph_extraction": build_kg,
+        "enable_knowledge_graph_storage": build_kg,
     }
     if verbose_stages is not None:
         cfg_kwargs["verbose_stage_logs"] = verbose_stages
@@ -114,6 +121,7 @@ def ingest(
         config=cfg,
         fresh=fresh,
         update=update,
+        obsidian_export=obsidian_export,
         selected_sources=selected_sources,
     )
     logger.info(
@@ -145,9 +153,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Ingest all supported documents in a specific directory",
     )
     parser.add_argument(
+        "--no-kg", action="store_true", help="Skip knowledge graph building"
+    )
+    parser.add_argument(
         "--update",
         action="store_true",
         help="Incremental update mode (changed docs only; idempotent writes)",
+    )
+    parser.add_argument(
+        "--export-obsidian",
+        action="store_true",
+        help="Export knowledge graph as Obsidian markdown files",
     )
     parser.add_argument(
         "--no-semantic",
@@ -280,6 +296,8 @@ def main() -> None:
         documents_dir=target_documents_dir,
         fresh=not args.update,
         update=args.update,
+        build_kg=not args.no_kg,
+        obsidian_export=args.export_obsidian,
         semantic_chunking=not args.no_semantic,
         export_processed=args.export_processed,
         selected_file=selected_file,

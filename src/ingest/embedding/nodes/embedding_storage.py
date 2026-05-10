@@ -26,7 +26,6 @@ from src.vector_db import (
 from src.ingest.common import append_processing_log
 from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.storage")
 
@@ -156,7 +155,6 @@ def _embed_batches(
     return all_vectors, errors, success_mask
 
 
-@node_span("embedding_storage")
 def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Generate chunk embeddings and STAGE records for atomic commit (Issue #42).
 

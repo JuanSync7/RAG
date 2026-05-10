@@ -45,6 +45,7 @@ def _make_state(
         config=config,
         embedder=mock_embedder,
         weaviate_client=mock_weaviate,
+        kg_builder=None,
     )
     return {
         "chunks": chunks or [],

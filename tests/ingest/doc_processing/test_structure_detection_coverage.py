@@ -38,6 +38,7 @@ def _make_state(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {
         "raw_text": raw_text,
@@ -192,13 +193,12 @@ class TestStructureDetectionErrorScenarios:
         state = _make_state(enable_docling=False)
         result = structure_detection_node(state)
 
-        # docling_model is only present when a Docling parser was actually
-        # used; non-docling/regex paths omit it to avoid leaky abstraction.
         assert set(result["structure"].keys()) == {
             "has_figures",
             "figures",
             "heading_count",
             "docling_enabled",
+            "docling_model",
             "docling_document_available",
             "parser_strategy",
         }
@@ -237,6 +237,7 @@ class TestStructureDetectionRegistryPath:
             config=config,
             embedder=MagicMock(),
             weaviate_client=MagicMock(),
+            kg_builder=None,
         )
         if registry is not None:
             runtime.parser_registry = registry

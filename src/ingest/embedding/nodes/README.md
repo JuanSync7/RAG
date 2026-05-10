@@ -1,8 +1,7 @@
 <!-- @summary
 One-stage-per-file LangGraph node implementations for the Embedding Pipeline,
-covering chunking, enrichment, deduplication, embedding, storage, and the
-optional visual-embedding path. Knowledge-graph ingest lives in KGWeave and
-runs out-of-process via the Temporal handoff (KG_PHASE2B_ACTIVITY).
+covering chunking, enrichment, deduplication, embedding, storage, and optional
+knowledge-graph and visual-embedding paths.
 @end-summary -->
 
 # embedding/nodes
@@ -23,6 +22,8 @@ the stage logic, not the wiring.
 | `document_storage_node.py` | Persists the clean markdown document to MinIO before chunking |
 | `metadata_generation.py` | Document-level summary and keyword generation with fallback extraction |
 | `cross_reference_extraction.py` | Optional cross-reference pattern extraction from document text |
+| `knowledge_graph_extraction.py` | Optional relation extraction to intermediate KG triples |
+| `knowledge_graph_storage.py` | Optional persistence of chunks into the knowledge graph builder |
 | `visual_embedding.py` | Dual-track visual embedding: page images via Docling, stored in MinIO, indexed in Weaviate |
 | `vlm_enrichment.py` | Post-chunking VLM image enrichment — resolves image placeholders in chunks |
 | `__init__.py` | Package marker |

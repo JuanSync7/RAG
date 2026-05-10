@@ -42,7 +42,6 @@ from src.ingest.support import (
     _describe_image,
     _extract_image_candidates,
 )
-from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.vlm_enrichment")
 
@@ -50,7 +49,6 @@ logger = logging.getLogger("rag.ingest.embedding.vlm_enrichment")
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
-@node_span("vlm_enrichment")
 def vlm_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Replace image placeholders in chunks with VLM-generated descriptions.
 

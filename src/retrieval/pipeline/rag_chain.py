@@ -3,10 +3,6 @@
 # visual retrieval, and LLM generation.  KG graph_context (REQ-KG-794, REQ-KG-796) is
 # threaded from expansion to the generator prompt, placed before document chunks when
 # non-empty and omitted entirely when empty.
-# Stage 7.5 implements a bounded internal re-retrieval loop (REQ-706 option B): when
-# composite confidence is below the high threshold and retry budget remains, the chain
-# re-runs search+rerank+generate+score with broader params (alpha-=0.15, limit+=5) and
-# returns whichever attempt scores higher. Surfaces both scores in RAGResponse.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -18,10 +14,13 @@ import logging
 import statistics
 import time
 
-from src.core.embeddings import get_embedding_provider
+from src.core import get_embedding_provider
 from src.retrieval.query.nodes import get_reranker_provider
 from src.retrieval.query.nodes import process_query
-from kgweave.client import get_client as _get_kg_client, KGQueryService
+from src.core import (
+    GraphQueryExpander,
+    KnowledgeGraphBuilder,
+)
 from src.vector_db import (
     create_persistent_client,
     get_client,
@@ -48,26 +47,12 @@ from src.retrieval.common import (
     RAGResponse,
     RankedResult,
     VisualPageResult,
-    AskUserReason,
-    StageOutcome,
-    StageStatus,
-    TerminalDecision,
-    decide_terminal,
 )
 from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
-from src.platform.llm.provider import get_llm_provider
 from src.retrieval.generation.nodes import get_system_prompt
-from src.retrieval.pipeline.query_shape import should_suggest_deep_research
-from src.retrieval.pipeline.deep_research import (
-    DeepResearch,
-    DeepResearchBudget,
-    DeepResearchResult,
-    KGSnippet,
-    TopicPool,
-)
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
-    KG_ENABLED, GENERATION_ENABLED,
+    KG_PATH, KG_ENABLED, GENERATION_ENABLED,
     RETRY_BACKOFF_MULTIPLIER,
     RETRY_INITIAL_BACKOFF_SECONDS,
     RETRY_MAX_ATTEMPTS,
@@ -85,14 +70,6 @@ from config.settings import (
     RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD,
     RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD,
     RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD,
-    RAG_STAGE_BUDGET_DEEP_RESEARCH_MS,
-    RAG_DEEP_RESEARCH_MAX_NODES,
-    RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
-    RAG_DEEP_RESEARCH_MAX_DEPTH,
-    RAG_DEEP_RESEARCH_MAX_TOPICS,
-    RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
-    RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
-    RAG_DEEP_RESEARCH_KB_TOP_PER_NODE,
 )
 from src.platform import TimingPool
 from config.settings import GUARDRAIL_BACKEND
@@ -146,28 +123,22 @@ class RAGChain:
 
         # GPU models must load sequentially (parallel .to(cuda) causes meta
         # tensor errors), but KG + generator can load concurrently with them.
-        def _load_kg() -> Optional[KGQueryService]:
-            # Returns the KG read-side service. In-process by default; flips
-            # to HTTP transparently when KGWEAVE_API_URL is set.
+        def _load_kg() -> Optional[GraphQueryExpander]:
             _t0 = time.perf_counter()
-            result: Optional[KGQueryService] = None
+            result: Optional[GraphQueryExpander] = None
             try:
-                if not KG_ENABLED:
+                if KG_ENABLED and KG_PATH.exists():
+                    try:
+                        builder = KnowledgeGraphBuilder.load(KG_PATH)
+                        stats = builder.stats()
+                        logger.info("Knowledge graph loaded: %s nodes, %s edges", stats["nodes"], stats["edges"])
+                        result = GraphQueryExpander(builder.graph)
+                    except Exception as e:
+                        logger.warning("Could not load knowledge graph: %s", e)
+                elif not KG_ENABLED:
                     logger.info("Knowledge graph disabled (set RAG_KG_ENABLED=true to enable).")
-                    return None
-                try:
-                    service = _get_kg_client()
-                    health = service.health()
-                    stats = health.stats or {}
-                    logger.info(
-                        "KG service ready (%s): %s nodes, %s edges",
-                        health.backend,
-                        stats.get("nodes", "?"),
-                        stats.get("edges", "?"),
-                    )
-                    result = service
-                except Exception as e:
-                    logger.warning("Could not initialize KG service: %s", e)
+                else:
+                    logger.info("No knowledge graph found (run ingest.py first to build it).")
                 return result
             finally:
                 logger.info("_load_kg elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
@@ -215,7 +186,7 @@ class RAGChain:
             fut_gen = pool.submit(_load_generator)
 
             self.embeddings, self.reranker = fut_models.result()
-            self._kg_expander: Optional[KGQueryService] = fut_kg.result()
+            self._kg_expander: Optional[GraphQueryExpander] = fut_kg.result()
             self._generator: Optional[OllamaGenerator] = fut_gen.result()
 
         # Embedding LRU cache — avoids re-computing embeddings for repeated
@@ -415,172 +386,6 @@ class RAGChain:
             )
             raise
 
-    # ------------------------------------------------------------------
-    # Deep-research branch helpers
-    # ------------------------------------------------------------------
-
-    def _run_deep_research(
-        self,
-        *,
-        original_question: str,
-        processed_query: str,
-        ignored_doc_ids: Optional[list[str]],
-        source_filter: Optional[str],
-        heading_filter: Optional[str],
-        tenant_id: Optional[str],
-        alpha: float,
-    ) -> DeepResearchResult:
-        """Run the recursive topic-grouped retrieval loop synchronously
-        (one ``asyncio.run`` island contained inside the activity thread)."""
-        import asyncio as _asyncio
-
-        # Build SearchFilter list once — reused for every kb_retrieve call.
-        filters: list[SearchFilter] = []
-        if ignored_doc_ids:
-            filters.append(
-                SearchFilter(
-                    property="document_id",
-                    operator="not_in",
-                    value=list(ignored_doc_ids),
-                )
-            )
-        if source_filter:
-            filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
-        if heading_filter:
-            filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
-        if tenant_id and tenant_id != "default":
-            filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
-        filters_arg = filters or None
-
-        # Capture self in the closures via local refs so we don't hold method
-        # bindings across the async boundary.
-        embeddings = self.embeddings
-        retry_provider = self.retry_provider
-        retry_policy = self.retry_policy
-        do_search = self._do_search
-        kg_expander = self._kg_expander
-        kb_top_per_node = max(1, RAG_DEEP_RESEARCH_KB_TOP_PER_NODE)
-
-        async def kb_retrieve(query: str):
-            def _blocking():
-                emb = embeddings.embed_query(query)
-                # Mirror linear-path BM25 fusion: KG-expanded terms aren't
-                # available per sub-query inside the tree; the KG snippet
-                # comes back via kg_retrieve and feeds graph_context only.
-                results = retry_provider.execute(
-                    operation_name="weaviate_hybrid_search_dr",
-                    fn=lambda: do_search(query, emb, alpha, kb_top_per_node, filters_arg),
-                    policy=retry_policy,
-                    idempotency_key=(
-                        f"dr_search:{query}:{source_filter}:{heading_filter}:{kb_top_per_node}"
-                    ),
-                )
-                return list(results or [])
-
-            return await _asyncio.to_thread(_blocking)
-
-        async def kg_retrieve(query: str):
-            if kg_expander is None:
-                return None
-
-            def _blocking():
-                er = kg_expander.expand(query, depth=1)
-                terms = list(getattr(er, "terms", []) or [])
-                gc = getattr(er, "graph_context", "") or ""
-                return KGSnippet(terms=terms, graph_context=gc)
-
-            try:
-                return await _asyncio.to_thread(_blocking)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("dr kg_retrieve failed for query=%r: %s", query, exc)
-                return None
-
-        budget = DeepResearchBudget(
-            max_nodes=RAG_DEEP_RESEARCH_MAX_NODES,
-            max_llm_calls=RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
-            wall_clock_ms=RAG_STAGE_BUDGET_DEEP_RESEARCH_MS,
-            max_depth=RAG_DEEP_RESEARCH_MAX_DEPTH,
-            max_topics=RAG_DEEP_RESEARCH_MAX_TOPICS,
-            per_topic_questions=RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
-            graph_context_max_chars=RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
-        )
-
-        orchestrator = DeepResearch(
-            provider=get_llm_provider(),
-            kb_retrieve=kb_retrieve,
-            kg_retrieve=kg_retrieve if kg_expander is not None else None,
-            original_question=original_question,
-            processed_query=processed_query,
-            budget=budget,
-            reranker=self.reranker,
-        )
-
-        return _asyncio.run(orchestrator.research())
-
-    def _rerank_deep_research(
-        self,
-        dr_result: DeepResearchResult,
-        processed_query: str,
-        rerank_top_k: int,
-    ) -> list[RankedResult]:
-        """Convert deep-research topic pools into a final ``list[RankedResult]``.
-
-        Routing rule:
-
-        - Single topic (``is_unified=True``): rerank the merged pool against
-          ``processed_query`` (Option B).
-        - Multiple topics: rerank each topic's pool against its own
-          ``rerank_anchor`` (the topic name / first sub-question), take a
-          per-topic share of ``rerank_top_k``, dedupe, concatenate.
-        """
-        pools = dr_result.topic_pools
-        if not pools:
-            return []
-
-        # If the orchestrator already applied per-topic rerank with the
-        # confidence gate, consume its round-robin merge directly (capped to
-        # rerank_top_k). This is the fast path for confident multi-topic splits.
-        if dr_result.per_topic_rerank_applied and dr_result.per_topic_rerank_merged is not None:
-            return list(dr_result.per_topic_rerank_merged)[:rerank_top_k]
-
-        if dr_result.is_unified or len(pools) == 1:
-            pool = pools[0]
-            chunks = list(pool.chunks_by_id.values())
-            if not chunks:
-                return []
-            return self.reranker.rerank(
-                query=processed_query,
-                documents=chunks,
-                top_k=rerank_top_k,
-            )
-
-        # Hybrid: per-topic rerank.
-        per_topic_k = max(1, rerank_top_k // len(pools))
-        seen_ids: set[str] = set()
-        merged: list[RankedResult] = []
-        for pool in pools:
-            chunks = list(pool.chunks_by_id.values())
-            if not chunks:
-                continue
-            ranked = self.reranker.rerank(
-                query=pool.rerank_anchor or processed_query,
-                documents=chunks,
-                top_k=per_topic_k,
-            )
-            for r in ranked:
-                # Stable id for dedup across topic pools.
-                md = r.metadata or {}
-                key = (
-                    md.get("object_id")
-                    or md.get("chunk_id")
-                    or f"{md.get('source','?')}|{md.get('heading','')}|{md.get('chunk_index','')}"
-                )
-                if key in seen_ids:
-                    continue
-                seen_ids.add(key)
-                merged.append(r)
-        return merged
-
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
         """Convert search results into a sorted RankedResult list."""
@@ -619,7 +424,6 @@ class RAGChain:
         mode: str = "query",
         retrieval_sub_mode: str = "auto",
         extra_processing: bool = False,
-        deep_research: bool = False,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -659,7 +463,6 @@ class RAGChain:
             "reranking": int(stage_budget_overrides.get("reranking", RAG_STAGE_BUDGET_RERANKING_MS)),
             "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
             "visual_retrieval": int(stage_budget_overrides.get("visual_retrieval", RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS)),
-            "deep_research": int(stage_budget_overrides.get("deep_research", RAG_STAGE_BUDGET_DEEP_RESEARCH_MS)),
         }
         tp = TimingPool(
             overall_budget_ms=float(overall_timeout_ms),
@@ -672,26 +475,6 @@ class RAGChain:
                 "This request reached the retrieval timeout budget during "
                 f"{stage}. Please narrow the query or try again."
             )
-
-        # Per-stage outcomes ledger threaded through to ``decide_terminal``.
-        # Stages append to this as they run (or are skipped). Bail-out sites
-        # consult ``decide_terminal`` rather than authoring action strings.
-        outcomes: list[StageOutcome] = []
-
-        def _decision_to_action_fields(d: TerminalDecision) -> dict:
-            """Translate a TerminalDecision into RAGResponse kwargs.
-
-            Centralises enum -> string serialisation so the RAGResponse
-            wire shape stays string-based (back-compat with the
-            response.action equality check on the consumer side).
-            """
-            return {
-                "action": d.action,
-                "ask_user_reason": (
-                    d.ask_user_reason.value if d.ask_user_reason is not None else None
-                ),
-                "degraded": d.degraded,
-            }
 
         with self.tracer.span("rag_chain.run", {"query_length": len(query)}) as root_span:
             alpha = validate_alpha(alpha)
@@ -811,31 +594,13 @@ class RAGChain:
                     ),
                 }
 
-                # Handle reject/canned responses from merge gate.
-                # Routed through ``decide_terminal`` so the action choice
-                # (and ask_user_reason on reject) is single-sourced.
+                # Handle reject/canned responses from merge gate
                 if merge_decision["action"] in ("reject", "canned"):
-                    # Detect injection vs empty-text by looking at input-rail
-                    # verdicts; sanitiser empty-rejects produce no rail error.
-                    if merge_decision["action"] == "reject":
-                        injection_detected = any(
-                            r.verdict.value not in ("allow", "pass")
-                            for r in (input_rail_result.rail_executions if input_rail_result else [])
-                        )
-                        if injection_detected:
-                            outcomes.append(
-                                StageOutcome("input_rails", StageStatus.ERROR, "injection")
-                            )
-                    decision = decide_terminal(
-                        outcomes=outcomes,
-                        deep_research=bool(deep_research),
-                        has_results=False,
-                        sanitizer_verdict=merge_decision["action"],
-                    )
                     return RAGResponse(
                         query=query,
                         processed_query=query_result.processed_query,
                         query_confidence=query_result.confidence,
+                        action="ask_user" if merge_decision["action"] == "reject" else "canned",
                         clarification_message=merge_decision["message"],
                         stage_timings=tp.entries(),
                         timing_totals=tp.totals(),
@@ -843,89 +608,37 @@ class RAGChain:
                         budget_exhausted_stage=tp.budget_exhausted_stage,
                         conversation_id=conversation_id,
                         guardrails=guardrails_metadata,
-                        **_decision_to_action_fields(decision),
                     )
 
-            # Bypass the LLM-confidence-loop ask_user gate when the caller has
-            # explicitly opted into deep_research. Rationale: the user has
-            # already accepted DR's latency cost, and DR's recursive decomposer
-            # is designed to recover from messy/terse queries. Without this
-            # bypass, the LLM-confidence loop's "this seems too vague" verdict
-            # (or its exhausted-with-confidence=0.0 path) refuses to retrieve
-            # even though DR could have answered.
-            #
-            # Hard sanitizer rejections (empty/injection_detected) author
-            # specific clarification strings. We still honour those by NOT
-            # bypassing when the message matches one of the sanitizer's
-            # signature strings — the sanitizer fires before the LangGraph loop
-            # and represents a request-level reject (security/empty), not a
-            # retrieval-quality concern.
-            _SANITIZER_REJECT_MESSAGES = (
-                "Your query appears to be empty.",
-                "Your query could not be processed.",
-            )
-            _is_sanitizer_reject = (
-                query_result.clarification_message is not None
-                and any(
-                    s in query_result.clarification_message
-                    for s in _SANITIZER_REJECT_MESSAGES
-                )
-            )
-            _dr_bypass_ask_user = bool(deep_research) and not _is_sanitizer_reject
-            # The LLM-confidence loop's "vague query" verdict is bypassed
-            # under DR (DR's recursive decomposer recovers from vague
-            # queries on its own); ``decide_terminal`` enforces that policy.
             if query_result.action == QueryAction.ASK_USER:
-                # Hard sanitizer rejects (empty/injection) can also surface
-                # via QueryAction.ASK_USER; keep their stronger reason.
-                sanitizer_verdict = "reject" if _is_sanitizer_reject else None
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=False,
-                    sanitizer_verdict=sanitizer_verdict,
-                    confidence_ask_user=not _is_sanitizer_reject,
+                return RAGResponse(
+                    query=query,
+                    processed_query=query_result.processed_query,
+                    query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=query_result.clarification_message,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=tp.budget_exhausted,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                    guardrails=guardrails_metadata,
                 )
-                # Under DR the decision may come back as "answer"; only return
-                # early when the centralized brain agrees we should give up.
-                if decision.action != "answer":
-                    return RAGResponse(
-                        query=query,
-                        processed_query=query_result.processed_query,
-                        query_confidence=query_result.confidence,
-                        clarification_message=query_result.clarification_message,
-                        stage_timings=tp.entries(),
-                        timing_totals=tp.totals(),
-                        budget_exhausted=tp.budget_exhausted,
-                        budget_exhausted_stage=tp.budget_exhausted_stage,
-                        conversation_id=conversation_id,
-                        guardrails=guardrails_metadata,
-                        **_decision_to_action_fields(decision),
-                    )
             if tp.budget_exhausted:
-                outcomes.append(
-                    StageOutcome("query_processing", StageStatus.BUDGET_EXHAUSTED)
+                tp.log_summary()
+                return RAGResponse(
+                    query=query,
+                    processed_query=query_result.processed_query,
+                    query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("query processing"),
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=True,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                    guardrails=guardrails_metadata,
                 )
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=False,
-                )
-                if decision.action != "answer":
-                    tp.log_summary()
-                    return RAGResponse(
-                        query=query,
-                        processed_query=query_result.processed_query,
-                        query_confidence=query_result.confidence,
-                        clarification_message=_budget_clarification("query processing"),
-                        stage_timings=tp.entries(),
-                        timing_totals=tp.totals(),
-                        budget_exhausted=True,
-                        budget_exhausted_stage=tp.budget_exhausted_stage,
-                        conversation_id=conversation_id,
-                        guardrails=guardrails_metadata,
-                        **_decision_to_action_fields(decision),
-                    )
 
             # Use PII-redacted query if available from merge gate
             processed_query = (
@@ -941,61 +654,12 @@ class RAGChain:
                 memory_context = None
                 memory_recent_turns = None
 
-            # Hoisted state used by stages 2–5 OR by the deep-research branch.
-            # When deep_research=True, the recursive loop populates `reranked`
-            # + `graph_context` + `kg_expanded_terms` directly and stages 2–5
-            # are skipped via the `_dr_active` guard.
-            kg_expanded_terms: list[str] = []
-            graph_context: str = ""
-            bm25_query: str = processed_query
-            query_embedding = None
-            search_results: list = []
-            reranked: list[RankedResult] = []
-            dr_result: Optional[DeepResearchResult] = None
-            _dr_active = bool(deep_research)
-
-            if _dr_active:
-                t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.deep_research", parent=root_span) as dr_span:
-                    try:
-                        dr_result = self._run_deep_research(
-                            original_question=query,
-                            processed_query=processed_query,
-                            ignored_doc_ids=ignored_doc_ids,
-                            source_filter=source_filter,
-                            heading_filter=heading_filter,
-                            tenant_id=tenant_id,
-                            alpha=alpha,
-                        )
-                        reranked = self._rerank_deep_research(
-                            dr_result, processed_query, rerank_top_k,
-                        )
-                        graph_context = dr_result.graph_context or ""
-                        dr_span.set_attribute("dr_node_count", dr_result.node_count)
-                        dr_span.set_attribute("dr_llm_calls", dr_result.llm_call_count)
-                        dr_span.set_attribute("dr_topic_count", len(dr_result.topic_pools))
-                        dr_span.set_attribute("dr_is_unified", dr_result.is_unified)
-                        dr_span.set_attribute("dr_budget_exhausted", dr_result.budget_exhausted)
-                        if dr_result.budget_exhausted_reason:
-                            dr_span.set_attribute(
-                                "dr_budget_reason", dr_result.budget_exhausted_reason
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.exception("deep_research branch failed: %s", exc)
-                        dr_span.set_attribute("dr_error", str(exc))
-                        # Fall back to empty pool — generation will see no context
-                        # and emit the standard "no evidence" response.
-                        reranked = []
-                        graph_context = ""
-                        dr_result = None
-                tp.record("deep_research", "retrieval", started_at=t0)
-                if tp.check_stage_budget("deep_research"):
-                    tp.mark_budget_exhausted("deep_research")
-
             # Stage 2: KG expansion
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
-                if not _dr_active and self._kg_expander:
+                kg_expanded_terms = []
+                graph_context = ""
+                if self._kg_expander:
                     expansion_result = self._kg_expander.expand(processed_query, depth=1)
                     kg_expanded_terms = (
                         expansion_result.terms
@@ -1006,254 +670,155 @@ class RAGChain:
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
                 kg_span.set_attribute("kg_graph_context_len", len(graph_context))
             tp.record("kg_expansion", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("kg_expansion"):
+            if tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
-            # When deep research is active it already consumed the retrieval
-            # budget by design; stages 2-5 are skipped, so don't let their
-            # passive budget checks trip the chain to ask_user.
-            if tp.budget_exhausted and not _dr_active:
-                outcomes.append(
-                    StageOutcome("kg_expansion", StageStatus.BUDGET_EXHAUSTED)
-                )
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=False,
-                )
-                if decision.action != "answer":
-                    tp.log_summary()
-                    return RAGResponse(
-                        query=query,
-                        processed_query=processed_query,
-                        query_confidence=query_result.confidence,
-                        clarification_message=_budget_clarification("KG expansion"),
-                        kg_expanded_terms=kg_expanded_terms or None,
-                        stage_timings=tp.entries(),
-                        timing_totals=tp.totals(),
-                        budget_exhausted=True,
-                        budget_exhausted_stage=tp.budget_exhausted_stage,
-                        conversation_id=conversation_id,
-                        **_decision_to_action_fields(decision),
-                    )
-
-            if not _dr_active:
-                if kg_expanded_terms:
-                    bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
-                else:
-                    bm25_query = processed_query
-
-            # Stage 3: Query embedding (with LRU cache for exact repeats)
-            t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.embed_query", parent=root_span) as embed_span:
-                if not _dr_active:
-                    cache_hit = processed_query in self._embedding_cache
-                    if cache_hit:
-                        query_embedding = self._embedding_cache[processed_query]
-                        self._embedding_cache.move_to_end(processed_query)
-                        embed_span.set_attribute("cache_hit", True)
-                    else:
-                        query_embedding = self.embeddings.embed_query(processed_query)
-                        self._embedding_cache[processed_query] = query_embedding
-                        if len(self._embedding_cache) > self._embedding_cache_max:
-                            self._embedding_cache.popitem(last=False)
-                        embed_span.set_attribute("cache_hit", False)
-                else:
-                    embed_span.set_attribute("skipped_for_deep_research", True)
-            tp.record("embedding", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("embedding"):
-                tp.mark_budget_exhausted("embedding")
-            if tp.budget_exhausted and not _dr_active:
-                outcomes.append(
-                    StageOutcome("embedding", StageStatus.BUDGET_EXHAUSTED)
-                )
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=False,
-                )
-                if decision.action != "answer":
-                    tp.log_summary()
-                    return RAGResponse(
-                        query=query,
-                        processed_query=processed_query,
-                        query_confidence=query_result.confidence,
-                        clarification_message=_budget_clarification("embedding"),
-                        kg_expanded_terms=kg_expanded_terms or None,
-                        stage_timings=tp.entries(),
-                        timing_totals=tp.totals(),
-                        budget_exhausted=True,
-                        budget_exhausted_stage=tp.budget_exhausted_stage,
-                        conversation_id=conversation_id,
-                        **_decision_to_action_fields(decision),
-                    )
-
-            # Stage 4: Hybrid search
-            t0 = time.perf_counter()
-            filters = []
-            if not _dr_active:
-                if ignored_doc_ids:
-                    filters.append(
-                        SearchFilter(
-                            property="document_id",
-                            operator="not_in",
-                            value=list(ignored_doc_ids),
-                        )
-                    )
-                if source_filter:
-                    filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
-                if heading_filter:
-                    filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
-                if tenant_id and tenant_id != "default":
-                    filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
-
-            with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
-                if not _dr_active:
-                    search_results = self.retry_provider.execute(
-                        operation_name="weaviate_hybrid_search",
-                        fn=lambda: self._do_search(
-                            bm25_query, query_embedding, alpha, search_limit, filters or None,
-                        ),
-                        policy=self.retry_policy,
-                        idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
-                    )
-                    search_span.set_attribute("search_result_count", len(search_results))
-                else:
-                    search_span.set_attribute("skipped_for_deep_research", True)
-            tp.record("hybrid_search", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("hybrid_search"):
-                tp.mark_budget_exhausted("hybrid_search")
-            if tp.budget_exhausted and not _dr_active:
-                outcomes.append(
-                    StageOutcome("hybrid_search", StageStatus.BUDGET_EXHAUSTED)
-                )
-                partial = self._ranked_from_search_results(search_results, rerank_top_k)
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=bool(partial),
-                )
+            if tp.budget_exhausted:
                 tp.log_summary()
-                # Partial results -> action=search; no results -> ask_user.
-                clarif = (
-                    None
-                    if decision.action == "search"
-                    else _budget_clarification("hybrid search")
-                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
-                    results=partial,
-                    clarification_message=clarif,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("KG expansion"),
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=True,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
-                    **_decision_to_action_fields(decision),
                 )
 
-            # Degraded fallback: if hybrid_search returned 0 results AND we're
-            # not on the DR path, retry once with BM25-only (alpha=1.0) and
-            # looser top-k. Only if THAT also returns 0 do we route to
-            # ``decide_terminal`` for the NO_RESULTS ask_user.
-            degraded_attempted = False
-            if not _dr_active and not search_results:
-                degraded_attempted = True
-                try:
-                    degraded_results = self._do_search(
-                        bm25_query,
-                        query_embedding,
-                        1.0,
-                        max(search_limit * 2, search_limit),
-                        filters or None,
-                    )
-                    if degraded_results:
-                        search_results = degraded_results
-                        outcomes.append(
-                            StageOutcome("hybrid_search_degraded", StageStatus.OK)
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("degraded BM25-only fallback failed: %s", exc)
+            if kg_expanded_terms:
+                bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
+            else:
+                bm25_query = processed_query
 
-            if not _dr_active and not search_results:
-                outcomes.append(StageOutcome("hybrid_search", StageStatus.EMPTY))
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=False,
-                    degraded=degraded_attempted,
-                )
+            # Stage 3: Query embedding (with LRU cache for exact repeats)
+            t0 = time.perf_counter()
+            with self.tracer.span("rag_chain.embed_query", parent=root_span) as embed_span:
+                cache_hit = processed_query in self._embedding_cache
+                if cache_hit:
+                    query_embedding = self._embedding_cache[processed_query]
+                    self._embedding_cache.move_to_end(processed_query)
+                    embed_span.set_attribute("cache_hit", True)
+                else:
+                    query_embedding = self.embeddings.embed_query(processed_query)
+                    self._embedding_cache[processed_query] = query_embedding
+                    if len(self._embedding_cache) > self._embedding_cache_max:
+                        self._embedding_cache.popitem(last=False)
+                    embed_span.set_attribute("cache_hit", False)
+            tp.record("embedding", "retrieval", started_at=t0)
+            if tp.check_stage_budget("embedding"):
+                tp.mark_budget_exhausted("embedding")
+            if tp.budget_exhausted:
                 tp.log_summary()
-                clarif = (
-                    "Your query did not match any documents in the corpus. "
-                    "Please rephrase or broaden the query."
-                    if decision.ask_user_reason is not None
-                    else None
-                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("embedding"),
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=True,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                )
+
+            # Stage 4: Hybrid search
+            t0 = time.perf_counter()
+            filters = []
+            if ignored_doc_ids:
+                filters.append(
+                    SearchFilter(
+                        property="document_id",
+                        operator="not_in",
+                        value=list(ignored_doc_ids),
+                    )
+                )
+            if source_filter:
+                filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
+            if heading_filter:
+                filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
+            if tenant_id and tenant_id != "default":
+                filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
+
+            with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
+                search_results = self.retry_provider.execute(
+                    operation_name="weaviate_hybrid_search",
+                    fn=lambda: self._do_search(
+                        bm25_query, query_embedding, alpha, search_limit, filters or None,
+                    ),
+                    policy=self.retry_policy,
+                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
+                )
+                search_span.set_attribute("search_result_count", len(search_results))
+            tp.record("hybrid_search", "retrieval", started_at=t0)
+            if tp.check_stage_budget("hybrid_search"):
+                tp.mark_budget_exhausted("hybrid_search")
+            if tp.budget_exhausted:
+                tp.log_summary()
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="search",
+                    results=self._ranked_from_search_results(search_results, rerank_top_k),
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=True,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                )
+
+            if not search_results:
+                tp.log_summary()
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="search",
                     results=[],
-                    clarification_message=clarif,
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=tp.budget_exhausted,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
-                    **_decision_to_action_fields(decision),
                 )
 
             # Stage 5: Reranking
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
-                if not _dr_active:
-                    reranked = self.reranker.rerank(
-                        query=processed_query,
-                        documents=search_results,
-                        top_k=rerank_top_k,
-                    )
+                reranked = self.reranker.rerank(
+                    query=processed_query,
+                    documents=search_results,
+                    top_k=rerank_top_k,
+                )
                 scores = [r.score for r in reranked]
                 if scores:
                     rerank_span.set_attribute("rerank_score_min", min(scores))
                     rerank_span.set_attribute("rerank_score_max", max(scores))
                     rerank_span.set_attribute("rerank_score_mean", statistics.mean(scores))
-                if _dr_active:
-                    rerank_span.set_attribute("from_deep_research", True)
             tp.record("reranking", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("reranking"):
+            if tp.check_stage_budget("reranking"):
                 tp.mark_budget_exhausted("reranking")
-            if tp.budget_exhausted and not _dr_active:
-                outcomes.append(
-                    StageOutcome("reranking", StageStatus.BUDGET_EXHAUSTED)
-                )
-                decision = decide_terminal(
-                    outcomes=outcomes,
-                    deep_research=bool(deep_research),
-                    has_results=bool(reranked),
-                )
+            if tp.budget_exhausted:
                 tp.log_summary()
-                clarif = (
-                    None
-                    if decision.action == "search"
-                    else _budget_clarification("reranking")
-                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
+                    action="search",
                     results=reranked,
-                    clarification_message=clarif,
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=True,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
-                    **_decision_to_action_fields(decision),
                 )
 
             # Classify retrieval quality based on reranker scores (REQ-403)
@@ -1278,13 +843,9 @@ class RAGChain:
                         "is generated from loosely related content and may not be reliable."
                     )
 
-            # REQ-1201: Fallback retrieval on standalone_query when primary is weak.
-            # Skipped under deep_research — the recursive loop already explored
-            # alternative formulations exhaustively, so a single-shot fallback
-            # adds no signal and burns budget.
+            # REQ-1201: Fallback retrieval on standalone_query when primary is weak
             if (
-                not _dr_active
-                and retrieval_quality in ("weak", "insufficient")
+                retrieval_quality in ("weak", "insufficient")
                 and not query_result.suppress_memory
                 and query_result.standalone_query
                 and query_result.standalone_query != processed_query
@@ -1393,7 +954,6 @@ class RAGChain:
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
-            gen_result = None  # type: ignore[assignment]
             generation_source = None
             if not skip_generation and self._generator and not tp.budget_exhausted and (
                 reranked or (query_result.has_backward_reference and (memory_context or memory_recent_turns))
@@ -1460,7 +1020,7 @@ class RAGChain:
                     # (skip_generation may be set by fresh-convo guard above)
                     if not skip_generation:
                         if formatted_context_str:
-                            gen_result = self._generator.generate(
+                            generated_answer = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=[formatted_context_str],
                                 scores=None,
@@ -1469,18 +1029,13 @@ class RAGChain:
                                 graph_context=graph_context,
                             )
                         else:
-                            gen_result = self._generator.generate(
+                            generated_answer = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=context_chunks,
                                 scores=scores,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
                                 graph_context=graph_context,
-                            )
-                        generated_answer = gen_result.answer or None
-                        if gen_result.error is not None:
-                            generate_span.set_attribute(
-                                "generation_error_kind", gen_result.error.kind.value
                             )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
@@ -1499,7 +1054,7 @@ class RAGChain:
                     model=self._generator.model if self._generator else None,
                 )
                 # Enrich with actual token usage from the LLM response
-                actual_resp = gen_result.raw_response if gen_result is not None else None
+                actual_resp = getattr(self._generator, "_last_response", None) if self._generator else None
                 if actual_resp and actual_resp.prompt_tokens:
                     snapshot = TokenBudgetSnapshot(
                         input_tokens=snapshot.input_tokens,
@@ -1574,12 +1129,11 @@ class RAGChain:
             verification_warning = None
             re_retrieval_suggested = False
             re_retrieval_params = None
-            first_composite = None
 
             if (
                 RAG_CONFIDENCE_ROUTING_ENABLED
                 and generated_answer
-                and (reranked or generation_source == "memory")
+                and reranked
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
@@ -1588,12 +1142,11 @@ class RAGChain:
                     from src.retrieval.generation.confidence import route_by_confidence
                     from src.retrieval.generation.confidence import PostGuardrailAction
 
-                    # #8: Memory path has no retrieval signal — reranker_scores=[] gives
-                    # retrieval_score=0.0 by design.  Composite still provides meaningful
-                    # signal via LLM self-report and citation marker presence/absence.
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (
-                        gen_result.confidence if gen_result is not None else "medium"
+                        self._generator._last_llm_confidence
+                        if self._generator
+                        else "medium"
                     )
                     context_texts = [r.text for r in reranked]
 
@@ -1642,121 +1195,16 @@ class RAGChain:
                     breakdown.citation_score,
                 )
 
-                # Act on routing decision.
+                # Act on routing decision (non-blocking: return first response
+                # immediately, suggest re-retrieval for caller to request)
                 re_retrieval_suggested = False
                 re_retrieval_params = None
 
                 if action == PostGuardrailAction.RE_RETRIEVE and generation_source != "memory":
-                    # Bounded internal re-retrieval loop (REQ-706, option B).
-                    # Re-run search + rerank + generate + score with broader params.
-                    # Reuses already-embedded query to avoid redundant model calls.
-                    # Input-rails and PII gate are NOT re-run (query is already clean).
-                    first_composite = breakdown.composite
-                    retry_alpha = max(0.0, alpha - 0.15)
-                    retry_search_limit = search_limit + 5
-                    retry_bm25_query = bm25_query
-
-                    with self.tracer.span("rag_chain.re_retrieval", parent=root_span) as rr_span:
-                        rr_span.set_attribute("retry_alpha", retry_alpha)
-                        rr_span.set_attribute("retry_search_limit", retry_search_limit)
-
-                        retry_search_results = self.retry_provider.execute(
-                            operation_name="weaviate_hybrid_search_re_retrieval",
-                            fn=lambda: self._do_search(
-                                retry_bm25_query,
-                                query_embedding,
-                                retry_alpha,
-                                retry_search_limit,
-                                filters or None,
-                            ),
-                            policy=self.retry_policy,
-                            idempotency_key=(
-                                f"re_retrieve:{processed_query}:{source_filter}:"
-                                f"{heading_filter}:{retry_search_limit}"
-                            ),
-                        )
-
-                        if retry_search_results:
-                            retry_reranked = self.reranker.rerank(
-                                query=processed_query,
-                                documents=retry_search_results,
-                                top_k=rerank_top_k,
-                            )
-                        else:
-                            retry_reranked = []
-
-                        retry_answer = generated_answer
-                        if retry_reranked and self._generator:
-                            retry_gen_result = self._generator.generate(
-                                query=processed_query,
-                                context_chunks=[r.text for r in retry_reranked],
-                                scores=[r.score for r in retry_reranked],
-                                memory_context=None,
-                                recent_turns=None,
-                                graph_context=graph_context,
-                            )
-                            retry_answer = retry_gen_result.answer or None
-                            retry_confidence = retry_gen_result.confidence
-                        else:
-                            retry_confidence = "medium"
-
-                        retry_breakdown = None
-                        if retry_reranked and retry_answer:
-                            retry_breakdown = compute_composite_confidence(
-                                reranker_scores=[r.score for r in retry_reranked],
-                                llm_confidence_text=retry_confidence,
-                                answer=retry_answer,
-                                retrieved_texts=[r.text for r in retry_reranked],
-                                retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
-                                llm_weight=RAG_CONFIDENCE_LLM_WEIGHT,
-                                citation_weight=RAG_CONFIDENCE_CITATION_WEIGHT,
-                            )
-
-                    if retry_breakdown is not None and retry_breakdown.composite >= breakdown.composite:
-                        reranked = retry_reranked
-                        generated_answer = retry_answer
-                        breakdown = retry_breakdown
-                        composite_confidence = retry_breakdown.composite
-                        confidence_breakdown_dict = {
-                            "retrieval_score": retry_breakdown.retrieval_score,
-                            "llm_score": retry_breakdown.llm_score,
-                            "citation_score": retry_breakdown.citation_score,
-                            "composite": retry_breakdown.composite,
-                            "retrieval_weight": retry_breakdown.retrieval_weight,
-                            "llm_weight": retry_breakdown.llm_weight,
-                            "citation_weight": retry_breakdown.citation_weight,
-                        }
-
-                    action = route_by_confidence(
-                        composite=breakdown.composite,
-                        retry_count=retry_count + 1,
-                        high_threshold=RAG_CONFIDENCE_HIGH_THRESHOLD,
-                        low_threshold=RAG_CONFIDENCE_LOW_THRESHOLD,
-                        max_retries=RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
-                    )
-                    post_guardrail_action = action.value
-
-                    logger.info(
-                        "Re-retrieval loop: first=%.2f second=%.2f final_action=%s",
-                        first_composite,
-                        breakdown.composite,
-                        action.value,
-                    )
-
-                if action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
-                    # REQ-1203: Re-retrieval not applicable on memory path — re-route to FLAG
-                    verification_warning = (
-                        "This answer was generated from conversation history and has limited confidence. "
-                        "Please verify against source documents."
-                    )
-                    generated_answer = (
-                        f"{generated_answer}\n\n"
-                        f"---\n"
-                        f"⚠️ {verification_warning}"
-                    )
-                    post_guardrail_action = PostGuardrailAction.FLAG.value
-                elif action == PostGuardrailAction.RE_RETRIEVE:
-                    # Retries exhausted — advisory flag for caller-driven broader pass.
+                    # Don't block — return the first answer and suggest re-retrieval.
+                    # The caller (UI/API) can request a second attempt with these
+                    # broader params. The user sees both side-by-side and chooses.
+                    # Skip when generation_source is "memory" — no docs to re-retrieve.
                     re_retrieval_suggested = True
                     re_retrieval_params = {
                         "alpha": max(0.0, alpha - 0.15),
@@ -1768,6 +1216,18 @@ class RAGChain:
                         "This answer has moderate confidence. A broader search "
                         "may yield better results — re-retrieval is available."
                     )
+                elif action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
+                    # REQ-1203: Re-retrieval not applicable on memory path — re-route to FLAG
+                    verification_warning = (
+                        "This answer was generated from conversation history and has limited confidence. "
+                        "Please verify against source documents."
+                    )
+                    generated_answer = (
+                        f"{generated_answer}\n\n"
+                        f"---\n"
+                        f"⚠️ {verification_warning}"
+                    )
+                    post_guardrail_action = PostGuardrailAction.FLAG.value
                 elif action == PostGuardrailAction.BLOCK:
                     generated_answer = (
                         "Insufficient documentation found to provide a reliable answer. "
@@ -1783,68 +1243,15 @@ class RAGChain:
                         f"---\n"
                         f"⚠️ {verification_warning}"
                     )
-                    if first_composite is not None:
-                        re_retrieval_suggested = True
-                        re_retrieval_params = {
-                            "alpha": max(0.0, alpha - 0.15),
-                            "search_limit": search_limit + 5,
-                            "rerank_top_k": rerank_top_k,
-                            "fast_path": True,
-                        }
 
             # Extract LLM self-reported confidence as structured data.
             # Display formatting is the UI/console layer's responsibility.
-            llm_confidence = gen_result.confidence if gen_result is not None else None
-            generation_error_payload = (
-                gen_result.error.to_dict()
-                if (gen_result is not None and gen_result.error is not None)
-                else None
-            )
-
-            # Advisory DR-suggestion chip — baseline path only. When DR was
-            # already active the user opted in; suggesting it again would just
-            # be noise (and risks a re-run loop on the UI side).
-            dr_suggestion_payload: Optional[dict[str, Any]] = None
-            if not _dr_active:
-                try:
-                    suggest, reason = should_suggest_deep_research(query, reranked)
-                    dr_suggestion_payload = {"suggest": bool(suggest), "reason": reason}
-                except Exception:  # noqa: BLE001 — never let an advisory hint break the response
-                    dr_suggestion_payload = None
+            llm_confidence = None
+            if self._generator:
+                llm_confidence = getattr(self._generator, "_last_llm_confidence", None)
 
             tp.log_summary()
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
-
-            response_metadata: dict = {}
-            if _dr_active:
-                if dr_result is not None:
-                    response_metadata["deep_research"] = {
-                        "iteration_count": int(dr_result.iteration_count),
-                        "llm_call_count": int(dr_result.llm_call_count),
-                        "node_count": int(dr_result.node_count),
-                        "topic_count": int(dr_result.topic_count),
-                        "decomposed": bool(dr_result.decomposed),
-                        "is_unified": bool(dr_result.is_unified),
-                        "budget_exhausted": bool(dr_result.budget_exhausted),
-                        "budget_exhausted_reason": dr_result.budget_exhausted_reason,
-                        "elapsed_ms": float(dr_result.elapsed_ms),
-                    }
-                else:
-                    # DR was requested but the orchestrator failed/early-exited
-                    # before producing a result. Surface zeros so downstream
-                    # observability (Temporal search attributes) still gets
-                    # consistent shape.
-                    response_metadata["deep_research"] = {
-                        "iteration_count": 0,
-                        "llm_call_count": 0,
-                        "node_count": 0,
-                        "topic_count": 0,
-                        "decomposed": False,
-                        "is_unified": True,
-                        "budget_exhausted": False,
-                        "budget_exhausted_reason": None,
-                        "elapsed_ms": 0.0,
-                    }
 
             return RAGResponse(
                 query=query,
@@ -1875,15 +1282,11 @@ class RAGChain:
                 retrieval_quality_note=retrieval_quality_note,
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
-                first_composite=first_composite if RAG_CONFIDENCE_ROUTING_ENABLED else None,
                 visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
-                generation_error=generation_error_payload,
                 history_decision=query_result.history_decision,
                 history_turns_used=query_result.history_turns_used,
-                dr_suggestion=dr_suggestion_payload,
-                metadata=response_metadata,
             )
 
 

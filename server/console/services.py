@@ -1,6 +1,6 @@
 # @summary
 # Shared console service helpers for UI serving, static asset resolution, log snapshots, source previews, and rendering.
-# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, is_remote_view_uri, build_source_preview_payload, render_source_document_html, read_clean_document_from_minio
+# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html, read_clean_document_from_minio
 # Deps: config.settings, server.schemas, fastapi
 # @end-summary
 """Console service helpers."""
@@ -137,33 +137,6 @@ def _allowed_source_roots() -> list[Path]:
         except Exception:
             logger.warning("invalid_console_source_root entry=%r", entry)
     return roots
-
-
-def is_remote_view_uri(source_uri: str | None) -> str | None:
-    """Return the URI when it points to a remote origin the console may redirect to.
-
-    Gated by ``RAG_CONSOLE_REMOTE_VIEW_ENABLED`` (default off) so flipping on
-    open-redirect behaviour is opt-in. ``RAG_CONSOLE_REMOTE_VIEW_HOST_ALLOWLIST``
-    (comma-separated host suffixes) optionally narrows further. Returns the
-    original URI when allowed, ``None`` otherwise.
-    """
-    if not source_uri:
-        return None
-    enabled = os.environ.get("RAG_CONSOLE_REMOTE_VIEW_ENABLED", "false").lower() in {
-        "1", "true", "yes", "on",
-    }
-    if not enabled:
-        return None
-    parsed = urlparse(source_uri)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    allowlist = os.environ.get("RAG_CONSOLE_REMOTE_VIEW_HOST_ALLOWLIST", "").strip()
-    if allowlist:
-        suffixes = [s.strip().lower() for s in allowlist.split(",") if s.strip()]
-        host = parsed.netloc.lower()
-        if not any(host == suf or host.endswith("." + suf) for suf in suffixes):
-            return None
-    return source_uri
 
 
 def resolve_console_source_path(source: str | None, source_uri: str | None) -> Path:

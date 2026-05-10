@@ -28,7 +28,6 @@ via `GUARDRAIL_BACKEND` — swapping backends requires zero changes to retrieval
 | --- | --- |
 | `common/` | Shared typed contracts (`RailVerdict`, `InputRailResult`, `OutputRailResult`, `GuardrailsMetadata`, `RailMergeGate`) |
 | `shared/` | Backend-agnostic ML rail modules (PII, injection, toxicity, intent, topic safety, faithfulness) |
-| `models/` | Guardian classifier wrappers (Granite Guardian, self-check) — one judge model shared across rails |
 | `nemo_guardrails/` | NeMo Guardrails backend: `NemoBackend`, `GuardrailsRuntime`, `InputRailExecutor`, `OutputRailExecutor` |
 
 ## Configuration

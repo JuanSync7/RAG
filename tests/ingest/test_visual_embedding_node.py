@@ -121,6 +121,7 @@ def _make_runtime(config: IngestionConfig) -> Runtime:
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
         db_client=MagicMock(),
     )
 

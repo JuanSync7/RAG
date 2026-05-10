@@ -216,4 +216,32 @@ def test_mock_run_embedding_pipeline_no_warning_without_docling():
     assert len(deprecation_warnings) == 0
 
 
-# refactored_text-forwarding test removed: refactoring node deleted in PR1.
+# ---------------------------------------------------------------------------
+# test_mock_run_embedding_pipeline_refactored_text
+# ---------------------------------------------------------------------------
+
+
+def test_mock_run_embedding_pipeline_refactored_text():
+    """Verify refactored_text is forwarded into initial_state."""
+    from src.ingest.embedding.impl import run_embedding_pipeline
+
+    runtime = _make_runtime()
+
+    with patch("src.ingest.embedding.impl._GRAPH") as mock_graph:
+        mock_graph.invoke.return_value = {"errors": [], "stored_count": 0}
+
+        run_embedding_pipeline(
+            runtime=runtime,
+            source_key="k",
+            source_name="n",
+            source_uri="u",
+            source_id="i",
+            connector="c",
+            source_version="v",
+            clean_text="original",
+            clean_hash="h",
+            refactored_text="refactored",
+        )
+
+    invoke_arg = mock_graph.invoke.call_args[0][0]
+    assert invoke_arg["refactored_text"] == "refactored"

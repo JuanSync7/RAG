@@ -1,7 +1,7 @@
 # @summary
 # Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
-# Deps: src.vector_db, src.core.embeddings, src.ingest.embedding,
+# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding,
 #       src.ingest.doc_processing, src.ingest.support.parser_registry
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
 #   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
@@ -39,12 +39,19 @@ from typing import Any, Optional
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|]')
 
 from config.settings import (
+    GLINER_ENABLED,
+    KG_OBSIDIAN_EXPORT_DIR,
+    KG_PATH,
     LLM_ROUTER_CONFIG,
     PROCESSED_DIR,
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
-from src.core.embeddings import get_embedding_provider
+from src.core import get_embedding_provider
+from src.core import (
+    KnowledgeGraphBuilder,
+    export_obsidian,
+)
 from src.vector_db import (
     delete_collection,
     delete_by_source_key,
@@ -159,10 +166,7 @@ def _write_refactor_mirror_artifacts(
     mapping_path = mirror_dir / f"{stem}.mapping.json"
 
     original_path.write_text(str(result.get("raw_text", "")), encoding="utf-8")
-    # NOTE: legacy mirror file naming retained for back-compat; the refactoring
-    # stage was removed in PR1, so this file now contains cleaned_text (the
-    # chunker's input) rather than an LLM-rewritten variant.
-    refactored_path.write_text(str(result.get("cleaned_text", "")), encoding="utf-8")
+    refactored_path.write_text(str(result.get("refactored_text", "")), encoding="utf-8")
 
     mapping_payload = {
         "source": source["source_name"],
@@ -486,6 +490,12 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     warnings: list[str] = []
     if config.chunk_overlap >= config.chunk_size:
         errors.append("chunk_overlap must be < chunk_size")
+    if config.enable_knowledge_graph_storage and not config.enable_knowledge_graph_extraction:
+        errors.append("knowledge_graph_storage requires knowledge_graph_extraction")
+    if config.enable_knowledge_graph_storage and not config.build_kg:
+        errors.append("knowledge_graph_storage requires build_kg=True")
+    if config.enable_document_refactoring and not config.enable_llm_metadata:
+        warnings.append("refactoring enabled but LLM disabled; cleaned text used")
     if config.enable_docling_parser and not str(config.docling_model).strip():
         errors.append("docling parser requires a non-empty docling_model")
     if config.enable_vision_processing:
@@ -595,7 +605,7 @@ def ingest_file(
         )
 
     # Determine final clean text
-    clean_text: str = phase1.get("cleaned_text", "")
+    clean_text: str = phase1.get("refactored_text") or phase1.get("cleaned_text", "")
     clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
 
     # ── Debug export (opt-in via export_processed) ────────────────────────
@@ -645,6 +655,7 @@ def ingest_file(
         source_version=source_version,
         clean_text=clean_text,
         clean_hash=clean_hash,
+        refactored_text=phase1.get("refactored_text"),
         docling_document=phase1.get("docling_document"),
         trace_id=phase1.get("trace_id", trace_id),
         batch_id=batch_id,
@@ -667,16 +678,18 @@ def ingest_directory(
     config: Optional[IngestionConfig] = None,
     fresh: bool = True,
     update: bool = False,
+    obsidian_export: bool = False,
     selected_sources: Optional[list[Path]] = None,
     batch_id: str = "",
 ) -> IngestionRunSummary:
-    """Ingest a directory of documents and persist vector artifacts.
+    """Ingest a directory of documents and persist vectors/KG artifacts.
 
     Args:
         documents_dir: Directory containing source documents.
         config: Optional ingestion configuration. When omitted, defaults are used.
         fresh: Whether to start from a fresh vector store collection.
         update: Whether to run in incremental mode using the manifest.
+        obsidian_export: Whether to export the knowledge graph to an Obsidian vault.
         selected_sources: Optional explicit list of files to ingest.
         batch_id: Optional batch grouping ID (FR-3053). When provided, all files in
             this run share the same batch_id in their manifests and Weaviate metadata.
@@ -777,6 +790,9 @@ def ingest_directory(
             config=config,
             embedder=get_embedding_provider(tier="ingest"),
             weaviate_client=client,
+            kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
+            if config.build_kg
+            else None,
             db_client=_db_client,
             parser_registry=_parser_registry,
         )
@@ -894,9 +910,10 @@ def ingest_directory(
                 errors.append(f"unhandled:{source.get('source_name', 'unknown')}:{exc}")
                 continue
 
-        # KG persistence owned by KGWeave: no graph save/export here. The
-        # CLI ``--obsidian-export`` switch is now a no-op for the in-process
-        # path; export is performed by the KGWeave worker on its own backend.
+        if runtime.kg_builder is not None:
+            runtime.kg_builder.save(KG_PATH)
+            if obsidian_export:
+                export_obsidian(runtime.kg_builder.graph, KG_OBSIDIAN_EXPORT_DIR)
 
         if _db_client is not None:
             from src.db import close_client as _db_close_client

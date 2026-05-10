@@ -42,12 +42,10 @@ from src.ingest.embedding.common.dedup_utils import (
 )
 from src.ingest.embedding.common.types import MergeEvent, create_merge_event
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.dedup")
 
 
-@node_span("cross_document_dedup")
 def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Detect and eliminate cross-document duplicate chunks.
 

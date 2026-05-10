@@ -1403,7 +1403,7 @@ def _make_heavy_init_patches():
     return [
         patch("src.retrieval.pipeline.rag_chain.get_embedding_provider"),
         patch("src.retrieval.pipeline.rag_chain.get_reranker_provider"),
-        patch("kgweave.core.knowledge_graph.KnowledgeGraphBuilder"),
+        patch("src.core.knowledge_graph.KnowledgeGraphBuilder"),
         patch("src.retrieval.pipeline.rag_chain.OllamaGenerator"),
         patch("src.retrieval.pipeline.rag_chain.get_tracer", return_value=MagicMock()),
         patch("src.retrieval.pipeline.rag_chain.get_retry_provider", return_value=MagicMock()),

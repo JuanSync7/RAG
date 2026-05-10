@@ -164,6 +164,12 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         intent="toggle_update_mode",
     ),
     CommandSpec(
+        name="toggle-kg",
+        description="Toggle KG extraction/storage",
+        modes=(MODE_INGEST_CLI,),
+        intent="toggle_build_kg",
+    ),
+    CommandSpec(
         name="toggle-semantic",
         description="Toggle semantic chunking",
         modes=(MODE_INGEST_CLI,),

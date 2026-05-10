@@ -28,13 +28,14 @@ def _make_chunk(text: str = "Sample chunk text.", heading: str = "Intro") -> Pro
     )
 
 
-def _make_state(chunks=None) -> dict:
+def _make_state(chunks=None, enable_refactoring: bool = False) -> dict:
     """Return a minimal ingest state dict for chunk_enrichment_node tests."""
-    config = IngestionConfig()
+    config = IngestionConfig(enable_document_refactoring=enable_refactoring)
     runtime = Runtime(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
     return {
         "chunks": chunks if chunks is not None else [],
@@ -46,6 +47,7 @@ def _make_state(chunks=None) -> dict:
         "source_version": "1",
         "raw_text": "raw content",
         "cleaned_text": "cleaned content",
+        "refactored_text": "",
         "errors": [],
         "processing_log": [],
         "runtime": runtime,
@@ -157,15 +159,25 @@ class TestSourceFieldPropagation:
 # ---------------------------------------------------------------------------
 
 class TestRetrievalTextOrigin:
-    """retrieval_text_origin is always 'original' after PR1 removed refactoring."""
+    """retrieval_text_origin reflects the enable_document_refactoring config flag."""
 
-    def test_retrieval_text_origin_is_always_original(self):
+    def test_retrieval_text_origin_original_when_refactoring_disabled(self):
+        """retrieval_text_origin == 'original' when enable_document_refactoring=False."""
         from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
 
-        state = _make_state(chunks=[_make_chunk("Body.")])
+        state = _make_state(chunks=[_make_chunk("Body.")], enable_refactoring=False)
         result = chunk_enrichment_node(state)
         chunk = _get_chunks(result, state)[0]
         assert chunk.metadata.get("retrieval_text_origin") == "original"
+
+    def test_retrieval_text_origin_refactored_when_enabled(self):
+        """retrieval_text_origin == 'refactored' when enable_document_refactoring=True."""
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        state = _make_state(chunks=[_make_chunk("Body.")], enable_refactoring=True)
+        result = chunk_enrichment_node(state)
+        chunk = _get_chunks(result, state)[0]
+        assert chunk.metadata.get("retrieval_text_origin") == "refactored"
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +224,20 @@ class TestEmptyChunksNoOp:
 
 class TestPartialStateResilience:
     """chunk_enrichment_node must handle None/absent optional fields gracefully."""
+
+    def test_refactored_text_none_no_error(self):
+        """refactored_text=None must not raise KeyError or AttributeError."""
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        state = _make_state(chunks=[_make_chunk("body text")])
+        state["refactored_text"] = None  # absent optional upstream field
+
+        result = chunk_enrichment_node(state)
+        errors = result.get("errors", state.get("errors", []))
+        assert errors == []
+        chunks = _get_chunks(result, state)
+        assert len(chunks) == 1
+        assert "chunk_id" in chunks[0].metadata
 
     def test_cleaned_text_absent_no_error(self):
         """When cleaned_text is absent from state, node must not raise KeyError."""

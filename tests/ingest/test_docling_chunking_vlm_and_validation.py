@@ -43,6 +43,7 @@ def _make_runtime(vlm_mode: str = "disabled", **config_kwargs) -> Runtime:
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
+        kg_builder=None,
     )
 
 
