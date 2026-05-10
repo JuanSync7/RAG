@@ -108,7 +108,7 @@ services:
 
   rag-api:
     profiles: ["app"]
-    image: ghcr.io/juansync7/ragweave-api:${RAG_API_IMAGE_TAG:-latest}
+    image: ${RAG_API_IMAGE_REF:-ghcr.io/juansync7/ragweave-api}:${RAG_API_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.api
@@ -189,7 +189,7 @@ services:
 
   rag-worker:
     profiles: ["workers"]
-    image: ghcr.io/juansync7/ragweave-worker:${RAG_WORKER_IMAGE_TAG:-latest}
+    image: ${RAG_WORKER_IMAGE_REF:-ghcr.io/juansync7/ragweave-worker}:${RAG_WORKER_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
