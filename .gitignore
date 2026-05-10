@@ -99,3 +99,9 @@ documents/opentitan_subset/
 scripts/.bench_results/*.json
 !scripts/.bench_results/cpu-1777015485.json
 !scripts/.bench_results/gpu-1777015578.json
+
+# Local-only compose overrides — machine-specific tuning (timeouts, model
+# choices, host paths) that should not bleed into source. Per-clone state.
+docker-compose.override.yml
+docker-compose.cpu-embed-off.yml
+.gitignore.local
