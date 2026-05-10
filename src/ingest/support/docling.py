@@ -728,7 +728,10 @@ class DoclingParser:
     def __init__(self) -> None:
         self._docling_document: Any = None
         self._vlm_mode: str = "disabled"
-        self._max_tokens: int = 512
+        # Aligns with parse-time fallback (line ~751) and the package-wide default
+        # (config.settings.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS = 1024). Used
+        # only on the rare path where chunk() runs before parse() (in tests).
+        self._max_tokens: int = 1024
         self._config: Any = None
 
     def parse(self, file_path: Path, config: Any) -> "ParseResult":
