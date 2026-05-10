@@ -124,7 +124,7 @@ class PlainTextParser:
                 from src.ingest.support.docling import chunk_markdown_via_docling
 
                 max_tokens = getattr(
-                    self._config, "hybrid_chunker_max_tokens", 512
+                    self._config, "hybrid_chunker_max_tokens", 1024
                 )
                 return chunk_markdown_via_docling(
                     parse_result.markdown,

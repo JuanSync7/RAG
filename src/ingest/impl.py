@@ -4,7 +4,7 @@
 # Deps: src.vector_db, src.core.embeddings, src.ingest.embedding,
 #       src.ingest.doc_processing, src.ingest.support.parser_registry
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
-#   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
+#   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 8192 limit.
 # verify_core_design also calls _check_visual_embedding_config (Task 1.1) which validates
 #   enable_visual_embedding requires enable_docling_parser, colqwen_batch_size 1-32,
 #   page_image_quality 1-100, and page_image_max_dimension 256-4096.
@@ -271,7 +271,7 @@ def _check_docling_chunking_config(
     Checks three contradiction patterns:
     1. vlm_mode=builtin without docling installed → fatal error
     2. vlm_mode=external without LiteLLM vision model configured → warning
-    3. hybrid_chunker_max_tokens > 512 (bge-m3 limit) → warning
+    3. hybrid_chunker_max_tokens > 8192 (bge-m3 limit) → warning
 
     Args:
         config: IngestionConfig to validate.
@@ -308,12 +308,14 @@ def _check_docling_chunking_config(
                 " VLM enrichment will be skipped at runtime"
             )
 
-    # Rule C: hybrid_chunker_max_tokens exceeds bge-m3 maximum input.
-    if config.hybrid_chunker_max_tokens > 512:
+    # Rule C: hybrid_chunker_max_tokens exceeds bge-m3 maximum input (8192).
+    # BGE-M3 supports up to 8192 tokens. Past ~1500–2000 the embedding loses
+    # specificity, but truncation only kicks in above 8192.
+    if config.hybrid_chunker_max_tokens > 8192:
         warnings.append(
             f"hybrid_chunker_max_tokens ({config.hybrid_chunker_max_tokens})"
-            " exceeds bge-m3 maximum input (512);"
-            " chunks may be silently truncated during embedding"
+            " exceeds bge-m3 maximum input (8192);"
+            " chunks will be silently truncated during embedding"
         )
 
     return errors, warnings
