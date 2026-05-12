@@ -20,6 +20,8 @@ import logging
 import string
 from typing import Optional
 
+from config.settings import RAG_GENERATION_MIN_FRAGMENT_LEN
+
 logger = logging.getLogger("rag.output_sanitizer")
 
 # Characters stripped from the edges of each token during normalisation.
@@ -176,7 +178,7 @@ def _is_template_artifact(line: str) -> bool:
 def _is_prompt_fragment(
     line: str,
     system_prompt: str,
-    min_fragment_length: int = 40,
+    min_fragment_length: int = RAG_GENERATION_MIN_FRAGMENT_LEN,
 ) -> bool:
     """Check if a line is a leaked fragment of the system prompt.
 

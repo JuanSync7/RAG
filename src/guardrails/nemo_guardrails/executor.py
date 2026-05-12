@@ -22,6 +22,10 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 from typing import Any, Optional
 
 from src.common import make_query_hash
+from config.settings import (
+    RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS,
+    RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS,
+)
 from src.guardrails.common import (
     GuardrailsMetadata,
     InputRailResult,
@@ -153,7 +157,7 @@ class InputRailExecutor:
         query_hash = make_query_hash(query)
 
         with ThreadPoolExecutor(
-            max_workers=5, thread_name_prefix="input_rail"
+            max_workers=RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="input_rail"
         ) as pool:
             futures: dict[str, Future] = {}
 
@@ -360,7 +364,7 @@ class OutputRailExecutor:
         executions: list[RailExecution] = []
 
         with ThreadPoolExecutor(
-            max_workers=3, thread_name_prefix="output_rail"
+            max_workers=RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="output_rail"
         ) as pool:
             futures: dict[str, Future] = {}
 

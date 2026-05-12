@@ -76,6 +76,9 @@ from config.settings import (
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
     RAG_INGESTION_EMBEDDING_BATCH_SIZE,
+    RAG_INGEST_MIN_CHUNK_CHARS,
+    RAG_INGEST_MIN_QUALITY_SCORE,
+    RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD,
 )
 from src.core.embeddings import LocalBGEEmbeddings
 from src.ingest.common.schemas import ProcessedChunk
@@ -149,8 +152,8 @@ class IngestionConfig:
     False, KG ingest is skipped entirely — kept as an opt-out for offline
     CLI / bench runs that don't run a Temporal cluster.
     Env var: RAG_INGESTION_ENABLE_KG_PHASE2B."""
-    min_chunk_chars: int = 40
-    min_quality_score: float = 0.45
+    min_chunk_chars: int = RAG_INGEST_MIN_CHUNK_CHARS
+    min_quality_score: float = RAG_INGEST_MIN_QUALITY_SCORE
     export_processed: bool = False
     update_mode: bool = False
     verbose_stage_logs: bool = RAG_INGESTION_VERBOSE_STAGE_LOGS
@@ -221,7 +224,7 @@ class IngestionConfig:
     """Enable cross-document chunk deduplication. Default: True. FR-3402, FR-3460."""
     enable_fuzzy_dedup: bool = False
     """Enable Tier 2 MinHash fuzzy dedup (requires enable_cross_document_dedup=True). Default: False. FR-3420."""
-    fuzzy_similarity_threshold: float = 0.95
+    fuzzy_similarity_threshold: float = RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD
     """Jaccard similarity threshold for fuzzy match. Range: [0.0, 1.0]. Default: 0.95. FR-3422."""
     fuzzy_shingle_size: int = 3
     """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""

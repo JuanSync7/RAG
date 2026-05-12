@@ -22,6 +22,7 @@ import functools
 import threading
 from typing import Callable, Optional, TypeVar
 
+from config.settings import RAG_OBSERVABILITY_MAX_CAPTURE_LEN
 from src.platform.observability.backend import (  # noqa: F401
     Generation,
     ObservabilityBackend,
@@ -34,8 +35,6 @@ F = TypeVar("F", bound=Callable)
 # Internal singleton state — do not access directly outside this module
 _backend: Optional[ObservabilityBackend] = None
 _backend_lock = threading.Lock()
-
-_MAX_CAPTURE_LEN = 500
 
 
 def get_tracer() -> ObservabilityBackend:
@@ -94,14 +93,14 @@ def observe(
             backend = get_tracer()
             with backend.span(span_name) as span:
                 if capture_input and args:
-                    span.set_attribute("input", repr(args[1:])[:_MAX_CAPTURE_LEN])
+                    span.set_attribute("input", repr(args[1:])[:RAG_OBSERVABILITY_MAX_CAPTURE_LEN])
                 try:
                     result = func(*args, **kwargs)
                 except Exception as exc:
                     span.set_attribute("error", str(exc))
                     raise
                 if capture_output:
-                    span.set_attribute("output", repr(result)[:_MAX_CAPTURE_LEN])
+                    span.set_attribute("output", repr(result)[:RAG_OBSERVABILITY_MAX_CAPTURE_LEN])
                 return result
         return wrapper  # type: ignore[return-value]
 

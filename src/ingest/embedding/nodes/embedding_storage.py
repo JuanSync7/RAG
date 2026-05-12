@@ -27,11 +27,12 @@ from src.ingest.common import append_processing_log
 from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
+from config.settings import (
+    RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES,
+    RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S,
+)
 
 logger = logging.getLogger("rag.ingest.embedding.storage")
-
-_BATCH_MAX_RETRIES = 3
-_BATCH_RETRY_DELAY = 0.3  # seconds; kept short to limit event-loop blocking in async paths
 
 
 def _form_batches(items: list, batch_size: int) -> list[list]:
@@ -92,7 +93,7 @@ def _log_batch_summary(
 def _embed_batches(
     embedder,
     text_batches: list[list[str]],
-    max_retries: int = _BATCH_MAX_RETRIES,
+    max_retries: int = RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES,
 ) -> tuple[list[list[float]], list[dict[str, Any]], list[bool]]:
     """Embed text batches with per-batch retry isolation.
 
@@ -130,7 +131,7 @@ def _embed_batches(
                     batch_idx + 1, len(text_batches), attempt, max_retries, exc,
                 )
                 if attempt < max_retries:
-                    time.sleep(_BATCH_RETRY_DELAY * attempt)
+                    time.sleep(RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S * attempt)  # seconds; kept short to limit event-loop blocking in async paths
 
         if batch_vectors is not None:
             all_vectors.extend(batch_vectors)

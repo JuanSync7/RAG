@@ -18,6 +18,11 @@ from __future__ import annotations
 import logging
 import math
 
+from config.settings import (
+    RAG_CONFIDENCE_HIGH_THRESHOLD,
+    RAG_CONFIDENCE_LOW_THRESHOLD,
+    RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
+)
 from src.retrieval.generation.confidence.schemas import PostGuardrailAction
 
 logger = logging.getLogger("rag.confidence_routing")
@@ -26,9 +31,9 @@ logger = logging.getLogger("rag.confidence_routing")
 def route_by_confidence(
     composite: float,
     retry_count: int = 0,
-    high_threshold: float = 0.70,
-    low_threshold: float = 0.50,
-    max_retries: int = 1,
+    high_threshold: float = RAG_CONFIDENCE_HIGH_THRESHOLD,
+    low_threshold: float = RAG_CONFIDENCE_LOW_THRESHOLD,
+    max_retries: int = RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
 ) -> PostGuardrailAction:
     """Determine routing action based on composite confidence score.
 
@@ -42,10 +47,10 @@ def route_by_confidence(
             finite float; NaN is treated as a safe-fail BLOCK.
         retry_count: Number of re-retrieval attempts already made.
         high_threshold: Score at or above which answers are returned.
-            Default 0.70.
+            Default RAG_CONFIDENCE_HIGH_THRESHOLD.
         low_threshold: Score below which answers are blocked after
-            exhausting retries. Default 0.50.
-        max_retries: Maximum number of re-retrieval attempts. Default 1.
+            exhausting retries. Default RAG_CONFIDENCE_LOW_THRESHOLD.
+        max_retries: Maximum number of re-retrieval attempts. Default RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES.
 
     Returns:
         PostGuardrailAction indicating what to do with the answer.

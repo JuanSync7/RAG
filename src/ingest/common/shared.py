@@ -19,6 +19,16 @@ import difflib
 from typing import Any, Optional
 
 from src.ingest.common.edit_log import EditLog
+from config.settings import (
+    RAG_INGEST_QUALITY_BASE,
+    RAG_INGEST_QUALITY_BONUS,
+    RAG_INGEST_QUALITY_MIN_BONUS_LEN,
+    RAG_INGEST_QUALITY_PER_CHAR,
+    RAG_INGEST_QUALITY_MAX,
+    RAG_INGEST_ANCHOR_PREVIEW_LEN,
+    RAG_INGEST_PARA_PREVIEW_LEN,
+    RAG_INGEST_MIN_PARA_SIMILARITY,
+)
 
 logger = logging.getLogger("rag.ingest.common.shared")
 
@@ -31,18 +41,6 @@ _CROSS_REF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bSection\s+\d+(?:\.\d+){0,3}\b", re.IGNORECASE), "section"),
     (re.compile(r"\bRFC\s+\d{3,5}\b", re.IGNORECASE), "standard"),
 ]
-
-# -- Named constants for magic numbers -----------------------------------------
-
-_QUALITY_BASE = 0.4
-_QUALITY_BONUS = 0.2
-_MIN_BONUS_LEN = 120
-_QUALITY_PER_CHAR = 0.01
-_QUALITY_MAX = 1.0
-
-_ANCHOR_PREVIEW = 220
-_PARA_PREVIEW = 600
-_MIN_PARA_SIM = 0.45
 
 
 def extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
@@ -88,9 +86,9 @@ def quality_score(text: str) -> float:
     Returns:
         A score in ``(0.0, 1.0]`` where higher implies "more complete" content.
     """
-    score = _QUALITY_BASE + (_QUALITY_BONUS if len(text) >= _MIN_BONUS_LEN else 0)
-    score += min(_QUALITY_BONUS, len(re.findall(r"\d", text)) * _QUALITY_PER_CHAR)
-    return min(_QUALITY_MAX, score)
+    score = RAG_INGEST_QUALITY_BASE + (RAG_INGEST_QUALITY_BONUS if len(text) >= RAG_INGEST_QUALITY_MIN_BONUS_LEN else 0)
+    score += min(RAG_INGEST_QUALITY_BONUS, len(re.findall(r"\d", text)) * RAG_INGEST_QUALITY_PER_CHAR)
+    return min(RAG_INGEST_QUALITY_MAX, score)
 
 
 def append_processing_log(state: dict[str, Any], message: str) -> list[str]:
@@ -159,8 +157,8 @@ def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
             continue
         ratio = difflib.SequenceMatcher(
             None,
-            anchor[:_ANCHOR_PREVIEW].lower(),
-            para[:_PARA_PREVIEW].lower(),
+            anchor[:RAG_INGEST_ANCHOR_PREVIEW_LEN].lower(),
+            para[:RAG_INGEST_PARA_PREVIEW_LEN].lower(),
         ).ratio()
         if ratio > best_ratio:
             idx = text.find(paragraph, offset)
@@ -240,7 +238,7 @@ def map_chunk_provenance(
 
     if orig_start < 0:
         para_start, para_end, ratio = _best_paragraph_span(original_text, chunk_text)
-        if para_start >= 0 and ratio >= _MIN_PARA_SIM:
+        if para_start >= 0 and ratio >= RAG_INGEST_MIN_PARA_SIMILARITY:
             orig_start, orig_end = para_start, para_end
             orig_method = "paragraph_fuzzy"
             confidence = round(min(0.79, ratio), 3)

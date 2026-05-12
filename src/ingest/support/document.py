@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID
+from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID, RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS
 from src.ingest.common import ProcessedChunk
 
 
@@ -214,7 +214,7 @@ def strip_section_markers(text: str) -> str:
     return text
 
 
-def strip_trailing_short_lines(text: str, max_words: int = 4) -> str:
+def strip_trailing_short_lines(text: str, max_words: int = RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS) -> str:
     """Remove very short trailing lines (likely signature/name remnants).
 
     Args:

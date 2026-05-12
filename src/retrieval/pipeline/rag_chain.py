@@ -93,6 +93,9 @@ from config.settings import (
     RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
     RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
     RAG_DEEP_RESEARCH_KB_TOP_PER_NODE,
+    RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS,
+    RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS,
+    RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE,
 )
 from src.platform import TimingPool
 from config.settings import GUARDRAIL_BACKEND
@@ -209,7 +212,7 @@ class RAGChain:
             finally:
                 logger.info("_load_models_sequential elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS) as pool:
             fut_models = pool.submit(_load_models_sequential)
             fut_kg = pool.submit(_load_kg)
             fut_gen = pool.submit(_load_generator)
@@ -222,7 +225,7 @@ class RAGChain:
         # exact queries (REQ-306). Keyed on the exact query string.
         from collections import OrderedDict
         self._embedding_cache: OrderedDict = OrderedDict()
-        self._embedding_cache_max = 128
+        self._embedding_cache_max = RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE
 
         # Initialize guardrail backend (REQ-701: once at startup, not per-query)
         self._guardrails_merge_gate = None
@@ -749,7 +752,7 @@ class RAGChain:
                             logger.warning("PII gate failed: %s — continuing with original query", e)
                             pii_gated_query = processing_query
 
-                    with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
+                    with _TP(max_workers=RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS, thread_name_prefix="stage1") as stage1_pool:
                         qp_future: _Fut = stage1_pool.submit(
                             process_query,
                             pii_gated_query,

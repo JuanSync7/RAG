@@ -29,6 +29,11 @@ from config.settings import (
     MEMORY_REDIS_URL,
     MEMORY_SUMMARY_MAX_SOURCE_TURNS,
     MEMORY_SUMMARY_TRIGGER_TURNS,
+    RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT,
+    RAG_MEMORY_CONTEXT_MAX_CHARS,
+    RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS,
+    RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS,
+    RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS,
 )
 from src.platform.memory.schemas import (
     ConversationMeta,
@@ -125,7 +130,7 @@ class ConversationMemoryProvider:
         subject: str,
         project_id: str | None,
         conversation_id: str,
-        limit: int = 100,
+        limit: int = RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT,
     ) -> list[ConversationTurn]:
         """Fetch conversation turns.
 
@@ -346,7 +351,7 @@ class NoopConversationMemory(ConversationMemoryProvider):
         subject: str,
         project_id: str | None,
         conversation_id: str,
-        limit: int = 100,
+        limit: int = RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT,
     ) -> list[ConversationTurn]:
         return []
 
@@ -629,7 +634,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         subject: str,
         project_id: str | None,
         conversation_id: str,
-        limit: int = 100,
+        limit: int = RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT,
     ) -> list[ConversationTurn]:
         scope = self._scope(tenant_id, subject, project_id)
         key = self._turns_key(scope, conversation_id)
@@ -676,7 +681,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         now = self._now()
         row = {
             "role": role,
-            "content": sanitize_memory_text(content, max_chars=5000),
+            "content": sanitize_memory_text(content, max_chars=RAG_MEMORY_CONTEXT_MAX_CHARS),
             "timestamp_ms": now,
             "query_id": query_id,
             "sources": sources or [],
@@ -745,10 +750,10 @@ class RedisConversationMemory(ConversationMemoryProvider):
         ]
         try:
             response = self._llm_provider.generate(
-                messages, model_alias="default", max_tokens=512
+                messages, model_alias="default", max_tokens=RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS
             )
             if response.content:
-                return sanitize_memory_text(response.content, max_chars=2600)
+                return sanitize_memory_text(response.content, max_chars=RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS)
         except Exception:
             logger.debug("LLM summarization failed, using heuristic", exc_info=True)
         return summarize_heuristic(turns)
@@ -853,7 +858,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         meta_key = self._meta_key(scope, conversation_id)
         if not self._client.exists(meta_key):
             return None
-        cleaned = (title or "").strip()[:200] or "New conversation"
+        cleaned = (title or "").strip()[:RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS] or "New conversation"
         now = self._now()
         self._client.hset(
             meta_key,

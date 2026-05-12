@@ -25,6 +25,10 @@ import logging
 from typing import Any, Optional
 
 from src.ingest.embedding.common.dedup_utils import normalise_chunk_text
+from config.settings import (
+    RAG_INGEST_FUZZY_SHINGLE_SIZE,
+    RAG_INGEST_FUZZY_NUM_HASHES,
+)
 
 logger = logging.getLogger("rag.ingest.embedding.minhash")
 
@@ -58,8 +62,8 @@ def _word_shingles(text: str, shingle_size: int = 3) -> list[str]:
 
 def compute_fuzzy_fingerprint(
     text: str,
-    shingle_size: int = 3,
-    num_hashes: int = 128,
+    shingle_size: int = RAG_INGEST_FUZZY_SHINGLE_SIZE,
+    num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES,
 ) -> str:
     """Compute a MinHash fingerprint for the given text.
 
@@ -89,7 +93,7 @@ def compute_fuzzy_fingerprint(
     return mh.hashvalues.tobytes().hex()
 
 
-def _deserialise_minhash(hex_str: str, num_hashes: int = 128) -> Any:
+def _deserialise_minhash(hex_str: str, num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES) -> Any:
     """Reconstruct a MinHash object from a hex-encoded signature.
 
     Args:
@@ -113,7 +117,7 @@ def _deserialise_minhash(hex_str: str, num_hashes: int = 128) -> Any:
     return mh
 
 
-def estimate_similarity(sig_a: str, sig_b: str, num_hashes: int = 128) -> float:
+def estimate_similarity(sig_a: str, sig_b: str, num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES) -> float:
     """Estimate Jaccard similarity between two MinHash signatures.
 
     Args:
@@ -136,7 +140,7 @@ def find_chunk_by_fuzzy_fingerprint(
     client: Any,
     fingerprint: str,
     threshold: float,
-    num_hashes: int = 128,
+    num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES,
 ) -> Optional[dict[str, Any]]:
     """Find the best fuzzy match above threshold in Weaviate.
 
@@ -215,7 +219,7 @@ class MinHashEngine:
         ImportError: On construction if datasketch is not installed.
     """
 
-    def __init__(self, shingle_size: int = 3, num_hashes: int = 128) -> None:
+    def __init__(self, shingle_size: int = RAG_INGEST_FUZZY_SHINGLE_SIZE, num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES) -> None:
         """Initialise and verify datasketch availability.
 
         Args:

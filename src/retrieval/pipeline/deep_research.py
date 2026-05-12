@@ -38,6 +38,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from config.settings import (
+    RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS,
+    RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES,
+    RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
+    RAG_DEEP_RESEARCH_MAX_DEPTH,
+    RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
+    RAG_DEEP_RESEARCH_MAX_NODES,
+    RAG_DEEP_RESEARCH_MAX_TOPICS,
+    RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
+    RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE,
+    RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K,
+    RAG_DEEP_RESEARCH_WALL_CLOCK_MS,
+    RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS,
+)
 from src.platform.llm.provider import LLMProvider
 from src.platform.observability import get_tracer
 from src.retrieval.deep_research.metrics import (
@@ -63,25 +77,25 @@ logger = logging.getLogger(__name__)
 class DeepResearchBudget:
     """Hard caps on the recursive loop. All three apply simultaneously."""
 
-    max_nodes: int = 12               # max number of retrieval calls
-    max_llm_calls: int = 24           # max sufficiency + decomposition calls combined
-    wall_clock_ms: int = 30_000       # max total elapsed
-    max_depth: int = 3                # max recursion depth (root = 0)
-    max_topics: int = 3               # cap on depth-1 topic count
-    per_topic_questions: int = 3      # cap on sub-questions per node
-    graph_context_max_chars: int = 4000
+    max_nodes: int = RAG_DEEP_RESEARCH_MAX_NODES               # max number of retrieval calls
+    max_llm_calls: int = RAG_DEEP_RESEARCH_MAX_LLM_CALLS           # max sufficiency + decomposition calls combined
+    wall_clock_ms: int = RAG_DEEP_RESEARCH_WALL_CLOCK_MS       # max total elapsed
+    max_depth: int = RAG_DEEP_RESEARCH_MAX_DEPTH                # max recursion depth (root = 0)
+    max_topics: int = RAG_DEEP_RESEARCH_MAX_TOPICS               # cap on depth-1 topic count
+    per_topic_questions: int = RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS      # cap on sub-questions per node
+    graph_context_max_chars: int = RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS
     # Tightened early-stop gate: requires confident sufficiency PLUS a chunk
     # floor and source-diversity floor. Disable to revert to single-bool stop.
     early_stop_enabled: bool = True
-    early_stop_min_chunks: int = 3
-    early_stop_min_sources: int = 2
+    early_stop_min_chunks: int = RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS
+    early_stop_min_sources: int = RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES
     # Per-topic reranking with split-confidence gate. When the orchestrator
     # decomposes into N>=2 topics AND the LLM's split_confidence clears
     # ``per_topic_rerank_min_confidence``, each pool is reranked against its
     # own ``rerank_anchor`` (not the original query) and merged round-robin.
     per_topic_rerank_enabled: bool = True
-    per_topic_rerank_min_confidence: float = 0.6
-    per_topic_top_k: int = 3
+    per_topic_rerank_min_confidence: float = RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE
+    per_topic_top_k: int = RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K
 
 
 @dataclass
@@ -617,7 +631,7 @@ class DeepResearch:
             return None
         iter_start = time.perf_counter()
         self._iteration_count += 1
-        evidence = pool.evidence_text(max_chars=8000)
+        evidence = pool.evidence_text(max_chars=RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS)
         prompt = _render(
             self._sufficiency_template,
             original_question=self._original_question,

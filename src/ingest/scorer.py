@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+from config.settings import RAG_INGEST_SCORER_PYTEST_TIMEOUT_S
+
 ROOT = Path(__file__).resolve().parent  # src/ingest/
 PROJECT_ROOT = ROOT.parent.parent  # RagWeave/
 SUPPORT_DIR = ROOT / "support"
@@ -176,14 +178,19 @@ def check_single_file_read() -> CheckResult:
 
 def check_retry_delay() -> CheckResult:
     """Embedding retry delay is <=0.5s to limit event-loop blocking."""
-    src = _read(EMBEDDING_STORAGE)
-    match = re.search(r'_BATCH_RETRY_DELAY\s*=\s*([\d.]+)', src)
+    settings_src = (PROJECT_ROOT / "config/settings.py").read_text(encoding="utf-8")
+    match = re.search(
+        r'"RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S"\s*,\s*"([\d.]+)"',
+        settings_src,
+    )
     if match:
         delay = float(match.group(1))
         if delay <= 0.5:
             return CheckResult("speed:retry_delay", True, f"retry delay={delay}s (<=0.5s)")
         return CheckResult("speed:retry_delay", False, f"retry delay={delay}s blocks event loop")
-    return CheckResult("speed:retry_delay", False, "could not find _BATCH_RETRY_DELAY")
+    return CheckResult(
+        "speed:retry_delay", False, "could not find RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S default"
+    )
 
 
 def check_paragraph_early_exit() -> CheckResult:
@@ -440,7 +447,7 @@ def run_correctness_guard() -> tuple[bool, str]:
             capture_output=True,
             text=True,
             cwd=str(project_root),
-            timeout=300,
+            timeout=RAG_INGEST_SCORER_PYTEST_TIMEOUT_S,
         )
         last_lines = result.stdout.strip().split("\n")[-5:]
         summary = "\n".join(last_lines)
@@ -448,7 +455,7 @@ def run_correctness_guard() -> tuple[bool, str]:
             return True, f"PASS: {summary}"
         return False, f"FAIL (rc={result.returncode}):\n{summary}\n{result.stderr[-500:]}"
     except subprocess.TimeoutExpired:
-        return False, "FAIL: test suite timed out (300s)"
+        return False, f"FAIL: test suite timed out ({RAG_INGEST_SCORER_PYTEST_TIMEOUT_S}s)"
     except Exception as exc:
         return False, f"FAIL: could not run tests: {exc}"
 

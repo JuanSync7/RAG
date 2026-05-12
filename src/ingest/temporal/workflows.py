@@ -47,6 +47,9 @@ with workflow.unsafe.imports_passed_through():
         RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN,
         RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S,
         RAG_INGEST_TEMPORAL_RETRY_MAX,
+        RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN,
+        RAG_INGEST_TEMPORAL_KG_RETRY_MAX,
+        RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S,
     )
     from kgweave.contracts import (
         KG_PHASE2B_ACTIVITY,
@@ -154,10 +157,10 @@ _RETRY_POLICY = RetryPolicy(
 
 # KG phase 2b: bounded retries, transient-only. document/system error classes
 # are non_retryable on the worker side, so Temporal won't retry them.
-_KG_PHASE2B_TIMEOUT = timedelta(minutes=10)
+_KG_PHASE2B_TIMEOUT = timedelta(minutes=RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN)
 _KG_PHASE2B_RETRY = RetryPolicy(
-    maximum_attempts=5,
-    initial_interval=timedelta(seconds=10),
+    maximum_attempts=RAG_INGEST_TEMPORAL_KG_RETRY_MAX,
+    initial_interval=timedelta(seconds=RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S),
     maximum_interval=timedelta(minutes=5),
     non_retryable_error_types=["document", "system"],
 )

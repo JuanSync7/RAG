@@ -29,6 +29,7 @@ from src.guardrails.models import (
     GuardianUnavailable,
 )
 from src.platform.llm import call_oneshot
+from config.settings import RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
@@ -188,7 +189,7 @@ class FaithfulnessChecker:
         if self._use_self_check:
             from concurrent.futures import ThreadPoolExecutor
 
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="faith") as pool:
+            with ThreadPoolExecutor(max_workers=RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS, thread_name_prefix="faith") as pool:
                 fut_self = pool.submit(
                     self._compute_overall_score,
                     answer,

@@ -26,6 +26,10 @@ from config.settings import (
     MINIO_SECRET_KEY,
     MINIO_BUCKET,
     MINIO_SECURE,
+    RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY,
+    RAG_MINIO_LIST_DEFAULT_LIMIT,
+    RAG_MINIO_LIST_DEFAULT_OFFSET,
+    RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
 )
 from src.platform.observability import get_tracer
 
@@ -184,7 +188,7 @@ def get_document_url(
     client: Minio,
     document_id: str,
     bucket: str = MINIO_BUCKET,
-    expires_in_seconds: int = 3600,
+    expires_in_seconds: int = RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
 ) -> str:
     """Return a presigned URL for direct download of the document content."""
     return client.presigned_get_object(
@@ -198,8 +202,8 @@ def list_documents(
     client: Minio,
     bucket: str = MINIO_BUCKET,
     prefix: str = "",
-    limit: int = 1000,
-    offset: int = 0,
+    limit: int = RAG_MINIO_LIST_DEFAULT_LIMIT,
+    offset: int = RAG_MINIO_LIST_DEFAULT_OFFSET,
 ) -> list[dict]:
     """List content objects in a bucket, excluding metadata sidecars.
 
@@ -351,7 +355,7 @@ def store_page_images(
     client: Minio,
     document_id: str,
     pages: list[tuple[int, object]],
-    quality: int = 85,
+    quality: int = RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY,
     bucket: str = MINIO_BUCKET,
 ) -> list[str]:
     """Store page images as JPEG in MinIO.

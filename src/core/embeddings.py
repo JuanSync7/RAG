@@ -20,6 +20,8 @@ from langchain_core.embeddings import Embeddings
 from config.settings import (
     EMBEDDING_MODEL_PATH,
     INFERENCE_BACKEND,
+    RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS,
+    RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING,
     TEI_EMBED_URL,
     TEI_EMBEDDING_MODEL,
     TEI_TIMEOUT_SECONDS,
@@ -47,7 +49,7 @@ class LocalBGEEmbeddings(Embeddings):
             texts,
             normalize_embeddings=True,
             show_progress_bar=True,
-            batch_size=32,
+            batch_size=RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS,
         )
         span.end(status="ok")
         return embeddings.tolist()
@@ -71,7 +73,7 @@ class LocalBGEEmbeddings(Embeddings):
         return self.model.encode(
             sentences,
             normalize_embeddings=True,
-            batch_size=64,
+            batch_size=RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING,
             show_progress_bar=False,
         )
 

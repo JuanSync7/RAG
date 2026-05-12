@@ -11,6 +11,13 @@ from __future__ import annotations
 import re
 import time
 
+from config.settings import (
+    RAG_MEMORY_SNIPPET_MAX_CHARS,
+    RAG_MEMORY_SUMMARY_MAX_CHARS,
+    RAG_MEMORY_TURN_MAX_CHARS,
+    RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS,
+    RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS,
+)
 from src.platform.memory.schemas import ConversationTurn
 
 
@@ -19,7 +26,7 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def sanitize_memory_text(text: str, max_chars: int = 1600) -> str:
+def sanitize_memory_text(text: str, max_chars: int = RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS) -> str:
     """Normalize whitespace and cap text length for prompt safety.
 
     Args:
@@ -97,17 +104,17 @@ def build_context_text(summary_text: str, recent_turns: list[ConversationTurn]) 
 
     parts: list[str] = []
     if summary_text:
-        parts.append("Conversation summary:\n" + sanitize_memory_text(summary_text, max_chars=2400))
+        parts.append("Conversation summary:\n" + sanitize_memory_text(summary_text, max_chars=RAG_MEMORY_SUMMARY_MAX_CHARS))
     if recent_turns:
         rendered = []
         for turn in recent_turns:
             role = turn.role.upper()
-            rendered.append(f"{role}: {sanitize_memory_text(turn.content, max_chars=1200)}")
+            rendered.append(f"{role}: {sanitize_memory_text(turn.content, max_chars=RAG_MEMORY_TURN_MAX_CHARS)}")
         parts.append("Recent turns:\n" + "\n".join(rendered))
     return "\n\n".join(parts).strip()
 
 
-def summarize_heuristic(turns: list[ConversationTurn], max_chars: int = 1800) -> str:
+def summarize_heuristic(turns: list[ConversationTurn], max_chars: int = RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS) -> str:
     """Create a heuristic compact summary when LLM summarization is unavailable.
 
     Args:
@@ -123,7 +130,7 @@ def summarize_heuristic(turns: list[ConversationTurn], max_chars: int = 1800) ->
     lines: list[str] = ["Key conversation points:"]
     for turn in turns[-12:]:
         prefix = "User" if turn.role == "user" else "Assistant"
-        lines.append(f"- {prefix}: {sanitize_memory_text(turn.content, max_chars=220)}")
+        lines.append(f"- {prefix}: {sanitize_memory_text(turn.content, max_chars=RAG_MEMORY_SNIPPET_MAX_CHARS)}")
     return sanitize_memory_text("\n".join(lines), max_chars=max_chars)
 
 

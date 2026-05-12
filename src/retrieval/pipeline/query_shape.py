@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from config.settings import RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES
 from src.retrieval.common.schemas import RankedResult
 
 
@@ -43,7 +44,7 @@ COMPOUND_MARKERS: tuple[str, ...] = (
     " compared ",
 )
 
-MAX_UNIQUE_SOURCES_FOR_SUGGESTION: int = 2
+MAX_UNIQUE_SOURCES_FOR_SUGGESTION: int = RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES
 
 _SOURCE_KEYS: tuple[str, ...] = ("source", "source_key", "source_uri", "document_id")
 

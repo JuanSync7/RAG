@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from config.settings import (
+    RAG_CONFIDENCE_CITATION_WEIGHT,
+    RAG_CONFIDENCE_LLM_WEIGHT,
+    RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+)
+
 
 @dataclass(frozen=True)
 class ConfidenceWeights:
@@ -50,9 +56,9 @@ class ConfidenceBreakdown:
     llm_score: float
     citation_score: float
     composite: float
-    retrieval_weight: float = 0.50
-    llm_weight: float = 0.25
-    citation_weight: float = 0.25
+    retrieval_weight: float = RAG_CONFIDENCE_RETRIEVAL_WEIGHT
+    llm_weight: float = RAG_CONFIDENCE_LLM_WEIGHT
+    citation_weight: float = RAG_CONFIDENCE_CITATION_WEIGHT
 
 
 class PostGuardrailAction(Enum):

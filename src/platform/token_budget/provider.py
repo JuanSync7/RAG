@@ -25,6 +25,7 @@ from config.settings import (
     LLM_MODEL,
     TOKEN_BUDGET_CHARS_PER_TOKEN,
     TOKEN_BUDGET_DEFAULT_CONTEXT_LENGTH,
+    RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S,
 )
 from src.platform.token_budget.schemas import (
     ModelCapabilities,
@@ -82,7 +83,7 @@ def _fetch_via_ollama(
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(req, timeout=5) as resp:
+        with urlopen(req, timeout=RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S) as resp:
             return orjson.loads(resp.read())
     except (URLError, OSError, orjson.JSONDecodeError, ValueError):
         return None
