@@ -32,8 +32,11 @@ from config.settings import (
     PROMPTS_DIR,
     QUERY_CONFIDENCE_THRESHOLD,
     QUERY_LOG_DIR,
-    QUERY_MAX_LENGTH,
     QUERY_PROCESSING_TEMPERATURE,
+    RAG_QUERY_PRONOUN_DENSITY_THRESHOLD,
+    RAG_QUERY_EVALUATOR_MAX_TOKENS,
+    RAG_RETRIEVAL_REWRITER_MAX_TOKENS,
+    RAG_QUERY_KG_MATCH_MAX_TERMS,
 )
 from src.platform.llm import call_oneshot, get_llm_provider
 from src.platform.observability import get_tracer
@@ -171,7 +174,7 @@ def _retrieval_auto_rewrite(
             messages,
             model_alias="default",
             temperature=QUERY_PROCESSING_TEMPERATURE,
-            max_tokens=400,
+            max_tokens=RAG_RETRIEVAL_REWRITER_MAX_TOKENS,
         )
         raw = (response.content or "").strip()
         parsed = parse_json_object(raw) or {}
@@ -323,7 +326,6 @@ _CONTEXT_RESET_PATTERNS = [
 
 # Pronouns for backward-ref density check
 _PRONOUNS = re.compile(r"\b(it|its|that|those|this|these|them)\b", re.IGNORECASE)
-_PRONOUN_DENSITY_THRESHOLD = 0.15
 
 
 def _has_backward_reference(query: str) -> bool:
@@ -343,7 +345,7 @@ def _has_backward_reference(query: str) -> bool:
         words = query.split()
         if words:
             pronoun_count = len(_PRONOUNS.findall(query))
-            if pronoun_count / len(words) >= _PRONOUN_DENSITY_THRESHOLD:
+            if pronoun_count / len(words) >= RAG_QUERY_PRONOUN_DENSITY_THRESHOLD:
                 logger.debug(
                     "_has_backward_reference: high pronoun density (%d/%d) in %.2fms",
                     pronoun_count, len(words), (time.perf_counter() - _t0) * 1000,
@@ -386,7 +388,7 @@ def _call_llm(prompt: str, system: str = "") -> Optional[str]:
             system=system,
             model_alias="query",
             temperature=QUERY_PROCESSING_TEMPERATURE,
-            max_tokens=256,
+            max_tokens=RAG_QUERY_EVALUATOR_MAX_TOKENS,
         )
 
 
@@ -447,11 +449,6 @@ def sanitize_node(state: QueryState) -> dict:
             ),
         }
 
-    # Length check
-    if len(query) > QUERY_MAX_LENGTH:
-        query = query[:QUERY_MAX_LENGTH]
-        logger.info("Query truncated to %d characters", QUERY_MAX_LENGTH)
-
     # Injection detection
     if _detect_injection(query):
         logger.warning("Potential prompt injection detected: %s", query[:80])
@@ -474,7 +471,7 @@ def sanitize_node(state: QueryState) -> dict:
     return {"current_query": query}
 
 
-def _match_kg_terms(query: str, max_terms: int = 20) -> str:
+def _match_kg_terms(query: str, max_terms: int = RAG_QUERY_KG_MATCH_MAX_TERMS) -> str:
     """Find KG terms relevant to the query and format them for prompt injection.
 
     Match logic (word-level lookup + top-N fallback) lives in

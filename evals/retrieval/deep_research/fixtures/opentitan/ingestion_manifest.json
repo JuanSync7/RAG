@@ -1,0 +1,4721 @@
+{
+  "source_root": "/home/juansync7/RagWeave/opentitan_data",
+  "filters": {
+    "min_bytes": 500,
+    "drop_names": [
+      "CHANGELOG.md",
+      "HISTORY.md",
+      "checklist.md"
+    ],
+    "drop_prefixes": [
+      "hw/vendor/",
+      "sw/vendor/",
+      "third_party/",
+      "toolchain/",
+      "rules/",
+      "signing/"
+    ],
+    "suffixes": [
+      ".md",
+      ".rst"
+    ]
+  },
+  "summary": {
+    "chip_arch": 172,
+    "embedded_sw": 76,
+    "ip_misc": 73,
+    "engineering_guide": 70,
+    "spec": 54,
+    "dv_plan": 35,
+    "hw_misc": 33,
+    "chip_dv": 30,
+    "microarch": 26,
+    "programmers_guide": 24,
+    "governance": 21,
+    "security_arch": 16,
+    "doc_misc": 11,
+    "getting_started": 10,
+    "host_sw": 10,
+    "use_case": 4,
+    "other": 3
+  },
+  "total": 668,
+  "files": [
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/CONTRIBUTING.md",
+      "rel_path": "CONTRIBUTING.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 2503
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/README.md",
+      "rel_path": "README.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 1570
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/SECURITY.md",
+      "rel_path": "SECURITY.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 619
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/SUMMARY.md",
+      "rel_path": "SUMMARY.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 50478
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/README.md",
+      "rel_path": "doc/contributing/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 5357
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/bazel_notes.md",
+      "rel_path": "doc/contributing/bazel_notes.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 18015
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/ci/README.md",
+      "rel_path": "doc/contributing/ci/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 5534
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/detailed_contribution_guide/README.md",
+      "rel_path": "doc/contributing/detailed_contribution_guide/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 24361
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/directory_structure.md",
+      "rel_path": "doc/contributing/directory_structure.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 6253
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/doc/README.md",
+      "rel_path": "doc/contributing/doc/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3046
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/doc/example_ip_block.md",
+      "rel_path": "doc/contributing/doc/example_ip_block.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 4607
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/dv/methodology/README.md",
+      "rel_path": "doc/contributing/dv/methodology/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 46373
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/dv/sec_cm_dv_framework/README.md",
+      "rel_path": "doc/contributing/dv/sec_cm_dv_framework/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 9338
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/fpga/README.md",
+      "rel_path": "doc/contributing/fpga/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 531
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/fpga/debugging_with_ila.md",
+      "rel_path": "doc/contributing/fpga/debugging_with_ila.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 17000
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/fpga/get_a_board.md",
+      "rel_path": "doc/contributing/fpga/get_a_board.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 2934
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/fpga/ref_manual_fpga.md",
+      "rel_path": "doc/contributing/fpga/ref_manual_fpga.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 10124
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/github_notes.md",
+      "rel_path": "doc/contributing/github_notes.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 20180
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/hw/comportability/README.md",
+      "rel_path": "doc/contributing/hw/comportability/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 48602
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/hw/design.md",
+      "rel_path": "doc/contributing/hw/design.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 8763
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/hw/methodology.md",
+      "rel_path": "doc/contributing/hw/methodology.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 20532
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/hw/racl/README.md",
+      "rel_path": "doc/contributing/hw/racl/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 18405
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/hw/vendor.md",
+      "rel_path": "doc/contributing/hw/vendor.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 18323
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/README.md",
+      "rel_path": "doc/contributing/style_guides/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 807
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/asm_coding_style.md",
+      "rel_path": "doc/contributing/style_guides/asm_coding_style.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 12894
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/c_cpp_coding_style.md",
+      "rel_path": "doc/contributing/style_guides/c_cpp_coding_style.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 25090
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/guidance_for_volatile.md",
+      "rel_path": "doc/contributing/style_guides/guidance_for_volatile.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 10338
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/hjson_usage_style.md",
+      "rel_path": "doc/contributing/style_guides/hjson_usage_style.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 8008
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/markdown_usage_style.md",
+      "rel_path": "doc/contributing/style_guides/markdown_usage_style.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 8469
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/otbn_style_guide.md",
+      "rel_path": "doc/contributing/style_guides/otbn_style_guide.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 13684
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/style_guides/python_coding_style.md",
+      "rel_path": "doc/contributing/style_guides/python_coding_style.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 7775
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/sw/README.md",
+      "rel_path": "doc/contributing/sw/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 537
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/sw/adding_python_depedencies.md",
+      "rel_path": "doc/contributing/sw/adding_python_depedencies.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 757
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/sw/device_interface_functions.md",
+      "rel_path": "doc/contributing/sw/device_interface_functions.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 10027
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/sw/otbn_sw.md",
+      "rel_path": "doc/contributing/sw/otbn_sw.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3388
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/contributing/system_list.md",
+      "rel_path": "doc/contributing/system_list.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 687
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/README.md",
+      "rel_path": "doc/getting_started/README.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 9300
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/build_docs.md",
+      "rel_path": "doc/getting_started/build_docs.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 1809
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/build_sw.md",
+      "rel_path": "doc/getting_started/build_sw.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 18424
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/install_vivado/README.md",
+      "rel_path": "doc/getting_started/install_vivado/README.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 1766
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/setup_dv.md",
+      "rel_path": "doc/getting_started/setup_dv.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 8606
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/setup_formal.md",
+      "rel_path": "doc/getting_started/setup_formal.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 2429
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/setup_fpga.md",
+      "rel_path": "doc/getting_started/setup_fpga.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 31817
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/setup_verilator.md",
+      "rel_path": "doc/getting_started/setup_verilator.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 16009
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/unofficial/fedora.md",
+      "rel_path": "doc/getting_started/unofficial/fedora.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 924
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/getting_started/using_openocd.md",
+      "rel_path": "doc/getting_started/using_openocd.md",
+      "category": "getting_started",
+      "ip_block": null,
+      "size": 1108
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/glossary.md",
+      "rel_path": "doc/glossary.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 4973
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/productarchitecture.md",
+      "rel_path": "doc/productarchitecture.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 1673
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/README.md",
+      "rel_path": "doc/project_governance/README.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 2491
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/checklist/README.md",
+      "rel_path": "doc/project_governance/checklist/README.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 28679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/code_of_conduct.md",
+      "rel_path": "doc/project_governance/code_of_conduct.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 10841
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/committers.md",
+      "rel_path": "doc/project_governance/committers.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 4157
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/communications.md",
+      "rel_path": "doc/project_governance/communications.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 8251
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/development_stages.md",
+      "rel_path": "doc/project_governance/development_stages.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 23231
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/edit.md",
+      "rel_path": "doc/project_governance/edit.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 684
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/governing_board.md",
+      "rel_path": "doc/project_governance/governing_board.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 2809
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/history.md",
+      "rel_path": "doc/project_governance/history.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 2891
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/lowRISC.md",
+      "rel_path": "doc/project_governance/lowRISC.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 1628
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/membership.md",
+      "rel_path": "doc/project_governance/membership.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 7572
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/news.md",
+      "rel_path": "doc/project_governance/news.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 8312
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/opensource.md",
+      "rel_path": "doc/project_governance/opensource.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 576
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/priority_definitions.md",
+      "rel_path": "doc/project_governance/priority_definitions.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 2506
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/project_milestone_definitions.md",
+      "rel_path": "doc/project_governance/project_milestone_definitions.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 5029
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/rfc_approved.md",
+      "rel_path": "doc/project_governance/rfc_approved.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 783
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/rfc_process.md",
+      "rel_path": "doc/project_governance/rfc_process.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 5165
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/technical_committee.md",
+      "rel_path": "doc/project_governance/technical_committee.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 5956
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/trademark.md",
+      "rel_path": "doc/project_governance/trademark.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 5649
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/useraccounts.md",
+      "rel_path": "doc/project_governance/useraccounts.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 6083
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/project_governance/working_group.md",
+      "rel_path": "doc/project_governance/working_group.md",
+      "category": "governance",
+      "ip_block": null,
+      "size": 4689
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/rust_for_c_devs.md",
+      "rel_path": "doc/rust_for_c_devs.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 121338
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/sections/governance.md",
+      "rel_path": "doc/sections/governance.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 1211
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/sections/security.md",
+      "rel_path": "doc/sections/security.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 504
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/sections/software.md",
+      "rel_path": "doc/sections/software.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 697
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/sections/usecases.md",
+      "rel_path": "doc/sections/usecases.md",
+      "category": "doc_misc",
+      "ip_block": null,
+      "size": 549
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/README.md",
+      "rel_path": "doc/security/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 5944
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/cryptolib/contributing.md",
+      "rel_path": "doc/security/cryptolib/contributing.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 5850
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/cryptolib/cryptolib_api.md",
+      "rel_path": "doc/security/cryptolib/cryptolib_api.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 43423
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/cryptolib/security.md",
+      "rel_path": "doc/security/cryptolib/security.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 8048
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/implementation_guidelines/hardware/README.md",
+      "rel_path": "doc/security/implementation_guidelines/hardware/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 23577
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/implementation_guidelines/reset_vs_non-reset_flops/README.md",
+      "rel_path": "doc/security/implementation_guidelines/reset_vs_non-reset_flops/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 13025
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/logical_security_model/README.md",
+      "rel_path": "doc/security/logical_security_model/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 16150
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/README.md",
+      "rel_path": "doc/security/specs/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 3750
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/attestation/README.md",
+      "rel_path": "doc/security/specs/attestation/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 29014
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/device_life_cycle/README.md",
+      "rel_path": "doc/security/specs/device_life_cycle/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 21869
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/device_provisioning/README.md",
+      "rel_path": "doc/security/specs/device_provisioning/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 34166
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/firmware_update/README.md",
+      "rel_path": "doc/security/specs/firmware_update/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 2316
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/identities_and_root_keys/README.md",
+      "rel_path": "doc/security/specs/identities_and_root_keys/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 22841
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/ownership_transfer/README.md",
+      "rel_path": "doc/security/specs/ownership_transfer/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 25621
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/specs/secure_boot/README.md",
+      "rel_path": "doc/security/specs/secure_boot/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 15163
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/security/threat_model/README.md",
+      "rel_path": "doc/security/threat_model/README.md",
+      "category": "security_arch",
+      "ip_block": null,
+      "size": 3546
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/use_cases/README.md",
+      "rel_path": "doc/use_cases/README.md",
+      "category": "use_case",
+      "ip_block": null,
+      "size": 680
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/use_cases/platform_integrity_module/README.md",
+      "rel_path": "doc/use_cases/platform_integrity_module/README.md",
+      "category": "use_case",
+      "ip_block": null,
+      "size": 6476
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/use_cases/tpm/README.md",
+      "rel_path": "doc/use_cases/tpm/README.md",
+      "category": "use_case",
+      "ip_block": null,
+      "size": 5235
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/doc/use_cases/u2f/README.md",
+      "rel_path": "doc/use_cases/u2f/README.md",
+      "category": "use_case",
+      "ip_block": null,
+      "size": 4509
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/README.md",
+      "rel_path": "hw/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 3619
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/bitstream/README.md",
+      "rel_path": "hw/bitstream/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 3431
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/doc/dv_doc_template.md",
+      "rel_path": "hw/dv/doc/dv_doc_template.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 5256
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/dpi/dmidpi/README.md",
+      "rel_path": "hw/dv/dpi/dmidpi/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1275
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/dpi/jtagdpi/README.md",
+      "rel_path": "hw/dv/dpi/jtagdpi/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1050
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/alert_esc_agent/README.md",
+      "rel_path": "hw/dv/sv/alert_esc_agent/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 762
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/cip_lib/README.md",
+      "rel_path": "hw/dv/sv/cip_lib/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 35944
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/common_ifs/README.md",
+      "rel_path": "hw/dv/sv/common_ifs/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 5396
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/csr_utils/README.md",
+      "rel_path": "hw/dv/sv/csr_utils/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 7187
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/dv_lib/README.md",
+      "rel_path": "hw/dv/sv/dv_lib/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 2273
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/jtag_agent/README.md",
+      "rel_path": "hw/dv/sv/jtag_agent/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3791
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/jtag_dmi_agent/README.md",
+      "rel_path": "hw/dv/sv/jtag_dmi_agent/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 6742
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/mem_bkdr_scb/README.md",
+      "rel_path": "hw/dv/sv/mem_bkdr_scb/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1982
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/mem_bkdr_util/README.md",
+      "rel_path": "hw/dv/sv/mem_bkdr_util/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1204
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/mem_model/README.md",
+      "rel_path": "hw/dv/sv/mem_model/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1317
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/push_pull_agent/README.md",
+      "rel_path": "hw/dv/sv/push_pull_agent/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 560
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/sim_sram/README.md",
+      "rel_path": "hw/dv/sv/sim_sram/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 5114
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/sv/test_vectors/README.md",
+      "rel_path": "hw/dv/sv/test_vectors/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3135
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/tools/ralgen/README.md",
+      "rel_path": "hw/dv/tools/ralgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 4730
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/tools/z01x/README.md",
+      "rel_path": "hw/dv/tools/z01x/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1070
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/dv/verilator/README.md",
+      "rel_path": "hw/dv/verilator/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 636
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/formal/README.md",
+      "rel_path": "hw/formal/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 16311
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/README.md",
+      "rel_path": "hw/ip/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 5893
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/README.md",
+      "rel_path": "hw/ip/adc_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "adc_ctrl",
+      "size": 2036
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/adc_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "adc_ctrl",
+      "size": 1833
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip/adc_ctrl/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "adc_ctrl",
+      "size": 7305
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/adc_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "adc_ctrl",
+      "size": 26752
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/adc_ctrl/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "adc_ctrl",
+      "size": 10755
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/adc_ctrl/dv/README.md",
+      "rel_path": "hw/ip/adc_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "adc_ctrl",
+      "size": 7123
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/README.md",
+      "rel_path": "hw/ip/aes/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 6802
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/doc/interfaces.md",
+      "rel_path": "hw/ip/aes/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "aes",
+      "size": 14117
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/doc/programmers_guide.md",
+      "rel_path": "hw/ip/aes/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "aes",
+      "size": 21583
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/doc/registers.md",
+      "rel_path": "hw/ip/aes/doc/registers.md",
+      "category": "spec",
+      "ip_block": "aes",
+      "size": 37819
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/aes/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "aes",
+      "size": 44671
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/dv/README.md",
+      "rel_path": "hw/ip/aes/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "aes",
+      "size": 8846
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/model/README.md",
+      "rel_path": "hw/ip/aes/model/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 2102
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_dv/aes_cipher_core_tb/README.md",
+      "rel_path": "hw/ip/aes/pre_dv/aes_cipher_core_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 1114
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_dv/aes_sbox_tb/README.md",
+      "rel_path": "hw/ip/aes/pre_dv/aes_sbox_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 977
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_dv/aes_tb/README.md",
+      "rel_path": "hw/ip/aes/pre_dv/aes_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 2774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_dv/aes_tb/README.md",
+      "rel_path": "hw/ip/aes/pre_dv/aes_tlul_shim_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 2774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_dv/aes_wrap_tb/README.md",
+      "rel_path": "hw/ip/aes/pre_dv/aes_wrap_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 930
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_sca/alma/README.md",
+      "rel_path": "hw/ip/aes/pre_sca/alma/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 8079
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_sca/alma_post_syn/README.md",
+      "rel_path": "hw/ip/aes/pre_sca/alma_post_syn/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 11397
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aes/pre_sca/prolead/README.md",
+      "rel_path": "hw/ip/aes/pre_sca/prolead/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 13895
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/vendor/lowrisc_ibex/syn/README.md",
+      "rel_path": "hw/ip/aes/pre_syn/README.md",
+      "category": "ip_misc",
+      "ip_block": "aes",
+      "size": 5938
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/README.md",
+      "rel_path": "hw/ip/aon_timer/README.md",
+      "category": "ip_misc",
+      "ip_block": "aon_timer",
+      "size": 6002
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/doc/interfaces.md",
+      "rel_path": "hw/ip/aon_timer/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "aon_timer",
+      "size": 3768
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/doc/programmers_guide.md",
+      "rel_path": "hw/ip/aon_timer/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "aon_timer",
+      "size": 5259
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/doc/registers.md",
+      "rel_path": "hw/ip/aon_timer/doc/registers.md",
+      "category": "spec",
+      "ip_block": "aon_timer",
+      "size": 11928
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/aon_timer/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "aon_timer",
+      "size": 2555
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/aon_timer/dv/README.md",
+      "rel_path": "hw/ip/aon_timer/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "aon_timer",
+      "size": 11020
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/README.md",
+      "rel_path": "hw/ip/ascon/README.md",
+      "category": "ip_misc",
+      "ip_block": "ascon",
+      "size": 5083
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/doc/background.md",
+      "rel_path": "hw/ip/ascon/doc/background.md",
+      "category": "ip_misc",
+      "ip_block": "ascon",
+      "size": 6236
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/doc/interfaces.md",
+      "rel_path": "hw/ip/ascon/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "ascon",
+      "size": 3302
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/doc/programmers_guide.md",
+      "rel_path": "hw/ip/ascon/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "ascon",
+      "size": 5905
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/doc/registers.md",
+      "rel_path": "hw/ip/ascon/doc/registers.md",
+      "category": "spec",
+      "ip_block": "ascon",
+      "size": 40435
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/ascon/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "ascon",
+      "size": 10688
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/ascon/pre_dv/ascon_tb/README.md",
+      "rel_path": "hw/ip/ascon/pre_dv/ascon_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "ascon",
+      "size": 642
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/README.md",
+      "rel_path": "hw/ip/csrng/README.md",
+      "category": "ip_misc",
+      "ip_block": "csrng",
+      "size": 11335
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/doc/interfaces.md",
+      "rel_path": "hw/ip/csrng/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "csrng",
+      "size": 10721
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/doc/programmers_guide.md",
+      "rel_path": "hw/ip/csrng/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "csrng",
+      "size": 7383
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/doc/registers.md",
+      "rel_path": "hw/ip/csrng/doc/registers.md",
+      "category": "spec",
+      "ip_block": "csrng",
+      "size": 41494
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/csrng/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "csrng",
+      "size": 23248
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/csrng/dv/README.md",
+      "rel_path": "hw/ip/csrng/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "csrng",
+      "size": 5083
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/README.md",
+      "rel_path": "hw/ip/dma/README.md",
+      "category": "ip_misc",
+      "ip_block": "dma",
+      "size": 5249
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/doc/interfaces.md",
+      "rel_path": "hw/ip/dma/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "dma",
+      "size": 4242
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/doc/programmers_guide.md",
+      "rel_path": "hw/ip/dma/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "dma",
+      "size": 10141
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/doc/registers.md",
+      "rel_path": "hw/ip/dma/doc/registers.md",
+      "category": "spec",
+      "ip_block": "dma",
+      "size": 53472
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/dma/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "dma",
+      "size": 24921
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/dma/dv/README.md",
+      "rel_path": "hw/ip/dma/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "dma",
+      "size": 6487
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/README.md",
+      "rel_path": "hw/ip/edn/README.md",
+      "category": "ip_misc",
+      "ip_block": "edn",
+      "size": 8630
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/doc/interfaces.md",
+      "rel_path": "hw/ip/edn/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "edn",
+      "size": 3900
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/doc/programmers_guide.md",
+      "rel_path": "hw/ip/edn/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "edn",
+      "size": 6240
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/doc/registers.md",
+      "rel_path": "hw/ip/edn/doc/registers.md",
+      "category": "spec",
+      "ip_block": "edn",
+      "size": 32352
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/edn/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "edn",
+      "size": 14406
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/edn/dv/README.md",
+      "rel_path": "hw/ip/edn/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "edn",
+      "size": 4870
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/README.md",
+      "rel_path": "hw/ip/entropy_src/README.md",
+      "category": "ip_misc",
+      "ip_block": "entropy_src",
+      "size": 9790
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/doc/interfaces.md",
+      "rel_path": "hw/ip/entropy_src/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "entropy_src",
+      "size": 11533
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/doc/programmers_guide.md",
+      "rel_path": "hw/ip/entropy_src/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "entropy_src",
+      "size": 8816
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/doc/registers.md",
+      "rel_path": "hw/ip/entropy_src/doc/registers.md",
+      "category": "spec",
+      "ip_block": "entropy_src",
+      "size": 90643
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/entropy_src/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "entropy_src",
+      "size": 29245
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/entropy_src/dv/README.md",
+      "rel_path": "hw/ip/entropy_src/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "entropy_src",
+      "size": 5620
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/README.md",
+      "rel_path": "hw/ip/hmac/README.md",
+      "category": "ip_misc",
+      "ip_block": "hmac",
+      "size": 5317
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/doc/interfaces.md",
+      "rel_path": "hw/ip/hmac/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "hmac",
+      "size": 5167
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/doc/programmers_guide.md",
+      "rel_path": "hw/ip/hmac/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "hmac",
+      "size": 11011
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/doc/registers.md",
+      "rel_path": "hw/ip/hmac/doc/registers.md",
+      "category": "spec",
+      "ip_block": "hmac",
+      "size": 33645
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/hmac/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "hmac",
+      "size": 11815
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/dv/README.md",
+      "rel_path": "hw/ip/hmac/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "hmac",
+      "size": 7964
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/hmac/dv/cryptoc_dpi/README.md",
+      "rel_path": "hw/ip/hmac/dv/cryptoc_dpi/README.md",
+      "category": "dv_plan",
+      "ip_block": "hmac",
+      "size": 1232
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/README.md",
+      "rel_path": "hw/ip/i2c/README.md",
+      "category": "ip_misc",
+      "ip_block": "i2c",
+      "size": 7672
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/doc/interfaces.md",
+      "rel_path": "hw/ip/i2c/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "i2c",
+      "size": 8830
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/doc/programmers_guide.md",
+      "rel_path": "hw/ip/i2c/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "i2c",
+      "size": 12632
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/doc/registers.md",
+      "rel_path": "hw/ip/i2c/doc/registers.md",
+      "category": "spec",
+      "ip_block": "i2c",
+      "size": 71622
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/i2c/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "i2c",
+      "size": 47826
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/i2c/dv/README.md",
+      "rel_path": "hw/ip/i2c/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "i2c",
+      "size": 4753
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/README.md",
+      "rel_path": "hw/ip/keymgr/README.md",
+      "category": "ip_misc",
+      "ip_block": "keymgr",
+      "size": 1598
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/doc/interfaces.md",
+      "rel_path": "hw/ip/keymgr/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "keymgr",
+      "size": 24348
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/doc/programmers_guide.md",
+      "rel_path": "hw/ip/keymgr/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "keymgr",
+      "size": 1463
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/doc/registers.md",
+      "rel_path": "hw/ip/keymgr/doc/registers.md",
+      "category": "spec",
+      "ip_block": "keymgr",
+      "size": 46180
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/keymgr/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "keymgr",
+      "size": 29397
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr/dv/README.md",
+      "rel_path": "hw/ip/keymgr/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "keymgr",
+      "size": 5836
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr_dpe/doc/interfaces.md",
+      "rel_path": "hw/ip/keymgr_dpe/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "keymgr_dpe",
+      "size": 24373
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr_dpe/doc/programmers_guide.md",
+      "rel_path": "hw/ip/keymgr_dpe/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "keymgr_dpe",
+      "size": 4808
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr_dpe/doc/registers.md",
+      "rel_path": "hw/ip/keymgr_dpe/doc/registers.md",
+      "category": "spec",
+      "ip_block": "keymgr_dpe",
+      "size": 42902
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr_dpe/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/keymgr_dpe/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "keymgr_dpe",
+      "size": 18489
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/keymgr_dpe/dv/README.md",
+      "rel_path": "hw/ip/keymgr_dpe/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "keymgr_dpe",
+      "size": 5967
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/README.md",
+      "rel_path": "hw/ip/kmac/README.md",
+      "category": "ip_misc",
+      "ip_block": "kmac",
+      "size": 3858
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/doc/interfaces.md",
+      "rel_path": "hw/ip/kmac/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "kmac",
+      "size": 8779
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/doc/programmers_guide.md",
+      "rel_path": "hw/ip/kmac/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "kmac",
+      "size": 15565
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/doc/registers.md",
+      "rel_path": "hw/ip/kmac/doc/registers.md",
+      "category": "spec",
+      "ip_block": "kmac",
+      "size": 52588
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/kmac/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "kmac",
+      "size": 24538
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/dv/README.md",
+      "rel_path": "hw/ip/kmac/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "kmac",
+      "size": 8597
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/dv/dpi/vendor/kerukuro_digestpp/README.md",
+      "rel_path": "hw/ip/kmac/dv/dpi/vendor/kerukuro_digestpp/README.md",
+      "category": "dv_plan",
+      "ip_block": "kmac",
+      "size": 14355
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/pre_dv/kmac_reduced_tb/README.md",
+      "rel_path": "hw/ip/kmac/pre_dv/kmac_reduced_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "kmac",
+      "size": 1131
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/kmac/pre_sca/prolead/README.md",
+      "rel_path": "hw/ip/kmac/pre_sca/prolead/README.md",
+      "category": "ip_misc",
+      "ip_block": "kmac",
+      "size": 14007
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/vendor/lowrisc_ibex/syn/README.md",
+      "rel_path": "hw/ip/kmac/pre_syn/README.md",
+      "category": "ip_misc",
+      "ip_block": "kmac",
+      "size": 5938
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/README.md",
+      "rel_path": "hw/ip/lc_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 4611
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "lc_ctrl",
+      "size": 43423
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_access_signals_table.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_access_signals_table.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 1967
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_counter_table.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_counter_table.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 6427
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_encoding_table.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_encoding_table.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 20371
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_flash_accessibility.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_flash_accessibility.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 671
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_function_signals_table.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_function_signals_table.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 2555
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_otp_accessibility.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_otp_accessibility.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 1336
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/lc_ctrl_otp_collateral.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/lc_ctrl_otp_collateral.md",
+      "category": "ip_misc",
+      "ip_block": "lc_ctrl",
+      "size": 1215
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "lc_ctrl",
+      "size": 7192
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "lc_ctrl",
+      "size": 38416
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/lc_ctrl/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "lc_ctrl",
+      "size": 36331
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/lc_ctrl/dv/README.md",
+      "rel_path": "hw/ip/lc_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "lc_ctrl",
+      "size": 5558
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/README.md",
+      "rel_path": "hw/ip/mbx/README.md",
+      "category": "ip_misc",
+      "ip_block": "mbx",
+      "size": 2495
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/doc/DOE.md",
+      "rel_path": "hw/ip/mbx/doc/DOE.md",
+      "category": "ip_misc",
+      "ip_block": "mbx",
+      "size": 50411
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/doc/interfaces.md",
+      "rel_path": "hw/ip/mbx/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "mbx",
+      "size": 4569
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/doc/programmers_guide.md",
+      "rel_path": "hw/ip/mbx/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "mbx",
+      "size": 5962
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/doc/registers.md",
+      "rel_path": "hw/ip/mbx/doc/registers.md",
+      "category": "spec",
+      "ip_block": "mbx",
+      "size": 31943
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/mbx/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "mbx",
+      "size": 23900
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/mbx/dv/README.md",
+      "rel_path": "hw/ip/mbx/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "mbx",
+      "size": 5234
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/README.md",
+      "rel_path": "hw/ip/otbn/README.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 41029
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/developing_otbn.md",
+      "rel_path": "hw/ip/otbn/doc/developing_otbn.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 5374
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/interfaces.md",
+      "rel_path": "hw/ip/otbn/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "otbn",
+      "size": 19997
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/isa.md",
+      "rel_path": "hw/ip/otbn/doc/isa.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 9818
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/otbn_intro.md",
+      "rel_path": "hw/ip/otbn/doc/otbn_intro.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 23044
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/programmers_guide.md",
+      "rel_path": "hw/ip/otbn/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "otbn",
+      "size": 17454
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/registers.md",
+      "rel_path": "hw/ip/otbn/doc/registers.md",
+      "category": "spec",
+      "ip_block": "otbn",
+      "size": 16679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/otbn/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "otbn",
+      "size": 31524
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/README.md",
+      "rel_path": "hw/ip/otbn/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 6930
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/doc/fcov.md",
+      "rel_path": "hw/ip/otbn/dv/doc/fcov.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 62438
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/otbnsim/README.md",
+      "rel_path": "hw/ip/otbn/dv/otbnsim/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 2306
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/rig/README.md",
+      "rel_path": "hw/ip/otbn/dv/rig/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 3514
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/rig/rig/README.md",
+      "rel_path": "hw/ip/otbn/dv/rig/rig/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 3123
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/rig/rig/configs/README.md",
+      "rel_path": "hw/ip/otbn/dv/rig/rig/configs/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 3488
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/dv/tracer/README.md",
+      "rel_path": "hw/ip/otbn/dv/tracer/README.md",
+      "category": "dv_plan",
+      "ip_block": "otbn",
+      "size": 7020
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otbn/pre_sca/alma/README.md",
+      "rel_path": "hw/ip/otbn/pre_sca/alma/README.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 8130
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/vendor/lowrisc_ibex/syn/README.md",
+      "rel_path": "hw/ip/otbn/pre_syn/README.md",
+      "category": "ip_misc",
+      "ip_block": "otbn",
+      "size": 5938
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/otp_macro/README.md",
+      "rel_path": "hw/ip/otp_macro/README.md",
+      "category": "ip_misc",
+      "ip_block": "otp_macro",
+      "size": 541
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/README.md",
+      "rel_path": "hw/ip/pattgen/README.md",
+      "category": "ip_misc",
+      "ip_block": "pattgen",
+      "size": 6668
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/doc/interfaces.md",
+      "rel_path": "hw/ip/pattgen/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "pattgen",
+      "size": 2305
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/doc/programmers_guide.md",
+      "rel_path": "hw/ip/pattgen/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "pattgen",
+      "size": 4614
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/doc/registers.md",
+      "rel_path": "hw/ip/pattgen/doc/registers.md",
+      "category": "spec",
+      "ip_block": "pattgen",
+      "size": 14460
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/pattgen/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "pattgen",
+      "size": 3912
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/pattgen/dv/README.md",
+      "rel_path": "hw/ip/pattgen/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "pattgen",
+      "size": 4983
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/README.md",
+      "rel_path": "hw/ip/prim/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 24026
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_flash.md",
+      "rel_path": "hw/ip/prim/doc/prim_flash.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 8643
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_keccak.md",
+      "rel_path": "hw/ip/prim/doc/prim_keccak.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 4101
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_lfsr.md",
+      "rel_path": "hw/ip/prim/doc/prim_lfsr.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 3876
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_packer.md",
+      "rel_path": "hw/ip/prim/doc/prim_packer.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 4466
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_packer_fifo.md",
+      "rel_path": "hw/ip/prim/doc/prim_packer_fifo.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 2596
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_present.md",
+      "rel_path": "hw/ip/prim/doc/prim_present.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 4018
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_prince.md",
+      "rel_path": "hw/ip/prim/doc/prim_prince.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 6021
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_ram_1p_scr.md",
+      "rel_path": "hw/ip/prim/doc/prim_ram_1p_scr.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 9167
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/doc/prim_xoshiro256pp.md",
+      "rel_path": "hw/ip/prim/doc/prim_xoshiro256pp.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 2717
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/pre_dv/prim_ascon/prim_ascon_duplex_tb/README.md",
+      "rel_path": "hw/ip/prim/pre_dv/prim_ascon/prim_ascon_duplex_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 948
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/pre_dv/prim_ascon/prim_ascon_round_tb/README.md",
+      "rel_path": "hw/ip/prim/pre_dv/prim_ascon/prim_ascon_round_tb/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 958
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/pre_dv/prim_crc32/README.md",
+      "rel_path": "hw/ip/prim/pre_dv/prim_crc32/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 788
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/pre_dv/prim_sync_reqack/README.md",
+      "rel_path": "hw/ip/prim/pre_dv/prim_sync_reqack/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 1116
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/prim/pre_dv/prim_trivium/README.md",
+      "rel_path": "hw/ip/prim/pre_dv/prim_trivium/README.md",
+      "category": "ip_misc",
+      "ip_block": "prim",
+      "size": 1217
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/README.md",
+      "rel_path": "hw/ip/rom_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "rom_ctrl",
+      "size": 3566
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/rom_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "rom_ctrl",
+      "size": 15311
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip/rom_ctrl/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "rom_ctrl",
+      "size": 1209
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/rom_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "rom_ctrl",
+      "size": 5887
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/rom_ctrl/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "rom_ctrl",
+      "size": 8534
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rom_ctrl/dv/README.md",
+      "rel_path": "hw/ip/rom_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "rom_ctrl",
+      "size": 5268
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_dm/README.md",
+      "rel_path": "hw/ip/rv_dm/README.md",
+      "category": "ip_misc",
+      "ip_block": "rv_dm",
+      "size": 2715
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_dm/doc/interfaces.md",
+      "rel_path": "hw/ip/rv_dm/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "rv_dm",
+      "size": 31061
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_dm/doc/registers.md",
+      "rel_path": "hw/ip/rv_dm/doc/registers.md",
+      "category": "spec",
+      "ip_block": "rv_dm",
+      "size": 64671
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_dm/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/rv_dm/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "rv_dm",
+      "size": 3404
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_dm/dv/README.md",
+      "rel_path": "hw/ip/rv_dm/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "rv_dm",
+      "size": 10531
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/README.md",
+      "rel_path": "hw/ip/rv_timer/README.md",
+      "category": "ip_misc",
+      "ip_block": "rv_timer",
+      "size": 2385
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/doc/interfaces.md",
+      "rel_path": "hw/ip/rv_timer/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "rv_timer",
+      "size": 2621
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/doc/programmers_guide.md",
+      "rel_path": "hw/ip/rv_timer/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "rv_timer",
+      "size": 5105
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/doc/registers.md",
+      "rel_path": "hw/ip/rv_timer/doc/registers.md",
+      "category": "spec",
+      "ip_block": "rv_timer",
+      "size": 6740
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/rv_timer/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "rv_timer",
+      "size": 3999
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/rv_timer/dv/README.md",
+      "rel_path": "hw/ip/rv_timer/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "rv_timer",
+      "size": 6031
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/soc_dbg_ctrl/README.md",
+      "rel_path": "hw/ip/soc_dbg_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "soc_dbg_ctrl",
+      "size": 6334
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/soc_dbg_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/soc_dbg_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "soc_dbg_ctrl",
+      "size": 5256
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/soc_dbg_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/soc_dbg_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "soc_dbg_ctrl",
+      "size": 23736
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/soc_dbg_ctrl/dv/README.md",
+      "rel_path": "hw/ip/soc_dbg_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "soc_dbg_ctrl",
+      "size": 7212
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/README.md",
+      "rel_path": "hw/ip/spi_device/README.md",
+      "category": "ip_misc",
+      "ip_block": "spi_device",
+      "size": 6745
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/doc/interfaces.md",
+      "rel_path": "hw/ip/spi_device/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "spi_device",
+      "size": 7925
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/doc/programmers_guide.md",
+      "rel_path": "hw/ip/spi_device/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "spi_device",
+      "size": 6029
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/doc/registers.md",
+      "rel_path": "hw/ip/spi_device/doc/registers.md",
+      "category": "spec",
+      "ip_block": "spi_device",
+      "size": 104571
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/spi_device/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "spi_device",
+      "size": 27732
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_device/dv/README.md",
+      "rel_path": "hw/ip/spi_device/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "spi_device",
+      "size": 5517
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/README.md",
+      "rel_path": "hw/ip/spi_host/README.md",
+      "category": "ip_misc",
+      "ip_block": "spi_host",
+      "size": 4721
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/doc/interfaces.md",
+      "rel_path": "hw/ip/spi_host/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "spi_host",
+      "size": 3850
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/doc/programmers_guide.md",
+      "rel_path": "hw/ip/spi_host/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "spi_host",
+      "size": 14501
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/doc/registers.md",
+      "rel_path": "hw/ip/spi_host/doc/registers.md",
+      "category": "spec",
+      "ip_block": "spi_host",
+      "size": 28272
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/spi_host/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "spi_host",
+      "size": 98095
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/spi_host/dv/README.md",
+      "rel_path": "hw/ip/spi_host/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "spi_host",
+      "size": 9773
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/README.md",
+      "rel_path": "hw/ip/sram_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "sram_ctrl",
+      "size": 2479
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/sram_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "sram_ctrl",
+      "size": 15114
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip/sram_ctrl/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "sram_ctrl",
+      "size": 2594
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/sram_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "sram_ctrl",
+      "size": 12363
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/sram_ctrl/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "sram_ctrl",
+      "size": 9578
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sram_ctrl/dv/README.md",
+      "rel_path": "hw/ip/sram_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "sram_ctrl",
+      "size": 12071
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sysrst_ctrl/README.md",
+      "rel_path": "hw/ip/sysrst_ctrl/README.md",
+      "category": "ip_misc",
+      "ip_block": "sysrst_ctrl",
+      "size": 2413
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sysrst_ctrl/doc/interfaces.md",
+      "rel_path": "hw/ip/sysrst_ctrl/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "sysrst_ctrl",
+      "size": 3498
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sysrst_ctrl/doc/registers.md",
+      "rel_path": "hw/ip/sysrst_ctrl/doc/registers.md",
+      "category": "spec",
+      "ip_block": "sysrst_ctrl",
+      "size": 46821
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sysrst_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/sysrst_ctrl/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "sysrst_ctrl",
+      "size": 15792
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/sysrst_ctrl/dv/README.md",
+      "rel_path": "hw/ip/sysrst_ctrl/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "sysrst_ctrl",
+      "size": 7001
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/tlul/README.md",
+      "rel_path": "hw/ip/tlul/README.md",
+      "category": "ip_misc",
+      "ip_block": "tlul",
+      "size": 40816
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/tlul/doc/TlulProtocolChecker.md",
+      "rel_path": "hw/ip/tlul/doc/TlulProtocolChecker.md",
+      "category": "ip_misc",
+      "ip_block": "tlul",
+      "size": 6876
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/tlul/doc/dv/README.md",
+      "rel_path": "hw/ip/tlul/doc/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "tlul",
+      "size": 7259
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/README.md",
+      "rel_path": "hw/ip/uart/README.md",
+      "category": "ip_misc",
+      "ip_block": "uart",
+      "size": 2187
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/doc/interfaces.md",
+      "rel_path": "hw/ip/uart/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "uart",
+      "size": 4285
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/doc/programmers_guide.md",
+      "rel_path": "hw/ip/uart/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "uart",
+      "size": 5267
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/doc/registers.md",
+      "rel_path": "hw/ip/uart/doc/registers.md",
+      "category": "spec",
+      "ip_block": "uart",
+      "size": 20051
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/uart/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "uart",
+      "size": 13097
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/uart/dv/README.md",
+      "rel_path": "hw/ip/uart/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "uart",
+      "size": 6019
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/README.md",
+      "rel_path": "hw/ip/usbdev/README.md",
+      "category": "ip_misc",
+      "ip_block": "usbdev",
+      "size": 2666
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/doc/interfaces.md",
+      "rel_path": "hw/ip/usbdev/doc/interfaces.md",
+      "category": "spec",
+      "ip_block": "usbdev",
+      "size": 15443
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/doc/programmers_guide.md",
+      "rel_path": "hw/ip/usbdev/doc/programmers_guide.md",
+      "category": "programmers_guide",
+      "ip_block": "usbdev",
+      "size": 19154
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/doc/registers.md",
+      "rel_path": "hw/ip/usbdev/doc/registers.md",
+      "category": "spec",
+      "ip_block": "usbdev",
+      "size": 113154
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/doc/theory_of_operation.md",
+      "rel_path": "hw/ip/usbdev/doc/theory_of_operation.md",
+      "category": "microarch",
+      "ip_block": "usbdev",
+      "size": 23264
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/doc/wake_resume.md",
+      "rel_path": "hw/ip/usbdev/doc/wake_resume.md",
+      "category": "ip_misc",
+      "ip_block": "usbdev",
+      "size": 5546
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip/usbdev/dv/README.md",
+      "rel_path": "hw/ip/usbdev/dv/README.md",
+      "category": "dv_plan",
+      "ip_block": "usbdev",
+      "size": 9083
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/ac_range_check/README.md",
+      "rel_path": "hw/ip_templates/ac_range_check/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 8403
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/ac_range_check/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/ac_range_check/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 1808
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/alert_handler/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/alert_handler/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 9776
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/alert_handler/dv/README.md",
+      "rel_path": "hw/ip_templates/alert_handler/dv/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 7602
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/clkmgr/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/clkmgr/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/flash_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/flash_ctrl/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 5534
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/flash_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/flash_ctrl/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 34380
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/otp_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/otp_ctrl/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 26402
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/otp_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/otp_ctrl/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 43147
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pinmux/README.md",
+      "rel_path": "hw/ip_templates/pinmux/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 1556
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pinmux/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/pinmux/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 8443
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pwm/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/pwm/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 2552
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pwm/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/pwm/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 14868
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pwrmgr/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/pwrmgr/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 5288
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/pwrmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/pwrmgr/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 18543
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/racl_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/racl_ctrl/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 2601
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_core_ibex/README.md",
+      "rel_path": "hw/ip_templates/rv_core_ibex/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 1584
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_core_ibex/doc/boot-rom-patching.md",
+      "rel_path": "hw/ip_templates/rv_core_ibex/doc/boot-rom-patching.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 26743
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_core_ibex/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/rv_core_ibex/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 6679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_core_ibex/dv/README.md",
+      "rel_path": "hw/ip_templates/rv_core_ibex/dv/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 2726
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_plic/README.md",
+      "rel_path": "hw/ip_templates/rv_plic/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 1009
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_plic/doc/dv/README.md",
+      "rel_path": "hw/ip_templates/rv_plic/doc/dv/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 1849
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_plic/doc/programmers_guide.md",
+      "rel_path": "hw/ip_templates/rv_plic/doc/programmers_guide.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 3342
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/ip_templates/rv_plic/doc/theory_of_operation.md",
+      "rel_path": "hw/ip_templates/rv_plic/doc/theory_of_operation.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 6208
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/lint/README.md",
+      "rel_path": "hw/lint/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 6311
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/syn/README.md",
+      "rel_path": "hw/syn/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 2689
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top/README.md",
+      "rel_path": "hw/top/README.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 10111
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top/doc/create_top.md",
+      "rel_path": "hw/top/doc/create_top.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 10555
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top/doc/top_desc.md",
+      "rel_path": "hw/top/doc/top_desc.md",
+      "category": "hw_misc",
+      "ip_block": null,
+      "size": 8723
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/README.md",
+      "rel_path": "hw/top_darjeeling/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1216
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/doc/datasheet.md",
+      "rel_path": "hw/top_darjeeling/doc/datasheet.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 8158
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/doc/memory_map.md",
+      "rel_path": "hw/top_darjeeling/doc/memory_map.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 9283
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip/ast/README.md",
+      "rel_path": "hw/top_darjeeling/ip/ast/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 27477
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip/soc_proxy/README.md",
+      "rel_path": "hw/top_darjeeling/ip/soc_proxy/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 827
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/ac_range_check/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/ac_range_check/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 8403
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/ac_range_check/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/ac_range_check/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 4635
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/ac_range_check/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/ac_range_check/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 65488
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/ac_range_check/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/ac_range_check/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1808
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/ac_range_check/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/ac_range_check/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 9674
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/alert_handler/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/alert_handler/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5577
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/alert_handler/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/alert_handler/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 9776
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/alert_handler/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/alert_handler/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 52002
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/alert_handler/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/alert_handler/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 7602
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1086
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 2939
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 15911
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 17284
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/clkmgr/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/clkmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 10666
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 3626
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 3178
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5382
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 24995
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 8521
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/gpio/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/gpio/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 7224
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5130
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 26868
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_digests.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_digests.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 2590
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_field_descriptions.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_field_descriptions.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 65644
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_mmap.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_mmap.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 22276
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_partitions.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/otp_ctrl_partitions.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 20677
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 26402
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 97152
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 43147
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/otp_ctrl/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/otp_ctrl/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 8700
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1556
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 2088
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5265
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/pinout_asic.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/pinout_asic.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 63199
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 8443
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 154732
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/targets.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/targets.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 625
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 14908
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 2336
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5951
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5288
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 22111
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 18543
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/pwrmgr/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/pwrmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 16480
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1338
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 2878
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 2601
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/doc/racl_configuration.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/doc/racl_configuration.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 32183
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 10717
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/racl_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/racl_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1581
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rstmgr/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rstmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1291
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rstmgr/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rstmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 5579
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rstmgr/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rstmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 16294
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 18592
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rstmgr/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rstmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 9807
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1584
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 26743
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 13358
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/registers.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 69746
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 6679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_core_ibex/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_core_ibex/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 2726
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_plic/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_plic/README.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 1009
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_plic/doc/dv/README.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_plic/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "darjeeling",
+      "size": 1849
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 3342
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_darjeeling/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "rel_path": "hw/top_darjeeling/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "darjeeling",
+      "size": 6208
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/README.md",
+      "rel_path": "hw/top_earlgrey/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 3201
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/doc/datasheet.md",
+      "rel_path": "hw/top_earlgrey/doc/datasheet.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5092
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/doc/design/README.md",
+      "rel_path": "hw/top_earlgrey/doc/design/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 38039
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/doc/memory_map.md",
+      "rel_path": "hw/top_earlgrey/doc/memory_map.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 6692
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/dv/README.md",
+      "rel_path": "hw/top_earlgrey/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 5809
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/ast/README.md",
+      "rel_path": "hw/top_earlgrey/ip/ast/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 12787
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/ast/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip/ast/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 79342
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/sensor_ctrl/README.md",
+      "rel_path": "hw/top_earlgrey/ip/sensor_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 649
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/sensor_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip/sensor_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 2260
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/sensor_ctrl/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip/sensor_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 29449
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/sensor_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip/sensor_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 2184
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/alert_handler/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/alert_handler/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5563
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/alert_handler/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/alert_handler/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 9776
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/alert_handler/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/alert_handler/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 52002
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/alert_handler/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/alert_handler/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 7602
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1072
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5331
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 28059
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 22191
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/clkmgr/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/clkmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 11536
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 11195
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 21371
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5534
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 110398
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 34380
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/flash_ctrl/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/flash_ctrl/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 12205
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 3230
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 3176
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 4425
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 16920
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 6334
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/gpio/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/gpio/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 7222
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5309
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 28575
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_digests.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_digests.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1677
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_field_descriptions.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_field_descriptions.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 84213
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_mmap.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_mmap.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 23334
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_partitions.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/otp_ctrl_partitions.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 9554
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 26402
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 65220
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 43147
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/otp_ctrl/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/otp_ctrl/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 8761
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1556
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 2086
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 21146
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_asic.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_asic.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 66247
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_cw310.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_cw310.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 67886
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_cw340.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/pinout_cw340.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 67472
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 8443
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 165932
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/targets.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/targets.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 888
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 16905
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 6300
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 2889
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 2552
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 15221
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 14868
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwm/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwm/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 6989
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 2322
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5761
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5288
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 24720
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 18543
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/pwrmgr/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/pwrmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 16500
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rstmgr/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rstmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1277
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rstmgr/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rstmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 5636
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rstmgr/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rstmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 18045
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 18592
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rstmgr/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rstmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 9749
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1584
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 26743
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 13356
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/registers.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 21916
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 6679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_core_ibex/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_core_ibex/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 2726
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_plic/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_plic/README.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 1009
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_plic/doc/dv/README.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_plic/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "earlgrey",
+      "size": 1849
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 3342
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "rel_path": "hw/top_earlgrey/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "earlgrey",
+      "size": 6208
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/README.md",
+      "rel_path": "hw/top_englishbreakfast/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 704
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/doc/memory_map.md",
+      "rel_path": "hw/top_englishbreakfast/doc/memory_map.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 3318
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/ast/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip/ast/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 12787
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_earlgrey/ip/sensor_ctrl/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip/sensor_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 649
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 1128
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 5339
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 774
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 24603
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 21712
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/clkmgr/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/clkmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 11592
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 11251
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 21379
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 5534
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 110400
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 34380
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/flash_ctrl/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/flash_ctrl/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 12269
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 3097
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 3184
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 4425
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 16928
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 6334
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/gpio/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/gpio/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 7230
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 1556
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 2094
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 21154
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/pinout_cw305.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/pinout_cw305.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 37094
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 8443
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 155739
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/targets.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/targets.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 652
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pinmux/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 16905
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 2378
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 5769
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 5288
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 23267
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 18543
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/pwrmgr/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/pwrmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 16636
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rstmgr/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rstmgr/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 1333
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rstmgr/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rstmgr/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 5644
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rstmgr/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rstmgr/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 16262
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rstmgr/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 18119
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rstmgr/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rstmgr/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 9981
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 1584
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/boot-rom-patching.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 26743
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/interfaces.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 13364
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/registers.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/registers.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 21924
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 6679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_core_ibex/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_core_ibex/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 2726
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_plic/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_plic/README.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 1009
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_plic/doc/dv/README.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_plic/doc/dv/README.md",
+      "category": "chip_dv",
+      "ip_block": "englishbreakfast",
+      "size": 1849
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_plic/doc/programmers_guide.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 3342
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/hw/top_englishbreakfast/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "rel_path": "hw/top_englishbreakfast/ip_autogen/rv_plic/doc/theory_of_operation.md",
+      "category": "chip_arch",
+      "ip_block": "englishbreakfast",
+      "size": 6208
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/README.md",
+      "rel_path": "sw/README.md",
+      "category": "other",
+      "ip_block": null,
+      "size": 2901
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/README.md",
+      "rel_path": "sw/device/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1842
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/README.md",
+      "rel_path": "sw/device/lib/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1566
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/base/README.md",
+      "rel_path": "sw/device/lib/base/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 795
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/base/freestanding/README.md",
+      "rel_path": "sw/device/lib/base/freestanding/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1211
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/README.md",
+      "rel_path": "sw/device/lib/dif/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 17679
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_adc_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_adc_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2921
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_aes.md",
+      "rel_path": "sw/device/lib/dif/dif_aes.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2894
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_alert_handler.md",
+      "rel_path": "sw/device/lib/dif/dif_alert_handler.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2863
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_aon_timer.md",
+      "rel_path": "sw/device/lib/dif/dif_aon_timer.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2842
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_clkmgr.md",
+      "rel_path": "sw/device/lib/dif/dif_clkmgr.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2856
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_csrng.md",
+      "rel_path": "sw/device/lib/dif/dif_csrng.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2818
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_dma.md",
+      "rel_path": "sw/device/lib/dif/dif_dma.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2974
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_edn.md",
+      "rel_path": "sw/device/lib/dif/dif_edn.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2862
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_entropy_src.md",
+      "rel_path": "sw/device/lib/dif/dif_entropy_src.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2842
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_flash_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_flash_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2866
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_gpio.md",
+      "rel_path": "sw/device/lib/dif/dif_gpio.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2836
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_hmac.md",
+      "rel_path": "sw/device/lib/dif/dif_hmac.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2815
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_i2c.md",
+      "rel_path": "sw/device/lib/dif/dif_i2c.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2812
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_keymgr.md",
+      "rel_path": "sw/device/lib/dif/dif_keymgr.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2831
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_keymgr_dpe.md",
+      "rel_path": "sw/device/lib/dif/dif_keymgr_dpe.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2993
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_kmac.md",
+      "rel_path": "sw/device/lib/dif/dif_kmac.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2815
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_lc_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_lc_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2850
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_mbx.md",
+      "rel_path": "sw/device/lib/dif/dif_mbx.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2960
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_otbn.md",
+      "rel_path": "sw/device/lib/dif/dif_otbn.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2815
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_otp_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_otp_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2860
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_pattgen.md",
+      "rel_path": "sw/device/lib/dif/dif_pattgen.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2844
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_pinmux.md",
+      "rel_path": "sw/device/lib/dif/dif_pinmux.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2860
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_pwm.md",
+      "rel_path": "sw/device/lib/dif/dif_pwm.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2833
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_pwrmgr.md",
+      "rel_path": "sw/device/lib/dif/dif_pwrmgr.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2856
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rom_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_rom_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2839
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rstmgr.md",
+      "rel_path": "sw/device/lib/dif/dif_rstmgr.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2856
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rv_core_ibex.md",
+      "rel_path": "sw/device/lib/dif/dif_rv_core_ibex.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2860
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rv_dm.md",
+      "rel_path": "sw/device/lib/dif/dif_rv_dm.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2960
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rv_plic.md",
+      "rel_path": "sw/device/lib/dif/dif_rv_plic.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2839
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_rv_timer.md",
+      "rel_path": "sw/device/lib/dif/dif_rv_timer.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2827
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_sensor_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_sensor_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2861
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_spi_device.md",
+      "rel_path": "sw/device/lib/dif/dif_spi_device.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2833
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_spi_host.md",
+      "rel_path": "sw/device/lib/dif/dif_spi_host.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2827
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_sram_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_sram_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2842
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_sysrst_ctrl.md",
+      "rel_path": "sw/device/lib/dif/dif_sysrst_ctrl.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2860
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_uart.md",
+      "rel_path": "sw/device/lib/dif/dif_uart.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2815
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/dif/dif_usbdev.md",
+      "rel_path": "sw/device/lib/dif/dif_usbdev.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2829
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/testing/README.md",
+      "rel_path": "sw/device/lib/testing/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2182
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/testing/test_framework/README.md",
+      "rel_path": "sw/device/lib/testing/test_framework/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3243
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/lib/testing/test_rom/README.md",
+      "rel_path": "sw/device/lib/testing/test_rom/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1336
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/doc/boot_log.md",
+      "rel_path": "sw/device/silicon_creator/doc/boot_log.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 803
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/lib/sigverify/sigverify_tests/README.md",
+      "rel_path": "sw/device/silicon_creator/lib/sigverify/sigverify_tests/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 685
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/manuf/README.md",
+      "rel_path": "sw/device/silicon_creator/manuf/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3109
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/manuf/extensions/README.md",
+      "rel_path": "sw/device/silicon_creator/manuf/extensions/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2573
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/manuf/keys/README.md",
+      "rel_path": "sw/device/silicon_creator/manuf/keys/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 4721
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/manuf/keys/fake/README.md",
+      "rel_path": "sw/device/silicon_creator/manuf/keys/fake/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2533
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/README.md",
+      "rel_path": "sw/device/silicon_creator/rom/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 742
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/bootstrap.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/bootstrap.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 8698
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/e2e_tests.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/e2e_tests.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 4991
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/memory_protection.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/memory_protection.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 9716
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/rom_customization.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/rom_customization.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 6810
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/rom_overview_specification.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/rom_overview_specification.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 7043
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/root_keys.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/root_keys.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 4927
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/shutdown.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/shutdown.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 14806
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/doc/sigverify.md",
+      "rel_path": "sw/device/silicon_creator/rom/doc/sigverify.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3477
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/hooks/README.md",
+      "rel_path": "sw/device/silicon_creator/rom/hooks/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 4374
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom/keys/README.md",
+      "rel_path": "sw/device/silicon_creator/rom/keys/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1526
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/doc/manifest.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/doc/manifest.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 8322
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/doc/ownership.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/doc/ownership.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 41232
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/doc/rescue.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/doc/rescue.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 8120
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/doc/si_val.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/doc/si_val.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3488
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/e2e/README.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/e2e/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1461
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/imm_section/README.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/imm_section/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3851
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/silicon_creator/rom_ext/sival/keys/README.md",
+      "rel_path": "sw/device/silicon_creator/rom_ext/sival/keys/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 1118
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/README.md",
+      "rel_path": "sw/device/tests/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 3403
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/closed_source/README.md",
+      "rel_path": "sw/device/tests/closed_source/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 2608
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/crypto/cryptotest/README.md",
+      "rel_path": "sw/device/tests/crypto/cryptotest/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 4741
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/crypto/testvectors/sphincsplus_kat/README.md",
+      "rel_path": "sw/device/tests/crypto/testvectors/sphincsplus_kat/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 821
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/doc/sival/README.md",
+      "rel_path": "sw/device/tests/doc/sival/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 9677
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/doc/sival/devguide.md",
+      "rel_path": "sw/device/tests/doc/sival/devguide.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 9099
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/device/tests/penetrationtests/doc/README.md",
+      "rel_path": "sw/device/tests/penetrationtests/doc/README.md",
+      "category": "embedded_sw",
+      "ip_block": null,
+      "size": 5860
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/cryptotest/testvectors/data/README.md",
+      "rel_path": "sw/host/cryptotest/testvectors/data/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 1324
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/hsmtool/doc/requirements.md",
+      "rel_path": "sw/host/hsmtool/doc/requirements.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 2794
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/opentitanlib/doc/bitbanging.md",
+      "rel_path": "sw/host/opentitanlib/doc/bitbanging.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 14591
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/opentitantool/README.md",
+      "rel_path": "sw/host/opentitantool/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 902
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/ot_certs/README.md",
+      "rel_path": "sw/host/ot_certs/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 1590
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/ot_transports/README.md",
+      "rel_path": "sw/host/ot_transports/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 759
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/penetrationtests/python/README.md",
+      "rel_path": "sw/host/penetrationtests/python/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 966
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/provisioning/orchestrator/README.md",
+      "rel_path": "sw/host/provisioning/orchestrator/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 2513
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/tests/chip/usb/README.md",
+      "rel_path": "sw/host/tests/chip/usb/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 2614
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/host/tests/usbdev/usbdev_stream/README.md",
+      "rel_path": "sw/host/tests/usbdev/usbdev_stream/README.md",
+      "category": "host_sw",
+      "ip_block": null,
+      "size": 10745
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/otbn/code-snippets/README.md",
+      "rel_path": "sw/otbn/code-snippets/README.md",
+      "category": "other",
+      "ip_block": null,
+      "size": 782
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/sw/otbn/crypto/mldsa87/README.md",
+      "rel_path": "sw/otbn/crypto/mldsa87/README.md",
+      "category": "other",
+      "ip_block": null,
+      "size": 8310
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/README.md",
+      "rel_path": "util/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1271
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/container/README.md",
+      "rel_path": "util/container/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1766
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/design/README.md",
+      "rel_path": "util/design/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 15180
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/doc/vendor.md",
+      "rel_path": "util/doc/vendor.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 6574
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/dtgen/README.md",
+      "rel_path": "util/dtgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3459
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/dvsim/README.md",
+      "rel_path": "util/dvsim/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 2186
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/dvsim/doc/design_doc.md",
+      "rel_path": "util/dvsim/doc/design_doc.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 17396
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/dvsim/doc/glossary.md",
+      "rel_path": "util/dvsim/doc/glossary.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 8890
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/dvsim/doc/testplanner.md",
+      "rel_path": "util/dvsim/doc/testplanner.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 13023
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/fpvgen/README.md",
+      "rel_path": "util/fpvgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3919
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/i2csvg/README.md",
+      "rel_path": "util/i2csvg/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 7205
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/i2csvg/smbus/SMBus.md",
+      "rel_path": "util/i2csvg/smbus/SMBus.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3564
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/ipgen/README.md",
+      "rel_path": "util/ipgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 11658
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/reggen/README.md",
+      "rel_path": "util/reggen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 61874
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/reggen/doc/setup_and_use.md",
+      "rel_path": "util/reggen/doc/setup_and_use.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 3721
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/testplantool/README.md",
+      "rel_path": "util/testplantool/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 1669
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/tlgen/README.md",
+      "rel_path": "util/tlgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 11980
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/topgen/README.md",
+      "rel_path": "util/topgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 15211
+    },
+    {
+      "path": "/home/juansync7/RagWeave/opentitan_data/util/uvmdvgen/README.md",
+      "rel_path": "util/uvmdvgen/README.md",
+      "category": "engineering_guide",
+      "ip_block": null,
+      "size": 15055
+    }
+  ]
+}

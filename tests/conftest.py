@@ -6,6 +6,18 @@ import types
 
 
 def _install_stub_modules() -> None:
+    # Prefer real heavyweight ML deps when present (Docling's HybridChunker
+    # tokenizer wrapper transitively needs real torch + transformers; without
+    # them, integration tests can't run). Import order matters: torch must be
+    # real before transformers tries to detect it. If any fail, fall through
+    # to per-module stubs below.
+    for _real_mod in ("torch", "transformers", "sentence_transformers"):
+        if _real_mod not in sys.modules:
+            try:
+                __import__(_real_mod)
+            except Exception:
+                pass
+
     if "sentence_transformers" not in sys.modules:
         st = types.ModuleType("sentence_transformers")
 
@@ -237,29 +249,40 @@ def _install_stub_modules() -> None:
         sys.modules["minio.commonconfig"] = minio_commonconfig
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        # Prefer the real Pillow when available — Docling's chunker/converter
+        # needs PIL.ImageColor / ImageDraw / ImageFont, which a hand-rolled
+        # stub does not provide. Real PIL is a transitive dep of Pillow,
+        # which the project already requires, so this should normally succeed.
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            size = (0, 0)
+            class Image:
+                size = (0, 0)
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            def convert(self, mode):
-                return self
+                def convert(self, mode):
+                    return self
 
-            def tobytes(self):
-                return b""
+                def tobytes(self):
+                    return b""
 
-        # `from PIL import Image` resolves to the PIL.Image module; callers
-        # then call Image.open(...) at module level, not on the class.
-        pil_image.Image = Image
-        pil_image.open = Image.open
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            # `from PIL import Image` resolves to the PIL.Image module; callers
+            # then call Image.open(...) at module level, not on the class.
+            pil_image.Image = Image
+            pil_image.open = Image.open
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     # Only stub temporalio when the real package can't be imported. Tests that
     # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
@@ -378,42 +401,49 @@ def _install_stub_modules() -> None:
         sys.modules["mcp.server.fastmcp"] = mcp_server_fastmcp
 
     if "prometheus_client" not in sys.modules:
-        prom = types.ModuleType("prometheus_client")
+        # Prefer the real prometheus_client package when it's installed — DR
+        # metrics tests rely on the real Counter/Histogram introspection API
+        # (`_name`, `_value`, `collect()`). Fall back to a no-op stub only when
+        # the real package is absent.
+        try:
+            import prometheus_client as _real_prom  # noqa: F401
+        except ImportError:
+            prom = types.ModuleType("prometheus_client")
 
-        class _MetricBase:
-            def __init__(self, *args, **kwargs):
+            class _MetricBase:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def labels(self, **kwargs):
+                    return self
+
+                def inc(self, amount=1):
+                    pass
+
+                def dec(self, amount=1):
+                    pass
+
+                def set(self, value):
+                    pass
+
+                def observe(self, value):
+                    pass
+
+            class Counter(_MetricBase):
                 pass
 
-            def labels(self, **kwargs):
-                return self
-
-            def inc(self, amount=1):
+            class Gauge(_MetricBase):
                 pass
 
-            def dec(self, amount=1):
+            class Histogram(_MetricBase):
                 pass
 
-            def set(self, value):
-                pass
-
-            def observe(self, value):
-                pass
-
-        class Counter(_MetricBase):
-            pass
-
-        class Gauge(_MetricBase):
-            pass
-
-        class Histogram(_MetricBase):
-            pass
-
-        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
-        prom.generate_latest = lambda registry=None: b""
-        prom.Counter = Counter
-        prom.Gauge = Gauge
-        prom.Histogram = Histogram
-        sys.modules["prometheus_client"] = prom
+            prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+            prom.generate_latest = lambda registry=None: b""
+            prom.Counter = Counter
+            prom.Gauge = Gauge
+            prom.Histogram = Histogram
+            sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
@@ -544,84 +574,95 @@ def _install_stub_modules() -> None:
         sys.modules["bitsandbytes"] = bnb
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            """Minimal PIL.Image stub."""
+            class Image:
+                """Minimal PIL.Image stub."""
 
-            LANCZOS = 1
+                LANCZOS = 1
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            @staticmethod
-            def new(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def new(*args, **kwargs):
+                    return Image()
 
-            def convert(self, *args, **kwargs):
-                return self
+                def convert(self, *args, **kwargs):
+                    return self
 
-            def resize(self, *args, **kwargs):
-                return self
+                def resize(self, *args, **kwargs):
+                    return self
 
-            def save(self, *args, **kwargs):
-                pass
+                def save(self, *args, **kwargs):
+                    pass
 
-            def tobytes(self, *args, **kwargs):
-                return b""
+                def tobytes(self, *args, **kwargs):
+                    return b""
 
-            @property
-            def size(self):
-                return (100, 100)
+                @property
+                def size(self):
+                    return (100, 100)
 
-        pil_image.Image = Image
-        pil_image.LANCZOS = Image.LANCZOS
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            pil_image.Image = Image
+            pil_image.LANCZOS = Image.LANCZOS
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     if "prometheus_client" not in sys.modules:
-        prom = types.ModuleType("prometheus_client")
+        # Prefer the real prometheus_client when installed (see comment above).
+        try:
+            import prometheus_client as _real_prom2  # noqa: F401
+        except ImportError:
+            prom = types.ModuleType("prometheus_client")
 
-        CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+            CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
-        def generate_latest(*args, **kwargs):
-            return b""
+            def generate_latest(*args, **kwargs):
+                return b""
 
-        class _MetricBase:
-            """Lightweight stub for Counter, Gauge, Histogram."""
+            class _MetricBase:
+                """Lightweight stub for Counter, Gauge, Histogram."""
 
-            def __init__(self, *args, **kwargs):
-                pass
+                def __init__(self, *args, **kwargs):
+                    pass
 
-            def labels(self, *args, **kwargs):
-                return self
+                def labels(self, *args, **kwargs):
+                    return self
 
-            def inc(self, *args, **kwargs):
-                pass
+                def inc(self, *args, **kwargs):
+                    pass
 
-            def dec(self, *args, **kwargs):
-                pass
+                def dec(self, *args, **kwargs):
+                    pass
 
-            def set(self, *args, **kwargs):
-                pass
+                def set(self, *args, **kwargs):
+                    pass
 
-            def observe(self, *args, **kwargs):
-                pass
+                def observe(self, *args, **kwargs):
+                    pass
 
-            def time(self):
-                import contextlib
-                return contextlib.nullcontext()
+                def time(self):
+                    import contextlib
+                    return contextlib.nullcontext()
 
-        prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
-        prom.generate_latest = generate_latest
-        prom.Counter = _MetricBase
-        prom.Gauge = _MetricBase
-        prom.Histogram = _MetricBase
-        prom.Summary = _MetricBase
-        sys.modules["prometheus_client"] = prom
+            prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
+            prom.generate_latest = generate_latest
+            prom.Counter = _MetricBase
+            prom.Gauge = _MetricBase
+            prom.Histogram = _MetricBase
+            prom.Summary = _MetricBase
+            sys.modules["prometheus_client"] = prom
 
     # httpx: prefer the real package if it's installed (litellm + openai depend
     # on it internally, so stubbing over the top breaks their imports). The

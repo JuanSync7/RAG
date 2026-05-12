@@ -21,9 +21,10 @@ from src.ingest.common import (
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
-
-_MAX_TEXT_FOR_METADATA = 10000
-_MAX_SUMMARY_LEN = 240
+from config.settings import (
+    RAG_INGEST_LLM_METADATA_MAX_CHARS,
+    RAG_INGEST_LLM_SUMMARY_MAX_LEN,
+)
 
 
 @node_span("metadata_generation")
@@ -50,12 +51,12 @@ def metadata_generation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     text = state.get("cleaned_text", "")
     prompt = (
         'Return {"summary":"...","keywords":[]} for:\n'
-        + text[:_MAX_TEXT_FOR_METADATA]
+        + text[:RAG_INGEST_LLM_METADATA_MAX_CHARS]
     )
     response = _llm_json(prompt, config, 250)
     llm_summary = str(response.get("summary", "")).strip()
     if not llm_summary:
-        summary_raw = text[:_MAX_SUMMARY_LEN]
+        summary_raw = text[:RAG_INGEST_LLM_SUMMARY_MAX_LEN]
         # truncate to last word boundary to avoid cutting mid-word
         summary = summary_raw[:summary_raw.rfind(" ")].strip() if " " in summary_raw else summary_raw.strip()
     else:

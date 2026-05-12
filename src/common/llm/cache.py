@@ -35,6 +35,7 @@ from src.platform.cache import (
     CacheProvider,
     get_cache,
 )
+from config.settings import RAG_LLM_CACHE_DEFAULT_TTL_S
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class _RedisChatCache(BaseCache):
     in the same Redis instance the rest of the project uses.
     """
 
-    def __init__(self, platform_cache: CacheProvider, ttl: int = 3600) -> None:
+    def __init__(self, platform_cache: CacheProvider, ttl: int = RAG_LLM_CACHE_DEFAULT_TTL_S) -> None:
         self._cache = platform_cache
         self._ttl = ttl
 

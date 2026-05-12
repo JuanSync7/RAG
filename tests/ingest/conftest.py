@@ -24,6 +24,29 @@ try:
 except ImportError:
     pass  # datasketch not installed — minhash tests will be skipped by the engine
 
+# Pre-import the real docling / docling_core / transformers / tree_sitter
+# submodules our integration tests touch. Other ingest tests context-manage
+# MagicMock entries into ``sys.modules`` for these and restore via ``pop``,
+# which can leave a partial module in Python's import state. Pre-importing
+# now locks real, complete modules into ``sys.modules`` before stubs can
+# overwrite them, and survives the pop/restore dance because the saved
+# "original" they restore is the real module we cached here.
+for _real_mod in (
+    "docling",
+    "docling.datamodel.base_models",
+    "docling.document_converter",
+    "docling_core",
+    "docling_core.types.doc",
+    "docling_core.transforms.chunker",
+    "docling_core.transforms.chunker.tokenizer.huggingface",
+    "transformers",
+    "tree_sitter",
+):
+    try:
+        __import__(_real_mod)
+    except Exception:
+        pass
+
 
 def _install_ingest_stubs() -> None:
     """Install lightweight stubs for optional dependencies that are not installed."""

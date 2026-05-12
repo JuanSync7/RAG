@@ -2,8 +2,23 @@ from src.retrieval.query.nodes.query_processor import (
     _detect_injection,
     _heuristic_confidence,
     process_query,
+    sanitize_node,
 )
 from src.retrieval.query.schemas import QueryAction
+
+
+def test_sanitize_node_does_not_truncate_long_query():
+    """Regression guard: the old 500-char silent truncation has been removed.
+
+    Long queries (e.g. pasted error logs, multi-paragraph context) must reach
+    downstream stages intact — the embedder owns the token-budget decision.
+    """
+    long_query = "what does this stack trace mean " + ("x" * 5000)
+    state = {"current_query": long_query}
+    out = sanitize_node(state)
+    # Whitespace is collapsed but no length-based truncation should occur.
+    assert len(out["current_query"]) >= 5000
+    assert out["current_query"].startswith("what does this stack trace mean")
 
 
 def test_detect_injection_flags_prompt_override():

@@ -23,6 +23,7 @@ from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support import parse_with_docling
 from src.ingest.common.observability import node_span
+from config.settings import RAG_INGEST_STRUCTURE_MAX_FIGURES
 
 logger = logging.getLogger("rag.ingest.docproc.structure_detection")
 
@@ -30,8 +31,6 @@ _FIGURE_PATTERN = re.compile(r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", re.IGNORECA
 _HEADING_PATTERN = re.compile(
     r"^\s*(?:#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+[A-Z].+)$", re.MULTILINE
 )
-_MAX_FIGURES = 32
-
 
 @node_span("structure_detection")
 def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
@@ -176,7 +175,7 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
 
         structure = {
             "has_figures": bool(figures),
-            "figures": figures[:_MAX_FIGURES],
+            "figures": figures[:RAG_INGEST_STRUCTURE_MAX_FIGURES],
             "heading_count": len(headings),
             "docling_enabled": bool(config.enable_docling_parser),
             "docling_model": str(config.docling_model),
@@ -200,7 +199,7 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
 
     structure: dict[str, Any] = {
         "has_figures": bool(figures),
-        "figures": figures[:_MAX_FIGURES],
+        "figures": figures[:RAG_INGEST_STRUCTURE_MAX_FIGURES],
         "heading_count": len(headings),
         "docling_enabled": bool(config.enable_docling_parser),
         "docling_document_available": False,

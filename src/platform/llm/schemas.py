@@ -15,6 +15,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from config.settings import (
+    RAG_LLM_DEFAULT_MAX_TOKENS,
+    RAG_LLM_DEFAULT_NUM_RETRIES,
+    RAG_LLM_DEFAULT_TEMPERATURE,
+)
+
 _OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
 _DEFAULT_API_BASE = os.environ.get(
     "RAG_LLM_API_BASE",
@@ -29,9 +35,9 @@ class LLMConfig:
     model: str = "ollama/qwen2.5:3b"
     api_base: Optional[str] = _DEFAULT_API_BASE
     api_key: Optional[str] = None
-    max_tokens: int = 2048
-    temperature: float = 0.2
-    num_retries: int = 3
+    max_tokens: int = RAG_LLM_DEFAULT_MAX_TOKENS
+    temperature: float = RAG_LLM_DEFAULT_TEMPERATURE
+    num_retries: int = RAG_LLM_DEFAULT_NUM_RETRIES
     fallback_models: list[str] = field(default_factory=list)
     vision_model: Optional[str] = None
     query_model: Optional[str] = None

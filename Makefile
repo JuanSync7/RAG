@@ -18,6 +18,28 @@
 .DEFAULT_GOAL := help
 
 # ---------------------------------------------------------------------------
+# Image-tag config
+#
+# docker-compose.yml pins worker/API services to GHCR-style refs:
+#   image: ${RAG_API_IMAGE_REF:-ghcr.io/juansync7/ragweave-api}:${RAG_API_IMAGE_TAG:-latest}
+# After local builds (which produce `rag-api` / `rag-worker`), we mirror to
+# the same ref so `docker compose up` picks up the freshly built image
+# instead of pulling stale `latest` from GHCR.
+#
+# Override on the command line or in your environment, e.g.:
+#   make container-build-worker RAG_WORKER_IMAGE_REF=myorg/ragweave-worker
+# ---------------------------------------------------------------------------
+#
+# Default tag is `dev` (not `latest`) so local builds can never be clobbered
+# by `docker compose pull` or a CI-published GHCR `:latest`. Set your local
+# `.env` to `RAG_{API,WORKER}_IMAGE_TAG=dev` so compose reads the same tag.
+# CI/prod can override to `latest` (or a pinned SHA) on the command line.
+RAG_API_IMAGE_REF    ?= ghcr.io/juansync7/ragweave-api
+RAG_API_IMAGE_TAG    ?= dev
+RAG_WORKER_IMAGE_REF ?= ghcr.io/juansync7/ragweave-worker
+RAG_WORKER_IMAGE_TAG ?= dev
+
+# ---------------------------------------------------------------------------
 # Help
 #
 # Grouped listing of targets. Keep this in sync with README.md's
@@ -330,9 +352,15 @@ container-build: console-build container-build-api container-build-worker contai
 
 container-build-api:
 	DOCKER_BUILDKIT=1 docker build -t rag-api -f containers/Dockerfile.api .
+	# Mirror to the registry ref that docker-compose.yml pins, so `compose up`
+	# picks up the freshly built image instead of pulling stale `latest`.
+	docker tag rag-api $(RAG_API_IMAGE_REF):$(RAG_API_IMAGE_TAG)
 
 container-build-worker:
 	DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
+	# Mirror to the registry ref that docker-compose.yml pins, so `compose up`
+	# picks up the freshly built image instead of pulling stale `latest`.
+	docker tag rag-worker $(RAG_WORKER_IMAGE_REF):$(RAG_WORKER_IMAGE_TAG)
 
 # Build with Podman instead of Docker. Passes --format docker so HEALTHCHECK
 # directives are preserved if ever re-added (the compose-level healthcheck
@@ -341,6 +369,9 @@ container-build-worker:
 container-build-podman: console-build
 	podman build --format docker -t rag-api    -f containers/Dockerfile.api .
 	podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
+	# Mirror to the registry refs that docker-compose.yml pins.
+	podman tag rag-api    $(RAG_API_IMAGE_REF):$(RAG_API_IMAGE_TAG)
+	podman tag rag-worker $(RAG_WORKER_IMAGE_REF):$(RAG_WORKER_IMAGE_TAG)
 	@$(MAKE) container-sizes
 
 # Run the import probe inside the built API image. Catches any transitive
@@ -383,9 +414,9 @@ container-sizes:
 
 # Remove locally-built rag-api / rag-worker images and dangling (<none>) images from both engines
 container-clean:
-	-docker rmi rag-api rag-worker 2>/dev/null || true
+	-docker rmi rag-api rag-worker $(RAG_API_IMAGE_REF):$(RAG_API_IMAGE_TAG) $(RAG_WORKER_IMAGE_REF):$(RAG_WORKER_IMAGE_TAG) 2>/dev/null || true
 	-docker image prune -f 2>/dev/null || true
-	-podman rmi rag-api rag-worker 2>/dev/null || true
+	-podman rmi rag-api rag-worker $(RAG_API_IMAGE_REF):$(RAG_API_IMAGE_TAG) $(RAG_WORKER_IMAGE_REF):$(RAG_WORKER_IMAGE_TAG) 2>/dev/null || true
 	-podman image prune -f 2>/dev/null || true
 
 # Run the full integration smoke test (build + stack + cloudflare tunnel + checks + teardown).

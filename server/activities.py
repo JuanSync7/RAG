@@ -18,6 +18,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from temporalio import activity
+from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
 from src.platform.cache import get_cache
 from src.platform import (
     CACHE_HITS,
@@ -81,7 +82,7 @@ def execute_rag_query(request: dict) -> dict:
     tenant_id: Optional[str] = request.get("tenant_id")
     max_query_iterations: int = int(request.get("max_query_iterations", 3))
     fast_path: Optional[bool] = request.get("fast_path")
-    overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
+    overall_timeout_ms: int = int(request.get("overall_timeout_ms", RAG_RETRIEVAL_TIMEOUT_MS))
     stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
     conversation_id: Optional[str] = request.get("conversation_id")
     memory_context: Optional[str] = request.get("memory_context")
@@ -94,6 +95,7 @@ def execute_rag_query(request: dict) -> dict:
     # Only treat as override when explicitly present and bool-typed; else None.
     _tree = request.get("tree_retrieval")
     tree_retrieval: Optional[bool] = _tree if isinstance(_tree, bool) else None
+    deep_research: bool = bool(request.get("deep_research") or False)
     # Retrieval mode skips answer generation by definition. The route
     # handler may also set skip_generation directly (e.g. for streaming);
     # union both signals so neither path accidentally enables generation.
@@ -121,6 +123,7 @@ def execute_rag_query(request: dict) -> dict:
         "retrieval_sub_mode": retrieval_sub_mode,
         "extra_processing": extra_processing,
         "tree_retrieval": tree_retrieval,
+        "deep_research": deep_research,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
@@ -156,6 +159,7 @@ def execute_rag_query(request: dict) -> dict:
         retrieval_sub_mode=retrieval_sub_mode,
         extra_processing=extra_processing,
         tree_retrieval=tree_retrieval,
+        deep_research=deep_research,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 

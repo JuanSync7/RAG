@@ -18,13 +18,13 @@ from pathlib import Path
 from typing import Any
 
 import orjson
+from config.settings import RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
 
 _VALID_PHASES = ("phase2a", "phase2b")
 _VALID_ERROR_CLASSES = ("transient", "document", "system")
-_DEFAULT_MAX_ATTEMPTS = 10
 
 
 def _now_iso() -> str:
@@ -303,7 +303,7 @@ class CleanDocumentStore:
         success: bool,
         error: str | None = None,
         error_class: str | None = None,
-        max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+        max_attempts: int = RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS,
     ) -> dict[str, Any]:
         """Increment the attempt counter for *phase* and record outcome.
 

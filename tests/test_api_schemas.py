@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from server.schemas import QueryRequest
+from server.schemas import ConsoleQueryRequest, QueryRequest
 
 
 def test_query_request_forbids_unknown_fields():
@@ -77,3 +77,45 @@ def test_query_request_valid_minimal():
     assert req.query == "what is RAG?"
     assert req.alpha == 0.5
     assert req.search_limit == 10
+
+
+# ---------------------------------------------------------------------------
+# Query length bounds — guards against regression of the 500/2000-char limits
+# ---------------------------------------------------------------------------
+
+
+QUERY_MAX = 32000
+
+
+def test_query_request_accepts_long_query_up_to_cap():
+    """Long-form queries (error logs, multi-paragraph context) up to 32000 chars."""
+    long_query = "a" * QUERY_MAX
+    req = QueryRequest(query=long_query)
+    assert len(req.query) == QUERY_MAX
+
+
+def test_query_request_accepts_query_above_old_2000_cap():
+    """Regression guard: 5000-char queries used to 422; they must now pass."""
+    req = QueryRequest(query="x" * 5000)
+    assert len(req.query) == 5000
+
+
+def test_query_request_rejects_query_over_cap():
+    with pytest.raises(ValidationError):
+        QueryRequest(query="a" * (QUERY_MAX + 1))
+
+
+def test_query_request_rejects_empty_query():
+    with pytest.raises(ValidationError):
+        QueryRequest(query="")
+
+
+def test_console_query_request_accepts_long_query_up_to_cap():
+    """ConsoleQueryRequest must share the same 32000-char ceiling as QueryRequest."""
+    req = ConsoleQueryRequest(query="a" * QUERY_MAX)
+    assert len(req.query) == QUERY_MAX
+
+
+def test_console_query_request_rejects_query_over_cap():
+    with pytest.raises(ValidationError):
+        ConsoleQueryRequest(query="a" * (QUERY_MAX + 1))

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
 from server.common import ApiErrorResponse
@@ -27,6 +27,7 @@ from server.console.services import (
     read_clean_document_from_minio,
     render_source_document_html,
     resolve_console_static_asset,
+    is_remote_view_uri,
     resolve_console_source_path,
     resolve_user_console_static_asset,
     tail_log_lines,
@@ -540,6 +541,14 @@ def create_console_router(
             except HTTPException as exc:
                 minio_error = exc
 
+        # Remote-origin redirect (SharePoint/Drive/etc.): when the source URI is
+        # http(s) and the operator has opted in via RAG_CONSOLE_REMOTE_VIEW_ENABLED,
+        # 302 to the origin so SSO handles auth/render. We only reach here when
+        # MinIO did not have a clean rendering, so origin is the best fallback.
+        remote = is_remote_view_uri(source_uri)
+        if remote:
+            return RedirectResponse(url=remote, status_code=302)
+
         # Fallback: raw file from an allowed source root.
         try:
             target = resolve_console_source_path(source, source_uri)
@@ -597,6 +606,9 @@ def create_console_router(
     ):
         """Stream raw bytes for a source document. Used by the PDF iframe preview."""
         require_role(principal, "query")
+        remote = is_remote_view_uri(source_uri)
+        if remote:
+            return RedirectResponse(url=remote, status_code=302)
         target = resolve_console_source_path(source, source_uri)
         ext = target.suffix.lower()
         media_type = {

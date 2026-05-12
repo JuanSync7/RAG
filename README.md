@@ -23,14 +23,14 @@ operations tooling for observability, backup/restore, and scaling.
 
 ### Key Strengths
 
-| Strength | Detail |
-|----------|--------|
-| **True multi-modal** | Not just text — visual page embeddings let you search diagrams, charts, and layouts that text extraction misses |
-| **Pipeline-first** | Every stage is a discrete LangGraph node with its own config toggle — add, skip, or replace any stage without touching the rest |
-| **Swappable backends** | Abstract base classes for vector store, document store, guardrails, observability, and retry — implement the ABC, add one config branch |
-| **Runs anywhere** | Local with Ollama + embedded Weaviate, or fully containerized with Docker/Podman profiles for app, workers, monitoring, and HTTPS gateway |
+| Strength                 | Detail                                                                                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **True multi-modal**     | Not just text — visual page embeddings let you search diagrams, charts, and layouts that text extraction misses                                    |
+| **Pipeline-first**       | Every stage is a discrete LangGraph node with its own config toggle — add, skip, or replace any stage without touching the rest                    |
+| **Swappable backends**   | Abstract base classes for vector store, document store, guardrails, observability, and retry — implement the ABC, add one config branch            |
+| **Runs anywhere**        | Local with Ollama + embedded Weaviate, or fully containerized with Docker/Podman profiles for app, workers, monitoring, and HTTPS gateway          |
 | **Battle-tested safety** | Defense-in-depth: regex + NeMo + LLM semantic classification for injection detection; Presidio + GLiNER for PII; claim-level hallucination scoring |
-| **Multi-tenant ready** | JWT + API key auth, per-tenant Redis conversation memory with sliding window + rolling summary, rate limiting and quotas |
+| **Multi-tenant ready**   | JWT + API key auth, per-tenant Redis conversation memory with sliding window + rolling summary, rate limiting and quotas                           |
 
 ### Architecture & Layout
 
@@ -44,18 +44,18 @@ Users/CLI -> FastAPI (server/api.py) -> Temporal workflow -> Worker activity
 
 Ingestion runs as a separate Temporal workflow that writes content + embeddings consumed by retrieval.
 
-| Directory | Purpose |
-| --- | --- |
-| `src/ingest/` | LangGraph ingestion pipeline (node-per-file + shared helpers); KG ingest delegated to KGWeave via Temporal |
-| `src/retrieval/` | Query processing, retrieval orchestration, reranking, generation |
-| `src/platform/` | Cross-cutting services: auth, quotas/rate limits, cache, metrics, observability |
-| `src/common/` | Deterministic helpers shared across ingestion/retrieval |
-| `server/` | FastAPI/Temporal runtime: API, workflows, activities, worker, schemas, web console |
-| `config/` | Environment-driven settings (`config/settings.py`) |
-| `docs/` | Engineering guides, specs, operations runbooks |
-| `tests/` | Unit + integration tests (ingestion in `tests/ingest/`) |
-| `scripts/` | Ops helpers (stack control, backup/restore, DR drill, smoke test) |
-| `prompts/` | Prompt templates for retrieval query processing |
+| Directory        | Purpose                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `src/ingest/`    | LangGraph ingestion pipeline (node-per-file + shared helpers); KG ingest delegated to KGWeave via Temporal |
+| `src/retrieval/` | Query processing, retrieval orchestration, reranking, generation                                           |
+| `src/platform/`  | Cross-cutting services: auth, quotas/rate limits, cache, metrics, observability                            |
+| `src/common/`    | Deterministic helpers shared across ingestion/retrieval                                                    |
+| `server/`        | FastAPI/Temporal runtime: API, workflows, activities, worker, schemas, web console                         |
+| `config/`        | Environment-driven settings (`config/settings.py`)                                                         |
+| `docs/`          | Engineering guides, specs, operations runbooks                                                             |
+| `tests/`         | Unit + integration tests (ingestion in `tests/ingest/`)                                                    |
+| `scripts/`       | Ops helpers (stack control, backup/restore, DR drill, smoke test)                                          |
+| `prompts/`       | Prompt templates for retrieval query processing                                                            |
 
 ---
 
@@ -75,12 +75,12 @@ The fastest path from clone to working query is **7 steps**. Containers-only use
 
 ### Choose a run mode
 
-| Mode | When to use | What you need |
-| --- | --- | --- |
+| Mode                                | When to use                                                     | What you need                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | **Containers-only** (fastest start) | Just trying it out, or running without modifying Python/TS code | Docker only — `rag-api` / `rag-worker` pull from `ghcr.io/juansync7/ragweave-{api,worker}:latest` |
-| **Local dev** (this guide) | Iterating on Python or TypeScript code | All prerequisites above |
+| **Local dev** (this guide)          | Iterating on Python or TypeScript code                          | All prerequisites above                                                                           |
 
-For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.env`. To rebuild app images locally instead of pulling: `./scripts/compose.sh build rag-api rag-worker`. Pin to a specific image tag via `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env`.
+For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.env`. To rebuild app images locally instead of pulling: `make container-build` (writes `:dev`; see [Image tags: `:latest` vs `:dev`](#image-tags-latest-vs-dev)). Pin to a specific image tag via `RAG_API_IMAGE_TAG` / `RAG_WORKER_IMAGE_TAG` in `.env`.
 
 ### Step 1 — Clone & copy environment
 
@@ -201,14 +201,14 @@ python cli.py                                  # interactive REPL
 
 These have working defaults but are worth reviewing before production:
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `RAG_LLM_TEMPERATURE` | `0.3` | Generation temperature |
-| `RAG_LLM_MAX_TOKENS` | `1024` | Max tokens per response |
-| `RAG_CACHE_TTL_SECONDS` | `120` | Query result cache lifetime |
-| `RAG_RATE_LIMIT_REQUESTS_PER_MINUTE` | `60` | Per-tenant rate limit |
-| `RAG_MEMORY_MAX_RECENT_TURNS` | `8` | Conversation history window |
-| `RAG_RETRIEVAL_TIMEOUT_MS` | `30000` | End-to-end query timeout |
+| Variable                             | Default | Notes                       |
+| ------------------------------------ | ------- | --------------------------- |
+| `RAG_LLM_TEMPERATURE`                | `0.3`   | Generation temperature      |
+| `RAG_LLM_MAX_TOKENS`                 | `1024`  | Max tokens per response     |
+| `RAG_CACHE_TTL_SECONDS`              | `120`   | Query result cache lifetime |
+| `RAG_RATE_LIMIT_REQUESTS_PER_MINUTE` | `60`    | Per-tenant rate limit       |
+| `RAG_MEMORY_MAX_RECENT_TURNS`        | `8`     | Conversation history window |
+| `RAG_RETRIEVAL_TIMEOUT_MS`           | `30000` | End-to-end query timeout    |
 
 See [`.env.example`](.env.example) for all available settings.
 
@@ -220,16 +220,17 @@ See [`.env.example`](.env.example) for all available settings.
 
 RagWeave ships with four stateful services. **All start automatically with any compose invocation** — they're profile-less, so you do not need a flag for them.
 
-| Service | Container | Default port(s) | Default credentials | Data location | What it stores |
-| --- | --- | --- | --- | --- | --- |
-| **Weaviate** | `rag-weaviate` | 8090 (HTTP), 50051 (gRPC) | anonymous access enabled | `./.weaviate_data/` (bind mount) | Dual-track text + visual embeddings, BM25 indexes |
-| **MinIO** | `rag-minio` | 9000 (S3 API), 9001 (console) | `minioadmin` / `minioadmin` | volume `rag-minio-data` | Document artifacts, intermediate ingest blobs |
-| **Postgres** | `rag-postgres` | 5432 | configured via env | volume `rag-postgres-data` | API metadata, tenancy, audit logs |
-| **Redis** | `rag-redis` | 6379 | none | volume `rag-redis-data` | Conversation memory, query cache, rate-limit counters |
+| Service      | Container      | Default port(s)               | Default credentials         | Data location                    | What it stores                                        |
+| ------------ | -------------- | ----------------------------- | --------------------------- | -------------------------------- | ----------------------------------------------------- |
+| **Weaviate** | `rag-weaviate` | 8090 (HTTP), 50051 (gRPC)     | anonymous access enabled    | `./.weaviate_data/` (bind mount) | Dual-track text + visual embeddings, BM25 indexes     |
+| **MinIO**    | `rag-minio`    | 9000 (S3 API), 9001 (console) | `minioadmin` / `minioadmin` | volume `rag-minio-data`          | Document artifacts, intermediate ingest blobs         |
+| **Postgres** | `rag-postgres` | 5432                          | configured via env          | volume `rag-postgres-data`       | API metadata, tenancy, audit logs                     |
+| **Redis**    | `rag-redis`    | 6379                          | none                        | volume `rag-redis-data`          | Conversation memory, query cache, rate-limit counters |
 
 **No setup required.** Buckets are created by workers on first ingest; Weaviate collections are created on first ingest; Postgres schemas are managed by the API on startup.
 
 **Important defaults to change before any non-local deployment:**
+
 - `RAG_MINIO_ACCESS_KEY` / `RAG_MINIO_SECRET_KEY` — currently `minioadmin / minioadmin`.
 - Weaviate runs with `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`. Disable and configure API keys before exposing it.
 - Postgres credentials are set in `.env`; the defaults are dev-only.
@@ -253,28 +254,28 @@ Compose uses [Docker profiles](https://docs.docker.com/compose/profiles/) to gat
 
 ### Always-on (no profile flag needed)
 
-| Container | Image | Why it's here |
-| --- | --- | --- |
-| `rag-postgres` | `postgres:16-alpine` | Application metadata |
-| `rag-minio` | `minio/minio` | Artifact storage |
-| `rag-weaviate` | `semitechnologies/weaviate:1.28.0` | Vector store |
-| `temporal-db` | `postgres:16-alpine` | Temporal backing store |
-| `temporal` | `temporalio/auto-setup` | Workflow engine |
-| `temporal-ui` | `temporalio/ui` | Workflow inspector (port 8080) |
-| `rag-embed` / `rag-embed-cpu` | `text-embeddings-inference` | TEI embed pool (GPU + CPU fallback) |
-| `rag-rerank` | `text-embeddings-inference` | TEI reranker |
-| `rag-ollama` | `ollama/ollama` | Local LLM serving |
-| `rag-nginx` | `nginx:alpine` | Fronts API + load-balances TEI replicas |
-| `dozzle` | `amir20/dozzle` | Container log viewer |
+| Container                     | Image                              | Why it's here                           |
+| ----------------------------- | ---------------------------------- | --------------------------------------- |
+| `rag-postgres`                | `postgres:16-alpine`               | Application metadata                    |
+| `rag-minio`                   | `minio/minio`                      | Artifact storage                        |
+| `rag-weaviate`                | `semitechnologies/weaviate:1.28.0` | Vector store                            |
+| `temporal-db`                 | `postgres:16-alpine`               | Temporal backing store                  |
+| `temporal`                    | `temporalio/auto-setup`            | Workflow engine                         |
+| `temporal-ui`                 | `temporalio/ui`                    | Workflow inspector (port 8080)          |
+| `rag-embed` / `rag-embed-cpu` | `text-embeddings-inference`        | TEI embed pool (GPU + CPU fallback)     |
+| `rag-rerank`                  | `text-embeddings-inference`        | TEI reranker                            |
+| `rag-ollama`                  | `ollama/ollama`                    | Local LLM serving                       |
+| `rag-nginx`                   | `nginx:alpine`                     | Fronts API + load-balances TEI replicas |
+| `dozzle`                      | `amir20/dozzle`                    | Container log viewer                    |
 
 ### Profile-gated
 
-| Profile | Activates | Approx. additional pull |
-|---------|-----------|--------------------------|
-| `app` | `rag-api`, `rag-redis`, `pg-maintenance` | +544 MB |
-| `workers` | `rag-worker`, `rag-redis` | +5.79 GB |
-| `monitoring` | Prometheus, Alertmanager, Grafana | +1.74 GB |
-| `observability` | Langfuse stack (6 containers — Postgres, Redis, ClickHouse, MinIO, web, worker) | +5.93 GB |
+| Profile         | Activates                                                                       | Approx. additional pull |
+| --------------- | ------------------------------------------------------------------------------- | ----------------------- |
+| `app`           | `rag-api`, `rag-redis`, `pg-maintenance`                                        | +544 MB                 |
+| `workers`       | `rag-worker`, `rag-redis`                                                       | +5.79 GB                |
+| `monitoring`    | Prometheus, Alertmanager, Grafana                                               | +1.74 GB                |
+| `observability` | Langfuse stack (6 containers — Postgres, Redis, ClickHouse, MinIO, web, worker) | +5.93 GB                |
 
 ```bash
 # Typical local dev:
@@ -292,14 +293,15 @@ Compose uses [Docker profiles](https://docs.docker.com/compose/profiles/) to gat
 
 The stack uses two custom images with strict dependency isolation:
 
-| Image | Size | Contents |
-|---|---|---|
-| `rag-api` | 389 MB | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| Image        | Size    | Contents                                                                         |
+| ------------ | ------- | -------------------------------------------------------------------------------- |
+| `rag-api`    | 389 MB  | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack    |
 | `rag-worker` | 5.79 GB | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
 
 Container deps live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would pull every dep listed under `[project.dependencies]`, undoing the isolation. Local dev uses `pyproject.toml` via `make install`; containers bypass it.
 
 **Adding a new dependency:**
+
 - API server imports it → add to `pyproject.toml` AND `containers/requirements-api.txt`
 - Worker-only → add to `pyproject.toml` AND `containers/requirements-worker.txt`
 - Dev-only (pytest, deptry, …) → `pyproject.toml` only
@@ -322,6 +324,26 @@ DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
 ```
 
 Multi-stage builds, BuildKit pip-cache mounts, `.dockerignore`, compose-level healthchecks (podman-friendly), `PYTHONPATH=/app` (no `pip install .`), GPU support in the worker — see [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md) for the full design.
+
+### Image tags: `:latest` vs `:dev`
+
+`docker-compose.yml` reads `${RAG_{API,WORKER}_IMAGE_REF:-ghcr.io/juansync7/ragweave-{api,worker}}:${RAG_{API,WORKER}_IMAGE_TAG:-latest}`. The Makefile mirrors local builds to the same ref so `compose up` finds your build instead of pulling from GHCR.
+
+Two audiences, two tags:
+
+| You are…                    | What you want                                               | What to set in `.env`                                 | What runs                                                  |
+| --------------------------- | ----------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------- |
+| Fresh-cloning the repo      | Whatever CI last published from `main`                      | _nothing_ (defaults apply)                            | `docker compose up` pulls `:latest` from GHCR              |
+| Hacking locally on a branch | Your freshly-built image, never clobbered by CI's `:latest` | `RAG_API_IMAGE_TAG=dev`<br>`RAG_WORKER_IMAGE_TAG=dev` | `make container-build` writes `:dev`, compose reads `:dev` |
+| CI / prod deploy            | Reproducible build                                          | `RAG_*_IMAGE_TAG=<sha-or-version>`                    | Compose reads the pinned tag                               |
+
+**Why `:dev` and not just `:latest` everywhere?** A local rebuild and CI's published image share the name `ghcr.io/juansync7/ragweave-worker:latest` but live in different image stores (your laptop vs the GHCR registry). If anything triggers a registry pull (`docker compose pull`, `pull_policy: always`, a teammate running `docker pull`), the registry version overwrites your local build. The `:dev` tag isolates local work from that race — CI never publishes `:dev`, so it can't be clobbered.
+
+Tags are parameterized via Makefile vars (`RAG_API_IMAGE_REF`, `RAG_API_IMAGE_TAG`, `RAG_WORKER_IMAGE_REF`, `RAG_WORKER_IMAGE_TAG`) — override per invocation:
+
+```bash
+make container-build-worker RAG_WORKER_IMAGE_REF=myorg/ragweave-worker RAG_WORKER_IMAGE_TAG=staging
+```
 
 ---
 
@@ -446,15 +468,15 @@ For internal design notes (rootless networking, socket detection, image-format t
 
 ## Entry Points
 
-| Command | Description |
-|---------|-------------|
-| `python -m src.ingest.cli --dir ./documents` | CLI for ingestion runs |
-| `python query.py "question"` | Local retrieval query CLI |
-| `python cli.py` | Unified interactive REPL |
-| `python -m server.worker` | Temporal worker process |
-| `uvicorn server.api:app --host 0.0.0.0 --port 8000` | API server (use `make dev` for hot reload) |
-| `python -m server.cli_client` | Interactive client targeting the API server |
-| `python -m server.mcp_adapter` | MCP tooling adapter over the API (`stdio` transport) |
+| Command                                             | Description                                          |
+| --------------------------------------------------- | ---------------------------------------------------- |
+| `python -m src.ingest.cli --dir ./documents`        | CLI for ingestion runs                               |
+| `python query.py "question"`                        | Local retrieval query CLI                            |
+| `python cli.py`                                     | Unified interactive REPL                             |
+| `python -m server.worker`                           | Temporal worker process                              |
+| `uvicorn server.api:app --host 0.0.0.0 --port 8000` | API server (use `make dev` for hot reload)           |
+| `python -m server.cli_client`                       | Interactive client targeting the API server          |
+| `python -m server.mcp_adapter`                      | MCP tooling adapter over the API (`stdio` transport) |
 
 ---
 
@@ -462,57 +484,58 @@ For internal design notes (rootless networking, socket detection, image-format t
 
 Run `make help` for this list in the terminal. All targets are also documented in comments in the [Makefile](Makefile).
 
-| Target | Purpose |
-|---|---|
-| **Setup & install** | |
-| `make setup` | **First-time setup.** Creates venv, installs Python deps, runs `npm install`, builds the web console |
-| `make install` | (Re)install Python deps into the active env (`uv sync --extra dev`) |
-| **Web console (TypeScript)** | |
-| `make console-install` | `npm install` for the web console |
-| `make console-check` | TypeScript type-check (no emit) |
-| `make console-build` | Compile TS → `static/main.js` |
-| `make console-watch` | Watch mode — rebuild on TS change |
-| **Checks & tests** | |
-| `make test` | Run the pytest suite |
-| `make py-compile-check` | L1 syntax: `compileall` across `src/`, `server/`, `config/`, `import_check/` |
-| `make import-check` | L2 internal: resolve imports + encapsulation, **whole tree** (includes untracked) |
-| `make import-check-tracked` | L2 internal but only for **git-tracked** files (for `precommit-check`) |
-| `make dep-check` | L3 external: `deptry` — `pyproject.toml` vs actual imports |
-| `make container-dep-check` | L4 container: `requirements-*.txt` in sync with `pyproject.toml` |
-| `make precommit-check` | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + L4 + `npm ci` + console-check. Excludes untracked WIP. |
-| `make all-check` | **Compound gate for release**: same checks but over the entire tree including untracked. |
-| **Container images** (see [Container Images](#container-images) for details) | |
-| `make container-build` | Compile frontend + build `rag-api` + `rag-worker` with docker (BuildKit) |
-| `make container-build-api` | Build only `rag-api` |
-| `make container-build-worker` | Build only `rag-worker` |
-| `make container-build-podman` | Compile frontend + build both with podman (`--format docker`) |
-| `make container-probe` | Run the API import probe inside `rag-api` — catches transitive ML leakage |
-| `make container-sizes` | Print current `rag-api` / `rag-worker` image sizes |
-| `make container-clean` | Remove local `rag-api` / `rag-worker` images + dangling images |
-| `make smoke-test` | Full integration check: build + stack + cloudflared tunnel + API checks + teardown |
-| `make container-build-and-test` | Build images then immediately run smoke test (`SKIP_BUILD=1`) |
-| **Stack control** (uses `scripts/stack.sh` — auto-detects docker/podman) | |
-| `make start` | Bring up base + workers (no rebuild) |
-| `make start-all` | Bring up every profile (no rebuild) |
-| `make restart` | Frontend rebuild + recreate base + workers (mirrors `start`, with rebuild) |
-| `make restart-all` | Frontend rebuild + recreate every profile (mirrors `start-all`, with rebuild) |
-| `make tunnel` | Cloudflare tunnel for local API (port 8000) |
+| Target                                                                       | Purpose                                                                                                            |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Setup & install**                                                          |                                                                                                                    |
+| `make setup`                                                                 | **First-time setup.** Creates venv, installs Python deps, runs `npm install`, builds the web console               |
+| `make install`                                                               | (Re)install Python deps into the active env (`uv sync --extra dev`)                                                |
+| **Web console (TypeScript)**                                                 |                                                                                                                    |
+| `make console-install`                                                       | `npm install` for the web console                                                                                  |
+| `make console-check`                                                         | TypeScript type-check (no emit)                                                                                    |
+| `make console-build`                                                         | Compile TS → `static/main.js`                                                                                      |
+| `make console-watch`                                                         | Watch mode — rebuild on TS change                                                                                  |
+| **Checks & tests**                                                           |                                                                                                                    |
+| `make test`                                                                  | Run the pytest suite                                                                                               |
+| `make py-compile-check`                                                      | L1 syntax: `compileall` across `src/`, `server/`, `config/`, `import_check/`                                       |
+| `make import-check`                                                          | L2 internal: resolve imports + encapsulation, **whole tree** (includes untracked)                                  |
+| `make import-check-tracked`                                                  | L2 internal but only for **git-tracked** files (for `precommit-check`)                                             |
+| `make dep-check`                                                             | L3 external: `deptry` — `pyproject.toml` vs actual imports                                                         |
+| `make container-dep-check`                                                   | L4 container: `requirements-*.txt` in sync with `pyproject.toml`                                                   |
+| `make precommit-check`                                                       | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + L4 + `npm ci` + console-check. Excludes untracked WIP. |
+| `make all-check`                                                             | **Compound gate for release**: same checks but over the entire tree including untracked.                           |
+| **Container images** (see [Container Images](#container-images) for details) |                                                                                                                    |
+| `make container-build`                                                       | Compile frontend + build `rag-api` + `rag-worker` with docker (BuildKit)                                           |
+| `make container-build-api`                                                   | Build only `rag-api`                                                                                               |
+| `make container-build-worker`                                                | Build only `rag-worker`                                                                                            |
+| `make container-build-podman`                                                | Compile frontend + build both with podman (`--format docker`)                                                      |
+| `make container-probe`                                                       | Run the API import probe inside `rag-api` — catches transitive ML leakage                                          |
+| `make container-sizes`                                                       | Print current `rag-api` / `rag-worker` image sizes                                                                 |
+| `make container-clean`                                                       | Remove local `rag-api` / `rag-worker` images + dangling images                                                     |
+| `make smoke-test`                                                            | Full integration check: build + stack + cloudflared tunnel + API checks + teardown                                 |
+| `make container-build-and-test`                                              | Build images then immediately run smoke test (`SKIP_BUILD=1`)                                                      |
+| **Stack control** (uses `scripts/stack.sh` — auto-detects docker/podman)     |                                                                                                                    |
+| `make start`                                                                 | Bring up base + workers (no rebuild)                                                                               |
+| `make start-all`                                                             | Bring up every profile (no rebuild)                                                                                |
+| `make restart`                                                               | Frontend rebuild + recreate base + workers (mirrors `start`, with rebuild)                                         |
+| `make restart-all`                                                           | Frontend rebuild + recreate every profile (mirrors `start-all`, with rebuild)                                      |
+| `make tunnel`                                                                | Cloudflare tunnel for local API (port 8000)                                                                        |
 
 ---
 
 ## Engineering Docs
 
-| Directory | Contents |
-|-----------|----------|
-| `docs/ingestion/` | Ingestion pipeline spec (split: pipeline nodes + platform/cross-cutting), implementation guide, engineering guide, onboarding checklist |
-| `docs/retrieval/` | Retrieval pipeline specs (split: query/ranking + generation/safety), NeMo Guardrails, engineering guide, onboarding checklist |
-| `docs/server/` | Server API spec + implementation, platform services spec (auth, tenancy, rate limits, caching) |
-| `docs/ui/` | CLI spec + implementation, web console spec + implementation, token budget spec + implementation |
-| `docs/performance/` | Retrieval performance spec (runtime controls, benchmarking, load testing) |
-| `docs/operations/` | Operations platform spec (deployment, scaling, monitoring, DR, CI/CD), 100-user plan, Podman migration |
-| `docs/llm/` | LiteLLM SDK integration guide |
+| Directory           | Contents                                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/ingestion/`   | Ingestion pipeline spec (split: pipeline nodes + platform/cross-cutting), implementation guide, engineering guide, onboarding checklist |
+| `docs/retrieval/`   | Retrieval pipeline specs (split: query/ranking + generation/safety), NeMo Guardrails, engineering guide, onboarding checklist           |
+| `docs/server/`      | Server API spec + implementation, platform services spec (auth, tenancy, rate limits, caching)                                          |
+| `docs/ui/`          | CLI spec + implementation, web console spec + implementation, token budget spec + implementation                                        |
+| `docs/performance/` | Retrieval performance spec (runtime controls, benchmarking, load testing)                                                               |
+| `docs/operations/`  | Operations platform spec (deployment, scaling, monitoring, DR, CI/CD), 100-user plan, Podman migration                                  |
+| `docs/llm/`         | LiteLLM SDK integration guide                                                                                                           |
 
 Key starting points:
+
 - Ingestion: `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
 - Retrieval: `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`
 - Server/runtime: `server/README.md`

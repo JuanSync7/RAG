@@ -108,7 +108,7 @@ services:
 
   rag-api:
     profiles: ["app"]
-    image: ghcr.io/juansync7/ragweave-api:${RAG_API_IMAGE_TAG:-latest}
+    image: ${RAG_API_IMAGE_REF:-ghcr.io/juansync7/ragweave-api}:${RAG_API_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.api
@@ -189,7 +189,7 @@ services:
 
   rag-worker:
     profiles: ["workers"]
-    image: ghcr.io/juansync7/ragweave-worker:${RAG_WORKER_IMAGE_TAG:-latest}
+    image: ${RAG_WORKER_IMAGE_REF:-ghcr.io/juansync7/ragweave-worker}:${RAG_WORKER_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
@@ -631,6 +631,10 @@ services:
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution (see comment on rag-rerank for rationale).
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -666,6 +670,10 @@ services:
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution (see comment on rag-rerank for rationale).
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -696,6 +704,13 @@ services:
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution. huggingface.co serves AAAA-heavy CDN
+    # records from many regions; Docker's default bridge has no IPv6 route,
+    # so TEI's startup probe (download_artifacts) hangs on TCP-connect for
+    # ~9 min before timing out. v4-only resolves in milliseconds.
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from config.settings import RAG_INGEST_LLM_DEFAULT_MAX_TOKENS
 from src.ingest.common import IngestionConfig
 from src.ingest.common import parse_json_object
 from src.platform.llm import get_llm_provider
@@ -18,7 +19,7 @@ logger = logging.getLogger("rag.ingest.support.llm")
 
 
 def _llm_json(
-    prompt: str, config: IngestionConfig, max_tokens: int = 300
+    prompt: str, config: IngestionConfig, max_tokens: int = RAG_INGEST_LLM_DEFAULT_MAX_TOKENS
 ) -> dict[str, object]:
     """Execute a JSON-only LLM chat call via LiteLLM and parse the response.
 

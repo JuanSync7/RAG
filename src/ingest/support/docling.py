@@ -21,7 +21,76 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:
+    from config.settings import EMBEDDING_MODEL_PATH, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+except Exception:  # pragma: no cover — defensive; settings should always import
+    EMBEDDING_MODEL_PATH = ""
+    RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS = 1024
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# HybridChunker tokenizer resolution + module-level cache
+# ---------------------------------------------------------------------------
+
+_TOKENIZER_CACHE: dict[tuple[str, int], Any] = {}
+
+
+def _resolve_tokenizer_model_id(config: Any) -> str:
+    """Resolve which HF tokenizer model id to use for HybridChunker.
+
+    Resolution order:
+      1. ``config.hybrid_chunker_tokenizer_model`` if non-empty.
+      2. ``EMBEDDING_MODEL_PATH`` (the embedder repo / local path) if non-empty,
+         so token counts match the embedding model.
+      3. Hardcoded final fallback ``"BAAI/bge-m3"``.
+    """
+    cfg_model = getattr(config, "hybrid_chunker_tokenizer_model", None) if config is not None else None
+    if cfg_model:
+        return cfg_model
+    if EMBEDDING_MODEL_PATH:
+        return EMBEDDING_MODEL_PATH
+    return "BAAI/bge-m3"
+
+
+def _build_hf_tokenizer(model_id: str, max_tokens: int) -> Any:
+    """Build a docling-core HuggingFaceTokenizer for ``model_id``.
+
+    Isolated for monkeypatching in tests. Raises any underlying exception so the
+    caller (``_get_or_build_tokenizer``) can decide on fallback behavior.
+    """
+    from docling_core.transforms.chunker.tokenizer.huggingface import (
+        HuggingFaceTokenizer,
+    )
+    from transformers import AutoTokenizer
+
+    return HuggingFaceTokenizer(
+        tokenizer=AutoTokenizer.from_pretrained(model_id),
+        max_tokens=max_tokens,
+    )
+
+
+def _get_or_build_tokenizer(model_id: str, *, max_tokens: int) -> Any:
+    """Return a cached HuggingFaceTokenizer or build (and cache) a new one.
+
+    Cache key is ``(model_id, max_tokens)`` since max_tokens is baked into the
+    tokenizer instance.
+    """
+    key = (model_id, int(max_tokens))
+    cached = _TOKENIZER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    tokenizer = _build_hf_tokenizer(model_id, max_tokens)
+    _TOKENIZER_CACHE[key] = tokenizer
+    # Surface the resolved tokenizer choice once per (model, max_tokens) pair —
+    # silent auto-tracking is hard to debug otherwise.
+    logger.info(
+        "HybridChunker tokenizer resolved: model_id=%s max_tokens=%d",
+        model_id,
+        max_tokens,
+    )
+    return tokenizer
 
 
 @dataclass
@@ -403,8 +472,13 @@ def chunk_markdown_via_docling(
          warning (alt text preserved). On VLM failure, alt text stands in.
       2. Build a DoclingDocument from the rewritten markdown via the MD backend
          (~0.2s, no models).
-      3. Run HybridChunker — preserves lists, tables, and requirement blocks
-         as atomic units.
+      3. Run HybridChunker with an explicit HuggingFaceTokenizer so
+         ``merge_peers=True`` consolidates sentence-per-line markdown into
+         token-budgeted chunks. The tokenizer model is resolved in this order:
+           1. ``config.hybrid_chunker_tokenizer_model`` if set.
+           2. ``EMBEDDING_MODEL_PATH`` (so the chunker's token accounting
+              matches the embedder).
+           3. Final fallback ``"BAAI/bge-m3"``.
 
     Captioning runs only when both ``source_path`` and ``config`` are provided
     AND ``config.enable_vision_processing`` is True. Without those, the function
@@ -447,7 +521,20 @@ def chunk_markdown_via_docling(
     )
     docling_document = conv_result.document
 
-    chunker = HybridChunker(max_tokens=max_tokens, merge_peers=True)
+    model_id = _resolve_tokenizer_model_id(config)
+    try:
+        tokenizer = _get_or_build_tokenizer(model_id, max_tokens=max_tokens)
+        chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
+    except Exception as exc:  # pragma: no cover — env-dependent
+        # Tokenizer load failed (no network, model not in HF cache, etc.).
+        # Re-raise so the caller's existing fallback path
+        # (parser_text.chunk → chunk_with_markdown) can handle it.
+        logger.warning(
+            "HybridChunker tokenizer load failed for model_id=%s: %s; "
+            "caller should fall back to char-splitter chunking.",
+            model_id, exc,
+        )
+        raise
     raw_chunks = list(chunker.chunk(dl_doc=docling_document))
 
     figures_payload = figures if figures else []
@@ -642,7 +729,11 @@ class DoclingParser:
     def __init__(self) -> None:
         self._docling_document: Any = None
         self._vlm_mode: str = "disabled"
-        self._max_tokens: int = 512
+        # Aligns with parse-time fallback (line ~751) and the package-wide default
+        # (config.settings.RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS = 1024). Used
+        # only on the rare path where chunk() runs before parse() (in tests).
+        self._max_tokens: int = RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+        self._config: Any = None
 
     def parse(self, file_path: Path, config: Any) -> "ParseResult":
         """Parse a document using Docling. FR-3221.
@@ -661,7 +752,8 @@ class DoclingParser:
         from src.ingest.support.parser_base import ParseResult
 
         self._vlm_mode = getattr(config, "vlm_mode", "disabled")
-        self._max_tokens = getattr(config, "hybrid_chunker_max_tokens", 512)
+        self._max_tokens = getattr(config, "hybrid_chunker_max_tokens", 1024)
+        self._config = config
 
         result = parse_with_docling(
             file_path,
@@ -710,10 +802,19 @@ class DoclingParser:
 
         from docling_core.transforms.chunker import HybridChunker
 
-        chunker = HybridChunker(
-            max_tokens=self._max_tokens,
-            merge_peers=True,
-        )
+        model_id = _resolve_tokenizer_model_id(getattr(self, "_config", None))
+        try:
+            tokenizer = _get_or_build_tokenizer(
+                model_id, max_tokens=self._max_tokens
+            )
+            chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
+        except Exception as exc:  # pragma: no cover — env-dependent
+            logger.warning(
+                "HybridChunker tokenizer load failed (model_id=%s): %s; "
+                "raising for caller fallback.",
+                model_id, exc,
+            )
+            raise
         chunk_iter = chunker.chunk(dl_doc=self._docling_document)
         raw_chunks = list(chunk_iter)
 

@@ -15,7 +15,7 @@ import { buildCitationsHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions } from "./chatMode";
+import { getChatMode, getDeepResearch, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerDrSuggestionResubmit } from "./chatMode";
 import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
@@ -38,6 +38,9 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         const topK = getSourcesTopK();
         body.rerank_top_k = topK;
         body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+    }
+    if (getDeepResearch()) {
+        body.deep_research = true;
     }
     return body;
 }
@@ -66,7 +69,9 @@ async function sourcesOnlyQuery(queryText: string): Promise<void> {
             relevant_doc_ids?: string[];
             ignored_doc_ids?: string[];
             token_budget?: TokenBudget;
+            dr_suggestion?: DrSuggestionPayload;
         }>("POST", "/console/query", buildQueryBody(queryText));
+        maybeShowDrChip(data.dr_suggestion, queryText);
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
         const sources = (data.results ?? []).map(chunkToSourceRef);
@@ -223,9 +228,25 @@ export async function streamQuery(queryText: string): Promise<void> {
                 } else if (evtType === "retrieval") {
                     const cid = String(data.conversation_id ?? "").trim();
                     if (cid) setActiveConversation(cid);
+                    const drSugg = (data as { dr_suggestion?: DrSuggestionPayload }).dr_suggestion;
+                    maybeShowDrChip(drSugg, queryText);
 
                     const clar = String(data.clarification_message ?? "").trim();
-                    if (clar) pendingClarification = clar;
+                    if (clar) {
+                        // Prefix the clarification with a typed reason badge
+                        // when the chain surfaces ``ask_user_reason`` (parity
+                        // with the CLI). Reason -> short human label.
+                        const reason = String(data.ask_user_reason ?? "").trim();
+                        const reasonLabels: Record<string, string> = {
+                            sanitizer_reject: "Empty or invalid query",
+                            injection_blocked: "Query blocked by safety rails",
+                            vague_query: "Query too vague to retrieve",
+                            budget_exhausted: "Retrieval timeout",
+                            no_results: "No matching documents",
+                        };
+                        const label = reasonLabels[reason];
+                        pendingClarification = label ? `[${label}] ${clar}` : clar;
+                    }
 
                     if (data.token_budget) {
                         lastBudget = data.token_budget;
@@ -367,10 +388,14 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         const data = await api<{
             generated_answer?: string;
             clarification_message?: string;
+            ask_user_reason?: string;
+            degraded?: boolean;
             results?: ChunkResult[];
             conversation_id?: string;
             token_budget?: TokenBudget;
+            dr_suggestion?: DrSuggestionPayload;
         }>("POST", "/console/query", buildQueryBody(queryText));
+        maybeShowDrChip(data.dr_suggestion, queryText);
 
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
@@ -422,6 +447,8 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 }
 
 export async function sendQuery(text: string): Promise<void> {
+    // Hide any prior suggestion — a new query supersedes the previous advisory.
+    hideDrSuggestionChip();
     if (getChatMode() === "sources") {
         await sourcesOnlyQuery(text);
         return;
@@ -430,4 +457,17 @@ export async function sendQuery(text: string): Promise<void> {
     const useStreaming = s.streaming !== false;
     if (useStreaming) await streamQuery(text);
     else await nonStreamQuery(text);
+}
+
+registerDrSuggestionResubmit(sendQuery);
+
+interface DrSuggestionPayload {
+    suggest?: boolean;
+    reason?: string | null;
+}
+
+function maybeShowDrChip(payload: DrSuggestionPayload | undefined, query: string): void {
+    if (!payload || !payload.suggest) return;
+    if (getDeepResearch()) return;
+    showDrSuggestionChip(query);
 }

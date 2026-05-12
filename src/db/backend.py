@@ -12,6 +12,10 @@ from contextlib import contextmanager
 from typing import Any, Generator, Optional
 
 from src.db.common import StoredDocument
+from config.settings import (
+    RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
+    RAG_MINIO_LIST_DEFAULT_LIMIT,
+)
 
 
 class DocumentBackend(ABC):
@@ -86,7 +90,7 @@ class DocumentBackend(ABC):
         client: Any,
         document_id: str,
         bucket: Optional[str] = None,
-        expires_in_seconds: int = 3600,
+        expires_in_seconds: int = RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
     ) -> str:
         """Return a presigned URL for direct download of the document."""
         ...
@@ -97,7 +101,7 @@ class DocumentBackend(ABC):
         client: Any,
         bucket: Optional[str] = None,
         prefix: str = "",
-        limit: int = 1000,
+        limit: int = RAG_MINIO_LIST_DEFAULT_LIMIT,
         offset: int = 0,
     ) -> list[dict]:
         """List documents. Returns dicts with document_id, source_key, size_bytes, last_modified."""

@@ -31,6 +31,10 @@ from src.guardrails.models import (
     GuardianRisk,
     GuardianUnavailable,
 )
+from config.settings import (
+    RAG_GUARDRAILS_INJECTION_LP_THRESHOLD,
+    RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD,
+)
 
 logger = logging.getLogger("rag.guardrails.injection")
 
@@ -103,8 +107,8 @@ class InjectionDetector:
         sensitivity: str = "balanced",
         enable_perplexity: bool = True,
         enable_model_classifier: bool = True,
-        lp_threshold: float = 89.79,
-        ps_ppl_threshold: float = 1845.65,
+        lp_threshold: float = RAG_GUARDRAILS_INJECTION_LP_THRESHOLD,
+        ps_ppl_threshold: float = RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD,
         runtime=None,
         guardian: Optional[GuardianModel] = None,
     ) -> None:

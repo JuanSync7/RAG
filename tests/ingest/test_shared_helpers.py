@@ -114,7 +114,7 @@ class TestQualityScore:
     """Tests for the quality_score() helper."""
 
     def test_quality_score_empty_returns_base_score(self):
-        # quality_score always returns at least _QUALITY_BASE (0.4)
+        # quality_score always returns at least RAG_INGEST_QUALITY_BASE (0.4)
         # because the base is added unconditionally before length bonuses
         score = quality_score("")
         assert isinstance(score, float)

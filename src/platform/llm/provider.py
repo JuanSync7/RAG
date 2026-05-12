@@ -29,6 +29,9 @@ from config.settings import (
     LLM_ROUTER_CONFIG,
     LLM_TEMPERATURE,
     LLM_VISION_MODEL,
+    RAG_LLM_ONESHOT_MAX_TOKENS,
+    RAG_LLM_RATE_LIMIT_RETRY_DELAY_S,
+    RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS,
 )
 from src.platform.llm.schemas import LLMConfig, LLMResponse
 
@@ -126,7 +129,7 @@ def _build_router_from_env(config: LLMConfig) -> Router:
     return Router(
         model_list=model_list,
         num_retries=config.num_retries,
-        retry_after=5,
+        retry_after=RAG_LLM_RATE_LIMIT_RETRY_DELAY_S,
     )
 
 
@@ -488,7 +491,7 @@ class LLMProvider:
             self.generate(
                 [{"role": "user", "content": "ping"}],
                 model_alias=model_alias,
-                max_tokens=1,
+                max_tokens=RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS,
             )
             return True
         except Exception:
@@ -517,7 +520,7 @@ def call_oneshot(
     system: str = "",
     model_alias: str = "query",
     temperature: Optional[float] = None,
-    max_tokens: Optional[int] = 256,
+    max_tokens: Optional[int] = RAG_LLM_ONESHOT_MAX_TOKENS,
 ) -> Optional[str]:
     """One-shot text completion: build messages from (system, prompt), call the
     provider, return content or None on failure.

@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -72,8 +72,16 @@ SEARCH_LIMIT = 10
 RERANK_TOP_K = 5
 
 # --- Document Processing ---
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
+# CHUNK_SIZE / CHUNK_OVERLAP apply to the **LangChain fallback** chunker
+# (RecursiveCharacterTextSplitter). They are CHARACTER counts, not token
+# counts. Kept roughly equivalent in tokens to the Docling HybridChunker
+# default RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024 at ~3.5 chars/token
+# for English (BGE-M3 tokenizer). If you change one, check the other.
+# Docling's HybridChunker has no overlap parameter — it splits at structural
+# boundaries and uses heading breadcrumbs to bridge context, so overlap only
+# matters for the char-window fallback path.
+CHUNK_SIZE = 3500
+CHUNK_OVERLAP = 350
 
 # --- Query Processing (LangGraph) ---
 QUERY_CONFIDENCE_THRESHOLD = float(
@@ -86,7 +94,6 @@ QUERY_PROCESSING_MODEL = os.environ.get("RAG_QUERY_MODEL", None)  # defaults to 
 QUERY_PROCESSING_TEMPERATURE = float(
     os.environ.get("RAG_QUERY_TEMPERATURE", "0.15")
 )
-QUERY_MAX_LENGTH = int(os.environ.get("RAG_QUERY_MAX_LENGTH", "500"))
 QUERY_PROCESSING_TIMEOUT = int(
     os.environ.get("RAG_QUERY_PROCESSING_TIMEOUT", "30")
 )
@@ -440,9 +447,16 @@ Valid values: "disabled", "builtin", "external".
 """
 
 RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS: int = int(
-    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "512")
+    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "1024")
 )
-"""Maximum token count per chunk for HybridChunker (bge-m3 limit is 512)."""
+"""Maximum token count per chunk for HybridChunker.
+
+Default 1024 — empirical sweet spot for technical-doc retrieval. BGE-M3
+itself accepts inputs up to 8192 tokens, but past ~1500–2000 the embedding
+loses specificity (a single dense vector covers too many subtopics) and
+single-sentence chunks (under ~50 tokens) lack contextual grounding.
+1024 keeps natural section units whole while staying comfortably below
+the dilution threshold."""
 
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
@@ -863,6 +877,317 @@ RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS: int = int(
 RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS: int = int(
     os.environ.get("RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS", "10000")
 )  # FR-617
+
+# ---------------------------------------------------------------------------
+# Deep research (recursive topic-grouped retrieval) — opt-in alternative to
+# the linear kg_expand → embed → hybrid_search → rerank stages. See
+# src/retrieval/pipeline/deep_research.py for the orchestrator.
+# ---------------------------------------------------------------------------
+
+RAG_STAGE_BUDGET_DEEP_RESEARCH_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_DEEP_RESEARCH_MS", "30000")
+)
+RAG_DEEP_RESEARCH_MAX_NODES: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_NODES", "12")
+)
+RAG_DEEP_RESEARCH_MAX_LLM_CALLS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_LLM_CALLS", "24")
+)
+RAG_DEEP_RESEARCH_MAX_DEPTH: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_DEPTH", "3")
+)
+RAG_DEEP_RESEARCH_MAX_TOPICS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_TOPICS", "3")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS", "3")
+)
+RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS", "4000")
+)
+RAG_DEEP_RESEARCH_KB_TOP_PER_NODE: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_KB_TOP_PER_NODE", "10")
+)
+RAG_DEEP_RESEARCH_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_WALL_CLOCK_MS", "30000")
+)
+RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS", "3")
+)
+RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES", "2")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE: float = float(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE", "0.6")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K", "3")
+)
+
+# --- Ingest: Embedding pipeline ---
+RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES: int = int(
+    os.environ.get("RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES", "3")
+)
+RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S: float = float(
+    os.environ.get("RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S", "0.3")
+)
+
+# --- Ingest: LLM metadata extraction ---
+RAG_INGEST_LLM_METADATA_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGEST_LLM_METADATA_MAX_CHARS", "10000")
+)
+RAG_INGEST_LLM_SUMMARY_MAX_LEN: int = int(
+    os.environ.get("RAG_INGEST_LLM_SUMMARY_MAX_LEN", "240")
+)
+
+# --- Ingest: Document structure detection ---
+RAG_INGEST_STRUCTURE_MAX_FIGURES: int = int(
+    os.environ.get("RAG_INGEST_STRUCTURE_MAX_FIGURES", "32")
+)
+
+# --- Ingest: Quality scoring heuristic ---
+RAG_INGEST_QUALITY_BASE: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_BASE", "0.4")
+)
+RAG_INGEST_QUALITY_BONUS: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_BONUS", "0.2")
+)
+RAG_INGEST_QUALITY_MIN_BONUS_LEN: int = int(
+    os.environ.get("RAG_INGEST_QUALITY_MIN_BONUS_LEN", "120")
+)
+RAG_INGEST_QUALITY_PER_CHAR: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_PER_CHAR", "0.01")
+)
+RAG_INGEST_QUALITY_MAX: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_MAX", "1.0")
+)
+RAG_INGEST_ANCHOR_PREVIEW_LEN: int = int(
+    os.environ.get("RAG_INGEST_ANCHOR_PREVIEW_LEN", "220")
+)
+RAG_INGEST_PARA_PREVIEW_LEN: int = int(
+    os.environ.get("RAG_INGEST_PARA_PREVIEW_LEN", "600")
+)
+RAG_INGEST_MIN_PARA_SIMILARITY: float = float(
+    os.environ.get("RAG_INGEST_MIN_PARA_SIMILARITY", "0.45")
+)
+
+# --- Ingest: Clean store ---
+RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS: int = int(
+    os.environ.get("RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS", "10")
+)
+
+# --- Ingest: Fuzzy dedup (MinHash) ---
+RAG_INGEST_FUZZY_SHINGLE_SIZE: int = int(
+    os.environ.get("RAG_INGEST_FUZZY_SHINGLE_SIZE", "3")
+)
+RAG_INGEST_FUZZY_NUM_HASHES: int = int(
+    os.environ.get("RAG_INGEST_FUZZY_NUM_HASHES", "128")
+)
+RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD: float = float(
+    os.environ.get("RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD", "0.95")
+)
+
+# --- Ingest: Chunk quality gates ---
+RAG_INGEST_MIN_CHUNK_CHARS: int = int(
+    os.environ.get("RAG_INGEST_MIN_CHUNK_CHARS", "40")
+)
+RAG_INGEST_MIN_QUALITY_SCORE: float = float(
+    os.environ.get("RAG_INGEST_MIN_QUALITY_SCORE", "0.45")
+)
+
+# --- Ingest: Temporal workflow (KG phase 2b) ---
+RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN", "10")
+)
+RAG_INGEST_TEMPORAL_KG_RETRY_MAX: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_RETRY_MAX", "5")
+)
+RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S", "10")
+)
+
+# --- Retrieval: Query processor (rewriter / evaluator) ---
+RAG_RETRIEVAL_REWRITER_MAX_TOKENS: int = int(
+    os.environ.get("RAG_RETRIEVAL_REWRITER_MAX_TOKENS", "400")
+)
+RAG_QUERY_PRONOUN_DENSITY_THRESHOLD: float = float(
+    os.environ.get("RAG_QUERY_PRONOUN_DENSITY_THRESHOLD", "0.15")
+)
+RAG_QUERY_EVALUATOR_MAX_TOKENS: int = int(
+    os.environ.get("RAG_QUERY_EVALUATOR_MAX_TOKENS", "256")
+)
+
+# --- Retrieval: Generation / sanitization ---
+RAG_GENERATION_MIN_FRAGMENT_LEN: int = int(
+    os.environ.get("RAG_GENERATION_MIN_FRAGMENT_LEN", "40")
+)
+
+# --- Retrieval: Query suggestion heuristic ---
+RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES: int = int(
+    os.environ.get("RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES", "2")
+)
+
+# --- Core: Embedding batch sizes ---
+RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS: int = int(
+    os.environ.get("RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS", "32")
+)
+RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING: int = int(
+    os.environ.get("RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING", "64")
+)
+
+# --- Platform: LLM defaults & probes ---
+RAG_LLM_DEFAULT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_LLM_DEFAULT_MAX_TOKENS", "2048")
+)
+RAG_LLM_DEFAULT_TEMPERATURE: float = float(
+    os.environ.get("RAG_LLM_DEFAULT_TEMPERATURE", "0.2")
+)
+RAG_LLM_DEFAULT_NUM_RETRIES: int = int(
+    os.environ.get("RAG_LLM_DEFAULT_NUM_RETRIES", "3")
+)
+RAG_LLM_RATE_LIMIT_RETRY_DELAY_S: int = int(
+    os.environ.get("RAG_LLM_RATE_LIMIT_RETRY_DELAY_S", "5")
+)
+RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS: int = int(
+    os.environ.get("RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS", "1")
+)
+RAG_LLM_ONESHOT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_LLM_ONESHOT_MAX_TOKENS", "256")
+)
+
+# --- Platform: Memory text limits ---
+RAG_MEMORY_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SUMMARY_MAX_CHARS", "2400")
+)
+RAG_MEMORY_TURN_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_TURN_MAX_CHARS", "1200")
+)
+RAG_MEMORY_SNIPPET_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SNIPPET_MAX_CHARS", "220")
+)
+
+# --- Platform: Observability ---
+RAG_OBSERVABILITY_MAX_CAPTURE_LEN: int = int(
+    os.environ.get("RAG_OBSERVABILITY_MAX_CAPTURE_LEN", "500")
+)
+
+# --- Platform: Reliability / retry defaults ---
+RAG_RELIABILITY_DEFAULT_MAX_ATTEMPTS: int = int(
+    os.environ.get("RAG_RELIABILITY_DEFAULT_MAX_ATTEMPTS", "3")
+)
+RAG_RELIABILITY_INITIAL_BACKOFF_S: float = float(
+    os.environ.get("RAG_RELIABILITY_INITIAL_BACKOFF_S", "0.5")
+)
+RAG_RELIABILITY_MAX_BACKOFF_S: float = float(
+    os.environ.get("RAG_RELIABILITY_MAX_BACKOFF_S", "5.0")
+)
+RAG_RELIABILITY_BACKOFF_MULTIPLIER: float = float(
+    os.environ.get("RAG_RELIABILITY_BACKOFF_MULTIPLIER", "2.0")
+)
+
+# --- DB: MinIO ---
+RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS: int = int(
+    os.environ.get("RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS", "3600")
+)
+RAG_MINIO_LIST_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MINIO_LIST_DEFAULT_LIMIT", "1000")
+)
+RAG_MINIO_LIST_DEFAULT_OFFSET: int = int(
+    os.environ.get("RAG_MINIO_LIST_DEFAULT_OFFSET", "0")
+)
+RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY: int = int(
+    os.environ.get("RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY", "85")
+)
+
+# --- Guardrails ---
+RAG_GUARDRAILS_PII_SCORE_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_PII_SCORE_THRESHOLD", "0.4")
+)
+RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD", "0.5")
+)
+RAG_GUARDRAILS_SELF_CHECK_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_SELF_CHECK_THRESHOLD", "0.5")
+)
+RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S: int = int(
+    os.environ.get("RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S", "10")
+)
+RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS", "5")
+)
+RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS", "3")
+)
+RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS", "2")
+)
+RAG_GUARDRAILS_INJECTION_LP_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_INJECTION_LP_THRESHOLD", "89.79")
+)
+RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD", "1845.65")
+)
+
+# --- Ingest: misc support helpers ---
+RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS: int = int(
+    os.environ.get("RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS", "4")
+)
+RAG_INGEST_LLM_DEFAULT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_INGEST_LLM_DEFAULT_MAX_TOKENS", "300")
+)
+RAG_INGEST_SCORER_PYTEST_TIMEOUT_S: int = int(
+    os.environ.get("RAG_INGEST_SCORER_PYTEST_TIMEOUT_S", "300")
+)
+
+# --- Platform: Memory (extended) ---
+RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS", "1600")
+)
+RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS", "1800")
+)
+RAG_MEMORY_CONTEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_CONTEXT_MAX_CHARS", "5000")
+)
+RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS: int = int(
+    os.environ.get("RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS", "512")
+)
+RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS", "2600")
+)
+RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS", "200")
+)
+RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT", "100")
+)
+
+# --- Platform: Token budget ---
+RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S: int = int(
+    os.environ.get("RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S", "5")
+)
+
+# --- Platform: LLM cache ---
+RAG_LLM_CACHE_DEFAULT_TTL_S: int = int(
+    os.environ.get("RAG_LLM_CACHE_DEFAULT_TTL_S", "3600")
+)
+
+# --- Retrieval: query/pipeline (extended) ---
+RAG_QUERY_KG_MATCH_MAX_TERMS: int = int(
+    os.environ.get("RAG_QUERY_KG_MATCH_MAX_TERMS", "20")
+)
+RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS", "8000")
+)
+RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS", "3")
+)
+RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS", "2")
+)
+RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE: int = int(
+    os.environ.get("RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE", "128")
+)
 
 # NOTE: RAG_INGESTION_COLQWEN_MODEL is reused for retrieval-time model
 # selection (FR-109). No separate retrieval model key exists.

@@ -31,6 +31,7 @@ from src.guardrails.models.base import (
     GuardianUnavailable,
     GuardianVerdict,
 )
+from config.settings import RAG_GUARDRAILS_SELF_CHECK_THRESHOLD
 
 logger = logging.getLogger("rag.guardrails.models.self_check")
 
@@ -95,7 +96,7 @@ class SelfCheckGuardian(GuardianModel):
         {GuardianRisk.HARM, GuardianRisk.GROUNDEDNESS}
     )
 
-    def __init__(self, threshold: float = 0.5) -> None:
+    def __init__(self, threshold: float = RAG_GUARDRAILS_SELF_CHECK_THRESHOLD) -> None:
         self._threshold = threshold
 
     def classify(

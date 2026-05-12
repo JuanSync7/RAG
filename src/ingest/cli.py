@@ -34,8 +34,8 @@ logger = logging.getLogger("rag.ingest")
 
 def ingest(
     documents_dir: Path = DOCUMENTS_DIR,
-    fresh: bool = True,
-    update: bool = False,
+    fresh: bool = False,
+    update: bool = True,
     semantic_chunking: bool = True,
     export_processed: bool = False,
     selected_file: Optional[Path] = None,
@@ -144,10 +144,23 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Ingest all supported documents in a specific directory",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--update",
         action="store_true",
-        help="Incremental update mode (changed docs only; idempotent writes)",
+        help="Incremental update mode (default; changed docs only, idempotent writes)",
+    )
+    mode_group.add_argument(
+        "--fresh",
+        action="store_true",
+        help="DESTRUCTIVE: delete the entire Weaviate collection before ingesting. "
+             "Requires confirmation unless --yes is passed.",
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompt for --fresh (use with care, e.g. in CI).",
     )
     parser.add_argument(
         "--no-semantic",
@@ -262,6 +275,28 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _confirm_fresh(collection_name: str) -> bool:
+    """Prompt the user to confirm a destructive --fresh ingest.
+
+    Returns True if the user confirms, False otherwise. Non-interactive
+    callers (no TTY) must pass --yes to skip this; otherwise the run aborts.
+    """
+    if not sys.stdin.isatty():
+        return False
+    print(
+        f"\nWARNING: --fresh will DELETE the entire Weaviate collection "
+        f"'{collection_name}' and re-ingest from scratch.\n"
+        f"Type the collection name to confirm, or anything else to abort: ",
+        end="",
+        flush=True,
+    )
+    try:
+        response = input().strip()
+    except EOFError:
+        return False
+    return response == collection_name
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -276,10 +311,20 @@ def main() -> None:
     elif args.dir is not None:
         target_documents_dir = validate_documents_dir(args.dir, PROJECT_ROOT)
 
+    # Default is incremental update; --fresh is the explicit destructive opt-in.
+    fresh_mode = bool(args.fresh)
+    update_mode = not fresh_mode
+
+    if fresh_mode and not args.yes:
+        from config.settings import WEAVIATE_COLLECTION_NAME
+        if not _confirm_fresh(WEAVIATE_COLLECTION_NAME):
+            print("Aborted: --fresh not confirmed.", file=sys.stderr)
+            sys.exit(2)
+
     ingest(
         documents_dir=target_documents_dir,
-        fresh=not args.update,
-        update=args.update,
+        fresh=fresh_mode,
+        update=update_mode,
         semantic_chunking=not args.no_semantic,
         export_processed=args.export_processed,
         selected_file=selected_file,
