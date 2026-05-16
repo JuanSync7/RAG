@@ -74,7 +74,7 @@ setting `KGWEAVE_API_URL` flips to the HTTP client transparently.
 | `KG_WORKER_SLOTS` | `4` | KGWeave worker — concurrent activity budget |
 | `KG_USE_GLINER` | `0` | KGWeave worker — `1` to enable GLiNER extractor |
 | `KGWEAVE_IMAGE_TAG` | `latest` | compose pull tag |
-| `KGWEAVE_REPO_PATH` | `../KGWeave` | compose build context (sibling checkout) |
+| `KGWEAVE_BUILD_CONTEXT` | git URL pinned to a SHA | compose build context — path or git URL. Legacy `KGWEAVE_REPO_PATH` honoured as fallback. |
 | `KGWEAVE_API_HOST_PORT` | `8090` | HTTP API host port (compose) |
 | `KGWEAVE_API_TOKEN` | unset | HTTP API bearer token (unset = open access) |
 | `KGWEAVE_API_WORKERS` | `1` | uvicorn worker count |
@@ -90,14 +90,13 @@ docker build -f containers/Dockerfile.kgweave-worker \
 
 ## Local rollout
 
-1. Clone KGWeave next to RagWeave: `git clone <repo> ../KGWeave`
-2. From `RagWeave/`: `docker compose --profile workers up -d kgweave-worker`
-3. Verify the worker registered:
+1. From `RagWeave/`: `docker compose --profile workers up -d kgweave-worker` — the build context defaults to a pinned KGWeave git SHA, so no sibling checkout is required. To co-develop KGWeave locally, clone it and set `KGWEAVE_BUILD_CONTEXT=../KGWeave` (or run `./scripts/bootstrap_kgweave.sh`).
+2. Verify the worker registered:
    `docker compose logs kgweave-worker | grep "kgweave worker started"`
-4. Trigger an ingest in RagWeave with `enable_kg_phase2b=True` in the
+3. Trigger an ingest in RagWeave with `enable_kg_phase2b=True` in the
    `IngestionConfig`. The workflow event history shows `kg_phase2b`
    dispatched on `kgweave-default`.
-5. On Phase 2b failure, inspect the document's status sidecar:
+4. On Phase 2b failure, inspect the document's status sidecar:
    `cat .runtime/clean_store/<safe_key>.status.json`. Backfill drains
    `failed_pending_retry` entries via `BackfillKGWorkflow`.
 

@@ -83,7 +83,7 @@ kgweave-api:
   profiles: ["kgweave"]
   image: ghcr.io/juansync7/kgweave-api:${KGWEAVE_IMAGE_TAG:-latest}
   build:
-    context: ${KGWEAVE_REPO_PATH:-../KGWeave}
+    context: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#<sha>}}
     dockerfile: containers/Dockerfile.kgweave-api
   ports:
     - "8090:8080"

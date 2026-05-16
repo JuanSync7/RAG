@@ -87,12 +87,11 @@ For containers-only, jump to [Step 5](#step-5--start-the-stack) after copying `.
 ```bash
 git clone <repo-url> RagWeave && cd RagWeave
 cp .env.example .env
-./scripts/bootstrap_kgweave.sh   # clones the KGWeave sibling repo to ../KGWeave
 ```
 
 You will edit `.env` in steps 3–4. Defaults work for local dev with the bundled containerised LLM and storage.
 
-> **Why bootstrap?** The knowledge-graph subsystem lives in the separate [KGWeave](https://github.com/JuanSync7/KGWeave) repo. Both the editable Python install (`pyproject.toml` -> `[tool.uv.sources]`) and the Docker builds (compose `additional_contexts`) resolve it from `../KGWeave`. Override the path with `KGWEAVE_REPO_PATH=/elsewhere` if you keep it somewhere else.
+> **KGWeave dependency.** The knowledge-graph subsystem lives in the separate [KGWeave](https://github.com/JuanSync7/KGWeave) repo. It is pinned by git SHA in both `pyproject.toml` (`[tool.uv.sources]`) and `docker-compose.yml` (build context), so a fresh clone needs no extra setup — `uv sync` and `docker compose build` fetch it automatically. If you want to co-develop KGWeave locally, run `./scripts/bootstrap_kgweave.sh` to clone it to `../KGWeave` and point compose at it with `KGWEAVE_BUILD_CONTEXT=../KGWeave`.
 
 ### Step 2 — Install Python + web console
 

@@ -113,7 +113,7 @@ services:
       context: .
       dockerfile: containers/Dockerfile.api
       additional_contexts:
-        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
+        kgweave: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
@@ -194,7 +194,7 @@ services:
       context: .
       dockerfile: containers/Dockerfile.runtime
       additional_contexts:
-        kgweave: ${KGWEAVE_REPO_PATH:-../KGWeave}
+        kgweave: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
     command: python -m server.worker
     environment:
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
@@ -245,13 +245,15 @@ services:
   # KGWeave Phase 2b worker — separate image, separate Temporal queue
   # (kgweave-default). RagWeave's IngestDocumentWorkflow dispatches by
   # activity name to this worker, so the two fleets scale independently.
-  # Set KGWEAVE_REPO_PATH in .env (default: ../KGWeave sibling checkout).
-  # See docs/kgweave_deployment.md for topology, scaling, and rollout.
+  # By default the build context is a git URL pinned to a KGWeave SHA, so a
+  # fresh clone needs no sibling checkout. Override with KGWEAVE_BUILD_CONTEXT
+  # (path or git URL) for KGWeave co-development. Legacy KGWEAVE_REPO_PATH
+  # is honoured as a fallback. See docs/kgweave_deployment.md.
   kgweave-worker:
     profiles: ["workers", "kgweave"]
     image: ghcr.io/juansync7/kgweave-worker:${KGWEAVE_IMAGE_TAG:-latest}
     build:
-      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
+      context: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
       dockerfile: containers/Dockerfile.kgweave-worker
     environment:
       # Shared Temporal cluster — same host:port as the RagWeave worker.
@@ -274,7 +276,7 @@ services:
     profiles: ["kgweave", "kgweave-api"]
     image: ghcr.io/juansync7/kgweave-api:${KGWEAVE_IMAGE_TAG:-latest}
     build:
-      context: ${KGWEAVE_REPO_PATH:-../KGWeave}
+      context: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
       dockerfile: containers/Dockerfile.kgweave-api
     ports:
       - "${KGWEAVE_API_HOST_PORT:-8090}:8080"

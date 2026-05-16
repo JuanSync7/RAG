@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Ensure the KGWeave sibling checkout exists at $KGWEAVE_REPO_PATH.
+# Optional: clone a local KGWeave sibling checkout for co-development.
 #
-# RagWeave depends on the `kgweave` Python package, which lives in a separate
-# repo (extracted in commits a662cd7 / f0191c5). Both the editable dev install
-# (`pyproject.toml` -> [tool.uv.sources] kgweave = { path = "../KGWeave" }) and
-# the Docker builds (compose `additional_contexts: kgweave: ../KGWeave`)
-# resolve KGWeave from a sibling directory by default.
+# RagWeave normally consumes KGWeave from a pinned git ref — Python deps via
+# `[tool.uv.sources]` in pyproject.toml, container builds via the
+# `KGWEAVE_BUILD_CONTEXT` default in docker-compose.yml. A fresh clone of
+# RagWeave does NOT require this script.
 #
-# Run this once after cloning RagWeave on a new machine:
+# Run this only if you want to edit KGWeave alongside RagWeave:
 #   ./scripts/bootstrap_kgweave.sh
+# Then point compose at the local checkout:
+#   echo 'KGWEAVE_BUILD_CONTEXT=../KGWeave' >> .env
+# And switch the uv source line locally (do NOT commit) to:
+#   kgweave = { path = "../KGWeave", editable = true }
 #
 # Override the remote URL, ref, or local path with env vars if needed:
 #   KGWEAVE_REMOTE=git@github.com:JuanSync7/KGWeave.git \
