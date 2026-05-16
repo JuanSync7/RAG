@@ -9,5 +9,6 @@ from src.ingest.embedding.nodes.document_storage_node import document_storage_no
 from src.ingest.embedding.nodes.embedding_storage import embedding_storage_node
 from src.ingest.embedding.nodes.metadata_generation import metadata_generation_node
 from src.ingest.embedding.nodes.quality_validation import quality_validation_node
+from src.ingest.embedding.nodes.tree_node_synthesis import tree_node_synthesis_node
 from src.ingest.embedding.nodes.visual_embedding import visual_embedding_node
 from src.ingest.embedding.nodes.vlm_enrichment import vlm_enrichment_node

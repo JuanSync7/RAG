@@ -69,6 +69,10 @@ class RAGRequest:
     overall_timeout_ms: Optional[int] = None
     stage_budget_overrides: Optional[dict[str, int]] = None
     max_query_iterations: Optional[int] = None
+    # Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
+    # None = use the global ``RAG_TREE_RETRIEVAL_ENABLED`` config default.
+    # True/False = force on/off for this request only.
+    tree_retrieval: Optional[bool] = None
 
 
 @dataclass

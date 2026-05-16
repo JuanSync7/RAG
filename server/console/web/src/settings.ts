@@ -61,6 +61,7 @@ function saveSettings(): void {
         streaming: byId<HTMLInputElement>("streamingToggle").checked,
         memory_enabled: byId<HTMLInputElement>("memoryToggle").checked,
         citations: byId<HTMLInputElement>("citationsToggle").checked,
+        tree_retrieval: byId<HTMLInputElement>("treeRetrievalToggle").checked,
     };
     localStorage.setItem("nc_settings", JSON.stringify(s));
     closeSettings();
@@ -83,6 +84,7 @@ export function loadSettings(): void {
     if (s.streaming !== undefined) byId<HTMLInputElement>("streamingToggle").checked = s.streaming as boolean;
     if (s.memory_enabled !== undefined) byId<HTMLInputElement>("memoryToggle").checked = s.memory_enabled as boolean;
     if (s.citations !== undefined) byId<HTMLInputElement>("citationsToggle").checked = s.citations as boolean;
+    if (s.tree_retrieval !== undefined) byId<HTMLInputElement>("treeRetrievalToggle").checked = s.tree_retrieval as boolean;
 }
 
 function resetSettings(): void {
@@ -94,6 +96,7 @@ function resetSettings(): void {
     byId<HTMLInputElement>("streamingToggle").checked = true;
     byId<HTMLInputElement>("memoryToggle").checked = true;
     byId<HTMLInputElement>("citationsToggle").checked = true;
+    byId<HTMLInputElement>("treeRetrievalToggle").checked = false;
     showToast("Settings reset to defaults");
 }
 

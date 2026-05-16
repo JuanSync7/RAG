@@ -27,6 +27,11 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
+    // Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
+    // Only set on body when user has explicitly toggled it; absent ⇒ server uses config default.
+    if (s.tree_retrieval !== undefined) {
+        body.tree_retrieval = Boolean(s.tree_retrieval);
+    }
     if (getChatMode() === "sources") {
         body.mode = "retrieval";
         body.retrieval_sub_mode = getRetrievalSubMode();

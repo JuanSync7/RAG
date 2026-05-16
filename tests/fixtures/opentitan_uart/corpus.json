@@ -1,0 +1,2029 @@
+{
+  "documents": [
+    {
+      "document_id": "uart__theory_of_operation",
+      "chunks": [
+        {
+          "chunk_id": "36feeb48e8a36f600c82995e",
+          "text": "Theory of Operation\n\n![UART Block Diagram](../doc/block_diagram.svg)\n\nThe TX/RX serial lines are high when idle. Data starts with a START bit (high\nidle state deasserts, **1**-->**0**) followed by 8 data bits. The least\nsignificant bit is sent first. If the parity featu\n\n```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',     wave: 'p............'                                                        },\n    { name: 'tx',             wave: '10333333331..', data: [ \"ls\n\nA write to [`WDATA`](registers.md#wdata) enqueues a data byte into the 32 byte deep write FIFO, which\ntriggers the transmit module to start UART TX serial data transfer. The TX\nmodule dequeues the byt\n\nIf TX is not enabled, written DATA into FIFO will be stacked up and sent out\nwhen TX is enabled.\n\nWhen the FIFO becomes empty as part of transmission, a TX FIFO done interrupt will be raised when the final byte has finished transmitting.\nThis is separate from the TX FIFO water mark interrupt.\n\nThe RX module oversamples the RX input pin at 16x the requested\nbaud clock. When the input is detected low the receiver will check\nhalf a bit-time later (i.e. 8 cycles of the oversample clock) that th\n\nThis behavior of the receiver can be used to compute the approximate\nbaud clock frequency error that can be tolerated between the\ntransmitter at the other end of the cable and the receiver. The\ninitia\n\n```wavejson\n{\n  signal: [\n    { name: 'Sample', wave: '', node: '..P............', period: \"2\" },\n    {},\n    { name: 'rx',\n ",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation"
+          ],
+          "node_kind": "section",
+          "child_count": 32
+        },
+        {
+          "chunk_id": "9b5e37de213b561be2d045d1",
+          "text": "Block Diagram\n\n![UART Block Diagram](../doc/block_diagram.svg)",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Block Diagram"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "8030e7710999c1591b082d3d",
+          "text": "Design Details\n\nThe TX/RX serial lines are high when idle. Data starts with a START bit (high\nidle state deasserts, **1**-->**0**) followed by 8 data bits. The least\nsignificant bit is sent first. If the parity featu\n\n```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',     wave: 'p............'                                                        },\n    { name: 'tx',             wave: '10333333331..', data: [ \"ls\n\nA write to [`WDATA`](registers.md#wdata) enqueues a data byte into the 32 byte deep write FIFO, which\ntriggers the transmit module to start UART TX serial data transfer. The TX\nmodule dequeues the byt\n\nIf TX is not enabled, written DATA into FIFO will be stacked up and sent out\nwhen TX is enabled.\n\nWhen the FIFO becomes empty as part of transmission, a TX FIFO done interrupt will be raised when the final byte has finished transmitting.\nThis is separate from the TX FIFO water mark interrupt.\n\nThe RX module oversamples the RX input pin at 16x the requested\nbaud clock. When the input is detected low the receiver will check\nhalf a bit-time later (i.e. 8 cycles of the oversample clock) that th\n\nThis behavior of the receiver can be used to compute the approximate\nbaud clock frequency error that can be tolerated between the\ntransmitter at the other end of the cable and the receiver. The\ninitia\n\n```wavejson\n{\n  signal: [\n    { name: 'Sample', wave: '', node: '..P............', period: \"2\" },\n    {},\n    { name: 'rx',\n      wave: '1.0.3.3.3.3.3.3.3.3.1.0.3',\n      node: '.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details"
+          ],
+          "node_kind": "section",
+          "child_count": 31
+        },
+        {
+          "chunk_id": "99160391b8f96a1e0701dc5f",
+          "text": "Serial interface (both directions)\n\nThe TX/RX serial lines are high when idle. Data starts with a START bit (high\nidle state deasserts, **1**-->**0**) followed by 8 data bits. The least\nsignificant bit is sent first. If the parity featu\n\n```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',     wave: 'p............'                                                        },\n    { name: 'tx',             wave: '10333333331..', data: [ \"ls",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Serial interface (both directions)"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "a01689664be0540b65245ad4",
+          "text": "Transmission\n\nA write to [`WDATA`](registers.md#wdata) enqueues a data byte into the 32 byte deep write FIFO, which\ntriggers the transmit module to start UART TX serial data transfer. The TX\nmodule dequeues the byt\n\nIf TX is not enabled, written DATA into FIFO will be stacked up and sent out\nwhen TX is enabled.\n\nWhen the FIFO becomes empty as part of transmission, a TX FIFO done interrupt will be raised when the final byte has finished transmitting.\nThis is separate from the TX FIFO water mark interrupt.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Transmission"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "ed534ab3fff9b359c8d2abf1",
+          "text": "Reception\n\nThe RX module oversamples the RX input pin at 16x the requested\nbaud clock. When the input is detected low the receiver will check\nhalf a bit-time later (i.e. 8 cycles of the oversample clock) that th\n\nThis behavior of the receiver can be used to compute the approximate\nbaud clock frequency error that can be tolerated between the\ntransmitter at the other end of the cable and the receiver. The\ninitia\n\n```wavejson\n{\n  signal: [\n    { name: 'Sample', wave: '', node: '..P............', period: \"2\" },\n    {},\n    { name: 'rx',\n      wave: '1.0.3.3.3.3.3.3.3.3.1.0.3',\n      node: '...A................C.\n\nIn practice, the transmitter and receiver will both differ from the\nideal baud rate. Since the worst case difference for reception is 5%,\nthe uart can be expected to work if both sides are within +/- ",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Reception"
+          ],
+          "node_kind": "section",
+          "child_count": 4
+        },
+        {
+          "chunk_id": "dc1693064688f1feaacd5bf7",
+          "text": "Setting the baud rate\n\nThe baud rate is set by writing to the [`CTRL.NCO`](registers.md#ctrl) register field. This should be\nset using the equation below, where `f_pclk` is the system clock frequency\nprovided to the UART, a\n\n$$ NCO = 16 \\times {{2^{$bits(NCO)} \\times f\\_{baud}} \\over {f\\_{pclk}}} $$\n\nThe formula above depends on the NCO CSR width.\nThe logic creates a x16 tick when the NCO counter overflows.\nSo, the computed baud rate from NCO value is below.\n\n$$ f\\_{baud} = {{1 \\over 16} \\times {NCO \\over {2^{$bits(NCO)}}} \\times {f\\_{pclk}}} $$\n\nNote that the NCO result from the above formula can be a fraction but\nthe NCO register only accepts an integer value. This will create an\nerror if the baud rate is not divisible by the fixed clock fre\n\n$$ Error = {{(NCO - INT(NCO))} \\over {NCO}} percent $$\n\nIn this case if the resulting value of NCO is greater than $$ {1 \\over\n0.025} = 40 $$ then this will always be less than the 2.5% error\ntarget.\n\nFor NCO less than 40 the error in baud rate may or may not be\nacceptable and should be carefully checked and rounding to the nearest\ninteger may achieve better results. If the computed value is close \n\n$$ {{baud} < {{40 * f\\_{pclk}} \\over {2^{$bits(NCO)+4}}}} \\qquad OR \\qquad\n{{f\\_{pclk}} > {{{2^{$bits(NCO)+4}} * {baud}} \\over {40}}} $$\n\nUsing rounded frequencies and common baud rates, this implies that\ncare is needed for 9600 baud and below if the system clock is over\n250MHz, with 4800 baud and below if the system clock is over 125MH",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "section",
+          "child_count": 10
+        },
+        {
+          "chunk_id": "d05a253ce25f3708df26f6af",
+          "text": "Interrupts\n\nUART module has a few interrupts including general data flow interrupts\nand unexpected event interrupts.\n\nIf the TX FIFO level becomes smaller than the TX water mark level (configurable via [`FIFO_CTRL.TXILVL`](registers.md#fifo_ctrl--txilvl)), the `tx_watermark` interrupt is raised to inform SW.\nIf the T\n\nNote that the watermark interrupts and the empty interrupt are level-based status interrupts.\nThey will stay asserted for as long as the FIFO levels are in violation of the configured level and cannot\n\nIf TX FIFO becomes empty as part of transmit, the interrupt `tx_done` is asserted once the final byte has been transmitted.\nThe transmitted contents may be garbage at this point as old FIFO contents w\n\nIf RX FIFO receives an additional write request when its FIFO is full,\nthe interrupt `rx_overflow` is asserted and the character is dropped.\n\nThe `rx_break_err` interrupt is triggered if a break condition has\nbeen detected. A break condition is defined as the RX pin being\ncontinuously low for more than a programmable number of\ncharacter-tim\n\nThe `rx_frame_err` interrupt is triggered if the RX module receives the `START`\nbit (**0**) and a series of data bits but did not detect the `STOP` bit\n(**1**). This can happen because of noise affect\n\n```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',        wave: 'p............'                                                 },\n    { name: 'rx',                wave: '10333333330..', data: [ \"lsb\n\nThe effects of the line bein",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts"
+          ],
+          "node_kind": "section",
+          "child_count": 12
+        },
+        {
+          "chunk_id": "8433cfd611d1a5cf8020f319",
+          "text": "tx_watermark / tx_empty / rx_watermark\n\nIf the TX FIFO level becomes smaller than the TX water mark level (configurable via [`FIFO_CTRL.TXILVL`](registers.md#fifo_ctrl--txilvl)), the `tx_watermark` interrupt is raised to inform SW.\nIf the T\n\nNote that the watermark interrupts and the empty interrupt are level-based status interrupts.\nThey will stay asserted for as long as the FIFO levels are in violation of the configured level and cannot",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "tx_watermark / tx_empty / rx_watermark"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "ac72c060e257356bc4fb7b95",
+          "text": "tx_done\n\nIf TX FIFO becomes empty as part of transmit, the interrupt `tx_done` is asserted once the final byte has been transmitted.\nThe transmitted contents may be garbage at this point as old FIFO contents w",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "tx_done"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "e8076f5854922cd0b6efbdb2",
+          "text": "rx_overflow\n\nIf RX FIFO receives an additional write request when its FIFO is full,\nthe interrupt `rx_overflow` is asserted and the character is dropped.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_overflow"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "08a2c18639585a8402ee8a5d",
+          "text": "rx_break_err\n\nThe `rx_break_err` interrupt is triggered if a break condition has\nbeen detected. A break condition is defined as the RX pin being\ncontinuously low for more than a programmable number of\ncharacter-tim",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_break_err"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "3bc74d8614e14ba05923af82",
+          "text": "rx_frame_err\n\nThe `rx_frame_err` interrupt is triggered if the RX module receives the `START`\nbit (**0**) and a series of data bits but did not detect the `STOP` bit\n(**1**). This can happen because of noise affect\n\n```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',        wave: 'p............'                                                 },\n    { name: 'rx',                wave: '10333333330..', data: [ \"lsb\n\nThe effects of the line being low for certain periods are summarized\nin the table:\n\n|Line low (bit-times) | Frame Err? | Break? | Comment |\n|---------------------|------------|--------|---------|\n|<10                  | If STOP=0  | No     | Normal operation |\n|10 (with parity)     |",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_frame_err"
+          ],
+          "node_kind": "section",
+          "child_count": 4
+        },
+        {
+          "chunk_id": "8050e1bb154d10c72d50e643",
+          "text": "rx_timeout\n\nThe `rx_timeout` interrupt is triggered when the RX FIFO has data sitting in it\nwithout software reading it for a programmable number of bit times (using the\nbaud rate clock as reference, programmable",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_timeout"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "d456f660bca46d2400250575",
+          "text": "rx_parity_err\n\nThe `rx_parity_err` interrupt is triggered if parity is enabled and\nthe RX parity bit does not match the expected polarity as programmed\nin [`CTRL.PARITY_ODD`](registers.md#ctrl--parity_odd).",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_parity_err"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "b85d81582b5873b9980edf04",
+          "text": "![UART Block Diagram](../doc/block_diagram.svg)",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Block Diagram"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "4df4e6c40c2e8052caf639ce",
+          "text": "The TX/RX serial lines are high when idle. Data starts with a START bit (high\nidle state deasserts, **1**-->**0**) followed by 8 data bits. The least\nsignificant bit is sent first. If the parity feature is turned on then an odd or\neven parity bit follows after the data bits. Finally a STOP (**1**) bit\ncompletes one byte of data transfer.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Serial interface (both directions)"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "ac7edbe623b96589544a18d9",
+          "text": "```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',     wave: 'p............'                                                        },\n    { name: 'tx',             wave: '10333333331..', data: [ \"lsb\", \"\", \"\", \"\", \"\", \"\", \"\", \"msb\" ]        },\n    { name: 'Baud Clock',     wave: 'p............'                                                        },\n    { name: 'tx (w/ parity)', wave: '103333333341.', data: [ \"lsb\", \"\", \"\", \"\", \"\", \"\", \"\", \"msb\", \"par\" ] },\n  ],\n  head: {\n    text: 'Serial Transmission Frame',\n  },\n  foot: {\n    text: 'start bit (\"0\") at cycle -1, stop bit (\"1\") at cycle 8, or after parity bit',\n    tock: -2\n  },\n  foot: {\n    text: [\n      'tspan',\n        ['tspan', 'start bit '],\n        ['tspan', {class:'info h4'}, '0'],\n        ['tspan', ' at cycle -1, stop bit '],\n        ['tspan', {class:'info h4'}, '1'],\n        ['tspan', ' at cycle 8, or at cycle 9 after parity bit'],\n      ],\n    tock: -2,\n  }\n}\n```",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Serial interface (both directions)"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "4b1223b799c37e9f81eeadf8",
+          "text": "A write to [`WDATA`](registers.md#wdata) enqueues a data byte into the 32 byte deep write FIFO, which\ntriggers the transmit module to start UART TX serial data transfer. The TX\nmodule dequeues the byte from the FIFO and shifts it bit by bit out to the UART\nTX pin on positive edges of the baud clock.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Transmission"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "cc4c42e918df62e0c5efaa0c",
+          "text": "If TX is not enabled, written DATA into FIFO will be stacked up and sent out\nwhen TX is enabled.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Transmission"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "2e8eaed995fe574234e78c6a",
+          "text": "When the FIFO becomes empty as part of transmission, a TX FIFO done interrupt will be raised when the final byte has finished transmitting.\nThis is separate from the TX FIFO water mark interrupt.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Transmission"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "2ee7b195e804830b94949661",
+          "text": "The RX module oversamples the RX input pin at 16x the requested\nbaud clock. When the input is detected low the receiver will check\nhalf a bit-time later (i.e. 8 cycles of the oversample clock) that the\nline is still low before detecting the START bit. If the line has\nreturned high the glitch is ignored. After it detects the START bit,\nthe RX module samples at the center of each bit-time and gathers\nincoming serial bits into a character buffer. If the STOP bit is\ndetected as high and the optional parity bit is correct the data byte\nis pushed into a 32 byte deep RX FIFO. The data can be read out by\nreading [`RDATA`](registers.md#rdata) register.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Reception"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "937570beec702d20594c6c0d",
+          "text": "This behavior of the receiver can be used to compute the approximate\nbaud clock frequency error that can be tolerated between the\ntransmitter at the other end of the cable and the receiver. The\ninitial sample point is aligned with the center of the START bit. The\nreceiver will then sample every 16 cycles of the 16 x baud clock, the\ndiagram below shows the number of ticks after the centering that each\nbit is captured. Because of the frequency difference between the\ntransmitter and receiver the actual sample point will drift compared to\nthe ideal center of the bit. In order to correctly receive the STOP\nbit it must be sampled between the \"early\" and \"late\" points shown\non the diagram, which are half a bit-time or 8 ticks of the 16x baud\nclock before or after the center. If the transmitter is considered\n\"ideal\" then the local clock must thus differ by no more than plus or\nminus 8 ticks in 144 or approximately +/- 5.5%. If parity is enabled\nthe stop bit will be a bit time later, so this becomes 8/160 or about\n+/- 5%.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Reception"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c02e2b2410fefb2f909e148b",
+          "text": "```wavejson\n{\n  signal: [\n    { name: 'Sample', wave: '', node: '..P............', period: \"2\" },\n    {},\n    { name: 'rx',\n      wave: '1.0.3.3.3.3.3.3.3.3.1.0.3',\n      node: '...A................C.D..',\n      cdata: [ \"idle\", \"start\", \"+16\", \"+32\", \"+48\", \"+64\", \"+80\",\n                \"+96\", \"+112\", \"+128\", \"+144\", \"next start\" ] },\n  ],\n    \"edge\"   : [\"P-|>A center\", \"P-|>C early\", \"P-|>D late\"],\n  head: {\n    text: 'Receiver sampling window',\n  },\n}\n```",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Reception"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "8ea22830eee81d9dea66d0d6",
+          "text": "In practice, the transmitter and receiver will both differ from the\nideal baud rate. Since the worst case difference for reception is 5%,\nthe uart can be expected to work if both sides are within +/- 2.5% of\nthe ideal baud rate.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Reception"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "56931e1eeae0e91a30b8252a",
+          "text": "The baud rate is set by writing to the [`CTRL.NCO`](registers.md#ctrl) register field. This should be\nset using the equation below, where `f_pclk` is the system clock frequency\nprovided to the UART, and `f_baud` is the desired baud rate (in bits per second).",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "210d79b6dbae7cfe8954e30f",
+          "text": "$$ NCO = 16 \\times {{2^{$bits(NCO)} \\times f\\_{baud}} \\over {f\\_{pclk}}} $$",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "d5b2f7ab600588caa054a2a4",
+          "text": "The formula above depends on the NCO CSR width.\nThe logic creates a x16 tick when the NCO counter overflows.\nSo, the computed baud rate from NCO value is below.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "ddfadfc252c597ce6a33220d",
+          "text": "$$ f\\_{baud} = {{1 \\over 16} \\times {NCO \\over {2^{$bits(NCO)}}} \\times {f\\_{pclk}}} $$",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "30747109ff1a2219e097bee9",
+          "text": "Note that the NCO result from the above formula can be a fraction but\nthe NCO register only accepts an integer value. This will create an\nerror if the baud rate is not divisible by the fixed clock frequency. As\ndiscussed in the previous section the error rate between the receiver\nand remote transmitter should be lower than `8 / 144` to latch a\ncorrect character value when parity is not used and lower than `8 /\n160` when parity is used. In the expectation that the device the other\nside of the line behaves similarly, this requires each side have a\nbaud rate that is matched to within +/- 2.5% of the ideal baud\nrate. The contribution to this error if NCO is rounded down to an\ninteger (which will make the actual baud rate always lower or equal to\nthe requested rate) can be computed from:",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "785ebe62646e077f33149e57",
+          "text": "$$ Error = {{(NCO - INT(NCO))} \\over {NCO}} percent $$",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "a3e9bfcafcc8f13b57bc038f",
+          "text": "In this case if the resulting value of NCO is greater than $$ {1 \\over\n0.025} = 40 $$ then this will always be less than the 2.5% error\ntarget.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "7f4354129e28b003eda322eb",
+          "text": "For NCO less than 40 the error in baud rate may or may not be\nacceptable and should be carefully checked and rounding to the nearest\ninteger may achieve better results. If the computed value is close to\nan integer so that the error in the target range then the baud rate\ncan be supported, however if it is too far off an integer then the\nbaud rate cannot be supported. This check is needed when",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "18ad3a1b1d7e7b664a94add0",
+          "text": "$$ {{baud} < {{40 * f\\_{pclk}} \\over {2^{$bits(NCO)+4}}}} \\qquad OR \\qquad\n{{f\\_{pclk}} > {{{2^{$bits(NCO)+4}} * {baud}} \\over {40}}} $$",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "b3ba83f72eae617b2c1e63ae",
+          "text": "Using rounded frequencies and common baud rates, this implies that\ncare is needed for 9600 baud and below if the system clock is over\n250MHz, with 4800 baud and below if the system clock is over 125MHz,\n2400 baud and below if the system clock is over 62MHz, and 1200 baud\nand below if the system clock is over 31MHz.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Setting the baud rate"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "cb3fc366494741fa4bae36d8",
+          "text": "UART module has a few interrupts including general data flow interrupts\nand unexpected event interrupts.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "baf53564b92a62f38cfbd035",
+          "text": "If the TX FIFO level becomes smaller than the TX water mark level (configurable via [`FIFO_CTRL.TXILVL`](registers.md#fifo_ctrl--txilvl)), the `tx_watermark` interrupt is raised to inform SW.\nIf the TX FIFO is empty, the `tx_empty` interrupt is raised to inform SW.\nIf the RX FIFO level becomes greater than or equal to RX water mark level (configurable via [`FIFO_CTRL.RXILVL`](registers.md#fifo_ctrl--rxilvl)), the `rx_watermark` interrupt is raised to inform SW.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "tx_watermark / tx_empty / rx_watermark"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c8e5e08d055def0ab1150c59",
+          "text": "Note that the watermark interrupts and the empty interrupt are level-based status interrupts.\nThey will stay asserted for as long as the FIFO levels are in violation of the configured level and cannot be cleared by writing to the status register.\nThis also means that `tx_watermark` and `tx_empty` start off in an asserted state (reset high).",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "tx_watermark / tx_empty / rx_watermark"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c1e68ec01fd5a38de1ebcfd9",
+          "text": "If TX FIFO becomes empty as part of transmit, the interrupt `tx_done` is asserted once the final byte has been transmitted.\nThe transmitted contents may be garbage at this point as old FIFO contents will likely be transmitted.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "tx_done"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "352a909720dd1082aac5b915",
+          "text": "If RX FIFO receives an additional write request when its FIFO is full,\nthe interrupt `rx_overflow` is asserted and the character is dropped.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_overflow"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9aa6e48859c737afbbefacc5",
+          "text": "The `rx_break_err` interrupt is triggered if a break condition has\nbeen detected. A break condition is defined as the RX pin being\ncontinuously low for more than a programmable number of\ncharacter-times (via [`CTRL.RXBLVL`](registers.md#ctrl), either 2, 4, 8, or 16). A\ncharacter time is 10 bit-times if parity is disabled (START + 8 data +\nSTOP) or 11 bit-times if parity is enabled (START + 8 data + parity +\nSTOP). If the UART is connected to an external connector this would\ntypically indicate the cable has been disconnected (or there is a\nbreak in the wire). If the UART is connected to another part on the\nsame board it would typically indicate the other part has reset or\nrebooted. (If the open connector or resetting peer part causes the RX\ninput to not be actively driven, then a pulldown resistor is needed to\nensure a break and a pullup resistor will ensure the line looks idle\nand no break is generated.)  Note that only one interrupt is generated\nper break -- the line must return high for at least half a bit-time\nbefore an additional break interrupt is generated. The current break\nstatus can be read from the [`STATUS.BREAK`](registers.md#status) bit. If STATUS.BREAK is set\nbut [`INTR_STATE.BREAK`](registers.md#intr_state) is clear then the line break has already caused\nan interrupt that has been cleared but the line break is still going\non. If [`STATUS.BREAK`](registers.md#status) is clear but [`INTR_STATE.BREAK`](registers.md#intr_state) is set then\nthere has been a line break for which software has not cleared the\ninterrupt but the line is now back to normal.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_break_err"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "59512d568e9d45646081b341",
+          "text": "The `rx_frame_err` interrupt is triggered if the RX module receives the `START`\nbit (**0**) and a series of data bits but did not detect the `STOP` bit\n(**1**). This can happen because of noise affecting the line or if the\ntransmitter clock is fast or slow compared to the receiver. In a real frame\nerror the stop bit will be present just at an incorrect time so the line will\ncontinue to signal both high and low. The start of a line break (described\nabove) matches a frame error with all data bits zero and one frame error\ninterrupt will be raised. If the line stays zero until the break error occurs,\nthe frame error will be set at every char-time. Frame errors will continue to\nbe reported after a break error.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_frame_err"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "6a5b1c021d75e428dbbc0de3",
+          "text": "```wavejson\n{\n  signal: [\n    { name: 'Baud Clock',        wave: 'p............'                                                 },\n    { name: 'rx',                wave: '10333333330..', data: [ \"lsb\", \"\", \"\", \"\", \"\", \"\", \"\", \"msb\" ] },\n    {},\n    { name: 'intr_rx_frame_err', wave: '0..........1.'},\n  ],\n  head: {\n    text: 'Serial Receive with Framing Error',\n  },\n  foot: {\n    text: [\n      'tspan',\n        ['tspan', 'start bit '],\n        ['tspan', {class:'info h4'}, '0'],\n        ['tspan', ' at cycle -1, stop bit '],\n        ['tspan', {class:'error h4'}, '1'],\n        ['tspan', ' missing at cycle 8'],\n      ],\n    tock: -2,\n  }\n}\n```",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_frame_err"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9c897235b878909a29f38339",
+          "text": "The effects of the line being low for certain periods are summarized\nin the table:",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_frame_err"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "fe77f45ad3c8cdb1aafe7878",
+          "text": "|Line low (bit-times) | Frame Err? | Break? | Comment |\n|---------------------|------------|--------|---------|\n|<10                  | If STOP=0  | No     | Normal operation |\n|10 (with parity)     | No         | No     | Normal zero data with STOP=1 |\n|10 (no parity)       | Yes        | No     | Frame error since STOP=0 |\n|11 - RXBLVL*char     | Yes        | No     | Break less than detect level |\n|\\>RXBLVL*char        | Yes        | Once   | Frame error signalled at every char-time, break at RXBLVL char-times|",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_frame_err"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9211ace4043b45eb41c2d285",
+          "text": "The `rx_timeout` interrupt is triggered when the RX FIFO has data sitting in it\nwithout software reading it for a programmable number of bit times (using the\nbaud rate clock as reference, programmable via [`TIMEOUT_CTRL`](registers.md#timeout_ctrl)). This is used to\nalert software that it has data still waiting in the FIFO that has not been\nhandled yet. The timeout counter is reset whenever the FIFO depth is changed or\nan `rx_timeout` event occurs. If the RX FIFO is full and new character is\nreceived, it won't reset the timeout value. The software is responsible for\nkeeping the RX FIFO in the level below the watermark. The actual timeout time\ncan vary based on the reset of the timeout timer and the start of the\ntransaction. For instance, if the software resets the timeout timer by reading a\ncharacter from the RX FIFO and right after it there is a baud clock tick and the\nstart of a new RX transaction from the host, the timeout time is reduced by 1\nand half baud clock periods.",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_timeout"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "761e2adc7a93fc0c7d0167a2",
+          "text": "The `rx_parity_err` interrupt is triggered if parity is enabled and\nthe RX parity bit does not match the expected polarity as programmed\nin [`CTRL.PARITY_ODD`](registers.md#ctrl--parity_odd).",
+          "document_id": "uart__theory_of_operation",
+          "heading_path": [
+            "Theory of Operation",
+            "Design Details",
+            "Interrupts",
+            "rx_parity_err"
+          ],
+          "node_kind": "chunk"
+        }
+      ]
+    },
+    {
+      "document_id": "uart__registers",
+      "chunks": [
+        {
+          "chunk_id": "3551a42513d4903beec2300a",
+          "text": "Registers\n\n<!-- BEGIN CMDGEN util/regtool.py -d ./hw/ip/uart/data/uart.hjson -->\n\n| Name                                 | Offset   |   Length | Description                                                        |\n|:-------------------------------------|:---------|---------:|:-----\n\nInterrupt State Register\n- Offset: `0x0`\n- Reset default: `0x101`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                                                                    |\n|:------:|:------:|:-------:|:-----------\n\nInterrupt Enable Register\n- Offset: `0x4`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                             |\n|:------:|:------:|:-------:|:--------------|:----------------------------------\n\nInterrupt Test Register\n- Offset: `0x8`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rot",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers"
+          ],
+          "node_kind": "section",
+          "child_count": 62
+        },
+        {
+          "chunk_id": "70edb5100743667d48951066",
+          "text": "Summary\n\n| Name                                 | Offset   |   Length | Description                                                        |\n|:-------------------------------------|:---------|---------:|:-----",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "Summary"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "9b94e4100c5c07b06b077ebc",
+          "text": "INTR_STATE\n\nInterrupt State Register\n- Offset: `0x0`\n- Reset default: `0x101`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                                                                    |\n|:------:|:------:|:-------:|:-----------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_STATE"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "540627ec23f059330ee67d80",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                                                                    |\n|:------:|:------:|:-------:|:-----------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_STATE",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "b73c5e1d8b55a51ade2c10de",
+          "text": "INTR_ENABLE\n\nInterrupt Enable Register\n- Offset: `0x4`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                             |\n|:------:|:------:|:-------:|:--------------|:----------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_ENABLE"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "75f209218ba9d74f0b9d33e0",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                             |\n|:------:|:------:|:-------:|:--------------|:----------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_ENABLE",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "dc21b429f2df4e97e9f95ef7",
+          "text": "INTR_TEST\n\nInterrupt Test Register\n- Offset: `0x8`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"wo\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                      |\n|:------:|:------:|:-------:|:--------------|:-----------------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_TEST"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "47249515539d548955c762f7",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"wo\n\n|  Bits  |  Type  |  Reset  | Name          | Description                                                      |\n|:------:|:------:|:-------:|:--------------|:-----------------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_TEST",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "04307396a19c5b07c9e402cc",
+          "text": "ALERT_TEST\n\nAlert Test Register\n- Offset: `0xc`\n- Reset default: `0x0`\n- Reset mask: `0x1`\n\n```wavejson\n{\"reg\": [{\"name\": \"fatal_fault\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"bits\": 31}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 130}}\n```\n\n|  Bits  |  Type  |  Reset  | Name        | Description                                      |\n|:------:|:------:|:-------:|:------------|:-------------------------------------------------|\n|  31:1  |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "ALERT_TEST"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "013d84bac05251e30f606256",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"fatal_fault\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"bits\": 31}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 130}}\n```\n\n|  Bits  |  Type  |  Reset  | Name        | Description                                      |\n|:------:|:------:|:-------:|:------------|:-------------------------------------------------|\n|  31:1  |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "ALERT_TEST",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "0575bda274aad893f6384486",
+          "text": "CTRL\n\nUART control register\n- Offset: `0x10`\n- Reset default: `0x0`\n- Reset mask: `0xffff03f7`\n\n```wavejson\n{\"reg\": [{\"name\": \"TX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"RX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"NF\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bit\n\n|  Bits  |  Type  |  Reset  | Name                            |\n|:------:|:------:|:-------:|:--------------------------------|\n| 31:16  |   rw   |   0x0   | [NCO](#ctrl--nco)               |\n| 15:10 \n\nBAUD clock rate control.\n\nTrigger level for RX break detection. Sets the number of character\ntimes the line must be low to detect a break.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | break2  | 2 characters  |\n| 0x1     | break4  | 4 characters  |\n| 0x2     | break8  | 8 characters  |\n| 0x3     \n\nIf PARITY_EN is true, this determines the type, 1 for odd parity, 0 for even.\n\nIf true, parity is enabled in both RX and TX directions.\n\nLine loopback enable.\n\nIf this bit is turned on, incoming bits are forwarded to TX for testing purpose.\nSee Block Diagram. Note that the internal design sees RX value as 1 always if line\nloopback is enabled.\n\nSystem loopback enable.\n\nIf this bit is turned on, any outgoing bits to TX are received through RX.\nSee Block Diagram. Note that the TX line goes 1 if System loopback is enabled.\n\nRX noise filter enable.\nIf the noise filter is enabled, RX line goes through the 3-tap\nrepetition code. It ignores single IP clock p",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL"
+          ],
+          "node_kind": "section",
+          "child_count": 15
+        },
+        {
+          "chunk_id": "a1d5701212eb4004638a19ec",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"TX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"RX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"NF\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bit\n\n|  Bits  |  Type  |  Reset  | Name                            |\n|:------:|:------:|:-------:|:--------------------------------|\n| 31:16  |   rw   |   0x0   | [NCO](#ctrl--nco)               |\n| 15:10 ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "ce8c3a2c56bfd3260ad77d7b",
+          "text": "CTRL . NCO\n\nBAUD clock rate control.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . NCO"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "63c6c63991cd43681b9c10bc",
+          "text": "CTRL . RXBLVL\n\nTrigger level for RX break detection. Sets the number of character\ntimes the line must be low to detect a break.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | break2  | 2 characters  |\n| 0x1     | break4  | 4 characters  |\n| 0x2     | break8  | 8 characters  |\n| 0x3     ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . RXBLVL"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "36b4ffa8e1bf239580545a37",
+          "text": "CTRL . PARITY_ODD\n\nIf PARITY_EN is true, this determines the type, 1 for odd parity, 0 for even.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . PARITY_ODD"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "53cbc429c4e635f9588c5b94",
+          "text": "CTRL . PARITY_EN\n\nIf true, parity is enabled in both RX and TX directions.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . PARITY_EN"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "b95e091b5186b25c51ea8499",
+          "text": "CTRL . LLPBK\n\nLine loopback enable.\n\nIf this bit is turned on, incoming bits are forwarded to TX for testing purpose.\nSee Block Diagram. Note that the internal design sees RX value as 1 always if line\nloopback is enabled.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . LLPBK"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "78bd9655aaee10decbb07e06",
+          "text": "CTRL . SLPBK\n\nSystem loopback enable.\n\nIf this bit is turned on, any outgoing bits to TX are received through RX.\nSee Block Diagram. Note that the TX line goes 1 if System loopback is enabled.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . SLPBK"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "eb7beb9a1ec6f73e5fbc28ed",
+          "text": "CTRL . NF\n\nRX noise filter enable.\nIf the noise filter is enabled, RX line goes through the 3-tap\nrepetition code. It ignores single IP clock period noise.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . NF"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "7ffb9b093611c8ddbcc4a88f",
+          "text": "CTRL . RX\n\nRX enable",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . RX"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "31cb09732536f7e24dd0200a",
+          "text": "CTRL . TX\n\nTX enable",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . TX"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "36f2aa5924ef61e58739618c",
+          "text": "STATUS\n\nUART live status register\n- Offset: `0x14`\n- Reset default: `0x3c`\n- Reset mask: `0x3f`\n\n```wavejson\n{\"reg\": [{\"name\": \"TXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"RXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"TXEMPTY\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\"\n\n|  Bits  |  Type  |  Reset  | Name    | Description                                         |\n|:------:|:------:|:-------:|:--------|:----------------------------------------------------|\n|  31:6  |  ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "STATUS"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "362b515df1813094390f752e",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"TXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"RXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"TXEMPTY\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\"\n\n|  Bits  |  Type  |  Reset  | Name    | Description                                         |\n|:------:|:------:|:-------:|:--------|:----------------------------------------------------|\n|  31:6  |  ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "STATUS",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "7b93cffc979f1fd7c4d6c959",
+          "text": "RDATA\n\nUART read data\n- Offset: `0x18`\n- Reset default: `0x0`\n- Reset mask: `0xff`\n\n```wavejson\n{\"reg\": [{\"name\": \"RDATA\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   ro   |    x    | RDATA",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "RDATA"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "e0f519feb92233124ad587a2",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"RDATA\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   ro   |    x    | RDATA",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "RDATA",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "8be37bd75a5d1eab0434fe89",
+          "text": "WDATA\n\nUART write data\n- Offset: `0x1c`\n- Reset default: `0x0`\n- Reset mask: `0xff`\n\n```wavejson\n{\"reg\": [{\"name\": \"WDATA\", \"bits\": 8, \"attr\": [\"wo\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   wo   |   0x0   | WDATA",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "WDATA"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "efc849e69d3ffe2fbbc042ba",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"WDATA\", \"bits\": 8, \"attr\": [\"wo\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   wo   |   0x0   | WDATA",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "WDATA",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "6dfbb883fa8812ac4f2a8dfa",
+          "text": "FIFO_CTRL\n\nUART FIFO control register\n- Offset: `0x20`\n- Reset default: `0x0`\n- Reset mask: `0xff`\n\n```wavejson\n{\"reg\": [{\"name\": \"RXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"TXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"RXILVL\", \"bits\": 3, \"attr\": [\"rw\"], \"rotate\": -\n\n|  Bits  |  Type  |  Reset  | Name                         |\n|:------:|:------:|:-------:|:-----------------------------|\n|  31:8  |        |         | Reserved                     |\n|  7:5   |   rw  \n\nTrigger level for TX interrupts. If the FIFO depth is less than the setting, it\nraises tx_watermark interrupt.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | txlvl1  | 1 character   |\n| 0x1     | txlvl2  | 2 characters  |\n| 0x2     | txlvl4  | 4 characters  |\n| 0x3     \n\nOther values are reserved.\n\nTrigger level for RX interrupts. If the FIFO depth is greater than or equal to\nthe setting, it raises rx_watermark interrupt.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | rxlvl1  | 1 character   |\n| 0x1     | rxlvl2  | 2 characters  |\n| 0x2     | rxlvl4  | 4 characters  |\n| 0x3     \n\nOther values are reserved.\n\nTX fifo reset. Write 1 to the register resets TX_FIFO. Read returns 0\n\nRX fifo reset. Write 1 to the register resets RX_FIFO. Read returns 0",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL"
+          ],
+          "node_kind": "section",
+          "child_count": 11
+        },
+        {
+          "chunk_id": "0c11c2e00ed0628a2a285d43",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"RXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"TXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"RXILVL\", \"bits\": 3, \"attr\": [\"rw\"], \"rotate\": -\n\n|  Bits  |  Type  |  Reset  | Name                         |\n|:------:|:------:|:-------:|:-----------------------------|\n|  31:8  |        |         | Reserved                     |\n|  7:5   |   rw  ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "8e5cd0bbe56548b1cfe1a408",
+          "text": "FIFO_CTRL . TXILVL\n\nTrigger level for TX interrupts. If the FIFO depth is less than the setting, it\nraises tx_watermark interrupt.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | txlvl1  | 1 character   |\n| 0x1     | txlvl2  | 2 characters  |\n| 0x2     | txlvl4  | 4 characters  |\n| 0x3     \n\nOther values are reserved.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXILVL"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "d04bca3cdbcd35b17df24c38",
+          "text": "FIFO_CTRL . RXILVL\n\nTrigger level for RX interrupts. If the FIFO depth is greater than or equal to\nthe setting, it raises rx_watermark interrupt.\n\n| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | rxlvl1  | 1 character   |\n| 0x1     | rxlvl2  | 2 characters  |\n| 0x2     | rxlvl4  | 4 characters  |\n| 0x3     \n\nOther values are reserved.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXILVL"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "0cf57d7bc36a2710f93c6a37",
+          "text": "FIFO_CTRL . TXRST\n\nTX fifo reset. Write 1 to the register resets TX_FIFO. Read returns 0",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXRST"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "e9e4d31a0d32ab2656d63cd5",
+          "text": "FIFO_CTRL . RXRST\n\nRX fifo reset. Write 1 to the register resets RX_FIFO. Read returns 0",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXRST"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "d4340b523ef7476aa82a5342",
+          "text": "FIFO_STATUS\n\nUART FIFO status register\n- Offset: `0x24`\n- Reset default: `0x0`\n- Reset mask: `0xff00ff`\n\n```wavejson\n{\"reg\": [{\"name\": \"TXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}, {\"name\": \"RXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}], \"config\": {\"lanes\": 1, \"fontsize\":\n\n|  Bits  |  Type  |  Reset  | Name   | Description                   |\n|:------:|:------:|:-------:|:-------|:------------------------------|\n| 31:24  |        |         |        | Reserved           ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_STATUS"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "47f45f109462475d086bf8f4",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"TXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}, {\"name\": \"RXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}], \"config\": {\"lanes\": 1, \"fontsize\":\n\n|  Bits  |  Type  |  Reset  | Name   | Description                   |\n|:------:|:------:|:-------:|:-------|:------------------------------|\n| 31:24  |        |         |        | Reserved           ",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_STATUS",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "bafd9de12818d6ad08772916",
+          "text": "OVRD\n\nTX pin override control. Gives direct SW control over TX pin state\n- Offset: `0x28`\n- Reset default: `0x0`\n- Reset mask: `0x3`\n\n```wavejson\n{\"reg\": [{\"name\": \"TXEN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"TXVAL\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 30}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vsp\n\n|  Bits  |  Type  |  Reset  | Name   | Description                          |\n|:------:|:------:|:-------:|:-------|:-------------------------------------|\n|  31:2  |        |         |        | Reser",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "OVRD"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "ef86bf620621fd8d291bb9c1",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"TXEN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"TXVAL\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 30}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vsp\n\n|  Bits  |  Type  |  Reset  | Name   | Description                          |\n|:------:|:------:|:-------:|:-------|:-------------------------------------|\n|  31:2  |        |         |        | Reser",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "OVRD",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "0d05f46fd9289ff849e61fac",
+          "text": "VAL\n\nUART oversampled values\n- Offset: `0x2c`\n- Reset default: `0x0`\n- Reset mask: `0xffff`\n\n```wavejson\n{\"reg\": [{\"name\": \"RX\", \"bits\": 16, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 16}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description                                                            |\n|:------:|:------:|:-------:|:-------|:-------------------------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "VAL"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "74457b502e87167e5f6be313",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"RX\", \"bits\": 16, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 16}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```\n\n|  Bits  |  Type  |  Reset  | Name   | Description                                                            |\n|:------:|:------:|:-------:|:-------|:-------------------------------------------------",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "VAL",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "c66b535e81c01f15a9436539",
+          "text": "TIMEOUT_CTRL\n\nUART RX timeout control\n- Offset: `0x30`\n- Reset default: `0x0`\n- Reset mask: `0x80ffffff`\n\n```wavejson\n{\"reg\": [{\"name\": \"VAL\", \"bits\": 24, \"attr\": [\"rw\"], \"rotate\": 0}, {\"bits\": 7}, {\"name\": \"EN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": \n\n|  Bits  |  Type  |  Reset  | Name   | Description                        |\n|:------:|:------:|:-------:|:-------|:-----------------------------------|\n|   31   |   rw   |   0x0   | EN     | Enable RX\n\n<!-- END CMDGEN -->",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL"
+          ],
+          "node_kind": "section",
+          "child_count": 4
+        },
+        {
+          "chunk_id": "7b9231bbacd95ce579f84458",
+          "text": "Fields\n\n```wavejson\n{\"reg\": [{\"name\": \"VAL\", \"bits\": 24, \"attr\": [\"rw\"], \"rotate\": 0}, {\"bits\": 7}, {\"name\": \"EN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": \n\n|  Bits  |  Type  |  Reset  | Name   | Description                        |\n|:------:|:------:|:-------:|:-------|:-----------------------------------|\n|   31   |   rw   |   0x0   | EN     | Enable RX\n\n<!-- END CMDGEN -->",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL",
+            "Fields"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "3489a0136082c4dc2b112d6b",
+          "text": "<!-- BEGIN CMDGEN util/regtool.py -d ./hw/ip/uart/data/uart.hjson -->",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "bdf8cde21ea2cdc6749de8e0",
+          "text": "| Name                                 | Offset   |   Length | Description                                                        |\n|:-------------------------------------|:---------|---------:|:-------------------------------------------------------------------|\n| uart.[`INTR_STATE`](#intr_state)     | 0x0      |        4 | Interrupt State Register                                           |\n| uart.[`INTR_ENABLE`](#intr_enable)   | 0x4      |        4 | Interrupt Enable Register                                          |\n| uart.[`INTR_TEST`](#intr_test)       | 0x8      |        4 | Interrupt Test Register                                            |\n| uart.[`ALERT_TEST`](#alert_test)     | 0xc      |        4 | Alert Test Register                                                |\n| uart.[`CTRL`](#ctrl)                 | 0x10     |        4 | UART control register                                              |\n| uart.[`STATUS`](#status)             | 0x14     |        4 | UART live status register                                          |\n| uart.[`RDATA`](#rdata)               | 0x18     |        4 | UART read data                                                     |\n| uart.[`WDATA`](#wdata)               | 0x1c     |        4 | UART write data                                                    |\n| uart.[`FIFO_CTRL`](#fifo_ctrl)       | 0x20     |        4 | UART FIFO control register                                         |\n| uart.[`FIFO_STATUS`](#fifo_status)   | 0x24     |        4 | UART FIFO status register                                          |\n| uart.[`OVRD`](#ovrd)                 | 0x28     |        4 | TX pin override control. Gives direct SW control over TX pin state |\n| uart.[`VAL`](#val)                   | 0x2c     |        4 | UART oversampled values                                            |\n| uart.[`TIMEOUT_CTRL`](#timeout_ctrl) | 0x30     |        4 | UART RX timeout control                                            |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "Summary"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "4d7cecc6939539ae8de9c277",
+          "text": "Interrupt State Register\n- Offset: `0x0`\n- Reset default: `0x101`\n- Reset mask: `0x1ff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_STATE"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "0ef94c7c7b9aae1d1bc06b30",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"rx_overflow\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"rx_frame_err\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"rx_break_err\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"rx_timeout\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"rx_parity_err\", \"bits\": 1, \"attr\": [\"rw1c\"], \"rotate\": -90}, {\"name\": \"tx_empty\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"bits\": 23}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 150}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_STATE",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9575f7c3b3ac5e2019380941",
+          "text": "|  Bits  |  Type  |  Reset  | Name          | Description                                                                                                    |\n|:------:|:------:|:-------:|:--------------|:---------------------------------------------------------------------------------------------------------------|\n|  31:9  |        |         |               | Reserved                                                                                                       |\n|   8    |   ro   |   0x1   | tx_empty      | raised if the transmit FIFO is empty.                                                                          |\n|   7    |  rw1c  |   0x0   | rx_parity_err | raised if the receiver has detected a parity error.                                                            |\n|   6    |  rw1c  |   0x0   | rx_timeout    | raised if RX FIFO has characters remaining in the FIFO without being retrieved for the programmed time period. |\n|   5    |  rw1c  |   0x0   | rx_break_err  | raised if break condition has been detected on receive.                                                        |\n|   4    |  rw1c  |   0x0   | rx_frame_err  | raised if a framing error has been detected on receive.                                                        |\n|   3    |  rw1c  |   0x0   | rx_overflow   | raised if the receive FIFO has overflowed.                                                                     |\n|   2    |  rw1c  |   0x0   | tx_done       | raised if the transmit FIFO has emptied and no transmit is ongoing.                                            |\n|   1    |   ro   |   0x0   | rx_watermark  | raised if the receive FIFO is past the high-water mark.                                                        |\n|   0    |   ro   |   0x1   | tx_watermark  | raised if the transmit FIFO is past the high-water mark.                                                       |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_STATE",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "d635c7c58fae817cc64aac69",
+          "text": "Interrupt Enable Register\n- Offset: `0x4`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_ENABLE"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "578a4e60550567de1fa0b5fe",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_overflow\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_frame_err\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_break_err\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_timeout\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"rx_parity_err\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"tx_empty\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 23}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 150}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_ENABLE",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "96f06a4771eb9bec4f5a3844",
+          "text": "|  Bits  |  Type  |  Reset  | Name          | Description                                                             |\n|:------:|:------:|:-------:|:--------------|:------------------------------------------------------------------------|\n|  31:9  |        |         |               | Reserved                                                                |\n|   8    |   rw   |   0x0   | tx_empty      | Enable interrupt when [`INTR_STATE.tx_empty`](#intr_state) is set.      |\n|   7    |   rw   |   0x0   | rx_parity_err | Enable interrupt when [`INTR_STATE.rx_parity_err`](#intr_state) is set. |\n|   6    |   rw   |   0x0   | rx_timeout    | Enable interrupt when [`INTR_STATE.rx_timeout`](#intr_state) is set.    |\n|   5    |   rw   |   0x0   | rx_break_err  | Enable interrupt when [`INTR_STATE.rx_break_err`](#intr_state) is set.  |\n|   4    |   rw   |   0x0   | rx_frame_err  | Enable interrupt when [`INTR_STATE.rx_frame_err`](#intr_state) is set.  |\n|   3    |   rw   |   0x0   | rx_overflow   | Enable interrupt when [`INTR_STATE.rx_overflow`](#intr_state) is set.   |\n|   2    |   rw   |   0x0   | tx_done       | Enable interrupt when [`INTR_STATE.tx_done`](#intr_state) is set.       |\n|   1    |   rw   |   0x0   | rx_watermark  | Enable interrupt when [`INTR_STATE.rx_watermark`](#intr_state) is set.  |\n|   0    |   rw   |   0x0   | tx_watermark  | Enable interrupt when [`INTR_STATE.tx_watermark`](#intr_state) is set.  |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_ENABLE",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "68a32e0d7ccc3307931062d2",
+          "text": "Interrupt Test Register\n- Offset: `0x8`\n- Reset default: `0x0`\n- Reset mask: `0x1ff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_TEST"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "f54b8e732ab6b5163f38044c",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"tx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_watermark\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"tx_done\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_overflow\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_frame_err\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_break_err\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_timeout\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"rx_parity_err\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"tx_empty\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"bits\": 23}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 150}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_TEST",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "dbe39ad1f9ad72ee9624dcc6",
+          "text": "|  Bits  |  Type  |  Reset  | Name          | Description                                                      |\n|:------:|:------:|:-------:|:--------------|:-----------------------------------------------------------------|\n|  31:9  |        |         |               | Reserved                                                         |\n|   8    |   wo   |   0x0   | tx_empty      | Write 1 to force [`INTR_STATE.tx_empty`](#intr_state) to 1.      |\n|   7    |   wo   |   0x0   | rx_parity_err | Write 1 to force [`INTR_STATE.rx_parity_err`](#intr_state) to 1. |\n|   6    |   wo   |   0x0   | rx_timeout    | Write 1 to force [`INTR_STATE.rx_timeout`](#intr_state) to 1.    |\n|   5    |   wo   |   0x0   | rx_break_err  | Write 1 to force [`INTR_STATE.rx_break_err`](#intr_state) to 1.  |\n|   4    |   wo   |   0x0   | rx_frame_err  | Write 1 to force [`INTR_STATE.rx_frame_err`](#intr_state) to 1.  |\n|   3    |   wo   |   0x0   | rx_overflow   | Write 1 to force [`INTR_STATE.rx_overflow`](#intr_state) to 1.   |\n|   2    |   wo   |   0x0   | tx_done       | Write 1 to force [`INTR_STATE.tx_done`](#intr_state) to 1.       |\n|   1    |   wo   |   0x0   | rx_watermark  | Write 1 to force [`INTR_STATE.rx_watermark`](#intr_state) to 1.  |\n|   0    |   wo   |   0x0   | tx_watermark  | Write 1 to force [`INTR_STATE.tx_watermark`](#intr_state) to 1.  |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "INTR_TEST",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "5668635d6aac01a0c9f445b3",
+          "text": "Alert Test Register\n- Offset: `0xc`\n- Reset default: `0x0`\n- Reset mask: `0x1`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "ALERT_TEST"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "672836a79c81da9d0260e555",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"fatal_fault\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"bits\": 31}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 130}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "ALERT_TEST",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c3e763aebb282b7cb9cfe7d7",
+          "text": "|  Bits  |  Type  |  Reset  | Name        | Description                                      |\n|:------:|:------:|:-------:|:------------|:-------------------------------------------------|\n|  31:1  |        |         |             | Reserved                                         |\n|   0    |   wo   |   0x0   | fatal_fault | Write 1 to trigger one alert event of this kind. |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "ALERT_TEST",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "05ca7b081f61f1487807393c",
+          "text": "UART control register\n- Offset: `0x10`\n- Reset default: `0x0`\n- Reset mask: `0xffff03f7`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "eb6470e41b9a680a24afd633",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"TX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"RX\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"NF\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 1}, {\"name\": \"SLPBK\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"LLPBK\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"PARITY_EN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"PARITY_ODD\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"RXBLVL\", \"bits\": 2, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 6}, {\"name\": \"NCO\", \"bits\": 16, \"attr\": [\"rw\"], \"rotate\": 0}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 120}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "b6a67bcb52b70f98811e0388",
+          "text": "|  Bits  |  Type  |  Reset  | Name                            |\n|:------:|:------:|:-------:|:--------------------------------|\n| 31:16  |   rw   |   0x0   | [NCO](#ctrl--nco)               |\n| 15:10  |        |         | Reserved                        |\n|  9:8   |   rw   |   0x0   | [RXBLVL](#ctrl--rxblvl)         |\n|   7    |   rw   |   0x0   | [PARITY_ODD](#ctrl--parity_odd) |\n|   6    |   rw   |   0x0   | [PARITY_EN](#ctrl--parity_en)   |\n|   5    |   rw   |   0x0   | [LLPBK](#ctrl--llpbk)           |\n|   4    |   rw   |   0x0   | [SLPBK](#ctrl--slpbk)           |\n|   3    |        |         | Reserved                        |\n|   2    |   rw   |   0x0   | [NF](#ctrl--nf)                 |\n|   1    |   rw   |   0x0   | [RX](#ctrl--rx)                 |\n|   0    |   rw   |   0x0   | [TX](#ctrl--tx)                 |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "a65b43bc87c492f7cdcc4f54",
+          "text": "BAUD clock rate control.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . NCO"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9e9b9b784b34ab49ca8ee9ef",
+          "text": "Trigger level for RX break detection. Sets the number of character\ntimes the line must be low to detect a break.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . RXBLVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "6d53eef7385a3b2edb2585af",
+          "text": "| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | break2  | 2 characters  |\n| 0x1     | break4  | 4 characters  |\n| 0x2     | break8  | 8 characters  |\n| 0x3     | break16 | 16 characters |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . RXBLVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "97df388b4deb6a8ece1a7875",
+          "text": "If PARITY_EN is true, this determines the type, 1 for odd parity, 0 for even.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . PARITY_ODD"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "af101e36e97d036764a80a8a",
+          "text": "If true, parity is enabled in both RX and TX directions.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . PARITY_EN"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "24527f1f0f72be4362e26a9f",
+          "text": "Line loopback enable.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . LLPBK"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9b38434898168af600437df1",
+          "text": "If this bit is turned on, incoming bits are forwarded to TX for testing purpose.\nSee Block Diagram. Note that the internal design sees RX value as 1 always if line\nloopback is enabled.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . LLPBK"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "aa473f1940f2d83a18e2c1e0",
+          "text": "System loopback enable.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . SLPBK"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "81d08473c2c9b0c45fcbba30",
+          "text": "If this bit is turned on, any outgoing bits to TX are received through RX.\nSee Block Diagram. Note that the TX line goes 1 if System loopback is enabled.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . SLPBK"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "cb33bb402e472ea6018da494",
+          "text": "RX noise filter enable.\nIf the noise filter is enabled, RX line goes through the 3-tap\nrepetition code. It ignores single IP clock period noise.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . NF"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "5a10b4c1f81667be37a86a2f",
+          "text": "RX enable",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . RX"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "d652c2eebb5af58a3c4e5fe2",
+          "text": "TX enable",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "CTRL",
+            "CTRL . TX"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "8487b87778d4946d4b001df5",
+          "text": "UART live status register\n- Offset: `0x14`\n- Reset default: `0x3c`\n- Reset mask: `0x3f`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "STATUS"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "db25d1caba4ae2f088f4e2ee",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"TXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"RXFULL\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"TXEMPTY\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"TXIDLE\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"RXIDLE\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"name\": \"RXEMPTY\", \"bits\": 1, \"attr\": [\"ro\"], \"rotate\": -90}, {\"bits\": 26}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 90}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "STATUS",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c70cbe5fcff893db1c408dbc",
+          "text": "|  Bits  |  Type  |  Reset  | Name    | Description                                         |\n|:------:|:------:|:-------:|:--------|:----------------------------------------------------|\n|  31:6  |        |         |         | Reserved                                            |\n|   5    |   ro   |   0x1   | RXEMPTY | RX FIFO is empty                                    |\n|   4    |   ro   |   0x1   | RXIDLE  | RX is idle                                          |\n|   3    |   ro   |   0x1   | TXIDLE  | TX FIFO is empty and all bits have been transmitted |\n|   2    |   ro   |   0x1   | TXEMPTY | TX FIFO is empty                                    |\n|   1    |   ro   |    x    | RXFULL  | RX buffer is full                                   |\n|   0    |   ro   |    x    | TXFULL  | TX buffer is full                                   |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "STATUS",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "945d6a55a20a32da14bdf2ca",
+          "text": "UART read data\n- Offset: `0x18`\n- Reset default: `0x0`\n- Reset mask: `0xff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "RDATA"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "62ad34cfec5087c8972a1ea3",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"RDATA\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "RDATA",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "58e86f6c9af21b78b5492ff1",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   ro   |    x    | RDATA  |               |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "RDATA",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "e76e774836d44f9568f5ceb1",
+          "text": "UART write data\n- Offset: `0x1c`\n- Reset default: `0x0`\n- Reset mask: `0xff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "WDATA"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "72da89030c5ca7c8a4371c94",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"WDATA\", \"bits\": 8, \"attr\": [\"wo\"], \"rotate\": 0}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "WDATA",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "59a39db28d6eca8e7ba863a9",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description   |\n|:------:|:------:|:-------:|:-------|:--------------|\n|  31:8  |        |         |        | Reserved      |\n|  7:0   |   wo   |   0x0   | WDATA  |               |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "WDATA",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "6268c0dd11d35dcb85a2a945",
+          "text": "UART FIFO control register\n- Offset: `0x20`\n- Reset default: `0x0`\n- Reset mask: `0xff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "1be123b6885f9eb7ce5784da",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"RXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"TXRST\", \"bits\": 1, \"attr\": [\"wo\"], \"rotate\": -90}, {\"name\": \"RXILVL\", \"bits\": 3, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"TXILVL\", \"bits\": 3, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 24}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "d5d1d51d56728ef7b277b86f",
+          "text": "|  Bits  |  Type  |  Reset  | Name                         |\n|:------:|:------:|:-------:|:-----------------------------|\n|  31:8  |        |         | Reserved                     |\n|  7:5   |   rw   |   0x0   | [TXILVL](#fifo_ctrl--txilvl) |\n|  4:2   |   rw   |   0x0   | [RXILVL](#fifo_ctrl--rxilvl) |\n|   1    |   wo   |   0x0   | [TXRST](#fifo_ctrl--txrst)   |\n|   0    |   wo   |   0x0   | [RXRST](#fifo_ctrl--rxrst)   |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "5b6629da93df6c345d998b1a",
+          "text": "Trigger level for TX interrupts. If the FIFO depth is less than the setting, it\nraises tx_watermark interrupt.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "4be3d5fc7135e7aa2e2355cb",
+          "text": "| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | txlvl1  | 1 character   |\n| 0x1     | txlvl2  | 2 characters  |\n| 0x2     | txlvl4  | 4 characters  |\n| 0x3     | txlvl8  | 8 characters  |\n| 0x4     | txlvl16 | 16 characters |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c2dd3ffbef1b83c51c4b621d",
+          "text": "Other values are reserved.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "8bb7fe70c1a593696e5f8e97",
+          "text": "Trigger level for RX interrupts. If the FIFO depth is greater than or equal to\nthe setting, it raises rx_watermark interrupt.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "26a9cfe2a05674f1f47b4cd6",
+          "text": "| Value   | Name    | Description   |\n|:--------|:--------|:--------------|\n| 0x0     | rxlvl1  | 1 character   |\n| 0x1     | rxlvl2  | 2 characters  |\n| 0x2     | rxlvl4  | 4 characters  |\n| 0x3     | rxlvl8  | 8 characters  |\n| 0x4     | rxlvl16 | 16 characters |\n| 0x5     | rxlvl32 | 32 characters |\n| 0x6     | rxlvl62 | 62 characters |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "533d5518aa88ab79b7a779c0",
+          "text": "Other values are reserved.",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXILVL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "6aa910b08bc70d6c03ef1903",
+          "text": "TX fifo reset. Write 1 to the register resets TX_FIFO. Read returns 0",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . TXRST"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "f4c3ff5503d47dbadfd8f897",
+          "text": "RX fifo reset. Write 1 to the register resets RX_FIFO. Read returns 0",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_CTRL",
+            "FIFO_CTRL . RXRST"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "818ddf1ec4878b35c7e6f95b",
+          "text": "UART FIFO status register\n- Offset: `0x24`\n- Reset default: `0x0`\n- Reset mask: `0xff00ff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_STATUS"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "235c007fb25b21fa531f2c36",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"TXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}, {\"name\": \"RXLVL\", \"bits\": 8, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 8}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_STATUS",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "fcb354f98f7770fe1d358292",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description                   |\n|:------:|:------:|:-------:|:-------|:------------------------------|\n| 31:24  |        |         |        | Reserved                      |\n| 23:16  |   ro   |    x    | RXLVL  | Current fill level of RX fifo |\n|  15:8  |        |         |        | Reserved                      |\n|  7:0   |   ro   |    x    | TXLVL  | Current fill level of TX fifo |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "FIFO_STATUS",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "a66c6623d2f27691812ba11d",
+          "text": "TX pin override control. Gives direct SW control over TX pin state\n- Offset: `0x28`\n- Reset default: `0x0`\n- Reset mask: `0x3`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "OVRD"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "86e03d282f12f38663138604",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"TXEN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"name\": \"TXVAL\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}, {\"bits\": 30}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "OVRD",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "8573e5ad6771c733e6fbbf26",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description                          |\n|:------:|:------:|:-------:|:-------|:-------------------------------------|\n|  31:2  |        |         |        | Reserved                             |\n|   1    |   rw   |   0x0   | TXVAL  | Write to set the value of the TX pin |\n|   0    |   rw   |   0x0   | TXEN   | Enable TX pin override control       |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "OVRD",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "ebd8d8107d575b349583becd",
+          "text": "UART oversampled values\n- Offset: `0x2c`\n- Reset default: `0x0`\n- Reset mask: `0xffff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "VAL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "de33f6da42d475d6211b882e",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"RX\", \"bits\": 16, \"attr\": [\"ro\"], \"rotate\": 0}, {\"bits\": 16}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "VAL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "514e4974c69106dad4ecbf38",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description                                                            |\n|:------:|:------:|:-------:|:-------|:-----------------------------------------------------------------------|\n| 31:16  |        |         |        | Reserved                                                               |\n|  15:0  |   ro   |    x    | RX     | Last 16 oversampled values of RX. Most recent bit is bit 0, oldest 15. |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "VAL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "e32a9fcd0875f4c87da701f7",
+          "text": "UART RX timeout control\n- Offset: `0x30`\n- Reset default: `0x0`\n- Reset mask: `0x80ffffff`",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "de9696be4ff52b5fc29d725b",
+          "text": "```wavejson\n{\"reg\": [{\"name\": \"VAL\", \"bits\": 24, \"attr\": [\"rw\"], \"rotate\": 0}, {\"bits\": 7}, {\"name\": \"EN\", \"bits\": 1, \"attr\": [\"rw\"], \"rotate\": -90}], \"config\": {\"lanes\": 1, \"fontsize\": 10, \"vspace\": 80}}\n```",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "14a1876d428dc42b33d7847b",
+          "text": "|  Bits  |  Type  |  Reset  | Name   | Description                        |\n|:------:|:------:|:-------:|:-------|:-----------------------------------|\n|   31   |   rw   |   0x0   | EN     | Enable RX timeout feature          |\n| 30:24  |        |         |        | Reserved                           |\n|  23:0  |   rw   |   0x0   | VAL    | RX timeout value in UART bit times |",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "e50ce82cc1796bf9332be151",
+          "text": "<!-- END CMDGEN -->",
+          "document_id": "uart__registers",
+          "heading_path": [
+            "Registers",
+            "TIMEOUT_CTRL",
+            "Fields"
+          ],
+          "node_kind": "chunk"
+        }
+      ]
+    },
+    {
+      "document_id": "uart__programmers_guide",
+      "chunks": [
+        {
+          "chunk_id": "b6572acfb9cebc24908d5c86",
+          "text": "Programmer's Guide\n\nThe following code snippet demonstrates initializing the UART to a programmable\nbaud rate, clearing the RX and TX FIFO, setting up the FIFOs for interrupt\nlevels, and enabling some interrupts. The NCO\n\n$$ NCO = {{2^{20} * f\\_{baud}} \\over {f\\_{pclk}}} $$\n\nNote that the NCO result from the above formula can be a fraction but\nthe NCO register only accepts an integer value. See the\n[Reception](#reception) and [Setting the baud\nrate](#setting-the-baud-rate\n\nAlso note that because the baud rate is multiplied by 2^20 care is\nneeded not to overflow 32-bit registers. Baud rates can easily be more\nthan 12 bits. The code below is careful to force 64-bit\narithm\n\n```cpp\n#define CLK_FIXED_FREQ_HZ (50ULL * 1000 * 1000)\n\nvoid uart_init(unsigned int baud) {\n  // nco = 2^20 * baud / fclk. Assume NCO width is 16bit.\n  uint64_t uart_ctrl_nco = ((uint64_t)baud << 20) \n\nThe following code shows the steps to transmit a string of characters.\n\n```cpp\nint uart_tx_rdy() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_TXLVL_MASK) == 32) ? 0 : 1;\n}\n\nvoid uart_send_char(char val) {\n  while(!uart_tx_rdy()) {}\n  *UART_WDATA_REG = val;\n}\n\nvoi\n\nDo the following to receive a character, with -1 returned if RX is empty.\n\n```cpp\nint uart_rx_empty() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_RXLVL_MASK) ==\n          (0 << UART_FIFO_STATUS_RXLVL_LSB)) ? 1 : 0;\n}\n\nint uart_rcv_char() {\n  if(uart_rx_empty())\n   \n\nThe code below shows one example of how to handle all UART interrup",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide"
+          ],
+          "node_kind": "section",
+          "child_count": 13
+        },
+        {
+          "chunk_id": "20dc25476b55ba5119d274bf",
+          "text": "Initialization\n\nThe following code snippet demonstrates initializing the UART to a programmable\nbaud rate, clearing the RX and TX FIFO, setting up the FIFOs for interrupt\nlevels, and enabling some interrupts. The NCO\n\n$$ NCO = {{2^{20} * f\\_{baud}} \\over {f\\_{pclk}}} $$\n\nNote that the NCO result from the above formula can be a fraction but\nthe NCO register only accepts an integer value. See the\n[Reception](#reception) and [Setting the baud\nrate](#setting-the-baud-rate\n\nAlso note that because the baud rate is multiplied by 2^20 care is\nneeded not to overflow 32-bit registers. Baud rates can easily be more\nthan 12 bits. The code below is careful to force 64-bit\narithm\n\n```cpp\n#define CLK_FIXED_FREQ_HZ (50ULL * 1000 * 1000)\n\nvoid uart_init(unsigned int baud) {\n  // nco = 2^20 * baud / fclk. Assume NCO width is 16bit.\n  uint64_t uart_ctrl_nco = ((uint64_t)baud << 20) ",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "section",
+          "child_count": 5
+        },
+        {
+          "chunk_id": "c723d0c5feb1ec7ab12d73d9",
+          "text": "Common Examples\n\nThe following code shows the steps to transmit a string of characters.\n\n```cpp\nint uart_tx_rdy() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_TXLVL_MASK) == 32) ? 0 : 1;\n}\n\nvoid uart_send_char(char val) {\n  while(!uart_tx_rdy()) {}\n  *UART_WDATA_REG = val;\n}\n\nvoi\n\nDo the following to receive a character, with -1 returned if RX is empty.\n\n```cpp\nint uart_rx_empty() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_RXLVL_MASK) ==\n          (0 << UART_FIFO_STATUS_RXLVL_LSB)) ? 1 : 0;\n}\n\nint uart_rcv_char() {\n  if(uart_rx_empty())\n   ",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Common Examples"
+          ],
+          "node_kind": "section",
+          "child_count": 4
+        },
+        {
+          "chunk_id": "2136b62db62a83f8a0273e4f",
+          "text": "Interrupt Handling\n\nThe code below shows one example of how to handle all UART interrupts\nin one service routine.\n\n```cpp\nvoid uart_interrupt_routine() {\n  volatile uint32 intr_state = *UART_INTR_STATE_REG;\n  uint32 intr_state_mask = 0;\n  char uart_ch;\n  uint32 intr_enable_reg;\n\n  // Turn off Interrupt Enable\n  in\n\nOne use of the `rx_timeout` interrupt is when the [`FIFO_CTRL.RXILVL`](registers.md#fifo_ctrl--rxilvl)\nis set greater than one, so an interrupt is only fired when the fifo\nis full to a certain level. ",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Interrupt Handling"
+          ],
+          "node_kind": "section",
+          "child_count": 3
+        },
+        {
+          "chunk_id": "7a032c03c0dcbaafe2584ef7",
+          "text": "Device Interface Functions (DIFs)\n\n- [Device Interface Functions](../../../../sw/device/lib/dif/dif_uart.h)",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Device Interface Functions (DIFs)"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "d394d80ddf8b479ec7a4c657",
+          "text": "The following code snippet demonstrates initializing the UART to a programmable\nbaud rate, clearing the RX and TX FIFO, setting up the FIFOs for interrupt\nlevels, and enabling some interrupts. The NCO register controls the baud rate,\nand should be set using the equation below, where `f_pclk` is the fixed clock\nfrequency and `f_baud` is the baud rate in bits per second. The UART uses the\nprimary clock `clk_i` as a clock source.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "2f7e267d3169a75557afc9bf",
+          "text": "$$ NCO = {{2^{20} * f\\_{baud}} \\over {f\\_{pclk}}} $$",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "63e2bb065f18fbf86ce4fea1",
+          "text": "Note that the NCO result from the above formula can be a fraction but\nthe NCO register only accepts an integer value. See the\n[Reception](#reception) and [Setting the baud\nrate](#setting-the-baud-rate) sections for more discussion of the\nbaud rate error target and when care is needed.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c68b73dfd55efeaab968cce0",
+          "text": "Also note that because the baud rate is multiplied by 2^20 care is\nneeded not to overflow 32-bit registers. Baud rates can easily be more\nthan 12 bits. The code below is careful to force 64-bit\narithmetic. (Even if the compiler is pre-computing constants there can\nbe unexpected overflow).",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "758eeaa17b09841598b6d06c",
+          "text": "```cpp\n#define CLK_FIXED_FREQ_HZ (50ULL * 1000 * 1000)\n\nvoid uart_init(unsigned int baud) {\n  // nco = 2^20 * baud / fclk. Assume NCO width is 16bit.\n  uint64_t uart_ctrl_nco = ((uint64_t)baud << 20) / CLK_FIXED_FREQ_HZ;\n  REG32(UART_CTRL(0)) =\n      ((uart_ctrl_nco & UART_CTRL_NCO_MASK) << UART_CTRL_NCO_OFFSET) |\n      (1 << UART_CTRL_TX) |\n      (1 << UART_CTRL_RX);\n\n  // clear FIFOs and set up to interrupt on any RX, half-full TX\n  *UART_FIFO_CTRL_REG =\n      UART_FIFO_CTRL_RXRST                 | // clear both FIFOs\n      UART_FIFO_CTRL_TXRST                 |\n      (UART_FIFO_CTRL_RXILVL_RXFULL_1 <<3) | // intr on RX 1 character\n      (UART_FIFO_CTRL_TXILVL_TXFULL_16<<5) ; // intr on TX 16 character\n\n  // enable only RX, overflow, and error interrupts\n  *UART_INTR_ENABLE_REG =\n      UART_INTR_ENABLE_RX_WATERMARK_MASK  |\n      UART_INTR_ENABLE_TX_OVERFLOW_MASK   |\n      UART_INTR_ENABLE_RX_OVERFLOW_MASK   |\n      UART_INTR_ENABLE_RX_FRAME_ERR_MASK  |\n      UART_INTR_ENABLE_RX_PARITY_ERR_MASK;\n\n  // at the processor level, the UART interrupts should also be enabled\n}\n```",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Initialization"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "0c00aa7e6b68e9449be1bc8c",
+          "text": "The following code shows the steps to transmit a string of characters.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Common Examples"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "92e4df77655f6a10ab459b7b",
+          "text": "```cpp\nint uart_tx_rdy() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_TXLVL_MASK) == 32) ? 0 : 1;\n}\n\nvoid uart_send_char(char val) {\n  while(!uart_tx_rdy()) {}\n  *UART_WDATA_REG = val;\n}\n\nvoid uart_send_str(char *str) {\n  while(*str != '\\0') {\n    uart_send_char(*str++);\n}\n```",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Common Examples"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "9ed1bf6b3508e44c47a3c5ac",
+          "text": "Do the following to receive a character, with -1 returned if RX is empty.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Common Examples"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "2d38cc3619ecb2d62c3837cb",
+          "text": "```cpp\nint uart_rx_empty() {\n  return ((*UART_FIFO_STATUS_REG & UART_FIFO_STATUS_RXLVL_MASK) ==\n          (0 << UART_FIFO_STATUS_RXLVL_LSB)) ? 1 : 0;\n}\n\nint uart_rcv_char() {\n  if(uart_rx_empty())\n    return -1;\n  return *UART_RDATA_REG;\n}\n```",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Common Examples"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "c55560f33c44a6afc600afc2",
+          "text": "The code below shows one example of how to handle all UART interrupts\nin one service routine.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Interrupt Handling"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "fa56c2d464b7cff2e34419c0",
+          "text": "```cpp\nvoid uart_interrupt_routine() {\n  volatile uint32 intr_state = *UART_INTR_STATE_REG;\n  uint32 intr_state_mask = 0;\n  char uart_ch;\n  uint32 intr_enable_reg;\n\n  // Turn off Interrupt Enable\n  intr_enable_reg = *UART_INTR_ENABLE_REG;\n  *UART_INTR_ENABLE_REG = intr_enable_reg & 0xFFFFFF00; // Clr bits 7:0\n\n  if (intr_state & UART_INTR_STATE_RX_PARITY_ERR_MASK) {\n    // Do something ...\n\n    // Store Int mask\n    intr_state_mask |= UART_INTR_STATE_RX_PARITY_ERR_MASK;\n  }\n\n  if (intr_state & UART_INTR_STATE_RX_BREAK_ERR_MASK) {\n    // Do something ...\n\n    // Store Int mask\n    intr_state_mask |= UART_INTR_STATE_RX_BREAK_ERR_MASK;\n  }\n\n  // .. Frame Error\n\n  // TX/RX Overflow Error\n\n  // RX Int\n  if (intr_state & UART_INTR_STATE_RX_WATERMARK_MASK) {\n    while(1) {\n      uart_ch = uart_rcv_char();\n      if (uart_ch == 0xff) break;\n      uart_buf.append(uart_ch);\n    }\n    // Store Int mask\n    intr_state_mask |= UART_INTR_STATE_RX_WATERMARK_MASK;\n  }\n\n  // Clear Interrupt State\n  *UART_INTR_STATE_REG = intr_state_mask;\n\n  // Restore Interrupt Enable\n  *UART_INTR_ENABLE_REG = intr_enable_reg;\n}\n```",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Interrupt Handling"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "6419a2ee82bc68f487c0b004",
+          "text": "One use of the `rx_timeout` interrupt is when the [`FIFO_CTRL.RXILVL`](registers.md#fifo_ctrl--rxilvl)\nis set greater than one, so an interrupt is only fired when the fifo\nis full to a certain level. If the remote device sends fewer than the\nwatermark number of characters before stopping sending (for example it\nis waiting an acknowledgement) then the usual `rx_watermark` interrupt\nwould not be raised. In this case an `rx_timeout` would generate an\ninterrupt that allows the host to read these additional characters. The\n`rx_timeout` can be selected based on the worst latency experienced by a\ncharacter. The worst case latency experienced by a character will happen\nif characters happen to arrive just slower than the timeout: the second\ncharacter arrives just before the timeout for the first (resetting the\ntimer), the third just before the timeout from the second etc. In this\ncase the host will eventually get a watermark interrupt, this will happen\n`((RXILVL - 1)*timeout)` after the first character was received.",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Interrupt Handling"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "5e8fccacc6ff61ef740ca7c6",
+          "text": "- [Device Interface Functions](../../../../sw/device/lib/dif/dif_uart.h)",
+          "document_id": "uart__programmers_guide",
+          "heading_path": [
+            "Programmer's Guide",
+            "Device Interface Functions (DIFs)"
+          ],
+          "node_kind": "chunk"
+        }
+      ]
+    },
+    {
+      "document_id": "uart__interfaces",
+      "chunks": [
+        {
+          "chunk_id": "9ef133f73e0ca2275df065cf",
+          "text": "Hardware Interfaces\n\n<!-- BEGIN CMDGEN util/regtool.py --interfaces ./hw/ip/uart/data/uart.hjson -->\nReferring to the [Comportable guideline for peripheral device functionality](https://opentitan.org/book/doc/contributing\n\n| Pin name   | Direction   | Description         |\n|:-----------|:------------|:--------------------|\n| rx         | input       | Serial receive bit  |\n| tx         | output      | Serial transmit bi\n\n| Port Name     | Package::Struct               | Type    | Act   |   Width | Description                                                                                                               \n\n| Interrupt Name   | Type   | Description                                                                                                    |\n|:-----------------|:-------|:---------------------------\n\n| Alert Name   | Description                                                                       |\n|:-------------|:----------------------------------------------------------------------------------\n\n| Countermeasure ID   | Description                      |\n|:--------------------|:---------------------------------|\n| UART.BUS.INTEGRITY  | End-to-end bus integrity scheme. |\n\n<!-- END CMDGEN -->",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces"
+          ],
+          "node_kind": "section",
+          "child_count": 7
+        },
+        {
+          "chunk_id": "740ee2253c3108451519af8a",
+          "text": "Peripheral Pins for Chip IO\n\n| Pin name   | Direction   | Description         |\n|:-----------|:------------|:--------------------|\n| rx         | input       | Serial receive bit  |\n| tx         | output      | Serial transmit bi",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Peripheral Pins for Chip IO"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "3daf4f68be57736fee857461",
+          "text": "[Inter-Module Signals](https://opentitan.org/book/doc/contributing/hw/comportability/index.html#inter-signal-handling)\n\n| Port Name     | Package::Struct               | Type    | Act   |   Width | Description                                                                                                               ",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "[Inter-Module Signals](https://opentitan.org/book/doc/contributing/hw/comportability/index.html#inter-signal-handling)"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "ac189059da0da932d342f991",
+          "text": "Interrupts\n\n| Interrupt Name   | Type   | Description                                                                                                    |\n|:-----------------|:-------|:---------------------------",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Interrupts"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "6629fed1fc1cbe5b219e95d9",
+          "text": "Security Alerts\n\n| Alert Name   | Description                                                                       |\n|:-------------|:----------------------------------------------------------------------------------",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Security Alerts"
+          ],
+          "node_kind": "section",
+          "child_count": 1
+        },
+        {
+          "chunk_id": "86a56e949f919cc3800217bb",
+          "text": "Security Countermeasures\n\n| Countermeasure ID   | Description                      |\n|:--------------------|:---------------------------------|\n| UART.BUS.INTEGRITY  | End-to-end bus integrity scheme. |\n\n<!-- END CMDGEN -->",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Security Countermeasures"
+          ],
+          "node_kind": "section",
+          "child_count": 2
+        },
+        {
+          "chunk_id": "d3f7726308361f8b69117b53",
+          "text": "<!-- BEGIN CMDGEN util/regtool.py --interfaces ./hw/ip/uart/data/uart.hjson -->\nReferring to the [Comportable guideline for peripheral device functionality](https://opentitan.org/book/doc/contributing/hw/comportability), the module **`uart`** has the following hardware interfaces defined\n- Primary Clock: **`clk_i`**\n- Other Clocks: *none*\n- Bus Device Interfaces (TL-UL): **`tl`**\n- Bus Host Interfaces (TL-UL): *none*",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "92e93313986c40c49f915a47",
+          "text": "| Pin name   | Direction   | Description         |\n|:-----------|:------------|:--------------------|\n| rx         | input       | Serial receive bit  |\n| tx         | output      | Serial transmit bit |",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Peripheral Pins for Chip IO"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "1a059d5d81d80fbaeb0deac6",
+          "text": "| Port Name     | Package::Struct               | Type    | Act   |   Width | Description                                                                                                                                    |\n|:--------------|:------------------------------|:--------|:------|--------:|:-----------------------------------------------------------------------------------------------------------------------------------------------|\n| lsio_trigger  | logic                         | uni     | req   |       1 | Self-clearing status trigger for the DMA. Set when RX or TX FIFOs are past their configured watermarks matching watermark interrupt behaviour. |\n| racl_policies | top_racl_pkg::racl_policy_vec | uni     | rcv   |       1 | Incoming RACL policy vector from a racl_ctrl instance. The policy selection vector (parameter) selects the policy for each register.           |\n| racl_error    | top_racl_pkg::racl_error_log  | uni     | req   |       1 | RACL error log information of this module.                                                                                                     |\n| tl            | tlul_pkg::tl                  | req_rsp | rsp   |       1 |                                                                                                                                                |",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "[Inter-Module Signals](https://opentitan.org/book/doc/contributing/hw/comportability/index.html#inter-signal-handling)"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "63323533f879ddb02be20a77",
+          "text": "| Interrupt Name   | Type   | Description                                                                                                    |\n|:-----------------|:-------|:---------------------------------------------------------------------------------------------------------------|\n| tx_watermark     | Status | raised if the transmit FIFO is past the high-water mark.                                                       |\n| rx_watermark     | Status | raised if the receive FIFO is past the high-water mark.                                                        |\n| tx_done          | Event  | raised if the transmit FIFO has emptied and no transmit is ongoing.                                            |\n| rx_overflow      | Event  | raised if the receive FIFO has overflowed.                                                                     |\n| rx_frame_err     | Event  | raised if a framing error has been detected on receive.                                                        |\n| rx_break_err     | Event  | raised if break condition has been detected on receive.                                                        |\n| rx_timeout       | Event  | raised if RX FIFO has characters remaining in the FIFO without being retrieved for the programmed time period. |\n| rx_parity_err    | Event  | raised if the receiver has detected a parity error.                                                            |\n| tx_empty         | Status | raised if the transmit FIFO is empty.                                                                          |",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Interrupts"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "b82e4f3c0ea0c655d17ba48d",
+          "text": "| Alert Name   | Description                                                                       |\n|:-------------|:----------------------------------------------------------------------------------|\n| fatal_fault  | This fatal alert is triggered when a fatal TL-UL bus integrity fault is detected. |",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Security Alerts"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "99233cb3c84ffe8736d6315c",
+          "text": "| Countermeasure ID   | Description                      |\n|:--------------------|:---------------------------------|\n| UART.BUS.INTEGRITY  | End-to-end bus integrity scheme. |",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Security Countermeasures"
+          ],
+          "node_kind": "chunk"
+        },
+        {
+          "chunk_id": "020c468c595b34daa5ee8b80",
+          "text": "<!-- END CMDGEN -->",
+          "document_id": "uart__interfaces",
+          "heading_path": [
+            "Hardware Interfaces",
+            "Security Countermeasures"
+          ],
+          "node_kind": "chunk"
+        }
+      ]
+    }
+  ]
+}

@@ -119,6 +119,33 @@ from config.settings import (
     RAG_VISUAL_RETRIEVAL_ENABLED,
     RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS,
 )
+from config.settings import (
+    RAG_TREE_RETRIEVAL_ENABLED,
+    RAG_TREE_DESCENT_TOP_K,
+    RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+    RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+    RAG_TREE_LIFT_SEED_K,
+    RAG_TREE_LIFT_SIBLINGS,
+    RAG_STAGE_BUDGET_TREE_DESCENT_MS,
+    RAG_STAGE_BUDGET_TREE_LIFT_MS,
+)
+from config.settings import (
+    RAG_RERANK_FUSION_ENABLED,
+    RAG_RERANK_RRF_K,
+    RAG_RERANK_RRF_LAMBDA,
+    RAG_RERANK_HEADING_LAMBDA,
+    RAG_RERANK_ANCHOR_LAMBDA,
+    RAG_RERANK_ANCHOR_K,
+)
+from src.retrieval.query.nodes.rerank_fusion import (
+    anchor_confidence,
+    fuse_scores,
+    heading_match_score,
+)
+import os as _os
+RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
+    "RAG_TREE_SCHEMA_PRESENT", "true"
+).lower() in ("true", "1", "yes")
 
 logger = logging.getLogger("rag.rag_chain")
 
@@ -418,6 +445,394 @@ class RAGChain:
             )
             raise
 
+    # ─── Tree retrieval helpers (TREE_RETRIEVAL_DESIGN.md §4) ────────────
+    @staticmethod
+    def _build_leaf_only_filter_clauses(schema_present: bool) -> list:
+        """Return the default Stage-4 filter clauses that pin retrieval to leaves.
+
+        When ``schema_present`` is True (post-1.2.0 collections), section nodes
+        live in the same collection as leaf chunks. Without an explicit
+        ``node_kind="chunk"`` filter, section text would surface as low-quality
+        evidence whenever the retrieval flag is off — see the design doc's
+        section-leak analysis. Operators on legacy collections that haven't
+        run the 1.2.0 migration set ``schema_present=False`` to skip the
+        filter (which would otherwise fail with "no such property").
+        """
+        if not schema_present:
+            return []
+        return [SearchFilter(property="node_kind", operator="eq", value="chunk")]
+
+    def _expand_sections_to_leaves(
+        self,
+        section_parent_ids: list[str],
+        per_section_limit: int,
+        base_filters,
+    ) -> list:
+        """Default expansion: fetch leaf chunks under each section's id.
+
+        Tests stub this method; the real implementation reads from the vector
+        store via ``fetch_chunks_by_parent_section``.
+        """
+        from src.vector_db.weaviate.store import fetch_chunks_by_parent_section
+        if self._weaviate_client is None:
+            return []
+        raw = fetch_chunks_by_parent_section(
+            self._weaviate_client,
+            section_parent_ids,
+            limit_per_section=per_section_limit,
+        )
+        return [
+            type("E", (), {"text": r["text"], "score": 0.0,
+                           "metadata": r["metadata"], "collection": "default"})()
+            for r in raw
+        ]
+
+    def _fetch_siblings(
+        self,
+        parent_ids: list[str],
+        per_group_limit: int,
+        base_filters,
+    ) -> list:
+        """Fetch sibling chunks under each parent_section_id (Stage 4c lift).
+
+        Tests stub this method to avoid hitting Weaviate; the real
+        implementation routes through the same store helper as descent
+        expansion.
+        """
+        return self._expand_sections_to_leaves(
+            parent_ids, per_group_limit, base_filters
+        )
+
+    def _run_tree_descent(
+        self,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        descent_top_k: int,
+        leaves_per_section: int,
+        base_filters,
+    ) -> list:
+        """Stage 4b — search section nodes, then expand to their leaves.
+
+        Each expanded leaf is tagged with ``_anchor_rank`` (private metadata
+        key, leading underscore) — the 0-indexed rank of the section that
+        produced it within ``section_hits``. The rerank-fusion module
+        consumes this signal when its anchor-confidence component is
+        enabled (R1.3).
+        """
+        section_filter = SearchFilter(
+            property="node_kind", operator="eq", value="section"
+        )
+        filters = list(base_filters or []) + [section_filter]
+        section_hits = self._do_search(
+            bm25_query, query_embedding, alpha, descent_top_k, filters
+        )
+        # Per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under section S have
+        # parent_section_id == S.chunk_id. So descent expansion uses each
+        # section's own chunk_id as the lookup key.
+        parent_ids = [
+            (h.metadata.get("chunk_id") or "")
+            for h in section_hits
+        ]
+        # Map each parent_section_id → its 0-indexed rank in the section
+        # search. The leaves returned by ``_expand_sections_to_leaves`` will
+        # be tagged with the rank of the section that produced them, looked
+        # up by their ``parent_section_id`` metadata (which production
+        # ingest writes for every leaf — see store.py prepare_object).
+        anchor_rank_by_pid: dict[str, int] = {}
+        for rank, pid in enumerate(parent_ids):
+            if pid and pid not in anchor_rank_by_pid:
+                anchor_rank_by_pid[pid] = rank
+
+        leaves = self._expand_sections_to_leaves(
+            parent_ids, leaves_per_section, base_filters
+        )
+        for leaf in leaves:
+            meta = getattr(leaf, "metadata", None)
+            if meta is None:
+                meta = {}
+                try:
+                    leaf.metadata = meta
+                except AttributeError:  # pragma: no cover
+                    continue
+            pid = meta.get("parent_section_id") or ""
+            ar = anchor_rank_by_pid.get(pid)
+            if ar is not None:
+                meta["_anchor_rank"] = ar
+        return leaves
+
+    def _run_tree_lift(
+        self,
+        seed_results: list,
+        seed_top_k: int,
+        siblings_per_group: int,
+        base_filters,
+    ) -> list:
+        """Stage 4c — for the top seeds, fetch siblings under their parent.
+
+        Each sibling is tagged with ``_anchor_rank`` — the 0-indexed rank
+        of the seed that supplied its parent section. Siblings whose
+        parent_section comes from the strongest seed score the highest
+        anchor-confidence boost in the rerank-fusion stage (R1.3).
+        """
+        seeds = list(seed_results)[:seed_top_k]
+        parent_ids: list[str] = []
+        seen: set[str] = set()
+        for seed in seeds:
+            psid = (seed.metadata or {}).get("parent_section_id") or ""
+            if not psid or psid in seen:
+                continue
+            seen.add(psid)
+            parent_ids.append(psid)
+        if not parent_ids:
+            return []
+        anchor_rank_by_pid: dict[str, int] = {
+            pid: rank for rank, pid in enumerate(parent_ids)
+        }
+        siblings = self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+        for sib in siblings:
+            meta = getattr(sib, "metadata", None)
+            if meta is None:
+                meta = {}
+                try:
+                    sib.metadata = meta
+                except AttributeError:  # pragma: no cover
+                    continue
+            pid = meta.get("parent_section_id") or ""
+            ar = anchor_rank_by_pid.get(pid)
+            if ar is not None:
+                meta["_anchor_rank"] = ar
+        return siblings
+
+    def _collect_candidates(
+        self,
+        *,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        search_limit: int,
+        base_filters: list,
+        tree_enabled: bool,
+        schema_present: bool,
+        descent_top_k: int,
+        leaves_per_section: int,
+        lift_seed_k: int,
+        siblings_per_group: int,
+        doc_diversity_top_per_doc: int,
+    ) -> list:
+        """Run Stage 4 + (optionally) 4b descent + 4c lift; return merged list.
+
+        Always applies the leaf-only filter to Stage 4 when ``schema_present``.
+        Tree sub-stages run only when ``tree_enabled`` is True. Descent results
+        are doc-diversity capped before merge so one verbose document cannot
+        dominate the final candidate pool.
+        """
+        leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
+            schema_present=schema_present
+        )
+        leaf_results = self._do_search(
+            bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
+        )
+
+        if not tree_enabled:
+            return list(leaf_results)
+
+        descent = self._run_tree_descent(
+            bm25_query=bm25_query,
+            query_embedding=query_embedding,
+            alpha=alpha,
+            descent_top_k=descent_top_k,
+            leaves_per_section=leaves_per_section,
+            base_filters=base_filters,
+        )
+        descent_capped = self._apply_doc_diversity_cap(
+            descent, top_per_doc=doc_diversity_top_per_doc
+        )
+
+        lift = self._run_tree_lift(
+            seed_results=list(leaf_results),
+            seed_top_k=lift_seed_k,
+            siblings_per_group=siblings_per_group,
+            base_filters=base_filters,
+        )
+
+        # Merge with uuid (preferred) / text fallback dedup, preserving the
+        # first occurrence's score so Stage 4 hits keep their hybrid scores.
+        merged: list = []
+        seen: set[str] = set()
+        for src in (leaf_results, descent_capped, lift):
+            for item in src:
+                key = ""
+                meta = getattr(item, "metadata", None) or {}
+                key = (
+                    str(getattr(item, "uuid", "") or "")
+                    or str(meta.get("uuid", "") or "")
+                    or str(meta.get("chunk_id", "") or "")
+                    or getattr(item, "text", "")
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+        return merged
+
+    @staticmethod
+    def _apply_doc_diversity_cap(hits: list, top_per_doc: int) -> list:
+        """Keep at most ``top_per_doc`` hits per document_id, in score order.
+
+        Stable: input order is preserved across survivors, so callers that
+        already sorted by score get a top-per-doc-capped list still sorted by
+        score.
+        """
+        kept: list = []
+        per_doc: dict[str, int] = {}
+        for h in hits:
+            doc_id = (h.metadata or {}).get("document_id") or ""
+            count = per_doc.get(doc_id, 0)
+            if count >= top_per_doc:
+                continue
+            per_doc[doc_id] = count + 1
+            kept.append(h)
+        return kept
+
+    # ─── Rerank fusion helpers (R1 — BM25-RRF + heading + anchor) ────────
+    @staticmethod
+    def _candidate_key(item) -> str:
+        """Stable identifier for a candidate across BM25 + CE pools.
+
+        Uses the same precedence as ``_collect_candidates`` dedup so a
+        candidate seen in both pools matches by key.
+        """
+        meta = getattr(item, "metadata", None) or {}
+        return (
+            str(getattr(item, "uuid", "") or "")
+            or str(meta.get("uuid", "") or "")
+            or str(meta.get("chunk_id", "") or "")
+            or getattr(item, "text", "")
+        )
+
+    def _collect_bm25_ranks(
+        self,
+        bm25_query: str,
+        query_embedding,
+        search_limit: int,
+        base_filters: list,
+        candidates: list,
+    ) -> list[Optional[int]]:
+        """Run a BM25-only Weaviate search and assign 0-indexed ranks to ``candidates``.
+
+        Implementation note: Weaviate v4's hybrid query exposes only the
+        fused score (and a free-text ``explain_score``). Rather than parse
+        explain-score we run a parallel ``alpha=0.0`` (BM25-only) hybrid
+        search with the same query and filters. The cost is low because
+        BM25 is the fast path on the inverted index.
+
+        Returns:
+            Same-length list as ``candidates``: a 0-indexed BM25 rank, or
+            ``None`` for candidates that did not appear in the BM25 pool
+            (e.g., descent/lift leaves never seen by BM25).
+        """
+        try:
+            bm25_hits = self._do_search(
+                bm25_query, query_embedding, 0.0, search_limit, base_filters
+            )
+        except Exception as exc:  # pragma: no cover — defensive only
+            logger.warning(
+                "_collect_bm25_ranks: BM25-only search failed (%s); "
+                "ranks will be None for all candidates", exc,
+            )
+            return [None] * len(candidates)
+        rank_by_key: dict[str, int] = {}
+        for rank, hit in enumerate(bm25_hits):
+            key = self._candidate_key(hit)
+            if key and key not in rank_by_key:
+                rank_by_key[key] = rank
+        return [
+            rank_by_key.get(self._candidate_key(c)) for c in candidates
+        ]
+
+    @staticmethod
+    def _heading_scores_for(query: str, candidates: list) -> list[float]:
+        return [
+            heading_match_score(
+                query,
+                ((getattr(c, "metadata", None) or {}).get("heading_path") or []),
+            )
+            for c in candidates
+        ]
+
+    @staticmethod
+    def _anchor_confs_for(candidates: list, anchor_k: int) -> list[float]:
+        out: list[float] = []
+        for c in candidates:
+            meta = getattr(c, "metadata", None) or {}
+            out.append(anchor_confidence(meta.get("_anchor_rank"), anchor_k=anchor_k))
+        return out
+
+    def _apply_rerank_fusion(
+        self,
+        *,
+        query: str,
+        candidates: list,
+        reranked: list[RankedResult],
+        bm25_ranks: list[Optional[int]],
+        rerank_top_k: int,
+    ) -> list[RankedResult]:
+        """Refine reranker output using the fusion module.
+
+        ``reranked`` is the cross-encoder's top-K (already CE-sorted). We
+        rebuild a positional alignment with ``candidates``/``bm25_ranks``
+        by candidate key, compute fused scores, re-sort, and slice. When
+        fusion is disabled, returns ``reranked`` unchanged so behavior is
+        bit-identical to the legacy path.
+        """
+        if not RAG_RERANK_FUSION_ENABLED or not reranked:
+            return reranked
+
+        # Map original candidates → BM25 rank via key.
+        cand_key_to_bm25: dict[str, Optional[int]] = {}
+        for c, br in zip(candidates, bm25_ranks):
+            cand_key_to_bm25[self._candidate_key(c)] = br
+
+        # Build the parallel arrays in CE order (the order of ``reranked``).
+        ce_scores: list[float] = []
+        bm25_aligned: list[Optional[int]] = []
+        heading_aligned: list[float] = []
+        anchor_aligned: list[float] = []
+        for r in reranked:
+            key = self._candidate_key(r)
+            ce_scores.append(float(r.score))
+            bm25_aligned.append(cand_key_to_bm25.get(key))
+            heading_aligned.append(
+                heading_match_score(query, (r.metadata or {}).get("heading_path") or [])
+            )
+            anchor_aligned.append(
+                anchor_confidence(
+                    (r.metadata or {}).get("_anchor_rank"),
+                    anchor_k=RAG_RERANK_ANCHOR_K,
+                )
+            )
+
+        fused = fuse_scores(
+            ce_scores=ce_scores,
+            bm25_ranks=bm25_aligned,
+            heading_scores=heading_aligned,
+            anchor_confs=anchor_aligned,
+            weights={
+                "rrf": RAG_RERANK_RRF_LAMBDA,
+                "heading": RAG_RERANK_HEADING_LAMBDA,
+                "anchor": RAG_RERANK_ANCHOR_LAMBDA,
+            },
+            k_rrf=RAG_RERANK_RRF_K,
+        )
+
+        # Apply fused scores back onto the existing RankedResults and resort.
+        rescored = [
+            RankedResult(text=r.text, score=fused[i], metadata=r.metadata)
+            for i, r in enumerate(reranked)
+        ]
+        rescored.sort(key=lambda r: r.score, reverse=True)
+        return rescored[:rerank_top_k]
     # ------------------------------------------------------------------
     # Deep-research branch helpers
     # ------------------------------------------------------------------
@@ -622,6 +1037,7 @@ class RAGChain:
         mode: str = "query",
         retrieval_sub_mode: str = "auto",
         extra_processing: bool = False,
+        tree_retrieval: Optional[bool] = None,
         deep_research: bool = False,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
@@ -1109,17 +1525,39 @@ class RAGChain:
                 if tenant_id and tenant_id != "default":
                     filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
+            # Per-request override beats config default (P4 §6).
+            tree_enabled_effective = (
+                RAG_TREE_RETRIEVAL_ENABLED
+                if tree_retrieval is None
+                else bool(tree_retrieval)
+            )
             with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
                 if not _dr_active:
                     search_results = self.retry_provider.execute(
                         operation_name="weaviate_hybrid_search",
-                        fn=lambda: self._do_search(
-                            bm25_query, query_embedding, alpha, search_limit, filters or None,
+                        fn=lambda: self._collect_candidates(
+                            bm25_query=bm25_query,
+                            query_embedding=query_embedding,
+                            alpha=alpha,
+                            search_limit=search_limit,
+                            base_filters=filters,
+                            tree_enabled=tree_enabled_effective,
+                            schema_present=RAG_TREE_SCHEMA_PRESENT,
+                            descent_top_k=RAG_TREE_DESCENT_TOP_K,
+                            leaves_per_section=RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+                            lift_seed_k=RAG_TREE_LIFT_SEED_K,
+                            siblings_per_group=RAG_TREE_LIFT_SIBLINGS,
+                            doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
                         ),
                         policy=self.retry_policy,
-                        idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
+                        idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={tree_enabled_effective}",
                     )
                     search_span.set_attribute("search_result_count", len(search_results))
+                    search_span.set_attribute("tree_retrieval_enabled", tree_enabled_effective)
+                    search_span.set_attribute(
+                        "tree_retrieval_source",
+                        "request" if tree_retrieval is not None else "config",
+                    )
                 else:
                     search_span.set_attribute("skipped_for_deep_research", True)
             tp.record("hybrid_search", "retrieval", started_at=t0)
@@ -1210,15 +1648,41 @@ class RAGChain:
                     **_decision_to_action_fields(decision),
                 )
 
-            # Stage 5: Reranking
+            # Stage 5: Reranking (cross-encoder + fusion R1)
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
                 if not _dr_active:
+                    # 5a. BM25-only rank lookup, used by the RRF fusion component.
+                    #     Run in parallel-style alongside CE scoring; if fusion is
+                    #     disabled at config level, skip the extra round-trip.
+                    bm25_ranks: list[Optional[int]] = []
+                    if RAG_RERANK_FUSION_ENABLED:
+                        bm25_ranks = self._collect_bm25_ranks(
+                            bm25_query=bm25_query,
+                            query_embedding=query_embedding,
+                            search_limit=search_limit,
+                            base_filters=filters,
+                            candidates=list(search_results),
+                        )
+
+                    # 5b. Cross-encoder rerank — the heavy lifter.
                     reranked = self.reranker.rerank(
                         query=processed_query,
                         documents=search_results,
-                        top_k=rerank_top_k,
+                        top_k=max(rerank_top_k, len(search_results)) if RAG_RERANK_FUSION_ENABLED else rerank_top_k,
                     )
+
+                    # 5c. Apply fusion (BM25-RRF + heading + anchor) on top of CE.
+                    if RAG_RERANK_FUSION_ENABLED:
+                        reranked = self._apply_rerank_fusion(
+                            query=processed_query,
+                            candidates=list(search_results),
+                            reranked=reranked,
+                            bm25_ranks=bm25_ranks,
+                            rerank_top_k=rerank_top_k,
+                        )
+                        rerank_span.set_attribute("fusion_enabled", True)
+
                 scores = [r.score for r in reranked]
                 if scores:
                     rerank_span.set_attribute("rerank_score_min", min(scores))

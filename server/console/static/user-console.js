@@ -1144,7 +1144,8 @@ function saveSettings() {
     rerankTopK: byId("rerankTopK").value,
     streaming: byId("streamingToggle").checked,
     memory_enabled: byId("memoryToggle").checked,
-    citations: byId("citationsToggle").checked
+    citations: byId("citationsToggle").checked,
+    tree_retrieval: byId("treeRetrievalToggle").checked
   };
   localStorage.setItem("nc_settings", JSON.stringify(s));
   closeSettings();
@@ -1166,6 +1167,7 @@ function loadSettings() {
   if (s.streaming !== void 0) byId("streamingToggle").checked = s.streaming;
   if (s.memory_enabled !== void 0) byId("memoryToggle").checked = s.memory_enabled;
   if (s.citations !== void 0) byId("citationsToggle").checked = s.citations;
+  if (s.tree_retrieval !== void 0) byId("treeRetrievalToggle").checked = s.tree_retrieval;
 }
 function resetSettings() {
   localStorage.removeItem("nc_settings");
@@ -1176,6 +1178,7 @@ function resetSettings() {
   byId("streamingToggle").checked = true;
   byId("memoryToggle").checked = true;
   byId("citationsToggle").checked = true;
+  byId("treeRetrievalToggle").checked = false;
   showToast("Settings reset to defaults");
 }
 function initSettings() {
@@ -1669,6 +1672,9 @@ function buildQueryBody(queryText) {
     memory_enabled: s.memory_enabled !== false,
     conversation_id: state.activeConversationId ?? void 0
   };
+  if (s.tree_retrieval !== void 0) {
+    body.tree_retrieval = Boolean(s.tree_retrieval);
+  }
   if (getChatMode() === "sources") {
     body.mode = "retrieval";
     body.retrieval_sub_mode = getRetrievalSubMode();

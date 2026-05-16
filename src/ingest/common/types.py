@@ -244,6 +244,18 @@ class IngestionConfig:
     Default: "native". FR-3320.
     Env var: RAG_INGESTION_CHUNKER"""
 
+    # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3, §5) --
+    enable_tree_retrieval_ingest: bool = False
+    """Emit section nodes (one per unique heading_path prefix) alongside leaf
+    chunks. When False (default), tree_node_synthesis is a no-op and only
+    `node_kind="chunk"` rows are produced. Mirrors RAG_TREE_RETRIEVAL_ENABLED."""
+    tree_section_text_max_chars: int = 1500
+    """Cap on assembled section-node text. Heading + truncated child snippets
+    are concatenated up to this size before embedding. Default: 1500."""
+    tree_section_child_snippet_chars: int = 200
+    """Per-child snippet size when assembling section text. Truncated head of
+    each direct child (or caption + first row for `chunk_type="table"`)."""
+
     @property
     def generate_page_images(self) -> bool:
         """Derived flag: True when visual embedding is enabled. FR-107"""

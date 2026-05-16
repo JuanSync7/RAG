@@ -100,6 +100,15 @@ class QueryRequest(BaseModel):
             "the current build."
         ),
     )
+    tree_retrieval: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Per-request override for hierarchical (tree) retrieval. "
+            "``None`` (default) uses the ``RAG_TREE_RETRIEVAL_ENABLED`` "
+            "config setting. ``true``/``false`` force on/off for this "
+            "request only. See TREE_RETRIEVAL_DESIGN.md §6."
+        ),
+    )
     deep_research: bool = Field(
         default=False,
         description=(
@@ -340,6 +349,7 @@ class ConsoleQueryRequest(BaseModel):
     mode: Literal["query", "retrieval"] = Field(default="query")
     retrieval_sub_mode: Literal["auto", "hard"] = Field(default="auto")
     extra_processing: bool = Field(default=False)
+    tree_retrieval: Optional[bool] = Field(default=None)
     deep_research: bool = Field(default=False)
 
 
