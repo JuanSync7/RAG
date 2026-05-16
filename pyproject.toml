@@ -35,10 +35,8 @@ dependencies = [
   "markdownify>=0.13.0",
   "pypandoc>=1.13",
   "tree-sitter-python>=0.23.0",
-  # Knowledge graph subsystem — extracted to its own repo (~/KGWeave) and
-  # consumed as a Python package. Source path is overridden in
-  # [tool.uv.sources] for local development; production builds pin a
-  # version. Step 14 of the KGWeave extraction (see docs/kgweave_deployment.md).
+  # Knowledge graph subsystem — extracted to its own repo and pinned by
+  # git SHA in [tool.uv.sources]. See docs/kgweave_deployment.md.
   "kgweave",
 ]
 
@@ -194,8 +192,10 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
-# KGWeave is consumed as an editable local-path dep during development.
-# CI / production builds should override this entry to point at a pinned
-# git ref or a published wheel.
-kgweave = { path = "../KGWeave", editable = true }
+# KGWeave is pinned by git SHA. To pick up upstream changes, bump `rev` to
+# a newer KGWeave commit and re-run `uv lock`. For active KGWeave
+# co-development, temporarily switch this entry to
+# `{ path = "../KGWeave", editable = true }` locally — but do not commit
+# that change.
+kgweave = { git = "https://github.com/JuanSync7/KGWeave.git", rev = "d4c474b4d6ff9da0053eadcb55343eab057b1739" }
 triton = { index = "pytorch-cu124" }
