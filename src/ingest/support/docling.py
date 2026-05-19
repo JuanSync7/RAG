@@ -27,6 +27,8 @@ except Exception:  # pragma: no cover — defensive; settings should always impo
     EMBEDDING_MODEL_PATH = ""
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS = 1024
 
+from src.platform.observability import get_tracer
+
 logger = logging.getLogger(__name__)
 
 
@@ -365,94 +367,106 @@ def parse_with_docling(
     """
     import logging
 
-    try:
-        # Import lazily to keep module import cheap and explicit.
-        from docling.document_converter import DocumentConverter
-    except Exception as exc:  # pragma: no cover - import path depends on runtime env
-        raise RuntimeError(
-            "Docling is required but not installed. Install with: uv add docling"
-        ) from exc
-
-    converter_kwargs: dict[str, Any] = {}
-    # Note: artifacts_path is accepted for caller compat but no longer passed
-    # to DocumentConverter (removed in newer Docling versions). Model location
-    # is controlled by warmup_docling_models / HF cache.
-
-    if vlm_mode == "builtin":
-        # Lazy import to keep module-level import cheap.
-        _builtin_vlm_configured = False
+    tracer = get_tracer()
+    with tracer.span(
+        "ingest.parse.docling",
+        {
+            "parser_model": parser_model,
+            "vlm_mode": vlm_mode,
+            "generate_page_images": generate_page_images,
+            "source_path": str(source_path),
+        },
+    ) as _span:
         try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import (
-                PdfPipelineOptions,
-                PictureDescriptionVlmEngineOptions,
-            )
-            from docling.document_converter import PdfFormatOption
+            # Import lazily to keep module import cheap and explicit.
+            from docling.document_converter import DocumentConverter
+        except Exception as exc:  # pragma: no cover - import path depends on runtime env
+            raise RuntimeError(
+                "Docling is required but not installed. Install with: uv add docling"
+            ) from exc
 
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.do_picture_description = True
-            pipeline_options.picture_description_options = (
-                PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
-            )
-            converter_kwargs["format_options"] = {
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-            }
-            _builtin_vlm_configured = True
-        except (ImportError, Exception) as exc:
-            logging.getLogger(__name__).warning(
-                "vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
-                "proceeding without picture description.",
-                exc,
-            )
-        converter = DocumentConverter(**converter_kwargs)
-        _ = _builtin_vlm_configured  # noqa: F841 — reserved for telemetry
-    else:
-        converter = DocumentConverter(**converter_kwargs)
+        converter_kwargs: dict[str, Any] = {}
+        # Note: artifacts_path is accepted for caller compat but no longer passed
+        # to DocumentConverter (removed in newer Docling versions). Model location
+        # is controlled by warmup_docling_models / HF cache.
 
-    try:
-        result = converter.convert(str(source_path))
-    except Exception as exc:
-        raise RuntimeError(
-            f"Docling conversion failed for {source_path}: {exc}"
-        ) from exc
-    document = getattr(result, "document", None)
-    if document is None:
-        raise RuntimeError("Docling conversion did not return a document object")
+        if vlm_mode == "builtin":
+            # Lazy import to keep module-level import cheap.
+            _builtin_vlm_configured = False
+            try:
+                from docling.datamodel.base_models import InputFormat
+                from docling.datamodel.pipeline_options import (
+                    PdfPipelineOptions,
+                    PictureDescriptionVlmEngineOptions,
+                )
+                from docling.document_converter import PdfFormatOption
 
-    if not hasattr(document, "export_to_markdown"):
-        raise RuntimeError("Docling document object does not support markdown export")
-    markdown = str(document.export_to_markdown() or "").strip()
-    if not markdown:
-        raise RuntimeError("Docling returned empty markdown output")
+                pipeline_options = PdfPipelineOptions()
+                pipeline_options.do_picture_description = True
+                pipeline_options.picture_description_options = (
+                    PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+                )
+                converter_kwargs["format_options"] = {
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+                _builtin_vlm_configured = True
+            except (ImportError, Exception) as exc:
+                logging.getLogger(__name__).warning(
+                    "vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
+                    "proceeding without picture description.",
+                    exc,
+                )
+            converter = DocumentConverter(**converter_kwargs)
+            _ = _builtin_vlm_configured  # noqa: F841 — reserved for telemetry
+        else:
+            converter = DocumentConverter(**converter_kwargs)
 
-    pictures = list(getattr(document, "pictures", []) or [])
-    figures = [f"Figure {idx + 1}" for idx, _ in enumerate(pictures)]
-    headings = _extract_headings_from_markdown(markdown)
-
-    # --- Page image extraction (FR-107, FR-201, FR-204, FR-205) --------------
-    page_images: list[Any] = []
-    page_count: int = 0
-    if generate_page_images:
         try:
-            page_images, page_count = _extract_page_images_from_result(result)
+            result = converter.convert(str(source_path))
         except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "Page image extraction failed for %s (%s); page_images will be empty.",
-                source_path,
-                exc,
-            )
-            page_images = []
+            raise RuntimeError(
+                f"Docling conversion failed for {source_path}: {exc}"
+            ) from exc
+        document = getattr(result, "document", None)
+        if document is None:
+            raise RuntimeError("Docling conversion did not return a document object")
 
-    return DoclingParseResult(
-        text_markdown=markdown,
-        has_figures=bool(figures),
-        figures=figures,
-        headings=headings,
-        parser_model=parser_model,
-        docling_document=document,
-        page_images=page_images,
-        page_count=page_count,
-    )
+        if not hasattr(document, "export_to_markdown"):
+            raise RuntimeError("Docling document object does not support markdown export")
+        markdown = str(document.export_to_markdown() or "").strip()
+        if not markdown:
+            raise RuntimeError("Docling returned empty markdown output")
+
+        pictures = list(getattr(document, "pictures", []) or [])
+        figures = [f"Figure {idx + 1}" for idx, _ in enumerate(pictures)]
+        headings = _extract_headings_from_markdown(markdown)
+
+        # --- Page image extraction (FR-107, FR-201, FR-204, FR-205) --------------
+        page_images: list[Any] = []
+        page_count: int = 0
+        if generate_page_images:
+            try:
+                page_images, page_count = _extract_page_images_from_result(result)
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Page image extraction failed for %s (%s); page_images will be empty.",
+                    source_path,
+                    exc,
+                )
+                page_images = []
+
+        _span.set_attribute("page_count", page_count)
+        _span.set_attribute("figure_count", len(figures))
+        return DoclingParseResult(
+            text_markdown=markdown,
+            has_figures=bool(figures),
+            figures=figures,
+            headings=headings,
+            parser_model=parser_model,
+            docling_document=document,
+            page_images=page_images,
+            page_count=page_count,
+        )
 
 
 def chunk_markdown_via_docling(
@@ -499,73 +513,84 @@ def chunk_markdown_via_docling(
 
     from src.ingest.support.parser_base import Chunk
 
-    figures: list[dict] = []
-    text_for_chunking = markdown_text
-    enable_vision = bool(getattr(config, "enable_vision_processing", False))
-    if source_path is not None and config is not None and enable_vision:
-        from src.ingest.support.vision import caption_markdown_images_inline
+    tracer = get_tracer()
+    with tracer.span(
+        "ingest.chunk.docling",
+        {
+            "strategy": "hybrid",
+            "max_tokens": max_tokens,
+            "input_chars": len(markdown_text),
+        },
+    ) as _span:
+      figures: list[dict] = []
+      text_for_chunking = markdown_text
+      enable_vision = bool(getattr(config, "enable_vision_processing", False))
+      if source_path is not None and config is not None and enable_vision:
+          from src.ingest.support.vision import caption_markdown_images_inline
 
-        text_for_chunking, figures = caption_markdown_images_inline(
-            markdown_text,
-            source_path=source_path,
-            config=config,
-            source_key=source_key,
-            doc_store_client=doc_store_client,
-        )
+          text_for_chunking, figures = caption_markdown_images_inline(
+              markdown_text,
+              source_path=source_path,
+              config=config,
+              source_key=source_key,
+              doc_store_client=doc_store_client,
+          )
 
-    converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-    conv_result = converter.convert(
-        source=DocumentStream(
-            name="input.md", stream=BytesIO(text_for_chunking.encode("utf-8"))
-        )
-    )
-    docling_document = conv_result.document
+      converter = DocumentConverter(allowed_formats=[InputFormat.MD])
+      conv_result = converter.convert(
+          source=DocumentStream(
+              name="input.md", stream=BytesIO(text_for_chunking.encode("utf-8"))
+          )
+      )
+      docling_document = conv_result.document
 
-    model_id = _resolve_tokenizer_model_id(config)
-    try:
-        tokenizer = _get_or_build_tokenizer(model_id, max_tokens=max_tokens)
-        chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
-    except Exception as exc:  # pragma: no cover — env-dependent
-        # Tokenizer load failed (no network, model not in HF cache, etc.).
-        # Re-raise so the caller's existing fallback path
-        # (parser_text.chunk → chunk_with_markdown) can handle it.
-        logger.warning(
-            "HybridChunker tokenizer load failed for model_id=%s: %s; "
-            "caller should fall back to char-splitter chunking.",
-            model_id, exc,
-        )
-        raise
-    raw_chunks = list(chunker.chunk(dl_doc=docling_document))
+      model_id = _resolve_tokenizer_model_id(config)
+      try:
+          tokenizer = _get_or_build_tokenizer(model_id, max_tokens=max_tokens)
+          chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
+      except Exception as exc:  # pragma: no cover — env-dependent
+          # Tokenizer load failed (no network, model not in HF cache, etc.).
+          # Re-raise so the caller's existing fallback path
+          # (parser_text.chunk → chunk_with_markdown) can handle it.
+          logger.warning(
+              "HybridChunker tokenizer load failed for model_id=%s: %s; "
+              "caller should fall back to char-splitter chunking.",
+              model_id, exc,
+          )
+          raise
+      raw_chunks = list(chunker.chunk(dl_doc=docling_document))
 
-    figures_payload = figures if figures else []
-    chunks: list = []
-    for idx, raw in enumerate(raw_chunks):
-        headings: list[str] = []
-        meta = getattr(raw, "meta", None)
-        if meta is not None:
-            headings = list(getattr(meta, "headings", None) or [])
-        # Only attach figures whose label appears in this chunk's text. Cheap
-        # substring check — keeps the citation linkback specific to chunks
-        # that actually reference a figure.
-        chunk_figures = [
-            fig for fig in figures_payload if fig.get("label", "") in raw.text
-        ]
-        extra: dict = {}
-        if chunk_figures:
-            extra["figures"] = chunk_figures
-        chunks.append(
-            Chunk(
-                text=raw.text,
-                section_path=" > ".join(headings),
-                heading=headings[-1] if headings else "",
-                heading_level=len(headings),
-                chunk_index=idx,
-                extra_metadata=extra,
-                heading_path=list(headings),
-                page_ref=_page_ref_from_chunk_meta(meta),
-            )
-        )
-    return chunks
+      figures_payload = figures if figures else []
+      chunks: list = []
+      for idx, raw in enumerate(raw_chunks):
+          headings: list[str] = []
+          meta = getattr(raw, "meta", None)
+          if meta is not None:
+              headings = list(getattr(meta, "headings", None) or [])
+          # Only attach figures whose label appears in this chunk's text. Cheap
+          # substring check — keeps the citation linkback specific to chunks
+          # that actually reference a figure.
+          chunk_figures = [
+              fig for fig in figures_payload if fig.get("label", "") in raw.text
+          ]
+          extra: dict = {}
+          if chunk_figures:
+              extra["figures"] = chunk_figures
+          chunks.append(
+              Chunk(
+                  text=raw.text,
+                  section_path=" > ".join(headings),
+                  heading=headings[-1] if headings else "",
+                  heading_level=len(headings),
+                  chunk_index=idx,
+                  extra_metadata=extra,
+                  heading_path=list(headings),
+                  page_ref=_page_ref_from_chunk_meta(meta),
+              )
+          )
+      _span.set_attribute("chunk_count", len(chunks))
+      _span.set_attribute("figure_count", len(figures))
+      return chunks
 
 
 # ---------------------------------------------------------------------------
