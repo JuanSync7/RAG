@@ -31,6 +31,7 @@ from src.platform.observability.backend import (  # noqa: F401
     Span,
     Trace,
 )
+from src.platform.observability.concurrency import submit_with_context  # noqa: F401
 
 F = TypeVar("F", bound=Callable)
 
@@ -182,7 +183,15 @@ def _init_backend() -> ObservabilityBackend:
 # Backward-compatible alias — use ObservabilityBackend instead
 Tracer = ObservabilityBackend
 
-__all__ = ["get_tracer", "observe", "Tracer", "Span", "Trace", "Generation"]
+__all__ = [
+    "get_tracer",
+    "observe",
+    "Tracer",
+    "Span",
+    "Trace",
+    "Generation",
+    "submit_with_context",
+]
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.platform.observability.schemas import (

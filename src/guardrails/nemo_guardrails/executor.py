@@ -42,7 +42,7 @@ from src.guardrails.shared import IntentClassifier
 from src.guardrails.shared import PIIDetector
 from src.guardrails.shared import TopicSafetyChecker
 from src.guardrails.shared import ToxicityFilter
-from src.platform.observability import get_tracer
+from src.platform.observability import get_tracer, submit_with_context
 from src.platform import PIPELINE_STAGE_MS
 from src.platform import measure_ms
 
@@ -211,17 +211,17 @@ class InputRailExecutor:
                 futures: dict[str, Future] = {}
 
                 if self._intent:
-                    futures["intent"] = pool.submit(self._intent.classify, query)
+                    futures["intent"] = submit_with_context(pool, self._intent.classify, query)
                 if self._injection:
-                    futures["injection"] = pool.submit(
-                        self._injection.check, query, tenant_id
+                    futures["injection"] = submit_with_context(
+                        pool, self._injection.check, query, tenant_id
                     )
                 if self._pii:
-                    futures["pii"] = pool.submit(self._pii.redact, query)
+                    futures["pii"] = submit_with_context(pool, self._pii.redact, query)
                 if self._toxicity:
-                    futures["toxicity"] = pool.submit(self._toxicity.check, query)
+                    futures["toxicity"] = submit_with_context(pool, self._toxicity.check, query)
                 if self._topic_safety:
-                    futures["topic_safety"] = pool.submit(self._topic_safety.check, query)
+                    futures["topic_safety"] = submit_with_context(pool, self._topic_safety.check, query)
 
                 for name, fut in futures.items():
                     t0 = time.perf_counter()
@@ -454,14 +454,14 @@ class OutputRailExecutor:
                 futures: dict[str, Future] = {}
 
                 if self._faithfulness:
-                    futures["faithfulness"] = pool.submit(
-                        self._faithfulness.check, answer, context_chunks
+                    futures["faithfulness"] = submit_with_context(
+                        pool, self._faithfulness.check, answer, context_chunks
                     )
                 if self._pii:
-                    futures["pii"] = pool.submit(self._pii.redact, answer)
+                    futures["pii"] = submit_with_context(pool, self._pii.redact, answer)
                 if self._toxicity:
-                    futures["toxicity"] = pool.submit(
-                        self._toxicity.filter_output, answer
+                    futures["toxicity"] = submit_with_context(
+                        pool, self._toxicity.filter_output, answer
                     )
 
                 for name, fut in futures.items():

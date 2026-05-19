@@ -573,8 +573,16 @@ class TestAllExports:
         assert "Generation" in obs_module.__all__
 
     def test_all_has_exactly_six_symbols(self):
-        """__all__ contains exactly the 6 expected symbols (no extras, no missing)."""
-        expected = {"get_tracer", "observe", "Tracer", "Span", "Trace", "Generation"}
+        """__all__ contains exactly the expected symbols (no extras, no missing)."""
+        expected = {
+            "get_tracer",
+            "observe",
+            "Tracer",
+            "Span",
+            "Trace",
+            "Generation",
+            "submit_with_context",
+        }
         assert set(obs_module.__all__) == expected
 
 
