@@ -98,6 +98,13 @@ class SpyTrace(Trace):
     def end(self, status: str = "ok", error: Optional[Exception] = None) -> None:
         self.end_calls.append((status, error))
 
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        if exc_val is not None:
+            self.end_calls.append(("error", exc_val if isinstance(exc_val, Exception) else None))
+        else:
+            self.end_calls.append(("ok", None))
+        return False
+
 
 class SpyBackend(ObservabilityBackend):
     def __init__(self) -> None:
@@ -215,7 +222,7 @@ def test_dr_run_creates_one_parent_trace_with_attributes(spy_backend):
 
     assert len(spy_backend.traces) == 1
     t = spy_backend.traces[0]
-    assert t.name == "deep_research"
+    assert t.name == "retrieval.deep_research"
     md = t.metadata
     assert md["original_question"] == "what is X and Y?"
     assert md["processed_query"] == "X Y context"
@@ -284,7 +291,7 @@ def test_dr_iteration_spans_emitted(spy_backend):
     asyncio.run(orch.research())
 
     t = spy_backend.traces[0]
-    iter_spans = [s for s in t.spans if s.name.startswith("dr_iteration_depth_")]
+    iter_spans = [s for s in t.spans if s.name == "retrieval.deep_research.iteration"]
     assert len(iter_spans) >= 1
 
 
