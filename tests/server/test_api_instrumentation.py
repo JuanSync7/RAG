@@ -210,3 +210,136 @@ def test_request_id_recorded_when_header_present(otel_capture):
     assert resp.status_code == 200
     roots = _spans_by_name(otel_capture, "api.query.post")
     assert roots[0].attributes.get("request_id") == "req-test-1234"
+
+
+# ---------------------------------------------------------------------------
+# Streaming (SSE) lifetime tests — regression coverage for the deferred trace
+# close. With BaseHTTPMiddleware the root span ended before the generator
+# yielded its chunks, so child spans emitted inside the generator outlived the
+# root. The ASGI-level implementation must keep the root open until the final
+# http.response.body chunk (more_body=False).
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+import httpx
+from httpx import ASGITransport
+from starlette.responses import StreamingResponse
+
+
+def _make_streaming_app() -> FastAPI:
+    """FastAPI app exposing a streaming endpoint that emits child spans per chunk."""
+    app = FastAPI()
+    install_observability_middleware(app)
+
+    @app.get("/stream")
+    async def _stream():
+        tracer = get_tracer()
+
+        async def gen():
+            for i in range(3):
+                with tracer.span("stream.chunk", {"i": i}):
+                    # Tiny sleep so chunk spans get a measurable duration and
+                    # land strictly after the root span's start.
+                    await asyncio.sleep(0.005)
+                yield f"data: {i}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.get("/stream-error")
+    async def _stream_error():
+        tracer = get_tracer()
+
+        async def gen():
+            with tracer.span("stream.chunk", {"i": 0}):
+                await asyncio.sleep(0.001)
+            yield "data: 0\n\n"
+            raise RuntimeError("mid-stream boom")
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.get("/plain")
+    async def _plain():
+        return {"ok": True}
+
+    return app
+
+
+def test_streaming_root_span_outlives_chunk_spans(otel_capture):
+    """Root api.stream.get must end AFTER the last chunk span emitted inside
+    the generator. With BaseHTTPMiddleware this fails because the root closes
+    when the Response object is returned, before the generator yields.
+    """
+    app = _make_streaming_app()
+
+    async def _run():
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            resp = await client.get("/stream")
+            assert resp.status_code == 200
+            # Drain the SSE body.
+            body = resp.text
+            assert "data: 2" in body
+
+    asyncio.run(_run())
+
+    roots = _spans_by_name(otel_capture, "api.stream.get")
+    assert len(roots) == 1
+    root = roots[0]
+    chunk_spans = _spans_by_name(otel_capture, "stream.chunk")
+    assert len(chunk_spans) == 3
+    last_chunk_end = max(s.end_time for s in chunk_spans)
+    # The deferred-close contract: the root span MUST end no earlier than the
+    # last child span emitted from inside the streaming generator.
+    assert root.end_time >= last_chunk_end, (
+        f"root end_time {root.end_time} predates last chunk end_time "
+        f"{last_chunk_end} — streaming trace closed too early"
+    )
+    # All chunk spans share trace_id with the root and parent under it.
+    for s in chunk_spans:
+        assert s.context.trace_id == root.context.trace_id
+        assert s.parent is not None
+        assert s.parent.span_id == root.context.span_id
+
+
+def test_non_streaming_response_shape_unchanged(otel_capture):
+    """Non-streaming endpoints must still produce root + api.response child."""
+    app = _make_streaming_app()
+
+    async def _run():
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            resp = await client.get("/plain")
+            assert resp.status_code == 200
+
+    asyncio.run(_run())
+
+    roots = _spans_by_name(otel_capture, "api.plain.get")
+    assert len(roots) == 1
+    markers = _spans_by_name(otel_capture, "api.response")
+    assert any(
+        m.attributes.get("http.status_code") == 200
+        and m.attributes.get("http.route") == "/plain"
+        for m in markers
+    )
+
+
+def test_streaming_generator_error_marks_trace_error(otel_capture):
+    """Generator raising mid-stream must close root trace with error status."""
+    app = _make_streaming_app()
+
+    async def _run():
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            try:
+                resp = await client.get("/stream-error")
+                # Consume body — may surface the error here.
+                _ = resp.text
+            except Exception:
+                pass
+
+    asyncio.run(_run())
+
+    roots = _spans_by_name(otel_capture, "api.stream-error.get")
+    assert len(roots) == 1
+    assert roots[0].status.status_code == StatusCode.ERROR
