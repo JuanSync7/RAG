@@ -99,37 +99,9 @@ def _install_lifecycle_stubs() -> None:
         sys.modules["prometheus_client"] = prom
 
     # ------------------------------------------------------------------ #
-    # Stub langfuse                                                        #
+    # (langfuse stub removed — the Python SDK is no longer a dependency;  #
+    #  observability now goes through OTLP via OTelBackend.)              #
     # ------------------------------------------------------------------ #
-    if "langfuse" not in sys.modules:
-        lf = types.ModuleType("langfuse")
-
-        class Langfuse:
-            def __init__(self, *a, **kw):
-                pass
-
-            def trace(self, *a, **kw):
-                return self
-
-            def flush(self):
-                pass
-
-        lf.Langfuse = Langfuse
-        lf_dec = types.ModuleType("langfuse.decorators")
-
-        def observe(*a, **kw):
-            def _d(fn):
-                return fn
-            return _d
-
-        lf_dec.observe = observe
-        lf_dec.langfuse_context = types.SimpleNamespace(
-            update_current_observation=lambda **kw: None,
-            update_current_trace=lambda **kw: None,
-        )
-        sys.modules["langfuse"] = lf
-        sys.modules["langfuse.decorators"] = lf_dec
-        sys.modules["langfuse.openai"] = types.ModuleType("langfuse.openai")
 
     # ------------------------------------------------------------------ #
     # Stub redis                                                           #

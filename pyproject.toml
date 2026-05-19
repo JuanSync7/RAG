@@ -16,7 +16,14 @@ dependencies = [
   "langgraph",
   "numpy",
   "temporalio>=1.23,<2",
-  "langfuse",
+  # OpenTelemetry SDK for the OTel-native observability backend
+  # (src/platform/observability/otel/backend.py). Targets OTLP/HTTP so any
+  # OTel-compatible collector (Langfuse v3 /api/public/otel/v1/traces,
+  # Phoenix, Braintrust, Honeycomb, Datadog, etc.) is reachable via
+  # OTEL_EXPORTER_OTLP_ENDPOINT.
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
   "fastapi",
   "uvicorn[standard]",
   "pydantic>=2.0",
@@ -177,6 +184,7 @@ markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
     "smoke: end-to-end stack smoke tests requiring docker compose up (run with '-m smoke')",
     "eval_deep_research: A/B retrieval eval for deep_research mode (run with '-m eval_deep_research')",
+    "integration: live end-to-end tests requiring external services (run with '-m integration')",
 ]
 
 [dependency-groups]
