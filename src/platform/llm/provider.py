@@ -34,6 +34,7 @@ from config.settings import (
     RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS,
 )
 from src.platform.llm.schemas import LLMConfig, LLMResponse
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -246,23 +247,41 @@ class LLMProvider:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        response = self._router.completion(**kwargs)
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.generate",
+            model=self.config.model,
+            input=repr(messages),
+            metadata={
+                "gen_ai.system": "litellm",
+                "model_alias": model_alias,
+                "temperature": kwargs.get("temperature"),
+            },
+        ) as gen:
+            response = self._router.completion(**kwargs)
 
-        cost = 0.0
-        try:
-            cost = litellm.completion_cost(completion_response=response)
-        except Exception:
-            pass  # Local models have no pricing data
+            cost = 0.0
+            try:
+                cost = litellm.completion_cost(completion_response=response)
+            except Exception:
+                pass  # Local models have no pricing data
 
-        usage = response.usage
-        return LLMResponse(
-            content=response.choices[0].message.content or "",
-            model=response.model or self.config.model,
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
-            total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
-            cost_usd=cost,
-        )
+            usage = response.usage
+            result = LLMResponse(
+                content=response.choices[0].message.content or "",
+                model=response.model or self.config.model,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
+                cost_usd=cost,
+            )
+            gen.set_output(result.content)
+            if result.prompt_tokens or result.completion_tokens:
+                gen.set_token_counts(
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                )
+            return result
 
     def generate_stream(
         self,
@@ -338,23 +357,41 @@ class LLMProvider:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        response = await self._router.acompletion(**kwargs)
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.agenerate",
+            model=self.config.model,
+            input=repr(messages),
+            metadata={
+                "gen_ai.system": "litellm",
+                "model_alias": model_alias,
+                "temperature": kwargs.get("temperature"),
+            },
+        ) as gen:
+            response = await self._router.acompletion(**kwargs)
 
-        cost = 0.0
-        try:
-            cost = litellm.completion_cost(completion_response=response)
-        except Exception:
-            pass
+            cost = 0.0
+            try:
+                cost = litellm.completion_cost(completion_response=response)
+            except Exception:
+                pass
 
-        usage = response.usage
-        return LLMResponse(
-            content=response.choices[0].message.content or "",
-            model=response.model or self.config.model,
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
-            total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
-            cost_usd=cost,
-        )
+            usage = response.usage
+            result = LLMResponse(
+                content=response.choices[0].message.content or "",
+                model=response.model or self.config.model,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
+                cost_usd=cost,
+            )
+            gen.set_output(result.content)
+            if result.prompt_tokens or result.completion_tokens:
+                gen.set_token_counts(
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                )
+            return result
 
     async def agenerate_stream(
         self,
