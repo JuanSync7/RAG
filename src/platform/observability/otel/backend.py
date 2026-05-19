@@ -453,6 +453,50 @@ class OTelBackend(ObservabilityBackend):
             from src.platform.observability.noop.backend import NoopSpan
             return NoopSpan()
 
+    def start_trace_from_carrier(
+        self,
+        name: str,
+        carrier: dict,
+        metadata: Optional[dict] = None,
+    ) -> Trace:
+        """Start a trace parented to a W3C ``traceparent`` carrier, if present.
+
+        Uses :class:`TraceContextTextMapPropagator` to extract context from
+        the carrier. If extraction yields a valid SpanContext, the new root
+        span is started in that context and inherits its trace_id. Otherwise
+        falls back to a fresh root via :meth:`trace`. Fail-open.
+        """
+        try:
+            # Local import keeps the propagator dep next to the rest of the
+            # opentelemetry imports without leaking out.
+            from opentelemetry.trace.propagation.tracecontext import (
+                TraceContextTextMapPropagator,
+            )
+
+            propagator = TraceContextTextMapPropagator()
+            # Normalize header names to lowercase since W3C traceparent is
+            # case-insensitive but the propagator does an exact-key lookup.
+            normalized = {
+                str(k).lower(): str(v)
+                for k, v in (carrier or {}).items()
+                if v is not None
+            }
+            ctx = propagator.extract(carrier=normalized)
+            root = self._tracer.start_span(name, context=ctx)
+            if metadata:
+                for key, value in metadata.items():
+                    try:
+                        root.set_attribute(key, _coerce_attribute_value(value))
+                    except Exception as exc:
+                        logger.warning(
+                            "OTelBackend.start_trace_from_carrier set_attribute failed: %s",
+                            exc,
+                        )
+            return OTelTrace(self._tracer, root)
+        except Exception as exc:
+            logger.warning("OTelBackend.start_trace_from_carrier failed: %s", exc)
+            return self.trace(name, metadata)
+
     def trace(self, name: str, metadata: Optional[dict] = None) -> Trace:
         """Start a new root span and wrap it as an OTelTrace. Fail-open."""
         try:
