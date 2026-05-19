@@ -339,6 +339,72 @@ def test_isinstance_checks(otel_capture):
 
 
 # ---------------------------------------------------------------------------
+# Ambient context propagation — implicit nesting via OTel current-context
+# ---------------------------------------------------------------------------
+
+def test_with_span_activates_ambient_context_for_children(otel_capture):
+    """Entering a span via `with` must make subsequent backend.span() calls children."""
+    backend = OTelBackend()
+    with backend.span("outer.op"):
+        inner = backend.span("inner.op")
+        inner.end()
+    spans = otel_capture.get_finished_spans()
+    by_name = {s.name: s for s in spans}
+    assert by_name["inner.op"].parent is not None
+    assert by_name["inner.op"].parent.span_id == by_name["outer.op"].context.span_id
+    assert by_name["inner.op"].context.trace_id == by_name["outer.op"].context.trace_id
+
+
+def test_with_trace_activates_ambient_context_for_descendants(otel_capture):
+    """A trace entered via `with` parents transitively across nested function calls."""
+    backend = OTelBackend()
+
+    def deep_work():
+        with backend.span("deep.op"):
+            with backend.generation("llm.call", model="m", input="p"):
+                pass
+
+    with backend.trace("pipeline.run"):
+        deep_work()
+
+    spans = otel_capture.get_finished_spans()
+    by_name = {s.name: s for s in spans}
+    root_id = by_name["pipeline.run"].context.span_id
+    deep_id = by_name["deep.op"].context.span_id
+    assert by_name["deep.op"].parent.span_id == root_id
+    assert by_name["llm.call"].parent.span_id == deep_id
+    # All share the same trace_id.
+    trace_ids = {s.context.trace_id for s in spans}
+    assert len(trace_ids) == 1
+
+
+def test_context_detached_after_exit(otel_capture):
+    """After exiting a span context, a new backend.span() must be a root again."""
+    backend = OTelBackend()
+    with backend.span("outer.op"):
+        pass
+    after = backend.span("after.op")
+    after.end()
+    spans = otel_capture.get_finished_spans()
+    by_name = {s.name: s for s in spans}
+    assert by_name["after.op"].parent is None
+
+
+def test_explicit_parent_still_wins_over_ambient(otel_capture):
+    """When parent= is passed explicitly, ambient context must be ignored."""
+    backend = OTelBackend()
+    t = backend.trace("root.a")
+    with backend.span("ambient.outer"):
+        # Explicit parent=trace overrides the currently-active ambient span.
+        forced = backend.span("forced.under.root", parent=t)
+        forced.end()
+    t.__exit__(None, None, None)
+    spans = otel_capture.get_finished_spans()
+    by_name = {s.name: s for s in spans}
+    assert by_name["forced.under.root"].parent.span_id == by_name["root.a"].context.span_id
+
+
+# ---------------------------------------------------------------------------
 # Encapsulation — no opentelemetry imports outside otel/backend.py
 # ---------------------------------------------------------------------------
 

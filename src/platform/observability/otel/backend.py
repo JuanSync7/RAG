@@ -36,6 +36,7 @@ import logging
 import os
 from typing import Optional
 
+from opentelemetry import context as otel_context
 from opentelemetry import trace as otel_trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -113,6 +114,31 @@ class OTelSpan(Span):
             inner_span: The underlying OTel SDK span.
         """
         self._span = inner_span
+        self._ctx_token = None
+
+    def __enter__(self) -> "OTelSpan":
+        try:
+            self._ctx_token = otel_context.attach(
+                otel_trace.set_span_in_context(self._span)
+            )
+        except Exception as exc:
+            logger.warning("OTelSpan.__enter__ context attach failed: %s", exc)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        try:
+            if exc_val is not None:
+                self.end(status="error", error=exc_val)
+            else:
+                self.end(status="ok")
+        finally:
+            if self._ctx_token is not None:
+                try:
+                    otel_context.detach(self._ctx_token)
+                except Exception as exc:
+                    logger.warning("OTelSpan.__exit__ context detach failed: %s", exc)
+                self._ctx_token = None
+        return False
 
     def set_attribute(self, key: str, value: object) -> None:
         """Set an attribute on the underlying OTel span. Fail-open."""
@@ -149,6 +175,31 @@ class OTelGeneration(Generation):
     def __init__(self, inner_span) -> None:
         """Wrap an opentelemetry Span representing an LLM generation."""
         self._span = inner_span
+        self._ctx_token = None
+
+    def __enter__(self) -> "OTelGeneration":
+        try:
+            self._ctx_token = otel_context.attach(
+                otel_trace.set_span_in_context(self._span)
+            )
+        except Exception as exc:
+            logger.warning("OTelGeneration.__enter__ context attach failed: %s", exc)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        try:
+            if exc_val is not None:
+                self.end(status="error", error=exc_val)
+            else:
+                self.end(status="ok")
+        finally:
+            if self._ctx_token is not None:
+                try:
+                    otel_context.detach(self._ctx_token)
+                except Exception as exc:
+                    logger.warning("OTelGeneration.__exit__ context detach failed: %s", exc)
+                self._ctx_token = None
+        return False
 
     def set_output(self, output: str) -> None:
         """Record the LLM completion text on ``gen_ai.completion``. Fail-open."""
@@ -201,6 +252,16 @@ class OTelTrace(Trace):
         """
         self._tracer = tracer
         self._span = root_span
+        self._ctx_token = None
+
+    def __enter__(self) -> "OTelTrace":
+        try:
+            self._ctx_token = otel_context.attach(
+                otel_trace.set_span_in_context(self._span)
+            )
+        except Exception as exc:
+            logger.warning("OTelTrace.__enter__ context attach failed: %s", exc)
+        return self
 
     def span(self, name: str, attributes: Optional[dict] = None) -> Span:
         """Start a child span parented under the trace root. Fail-open."""
@@ -251,6 +312,13 @@ class OTelTrace(Trace):
             self._span.end()
         except Exception as exc:
             logger.warning("OTelTrace.__exit__ failed: %s", exc)
+        finally:
+            if self._ctx_token is not None:
+                try:
+                    otel_context.detach(self._ctx_token)
+                except Exception as exc:
+                    logger.warning("OTelTrace.__exit__ context detach failed: %s", exc)
+                self._ctx_token = None
         return False
 
 
