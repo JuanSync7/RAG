@@ -364,6 +364,27 @@ RAG_INGESTION_DOCLING_STRICT = os.environ.get(
 RAG_INGESTION_DOCLING_AUTO_DOWNLOAD = os.environ.get(
     "RAG_INGESTION_DOCLING_AUTO_DOWNLOAD", "true"
 ).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_OCR: bool = os.environ.get(
+    "RAG_INGESTION_ENABLE_OCR", "true"
+).lower() in ("true", "1", "yes")
+"""Enable Docling OCR auto-trigger for image-only pages. Default: True.
+Uses RapidOCR with force_full_page_ocr=False so text-native pages are not
+re-OCR'd. Set False to disable OCR entirely (faster, but image-only pages
+yield empty text)."""
+RAG_INGESTION_OCR_ENGINE: str = os.environ.get(
+    "RAG_INGESTION_OCR_ENGINE", "rapidocr"
+)
+"""OCR engine identifier. Only "rapidocr" is wired today; reserved for
+forward-compat with easyocr/tesseract. Informational."""
+RAG_INGESTION_TABLEFORMER_MODE: str = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_MODE", "accurate"
+)
+"""TableFormer mode: "accurate" (TF v2, higher quality) or "fast" (TF v1)."""
+RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING: bool = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING", "true"
+).lower() in ("true", "1", "yes")
+"""When True, TableFormer matches PDF text cells to detected table cells
+(higher fidelity). Disable to fall back to OCR-only cell content."""
 RAG_INGESTION_EXPORT_EXTENSIONS = os.environ.get(
     "RAG_INGESTION_EXPORT_EXTENSIONS",
     ".txt,.md,.markdown,.rst,.html,.htm,.pdf,.docx,.pptx",

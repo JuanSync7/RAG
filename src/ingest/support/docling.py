@@ -6,6 +6,10 @@
  # generate_page_images=True extracts PIL.Image (RGB) page images from the converted document.
  # page_count reflects total pages in source; page_images is empty on extraction failure (no error raised).
  # DoclingParser wraps standalone functions into the DocumentParser protocol (FR-3221, FR-3223, FR-3224).
+ # parse_with_docling builds a PdfPipelineOptions on every call: TableFormer mode
+ # (accurate=TF v2 / fast=TF v1), OCR auto-trigger via RapidOcrOptions(force_full_page_ocr=False),
+ # and optional built-in SmolVLM picture description.
+ # warmup_docling_models defaults to fetching TableFormer v2 and RapidOCR artifacts.
  # @end-summary
 """Docling integration for ingestion parsing.
 
@@ -123,7 +127,14 @@ class DoclingParseResult:
     """Total number of pages in the source document. FR-205"""
 
 
-def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = False) -> Path:
+def warmup_docling_models(
+    *,
+    artifacts_path: str = "",
+    with_smolvlm: bool = False,
+    with_tableformer_v2: bool = True,
+    with_rapidocr: bool = True,
+    with_easyocr: bool = False,
+) -> Path:
     """Download and validate core Docling models used by ingestion.
 
     Args:
@@ -131,6 +142,12 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
             empty, Docling's default cache location is used.
         with_smolvlm: If True, also download SmolVLM model artifacts.
             Must be True when vlm_mode is "builtin".
+        with_tableformer_v2: If True (default), also fetch TableFormer v2
+            artifacts so ``tableformer_mode="accurate"`` works offline.
+        with_rapidocr: If True (default), also fetch RapidOCR artifacts so OCR
+            auto-trigger works on image-only pages offline.
+        with_easyocr: If True, fetch EasyOCR artifacts. Default False — RapidOCR
+            is the wired engine.
 
     Returns:
         The resolved Docling model root directory.
@@ -159,7 +176,7 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
         progress=False,
         with_layout=True,
         with_tableformer=True,
-        with_tableformer_v2=False,
+        with_tableformer_v2=with_tableformer_v2,
         with_code_formula=False,
         with_picture_classifier=False,
         with_smolvlm=with_smolvlm,
@@ -169,8 +186,8 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
         with_smoldocling_mlx=False,
         with_granite_vision=False,
         with_granite_chart_extraction=False,
-        with_rapidocr=False,
-        with_easyocr=False,
+        with_rapidocr=with_rapidocr,
+        with_easyocr=with_easyocr,
     )
     layout_repo_dir = model_root / LayoutOptions().model_spec.model_repo_folder
     tableformer_repo_dir = model_root / TableStructureModel._model_repo_folder
@@ -329,6 +346,9 @@ def parse_with_docling(
     artifacts_path: str = "",
     vlm_mode: str = "disabled",
     generate_page_images: bool = False,
+    enable_ocr: bool = True,
+    tableformer_mode: str = "accurate",
+    tableformer_do_cell_matching: bool = True,
 ) -> DoclingParseResult:
     """Parse a source document into markdown using local Docling runtime.
 
@@ -378,36 +398,68 @@ def parse_with_docling(
     # to DocumentConverter (removed in newer Docling versions). Model location
     # is controlled by warmup_docling_models / HF cache.
 
-    if vlm_mode == "builtin":
-        # Lazy import to keep module-level import cheap.
-        _builtin_vlm_configured = False
-        try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import (
-                PdfPipelineOptions,
-                PictureDescriptionVlmEngineOptions,
-            )
-            from docling.document_converter import PdfFormatOption
+    # Always build PdfPipelineOptions so OCR auto-trigger and TableFormer v2
+    # selection apply regardless of vlm_mode. PdfFormatOption is wired into
+    # converter_kwargs only when the import surface is available — keeps the
+    # function robust against pruned docling installs.
+    try:
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import (
+            PdfPipelineOptions,
+            RapidOcrOptions,
+            TableFormerMode,
+        )
+        from docling.document_converter import PdfFormatOption
 
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.do_picture_description = True
-            pipeline_options.picture_description_options = (
-                PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+        pipeline_options = PdfPipelineOptions()
+
+        # --- TableFormer mode (v2 = ACCURATE, v1 = FAST) -----------------
+        mode = (
+            TableFormerMode.ACCURATE
+            if str(tableformer_mode).lower() == "accurate"
+            else TableFormerMode.FAST
+        )
+        pipeline_options.table_structure_options.mode = mode
+        pipeline_options.table_structure_options.do_cell_matching = bool(
+            tableformer_do_cell_matching
+        )
+
+        # --- OCR auto-trigger (image-only pages) -------------------------
+        pipeline_options.do_ocr = bool(enable_ocr)
+        if enable_ocr:
+            pipeline_options.ocr_options = RapidOcrOptions(
+                force_full_page_ocr=False
             )
-            converter_kwargs["format_options"] = {
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-            }
-            _builtin_vlm_configured = True
-        except (ImportError, Exception) as exc:
-            logging.getLogger(__name__).warning(
-                "vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
-                "proceeding without picture description.",
-                exc,
-            )
-        converter = DocumentConverter(**converter_kwargs)
-        _ = _builtin_vlm_configured  # noqa: F841 — reserved for telemetry
-    else:
-        converter = DocumentConverter(**converter_kwargs)
+
+        # --- Built-in SmolVLM picture description ------------------------
+        if vlm_mode == "builtin":
+            try:
+                from docling.datamodel.pipeline_options import (
+                    PictureDescriptionVlmEngineOptions,
+                )
+
+                pipeline_options.do_picture_description = True
+                pipeline_options.picture_description_options = (
+                    PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "vlm_mode='builtin' requested but SmolVLM setup failed "
+                    "(%s); proceeding without picture description.",
+                    exc,
+                )
+
+        converter_kwargs["format_options"] = {
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    except Exception as exc:
+        # If the docling pipeline_options surface is unavailable, fall back to
+        # default DocumentConverter — preserves backward compatibility.
+        logging.getLogger(__name__).warning(
+            "Docling PdfPipelineOptions unavailable (%s); using defaults.", exc
+        )
+
+    converter = DocumentConverter(**converter_kwargs)
 
     try:
         result = converter.convert(str(source_path))
@@ -620,12 +672,90 @@ def _page_ref_from_table_item(tbl: Any) -> Any:
     return None
 
 
+_HEADING_LABEL_VALUES = frozenset({"section_header", "title"})
+
+
+def _label_value(item: Any) -> str:
+    """Return the lowercase string value of an item's ``label`` attribute.
+
+    Works whether ``label`` is a Docling ``DocItemLabel`` enum, a plain string,
+    or absent. Returns ``""`` when no label is present.
+    """
+    label = getattr(item, "label", None)
+    if label is None:
+        return ""
+    value = getattr(label, "value", label)
+    try:
+        return str(value).lower()
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
+    """Map each table's ``self_ref`` to its ancestor heading breadcrumb.
+
+    Walks ``docling_document.iterate_items()`` in document order, maintaining
+    a heading stack keyed by the heading's ``level`` (``TitleItem`` is treated
+    as level 0). When a ``TableItem`` is encountered, the current stack is
+    joined with ``" > "`` and recorded against the table's ``self_ref``.
+
+    Returns an empty mapping when ``iterate_items`` is unavailable or raises —
+    callers must fall back to ``section_path=""`` in that case.
+    """
+    paths: dict[str, str] = {}
+    iterate = getattr(docling_document, "iterate_items", None)
+    if not callable(iterate):
+        return paths
+
+    # Stack entries: (level:int, text:str). Lower level == shallower heading.
+    stack: list[tuple[int, str]] = []
+    try:
+        walker = iterate()
+    except Exception:  # pragma: no cover - defensive
+        return paths
+
+    try:
+        for entry in walker:
+            # iterate_items yields (node, depth). Tolerate alternate shapes.
+            if isinstance(entry, tuple) and len(entry) >= 1:
+                item = entry[0]
+            else:
+                item = entry
+
+            label = _label_value(item)
+            if label in _HEADING_LABEL_VALUES:
+                # TitleItem has no .level; treat as level 0 (root).
+                level = int(getattr(item, "level", 0) or 0)
+                if label == "title":
+                    level = 0
+                text = str(getattr(item, "text", "") or "")
+                if not text:
+                    continue
+                # Pop entries at the same or deeper level.
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                stack.append((level, text))
+            elif label == "table":
+                self_ref = getattr(item, "self_ref", None)
+                if self_ref:
+                    paths[str(self_ref)] = " > ".join(t for _, t in stack)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("section_path walker aborted: %s", exc)
+
+    return paths
+
+
 def _extract_table_artifacts(docling_document: Any) -> list:
     """Extract structured table artifacts from a DoclingDocument. FR-3211.
 
     Walks ``docling_document.tables`` (when present) and converts each entry
     into a ``TableArtifact`` with markdown, row-major cell grid, and section
     breadcrumbs derived from the table's parent heading chain.
+
+    The section breadcrumb is resolved by replaying ``iterate_items()`` once
+    and snapshotting the active heading stack at each table's position — the
+    Docling object graph stores headings and tables as flat siblings under
+    ``body``, so a structural parent walk would not surface the breadcrumb.
 
     Returns an empty list when the document has no tables or when extraction
     of any individual table fails — table extraction must never break parsing.
@@ -636,6 +766,8 @@ def _extract_table_artifacts(docling_document: Any) -> list:
         return []
 
     raw_tables = getattr(docling_document, "tables", None) or []
+    section_paths = _resolve_table_section_paths(docling_document)
+
     artifacts: list[TableArtifact] = []
     for idx, tbl in enumerate(raw_tables):
         try:
@@ -657,6 +789,8 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                 caption = str(cap_text or "")
             except Exception:
                 caption = ""
+            self_ref = getattr(tbl, "self_ref", None)
+            section_path = section_paths.get(str(self_ref), "") if self_ref else ""
             artifacts.append(
                 TableArtifact(
                     table_id=f"table-{idx + 1}",
@@ -665,7 +799,7 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     num_rows=num_rows,
                     num_cols=num_cols,
                     has_header=_detect_header_row(tbl),
-                    section_path="",
+                    section_path=section_path,
                     caption=caption.strip(),
                     page_ref=_page_ref_from_table_item(tbl),
                 )
@@ -711,6 +845,184 @@ def _cells_to_markdown(cells: list[list[str]]) -> str:
     sep = "| " + " | ".join(["---"] * width) + " |"
     body = "\n".join("| " + " | ".join(r) + " |" for r in norm[1:])
     return "\n".join([header, sep, body]).strip()
+
+
+def _table_signature(markdown: str) -> str:
+    """Return the first non-empty, non-separator row of a markdown table.
+
+    Mirrors the heuristic used by ``embedding.nodes.chunking._match_table_artifact``;
+    duplicated locally to avoid an import dependency on the embedding node.
+    """
+    if not markdown:
+        return ""
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("|---") or set(stripped) <= {"|", "-", " "}:
+            continue
+        return stripped
+    return ""
+
+
+def _is_table_dominant(chunk_text: str, table_md: str, signature: str) -> bool:
+    """A chunk is "table-dominant" iff it contains the signature row AND the
+    table markdown forms >=60% of the chunk text length.
+    """
+    if not signature or signature not in chunk_text:
+        return False
+    text_len = len(chunk_text)
+    if text_len == 0:
+        return False
+    return (len(table_md) / text_len) >= 0.6
+
+
+def _build_table_summary_text(tbl: Any) -> str:
+    headers = tbl.cells[0] if tbl.has_header and tbl.cells else []
+    body_rows = max(0, tbl.num_rows - (1 if tbl.has_header else 0))
+    lines: list[str] = []
+    caption = (tbl.caption or "").strip()
+    if caption:
+        lines.append(f"Table: {caption}")
+    lines.append(f"Columns: {' | '.join(headers)}")
+    lines.append(f"Rows: {body_rows}")
+    return "\n".join(lines)
+
+
+def _table_is_small_uniform(tbl: Any, max_rows: int, max_cols: int) -> bool:
+    if not tbl.has_header:
+        return False
+    if not tbl.cells:
+        return False
+    body = tbl.cells[1:]
+    body_rows = len(body)
+    if body_rows == 0:
+        return False
+    if body_rows > max_rows:
+        return False
+    if tbl.num_cols < 2 or tbl.num_cols > max_cols:
+        return False
+    header_len = len(tbl.cells[0])
+    if not all(len(r) == header_len for r in body):
+        return False
+    return True
+
+
+def _apply_adaptive_table_chunking(
+    chunks: list, tables: list, cfg: Any
+) -> list:
+    """Drop table-dominant chunks; emit summary + (optional) row chunks per table.
+
+    Inserts emitted chunks at the position where the first table-dominant chunk
+    appeared so document order is preserved. Falls back to appending when the
+    table-dominant chunk is absent (e.g., HybridChunker did not surface it).
+    """
+    from src.ingest.support.parser_base import Chunk
+
+    max_rows = int(getattr(cfg, "max_table_rows_for_row_chunks", 32))
+    max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
+
+    # Compute table signatures once.
+    table_meta: list[tuple[Any, str]] = []
+    for tbl in tables:
+        md = getattr(tbl, "markdown", "") or ""
+        sig = _table_signature(md)
+        table_meta.append((tbl, sig))
+
+    # Mark indices for removal and compute insertion anchor per table.
+    drop_indices: set[int] = set()
+    insertion_anchor: dict[str, int] = {}
+    for tbl, sig in table_meta:
+        if not sig:
+            continue
+        md = tbl.markdown or ""
+        for i, c in enumerate(chunks):
+            if i in drop_indices:
+                continue
+            if _is_table_dominant(c.text, md, sig):
+                drop_indices.add(i)
+                insertion_anchor.setdefault(tbl.table_id, i)
+                # Mark only the first match per table; let other matches remain
+                # so chained tables on a page still get their own anchors.
+                break
+
+    def _make_table_chunks(tbl: Any) -> list:
+        out: list = []
+        heading_path = [h for h in (tbl.section_path or "").split(" > ") if h]
+        heading = heading_path[-1] if heading_path else ""
+        common_meta_summary = {
+            "chunk_type": "table_summary",
+            "table_id": tbl.table_id,
+            "table_num_rows": tbl.num_rows,
+            "table_num_cols": tbl.num_cols,
+            "table_has_header": tbl.has_header,
+        }
+        if tbl.caption:
+            common_meta_summary["table_caption"] = tbl.caption
+        out.append(
+            Chunk(
+                text=_build_table_summary_text(tbl),
+                section_path=tbl.section_path or "",
+                heading=heading,
+                heading_level=len(heading_path),
+                chunk_index=0,
+                extra_metadata=common_meta_summary,
+                heading_path=heading_path,
+                page_ref=tbl.page_ref,
+            )
+        )
+
+        if _table_is_small_uniform(tbl, max_rows, max_cols):
+            headers = tbl.cells[0]
+            caption_prefix = (tbl.caption or "").strip()
+            for body_idx, row in enumerate(tbl.cells[1:]):
+                pairs = " | ".join(f"{h}: {v}" for h, v in zip(headers, row))
+                text = f"{caption_prefix}\n{pairs}" if caption_prefix else pairs
+                row_meta = {
+                    "chunk_type": "table_row",
+                    "table_id": tbl.table_id,
+                    "table_row_index": body_idx,
+                    "table_num_rows": tbl.num_rows,
+                    "table_num_cols": tbl.num_cols,
+                }
+                out.append(
+                    Chunk(
+                        text=text,
+                        section_path=tbl.section_path or "",
+                        heading=heading,
+                        heading_level=len(heading_path),
+                        chunk_index=0,
+                        extra_metadata=row_meta,
+                        heading_path=list(heading_path),
+                        page_ref=tbl.page_ref,
+                    )
+                )
+        return out
+
+    # Assemble result preserving order: walk original chunks, drop marked ones,
+    # and insert per-table emissions at the first occurrence anchor.
+    inserted_for: set[str] = set()
+    result: list = []
+    for i, c in enumerate(chunks):
+        if i in drop_indices:
+            # Find which table anchored here and emit its chunks once.
+            for tbl, _sig in table_meta:
+                if (
+                    tbl.table_id not in inserted_for
+                    and insertion_anchor.get(tbl.table_id) == i
+                ):
+                    result.extend(_make_table_chunks(tbl))
+                    inserted_for.add(tbl.table_id)
+            continue
+        result.append(c)
+
+    # Tables that never matched a chunk — append their emissions at the end.
+    for tbl, _sig in table_meta:
+        if tbl.table_id not in inserted_for:
+            result.extend(_make_table_chunks(tbl))
+            inserted_for.add(tbl.table_id)
+
+    return result
 
 
 class DoclingParser:
@@ -761,6 +1073,11 @@ class DoclingParser:
             artifacts_path=config.docling_artifacts_path,
             vlm_mode=self._vlm_mode,
             generate_page_images=config.generate_page_images,
+            enable_ocr=getattr(config, "enable_ocr", True),
+            tableformer_mode=getattr(config, "tableformer_mode", "accurate"),
+            tableformer_do_cell_matching=getattr(
+                config, "tableformer_do_cell_matching", True
+            ),
         )
 
         # Encapsulate DoclingDocument — FR-3205
@@ -819,7 +1136,7 @@ class DoclingParser:
         raw_chunks = list(chunk_iter)
 
         chunks: list[Chunk] = []
-        for idx, raw in enumerate(raw_chunks):
+        for raw in raw_chunks:
             # Extract heading hierarchy from HybridChunker metadata
             headings: list[str] = []
             meta = getattr(raw, "meta", None)
@@ -837,12 +1154,23 @@ class DoclingParser:
                     section_path=section_path,
                     heading=heading,
                     heading_level=heading_level,
-                    chunk_index=idx,
+                    chunk_index=0,  # re-sequenced below
                     extra_metadata={},
                     heading_path=headings,
                     page_ref=page_ref,
                 )
             )
+
+        tables = list(getattr(parse_result, "tables", []) or [])
+        cfg = getattr(self, "_config", None)
+        if (
+            tables
+            and getattr(cfg, "enable_adaptive_table_chunking", True)
+        ):
+            chunks = _apply_adaptive_table_chunking(chunks, tables, cfg)
+
+        for i, c in enumerate(chunks):
+            c.chunk_index = i
         return chunks
 
     @classmethod
@@ -860,6 +1188,11 @@ class DoclingParser:
         warmup_docling_models(
             artifacts_path=config.docling_artifacts_path,
             with_smolvlm=(getattr(config, "vlm_mode", "disabled") == "builtin"),
+            with_tableformer_v2=(
+                str(getattr(config, "tableformer_mode", "accurate")).lower()
+                == "accurate"
+            ),
+            with_rapidocr=bool(getattr(config, "enable_ocr", True)),
         )
 
 

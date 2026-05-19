@@ -732,6 +732,8 @@ class TestDoclingParser:
         mock_warmup.assert_called_once_with(
             artifacts_path=config.docling_artifacts_path,
             with_smolvlm=True,  # vlm_mode == "builtin"
+            with_tableformer_v2=True,  # default tableformer_mode == "accurate"
+            with_rapidocr=True,  # default enable_ocr == True
         )
 
     def test_mock_docling_parser_warmup_no_smolvlm_when_disabled(self):
@@ -747,4 +749,6 @@ class TestDoclingParser:
         mock_warmup.assert_called_once_with(
             artifacts_path=config.docling_artifacts_path,
             with_smolvlm=False,  # vlm_mode == "disabled"
+            with_tableformer_v2=True,  # default tableformer_mode == "accurate"
+            with_rapidocr=True,  # default enable_ocr == True
         )

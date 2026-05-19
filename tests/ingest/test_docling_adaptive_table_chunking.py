@@ -1,0 +1,235 @@
+# @summary
+# Tests for adaptive table chunking inside DoclingParser.chunk() — Workstream B.
+# Covers: table-summary chunk emission, row-with-headers chunks for small uniform
+# tables, large/headerless/ragged-table gating, disable flag pass-through,
+# prose-mention false positives, chunk_index re-sequencing, metadata propagation.
+# Exports: TestAdaptiveTableChunking
+# Deps: src.ingest.support.docling, src.ingest.support.parser_base,
+#       src.ingest.common.types, unittest.mock, pytest
+# @end-summary
+
+"""Adaptive table chunking tests for ``DoclingParser.chunk()``.
+
+HybridChunker and the tokenizer loader are stubbed via ``patch.dict`` on
+``sys.modules`` and ``patch.object`` on the module-local helper so these tests
+run without docling installed. Inputs are constructed as lightweight doubles
+of ``DoclingDocument`` + ``TableArtifact`` so the post-processing logic is
+exercised in isolation.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.ingest.common.types import IngestionConfig
+from src.ingest.support import docling as _docling_mod
+from src.ingest.support.docling import DoclingParser
+from src.ingest.support.parser_base import ParseResult, TableArtifact, PageRef
+
+
+def _make_raw_chunk(text: str, headings: list[str] | None = None) -> MagicMock:
+    chunk = MagicMock()
+    chunk.text = text
+    chunk.meta = MagicMock()
+    chunk.meta.headings = list(headings or [])
+    # Avoid any auto-spec'd page provenance attributes that might mislead
+    # _page_ref_from_chunk_meta; explicit empty values.
+    chunk.meta.doc_items = []
+    return chunk
+
+
+def _markdown_for(cells: list[list[str]]) -> str:
+    width = max(len(r) for r in cells)
+    norm = [r + [""] * (width - len(r)) for r in cells]
+    header = "| " + " | ".join(norm[0]) + " |"
+    sep = "| " + " | ".join(["---"] * width) + " |"
+    body = "\n".join("| " + " | ".join(r) + " |" for r in norm[1:])
+    return "\n".join([header, sep, body]).strip()
+
+
+def _make_table_artifact(
+    *,
+    table_id: str = "table-1",
+    cells: list[list[str]] | None = None,
+    has_header: bool = True,
+    caption: str = "Demo Caption",
+    section_path: str = "Top > Sub",
+    page_no: int = 3,
+) -> TableArtifact:
+    if cells is None:
+        cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+    md = _markdown_for(cells)
+    return TableArtifact(
+        table_id=table_id,
+        markdown=md,
+        cells=cells,
+        num_rows=len(cells),
+        num_cols=max(len(r) for r in cells),
+        has_header=has_header,
+        section_path=section_path,
+        caption=caption,
+        page_ref=PageRef(page_no=page_no, page_label=str(page_no)),
+    )
+
+
+def _run_chunk(
+    raw_chunks: list[Any],
+    tables: list[TableArtifact],
+    *,
+    config: IngestionConfig | None = None,
+) -> list[Any]:
+    """Drive DoclingParser.chunk() with stubbed HybridChunker + tokenizer."""
+    if config is None:
+        config = IngestionConfig()
+    mock_chunker = MagicMock()
+    mock_chunker.chunk = MagicMock(return_value=raw_chunks)
+    mock_hc_cls = MagicMock(return_value=mock_chunker)
+
+    with patch.dict(
+        "sys.modules",
+        {
+            "docling_core.transforms.chunker": MagicMock(HybridChunker=mock_hc_cls),
+        },
+    ), patch.object(
+        _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
+    ):
+        parser = DoclingParser()
+        parser._docling_document = MagicMock()
+        parser._max_tokens = 512
+        parser._config = config
+        return parser.chunk(
+            ParseResult(
+                markdown="",
+                headings=[],
+                has_figures=False,
+                page_count=0,
+                tables=tables,
+            )
+        )
+
+
+class TestAdaptiveTableChunking:
+    """Behavior of DoclingParser.chunk() table post-processing."""
+
+    def test_small_table_emits_summary_and_row_chunks(self):
+        """A small table with header yields 1 summary + N row chunks; original dropped."""
+        cells = [["Col A", "Col B"], ["x1", "y1"], ["x2", "y2"], ["x3", "y3"]]
+        tbl = _make_table_artifact(cells=cells)
+        prose = _make_raw_chunk("Some intro prose.", headings=["Top", "Sub"])
+        table_chunk = _make_raw_chunk(tbl.markdown, headings=["Top", "Sub"])
+
+        out = _run_chunk([prose, table_chunk], [tbl])
+        types = [c.extra_metadata.get("chunk_type") for c in out]
+        assert types.count("table_summary") == 1
+        assert types.count("table_row") == 3
+        # original table-dominant chunk dropped → prose + summary + 3 rows = 5
+        assert len(out) == 5
+        # summary text composition
+        summary = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_summary")
+        assert "Table: Demo Caption" in summary.text
+        assert "Columns: Col A | Col B" in summary.text
+        assert "Rows: 3" in summary.text
+        # row chunk shape
+        row0 = next(
+            c for c in out
+            if c.extra_metadata.get("chunk_type") == "table_row"
+            and c.extra_metadata.get("table_row_index") == 0
+        )
+        assert "Col A: x1" in row0.text
+        assert "Col B: y1" in row0.text
+
+    def test_large_table_emits_only_summary(self):
+        """Tables exceeding max_table_rows_for_row_chunks emit only the summary."""
+        header = ["Col A", "Col B"]
+        body = [[f"a{i}", f"b{i}"] for i in range(40)]
+        cells = [header] + body
+        tbl = _make_table_artifact(cells=cells)
+        cfg = IngestionConfig()  # default max_table_rows_for_row_chunks = 32
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        types = [c.extra_metadata.get("chunk_type") for c in out]
+        assert types.count("table_summary") == 1
+        assert types.count("table_row") == 0
+
+    def test_headerless_table_emits_only_summary(self):
+        """A table without a header row never emits row chunks."""
+        cells = [["a", "b"], ["c", "d"]]
+        tbl = _make_table_artifact(cells=cells, has_header=False, caption="")
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl])
+        types = [c.extra_metadata.get("chunk_type") for c in out]
+        assert types.count("table_summary") == 1
+        assert types.count("table_row") == 0
+        # caption omitted from summary text when empty
+        summary = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_summary")
+        assert not summary.text.startswith("Table:")
+        assert "Columns:" in summary.text
+
+    def test_ragged_rows_emit_only_summary(self):
+        """A table whose body rows have unequal length never emits row chunks."""
+        cells = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl])
+        types = [c.extra_metadata.get("chunk_type") for c in out]
+        assert types.count("table_summary") == 1
+        assert types.count("table_row") == 0
+
+    def test_disabled_flag_preserves_legacy_output(self):
+        """enable_adaptive_table_chunking=False leaves HybridChunker output untouched."""
+        cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+        tbl = _make_table_artifact(cells=cells)
+        cfg = IngestionConfig(enable_adaptive_table_chunking=False)
+        prose = _make_raw_chunk("intro")
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([prose, table_chunk], [tbl], config=cfg)
+        assert len(out) == 2
+        assert all(
+            c.extra_metadata.get("chunk_type") not in ("table_summary", "table_row")
+            for c in out
+        )
+
+    def test_prose_mention_of_caption_is_not_removed(self):
+        """Chunks that only mention the caption (no signature row) are preserved."""
+        cells = [["H1", "H2"], ["alpha-key", "beta-val"]]
+        tbl = _make_table_artifact(cells=cells, caption="Pricing")
+        # signature row begins with "| H1 | H2 |" — prose mentions caption only
+        prose = _make_raw_chunk("See Pricing table below for details.")
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([prose, table_chunk], [tbl])
+        # prose preserved
+        assert any(c.text == "See Pricing table below for details." for c in out)
+        # table-dominant chunk dropped
+        assert not any(c.text == tbl.markdown for c in out)
+
+    def test_chunk_index_is_contiguous_and_monotonic(self):
+        """Final chunk_index values are 0..N-1 in order."""
+        cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+        tbl = _make_table_artifact(cells=cells)
+        prose1 = _make_raw_chunk("first")
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        prose2 = _make_raw_chunk("last")
+        out = _run_chunk([prose1, table_chunk, prose2], [tbl])
+        indices = [c.chunk_index for c in out]
+        assert indices == list(range(len(out)))
+
+    def test_metadata_propagates_to_summary_and_row_chunks(self):
+        """table_id, page_ref, heading_path appear on both summary and row chunks."""
+        cells = [["H1", "H2"], ["a", "b"]]
+        tbl = _make_table_artifact(
+            cells=cells, section_path="Alpha > Beta", page_no=7
+        )
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl])
+        target = [c for c in out if c.extra_metadata.get("chunk_type") in
+                  ("table_summary", "table_row")]
+        assert len(target) == 2  # 1 summary + 1 row
+        for c in target:
+            assert c.extra_metadata.get("table_id") == "table-1"
+            assert c.heading_path == ["Alpha", "Beta"]
+            assert c.section_path == "Alpha > Beta"
+            assert c.page_ref is not None
+            assert c.page_ref.page_no == 7

@@ -39,6 +39,10 @@ from config.settings import (
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_STRICT,
+    RAG_INGESTION_ENABLE_OCR,
+    RAG_INGESTION_OCR_ENGINE,
+    RAG_INGESTION_TABLEFORMER_MODE,
+    RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING,
     RAG_INGESTION_ENABLE_KG_PHASE2B,
     RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING,
     RAG_INGESTION_ENABLE_QUALITY_VALIDATION,
@@ -123,6 +127,17 @@ class IngestionConfig:
     docling_artifacts_path: str = RAG_INGESTION_DOCLING_ARTIFACTS_PATH
     docling_strict: bool = RAG_INGESTION_DOCLING_STRICT
     docling_auto_download: bool = RAG_INGESTION_DOCLING_AUTO_DOWNLOAD
+    enable_ocr: bool = RAG_INGESTION_ENABLE_OCR
+    """Enable Docling OCR auto-trigger for image-only pages (RapidOCR with
+    force_full_page_ocr=False). Default: True. Env: RAG_INGESTION_ENABLE_OCR."""
+    ocr_engine: str = RAG_INGESTION_OCR_ENGINE
+    """OCR engine identifier (informational). Default: "rapidocr"."""
+    tableformer_mode: str = RAG_INGESTION_TABLEFORMER_MODE
+    """TableFormer mode: "accurate" (TF v2, default) or "fast" (TF v1).
+    Env: RAG_INGESTION_TABLEFORMER_MODE."""
+    tableformer_do_cell_matching: bool = RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING
+    """Match PDF text cells to detected table cells. Default: True.
+    Env: RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING."""
     semantic_chunking: bool = SEMANTIC_CHUNKING_ENABLED
     chunk_size: int = CHUNK_SIZE
     chunk_overlap: int = CHUNK_OVERLAP
@@ -177,6 +192,15 @@ class IngestionConfig:
     actually consume. Final fallback is ``BAAI/bge-m3``. Env-driven override
     is intentionally not wired — set this on IngestionConfig directly when a
     different tokenizer is desired."""
+    enable_adaptive_table_chunking: bool = True
+    """If True, ``DoclingParser.chunk()`` post-processes HybridChunker output:
+    drops table-dominant chunks and emits a per-table summary chunk plus
+    per-row chunks for small/uniform tables. Default: True."""
+    max_table_rows_for_row_chunks: int = 32
+    """Maximum body-row count (excluding header) for which per-row chunks are
+    emitted. Larger tables emit only the summary chunk."""
+    max_table_cols_for_row_chunks: int = 12
+    """Maximum column count for which per-row chunks are emitted."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN
