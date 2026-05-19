@@ -183,7 +183,9 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.152.8",
     "libcst>=1.8.6",
+    "pypdf>=6.11.0",
     "reportlab>=4.5.1",
 ]
 
