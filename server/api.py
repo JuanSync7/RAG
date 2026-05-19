@@ -52,6 +52,7 @@ from src.platform.security import Principal
 from src.platform.security import get_tenant_quota
 from src.platform.security import require_role
 from server.console import create_console_router
+from server.observability_middleware import install_observability_middleware
 from server.routes import (
     create_admin_router,
     create_documents_router,
@@ -188,6 +189,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Observability middleware: starts a root trace per request and extracts the
+# W3C traceparent header so external client traces link into backend traces.
+# Installed after CORS so CORS preflights are not traced, and before the
+# request_id middleware so the trace's lifetime envelops request_id handling.
+install_observability_middleware(app)
 
 
 @app.middleware("http")
