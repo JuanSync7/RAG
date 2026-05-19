@@ -61,6 +61,13 @@ the backend constructs the Basic-auth header automatically (see
 | Braintrust | `https://api.braintrust.dev/otel` |
 | Honeycomb | `https://api.honeycomb.io` (set `x-honeycomb-team=<key>` in `OTEL_EXPORTER_OTLP_HEADERS`) |
 
+## Engineering guide
+
+See [`docs/observability.md`](../../../docs/observability.md) for the full
+engineering guide: span-tree reference, backend swap procedure, extension
+patterns, and gotchas (OTLP endpoint kwarg, ThreadPoolExecutor context,
+streaming-response trace lifetime, Langfuse headless bootstrap).
+
 ## Files
 
 | File | Purpose |
