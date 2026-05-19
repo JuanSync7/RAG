@@ -176,7 +176,7 @@ class InputRailExecutor:
 
             for name, fut in futures.items():
                 t0 = time.perf_counter()
-                span = self._tracer.start_span(
+                span = self._tracer.span(
                     f"guardrails.input.{name}",
                     {"query_hash": query_hash},
                     parent=parent_span,
@@ -383,7 +383,7 @@ class OutputRailExecutor:
             rail_results: dict[str, Any] = {}
             for name, fut in futures.items():
                 t0 = time.perf_counter()
-                span = self._tracer.start_span(
+                span = self._tracer.span(
                     f"guardrails.output.{name}", parent=parent_span
                 )
                 try:

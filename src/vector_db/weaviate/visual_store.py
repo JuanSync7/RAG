@@ -162,7 +162,7 @@ def visual_search(
     Raises:
         weaviate.exceptions.WeaviateQueryError: On query failure.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.visual_search",
         {"collection": collection, "limit": limit, "score_threshold": score_threshold},
     )

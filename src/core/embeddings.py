@@ -44,7 +44,7 @@ class LocalBGEEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of document texts."""
-        span = self.tracer.start_span("embeddings.embed_documents", {"batch_size": len(texts)})
+        span = self.tracer.span("embeddings.embed_documents", {"batch_size": len(texts)})
         embeddings = self.model.encode(
             texts,
             normalize_embeddings=True,
@@ -56,7 +56,7 @@ class LocalBGEEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query text."""
-        span = self.tracer.start_span("embeddings.embed_query", {"text_len": len(text)})
+        span = self.tracer.span("embeddings.embed_query", {"text_len": len(text)})
         embedding = self.model.encode(
             text,
             normalize_embeddings=True,
@@ -113,7 +113,7 @@ class TEIEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of documents via TEI."""
-        span = self.tracer.start_span("embeddings.embed_documents", {"batch_size": len(texts)})
+        span = self.tracer.span("embeddings.embed_documents", {"batch_size": len(texts)})
         try:
             vectors = self._embed(texts)
         finally:
@@ -122,7 +122,7 @@ class TEIEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query text via TEI."""
-        span = self.tracer.start_span("embeddings.embed_query", {"text_len": len(text)})
+        span = self.tracer.span("embeddings.embed_query", {"text_len": len(text)})
         try:
             vectors = self._embed([text])
         finally:
