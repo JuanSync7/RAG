@@ -19,6 +19,7 @@ import re
 from typing import Optional
 
 from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown, ConfidenceWeights
+from src.platform.observability import get_tracer
 
 # Downward correction map for LLM overconfidence bias.
 # LLMs tend to report "high" even when evidence is weak,
@@ -352,36 +353,45 @@ def compute_composite_confidence(
     Returns:
         ConfidenceBreakdown with all three signals and the composite score.
     """
-    if weights is not None:
-        w = weights
-    else:
-        # Build from kwargs — ConfidenceWeights.__post_init__ validates sum.
-        w = ConfidenceWeights(
-            retrieval=retrieval_weight,
-            llm=llm_weight,
-            citation=citation_weight,
+    with get_tracer().span(
+        "retrieval.confidence.score",
+        {
+            "reranker_score_count": len(reranker_scores),
+            "retrieved_doc_count": len(retrieved_texts),
+            "answer_len": len(answer or ""),
+        },
+    ) as _span:
+        if weights is not None:
+            w = weights
+        else:
+            # Build from kwargs — ConfidenceWeights.__post_init__ validates sum.
+            w = ConfidenceWeights(
+                retrieval=retrieval_weight,
+                llm=llm_weight,
+                citation=citation_weight,
+            )
+
+        retrieval_score = compute_retrieval_confidence(reranker_scores)
+        llm_score = parse_llm_confidence(llm_confidence_text)
+        citation_score = compute_citation_coverage(answer, retrieved_texts)
+
+        composite = (
+            w.retrieval * retrieval_score
+            + w.llm * llm_score
+            + w.citation * citation_score
         )
+        composite = max(0.0, min(1.0, composite))
+        _span.set_attribute("composite", float(composite))
 
-    retrieval_score = compute_retrieval_confidence(reranker_scores)
-    llm_score = parse_llm_confidence(llm_confidence_text)
-    citation_score = compute_citation_coverage(answer, retrieved_texts)
-
-    composite = (
-        w.retrieval * retrieval_score
-        + w.llm * llm_score
-        + w.citation * citation_score
-    )
-    composite = max(0.0, min(1.0, composite))
-
-    return ConfidenceBreakdown(
-        retrieval_score=retrieval_score,
-        llm_score=llm_score,
-        citation_score=citation_score,
-        composite=composite,
-        retrieval_weight=w.retrieval,
-        llm_weight=w.llm,
-        citation_weight=w.citation,
-    )
+        return ConfidenceBreakdown(
+            retrieval_score=retrieval_score,
+            llm_score=llm_score,
+            citation_score=citation_score,
+            composite=composite,
+            retrieval_weight=w.retrieval,
+            llm_weight=w.llm,
+            citation_weight=w.citation,
+        )
 
 
 def _has_substantial_overlap(
