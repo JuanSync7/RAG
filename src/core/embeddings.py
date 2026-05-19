@@ -39,30 +39,52 @@ class LocalBGEEmbeddings(Embeddings):
     """LangChain-compatible embeddings using a local BAAI/bge-m3 model."""
 
     def __init__(self, model_path: str = EMBEDDING_MODEL_PATH):
+        self.model_path = model_path
         self.model = _load_sentence_transformer(model_path)
         self.tracer = get_tracer()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of document texts."""
-        span = self.tracer.span("embeddings.embed_documents", {"batch_size": len(texts)})
-        embeddings = self.model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=True,
-            batch_size=RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS,
-        )
-        span.end(status="ok")
-        return embeddings.tolist()
+        """Embed a list of document texts.
+
+        Notes:
+            gen_ai.usage.input_tokens is reported as the sum of input text
+            character lengths — sentence-transformers does not expose a
+            tokenizer hook on this code path.
+        """
+        attrs = {
+            "gen_ai.system": "sentence-transformers",
+            "gen_ai.request.model": self.model_path,
+            "gen_ai.usage.input_tokens": sum(len(t) for t in texts),
+            "batch_size": len(texts),
+        }
+        with self.tracer.span("embeddings.local.batch", attrs) as span:
+            embeddings = self.model.encode(
+                texts,
+                normalize_embeddings=True,
+                show_progress_bar=True,
+                batch_size=RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS,
+            )
+            result = embeddings.tolist()
+            span.set_attribute("vector_count", len(result))
+            span.set_attribute("vector_dim", len(result[0]) if result else 0)
+            return result
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query text."""
-        span = self.tracer.span("embeddings.embed_query", {"text_len": len(text)})
-        embedding = self.model.encode(
-            text,
-            normalize_embeddings=True,
-        )
-        span.end(status="ok")
-        return embedding.tolist()
+        attrs = {
+            "gen_ai.system": "sentence-transformers",
+            "gen_ai.request.model": self.model_path,
+            "gen_ai.usage.input_tokens": len(text),
+        }
+        with self.tracer.span("embeddings.local.query", attrs) as span:
+            embedding = self.model.encode(
+                text,
+                normalize_embeddings=True,
+            )
+            vec = embedding.tolist()
+            span.set_attribute("vector_count", 1)
+            span.set_attribute("vector_dim", len(vec))
+            return vec
 
     def encode_sentences(self, sentences: list[str]) -> np.ndarray:
         """Encode sentences returning numpy array for internal use.
@@ -113,21 +135,30 @@ class TEIEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of documents via TEI."""
-        span = self.tracer.span("embeddings.embed_documents", {"batch_size": len(texts)})
-        try:
+        attrs = {
+            "gen_ai.system": "tei",
+            "gen_ai.request.model": self.model,
+            "gen_ai.usage.input_tokens": sum(len(t) for t in texts),
+            "batch_size": len(texts),
+        }
+        with self.tracer.span("embeddings.tei.batch", attrs) as span:
             vectors = self._embed(texts)
-        finally:
-            span.end(status="ok")
-        return vectors
+            span.set_attribute("vector_count", len(vectors))
+            span.set_attribute("vector_dim", len(vectors[0]) if vectors else 0)
+            return vectors
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query text via TEI."""
-        span = self.tracer.span("embeddings.embed_query", {"text_len": len(text)})
-        try:
+        attrs = {
+            "gen_ai.system": "tei",
+            "gen_ai.request.model": self.model,
+            "gen_ai.usage.input_tokens": len(text),
+        }
+        with self.tracer.span("embeddings.tei.query", attrs) as span:
             vectors = self._embed([text])
-        finally:
-            span.end(status="ok")
-        return vectors[0]
+            span.set_attribute("vector_count", 1)
+            span.set_attribute("vector_dim", len(vectors[0]) if vectors else 0)
+            return vectors[0]
 
     def encode_sentences(self, sentences: list[str]) -> np.ndarray:
         """Return L2-normalized embeddings as a numpy array for semantic chunking.
