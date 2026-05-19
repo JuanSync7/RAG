@@ -18,6 +18,7 @@ from typing import Any, Optional
 from src.ingest.common import Runtime
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.embedding.workflow import build_embedding_graph
+from src.platform.observability import get_tracer
 
 _GRAPH = build_embedding_graph()
 
@@ -98,8 +99,19 @@ def run_embedding_pipeline(
         "staged_weaviate_records": [],
         "staged_weaviate_delete_old": False,
     }
-    try:
-        final_state = _GRAPH.invoke(initial_state)
-    except Exception as exc:
-        final_state = {**initial_state, "errors": [f"embedding_graph:{exc}"], "stored_count": 0}
+    tracer = get_tracer()
+    with tracer.trace(
+        "ingest.embedding",
+        {
+            "source_key": source_key,
+            "source_name": source_name,
+            "connector": connector,
+            "trace_id": trace_id,
+            "batch_id": batch_id,
+        },
+    ):
+        try:
+            final_state = _GRAPH.invoke(initial_state)
+        except Exception as exc:
+            final_state = {**initial_state, "errors": [f"embedding_graph:{exc}"], "stored_count": 0}
     return final_state

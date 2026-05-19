@@ -45,6 +45,7 @@ from config.settings import (
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
 from src.core.embeddings import get_embedding_provider
+from src.platform.observability import get_tracer
 from src.vector_db import (
     delete_collection,
     delete_by_source_key,
@@ -569,99 +570,111 @@ def ingest_file(
         batch_id,
     )
 
-    # ── Phase 1 ──────────────────────────────────────────────────────────
-    phase1 = run_document_processing(
-        runtime=runtime,
-        source_path=str(source_path),
-        source_name=source_name,
-        source_uri=source_uri,
-        source_key=source_key,
-        source_id=source_id,
-        connector=connector,
-        source_version=source_version,
-        trace_id=trace_id,
-        raw_bytes=raw_bytes,
-    )
-
-    # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
-    if phase1.get("errors"):
-        return IngestFileResult(
-            errors=phase1["errors"],
-            stored_count=0,
-            metadata_summary="",
-            metadata_keywords=[],
-            processing_log=phase1.get("processing_log", []),
-            source_hash=phase1.get("source_hash", ""),
-            clean_hash="",
-            trace_id=trace_id,
-        )
-
-    # Determine final clean text
-    clean_text: str = phase1.get("cleaned_text", "")
-    clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
-
-    # ── Debug export (opt-in via export_processed) ────────────────────────
-    if config.export_processed and config.clean_store_dir:
-        _debug_store = CleanDocumentStore(Path(config.clean_store_dir))
-        meta = {
+    tracer = get_tracer()
+    with tracer.trace(
+        "ingest.file",
+        {
             "source_key": source_key,
             "source_name": source_name,
-            "source_uri": source_uri,
-            "source_id": source_id,
             "connector": connector,
-            "source_version": source_version,
-            "source_hash": phase1.get("source_hash", ""),
-        }
-        _debug_store.write(
-            source_key,
-            clean_text,
-            meta,
-            docling_document=phase1.get("docling_document") if config.persist_docling_document else None,
-        )
-
-    # ── Write mirror artifacts (optional) ─────────────────────────────────
-    if config.persist_refactor_mirror:
-        source_identity = {
+            "trace_id": trace_id,
+            "batch_id": batch_id,
             "source_path": str(source_path),
-            "source_name": source_name,
-            "source_uri": source_uri,
-            "source_key": source_key,
-            "source_id": source_id,
-            "connector": connector,
-            "source_version": source_version,
-        }
-        _write_refactor_mirror_artifacts(source_identity, phase1, config)
+        },
+    ):
+      # ── Phase 1 ──────────────────────────────────────────────────────────
+      phase1 = run_document_processing(
+          runtime=runtime,
+          source_path=str(source_path),
+          source_name=source_name,
+          source_uri=source_uri,
+          source_key=source_key,
+          source_id=source_id,
+          connector=connector,
+          source_version=source_version,
+          trace_id=trace_id,
+          raw_bytes=raw_bytes,
+      )
 
-    # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
-    # Propagate trace_id from Phase 1 state to Phase 2 (FR-3052).
-    # phase1.get("trace_id") will be the same value we injected above, but we
-    # read it from the state to stay consistent with the contract that Phase 2
-    # receives trace_id via state, not as a free variable.
-    phase2 = run_embedding_pipeline(
-        runtime=runtime,
-        source_key=source_key,
-        source_name=source_name,
-        source_uri=source_uri,
-        source_id=source_id,
-        connector=connector,
-        source_version=source_version,
-        clean_text=clean_text,
-        clean_hash=clean_hash,
-        docling_document=phase1.get("docling_document"),
-        trace_id=phase1.get("trace_id", trace_id),
-        batch_id=batch_id,
-    )
+      # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
+      if phase1.get("errors"):
+          return IngestFileResult(
+              errors=phase1["errors"],
+              stored_count=0,
+              metadata_summary="",
+              metadata_keywords=[],
+              processing_log=phase1.get("processing_log", []),
+              source_hash=phase1.get("source_hash", ""),
+              clean_hash="",
+              trace_id=trace_id,
+          )
 
-    return IngestFileResult(
-        errors=phase2.get("errors", []),
-        stored_count=phase2.get("stored_count", 0),
-        metadata_summary=phase2.get("metadata_summary", ""),
-        metadata_keywords=phase2.get("metadata_keywords", []),
-        processing_log=phase1.get("processing_log", []) + phase2.get("processing_log", []),
-        source_hash=phase1.get("source_hash", ""),
-        clean_hash=clean_hash,
-        trace_id=trace_id,
-    )
+      # Determine final clean text
+      clean_text: str = phase1.get("cleaned_text", "")
+      clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+
+      # ── Debug export (opt-in via export_processed) ────────────────────────
+      if config.export_processed and config.clean_store_dir:
+          _debug_store = CleanDocumentStore(Path(config.clean_store_dir))
+          meta = {
+              "source_key": source_key,
+              "source_name": source_name,
+              "source_uri": source_uri,
+              "source_id": source_id,
+              "connector": connector,
+              "source_version": source_version,
+              "source_hash": phase1.get("source_hash", ""),
+          }
+          _debug_store.write(
+              source_key,
+              clean_text,
+              meta,
+              docling_document=phase1.get("docling_document") if config.persist_docling_document else None,
+          )
+
+      # ── Write mirror artifacts (optional) ─────────────────────────────────
+      if config.persist_refactor_mirror:
+          source_identity = {
+              "source_path": str(source_path),
+              "source_name": source_name,
+              "source_uri": source_uri,
+              "source_key": source_key,
+              "source_id": source_id,
+              "connector": connector,
+              "source_version": source_version,
+          }
+          _write_refactor_mirror_artifacts(source_identity, phase1, config)
+
+      # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
+      # Propagate trace_id from Phase 1 state to Phase 2 (FR-3052).
+      # phase1.get("trace_id") will be the same value we injected above, but we
+      # read it from the state to stay consistent with the contract that Phase 2
+      # receives trace_id via state, not as a free variable.
+      phase2 = run_embedding_pipeline(
+          runtime=runtime,
+          source_key=source_key,
+          source_name=source_name,
+          source_uri=source_uri,
+          source_id=source_id,
+          connector=connector,
+          source_version=source_version,
+          clean_text=clean_text,
+          clean_hash=clean_hash,
+          docling_document=phase1.get("docling_document"),
+          trace_id=phase1.get("trace_id", trace_id),
+          batch_id=batch_id,
+      )
+
+      return IngestFileResult(
+          errors=phase2.get("errors", []),
+          stored_count=phase2.get("stored_count", 0),
+          metadata_summary=phase2.get("metadata_summary", ""),
+          metadata_keywords=phase2.get("metadata_keywords", []),
+          processing_log=phase1.get("processing_log", []) + phase2.get("processing_log", []),
+          source_hash=phase1.get("source_hash", ""),
+          clean_hash=clean_hash,
+          trace_id=trace_id,
+      )
 
 
 def ingest_directory(
@@ -694,226 +707,236 @@ def ingest_directory(
     """
     config = config or IngestionConfig()
     config.update_mode = update
-    design = verify_core_design(config)
-    if not design.ok:
-        raise ValueError("Invalid ingestion config: " + "; ".join(design.errors))
-    if config.enable_docling_parser:
-        ensure_docling_ready(
-            parser_model=config.docling_model,
-            artifacts_path=config.docling_artifacts_path,
-            auto_download=config.docling_auto_download,
-        )
-    if config.enable_vision_processing:
-        ensure_vision_ready(config)
+    tracer = get_tracer()
+    with tracer.trace(
+        "ingest.directory",
+        {
+            "documents_dir": str(documents_dir),
+            "batch_id": batch_id,
+            "fresh": fresh,
+            "update": update,
+        },
+    ):
+      design = verify_core_design(config)
+      if not design.ok:
+          raise ValueError("Invalid ingestion config: " + "; ".join(design.errors))
+      if config.enable_docling_parser:
+          ensure_docling_ready(
+              parser_model=config.docling_model,
+              artifacts_path=config.docling_artifacts_path,
+              auto_download=config.docling_auto_download,
+          )
+      if config.enable_vision_processing:
+          ensure_vision_ready(config)
 
-    manifest = _normalize_manifest_entries(load_manifest())
-    errors: list[str] = []
-    processed = skipped = failed = stored_chunks = 0
+      manifest = _normalize_manifest_entries(load_manifest())
+      errors: list[str] = []
+      processed = skipped = failed = stored_chunks = 0
 
-    patterns = [
-        pattern.strip()
-        for pattern in RAG_INGESTION_EXPORT_EXTENSIONS.split(",")
-        if pattern.strip()
-    ]
-    allowed_suffixes = {pattern.lower() for pattern in patterns}
-    if selected_sources is None:
-        files = sorted(
-            {path.resolve() for p in patterns for path in documents_dir.rglob(f"*{p}")}
-        )
-    else:
-        files = sorted(
-            {
-                path.resolve()
-                for path in selected_sources
-                if path.is_file() and path.suffix.lower() in allowed_suffixes
-            }
-        )
-    if not files:
-        return IngestionRunSummary(0, 0, 0, 0, 0, [], design.warnings)
+      patterns = [
+          pattern.strip()
+          for pattern in RAG_INGESTION_EXPORT_EXTENSIONS.split(",")
+          if pattern.strip()
+      ]
+      allowed_suffixes = {pattern.lower() for pattern in patterns}
+      if selected_sources is None:
+          files = sorted(
+              {path.resolve() for p in patterns for path in documents_dir.rglob(f"*{p}")}
+          )
+      else:
+          files = sorted(
+              {
+                  path.resolve()
+                  for path in selected_sources
+                  if path.is_file() and path.suffix.lower() in allowed_suffixes
+              }
+          )
+      if not files:
+          return IngestionRunSummary(0, 0, 0, 0, 0, [], design.warnings)
 
-    sources = [_local_source_identity(path, documents_dir) for path in files]
-    source_keys = {source["source_key"] for source in sources}
+      sources = [_local_source_identity(path, documents_dir) for path in files]
+      source_keys = {source["source_key"] for source in sources}
 
-    removed_sources = (
-        sorted(set(manifest.keys()) - source_keys)
-        if update and selected_sources is None
-        else []
-    )
+      removed_sources = (
+          sorted(set(manifest.keys()) - source_keys)
+          if update and selected_sources is None
+          else []
+      )
 
-    with get_client() as client:
-        if fresh:
-            delete_collection(client)
-            manifest = {}
-        ensure_collection(client)
+      with get_client() as client:
+          if fresh:
+              delete_collection(client)
+              manifest = {}
+          ensure_collection(client)
 
-        for source in removed_sources:
-            delete_by_source_key(
-                client,
-                source,
-                legacy_source=str(manifest.get(source, {}).get("source", "")),
-            )
-            # Clean up debug export artifacts if they exist.
-            if config.clean_store_dir:
-                CleanDocumentStore(Path(config.clean_store_dir)).delete(source)
-            manifest.pop(source, None)
+          for source in removed_sources:
+              delete_by_source_key(
+                  client,
+                  source,
+                  legacy_source=str(manifest.get(source, {}).get("source", "")),
+              )
+              # Clean up debug export artifacts if they exist.
+              if config.clean_store_dir:
+                  CleanDocumentStore(Path(config.clean_store_dir)).delete(source)
+              manifest.pop(source, None)
 
-        _db_client = None
-        if config.store_documents:
-            from src.db import create_persistent_client as _db_create_client, ensure_bucket as _db_ensure_bucket
-            _db_client = _db_create_client()
-            _db_ensure_bucket(_db_client, config.target_bucket or None)
+          _db_client = None
+          if config.store_documents:
+              from src.db import create_persistent_client as _db_create_client, ensure_bucket as _db_ensure_bucket
+              _db_client = _db_create_client()
+              _db_ensure_bucket(_db_client, config.target_bucket or None)
 
-        # Instantiate parser registry and validate readiness (T9 / FR-3303).
-        try:
-            _parser_registry = ParserRegistry(config)
-            _parser_registry.ensure_all_ready(config)
-        except Exception as _preg_exc:
-            logger.warning(
-                "ParserRegistry initialisation failed: %s — "
-                "structure_detection_node will use legacy Docling fallback.",
-                _preg_exc,
-            )
-            _parser_registry = None
+          # Instantiate parser registry and validate readiness (T9 / FR-3303).
+          try:
+              _parser_registry = ParserRegistry(config)
+              _parser_registry.ensure_all_ready(config)
+          except Exception as _preg_exc:
+              logger.warning(
+                  "ParserRegistry initialisation failed: %s — "
+                  "structure_detection_node will use legacy Docling fallback.",
+                  _preg_exc,
+              )
+              _parser_registry = None
 
-        runtime = Runtime(
-            config=config,
-            embedder=get_embedding_provider(tier="ingest"),
-            weaviate_client=client,
-            db_client=_db_client,
-            parser_registry=_parser_registry,
-        )
+          runtime = Runtime(
+              config=config,
+              embedder=get_embedding_provider(tier="ingest"),
+              weaviate_client=client,
+              db_client=_db_client,
+              parser_registry=_parser_registry,
+          )
 
-        if config.export_processed:
-            PROCESSED_DIR.mkdir(exist_ok=True)
+          if config.export_processed:
+              PROCESSED_DIR.mkdir(exist_ok=True)
 
-        for source in sources:
-            source_path = Path(source["source_path"])
-            logger.info(
-                "ingestion_start source=%s source_key=%s",
-                source["source_name"],
-                source["source_key"],
-            )
-            matched_key, matched_entry = _find_manifest_entry(manifest, source)
-            previous_hash = matched_entry.get("content_hash", "") if update else ""
-            previous_uri = matched_entry.get("source_uri", "") if update else ""
-            # Idempotency check: skip if source unchanged (hash match in manifest).
-            # Read bytes once here so we can reuse them in ingest_file, avoiding
-            # a second disk read inside document_ingestion_node.
-            raw_bytes = source_path.read_bytes()
-            current_hash = sha256_bytes(raw_bytes)
-            if update and previous_hash:
-                if current_hash == previous_hash:
-                    skipped += 1
-                    if matched_key and matched_key != source["source_key"]:
-                        manifest.pop(matched_key, None)
-                    manifest[source["source_key"]] = {
-                        **matched_entry,
-                        "source": source["source_name"],
-                        "source_uri": source["source_uri"],
-                        "source_id": source["source_id"],
-                        "source_key": source["source_key"],
-                        "connector": source["connector"],
-                        "source_version": source["source_version"],
-                        "content_hash": previous_hash,
-                    }
-                    logger.info(
-                        "ingestion_skipped source=%s source_key=%s reason=unchanged",
-                        source["source_name"],
-                        source["source_key"],
-                    )
-                    continue
-            try:
-                result = ingest_file(
-                    source_path,
-                    runtime,
-                    source_name=source["source_name"],
-                    source_uri=source["source_uri"],
-                    source_key=source["source_key"],
-                    source_id=source["source_id"],
-                    connector=source["connector"],
-                    source_version=source["source_version"],
-                    existing_hash=previous_hash if update else "",
-                    existing_source_uri=previous_uri if update else "",
-                    batch_id=batch_id,
-                    raw_bytes=raw_bytes,
-                )
-                if result.errors:
-                    failed += 1
-                    errors.extend(result.errors)
-                    logger.error(
-                        "ingestion_failed source=%s source_key=%s errors=%s",
-                        source["source_name"],
-                        source["source_key"],
-                        "; ".join(result.errors),
-                    )
-                    continue
+          for source in sources:
+              source_path = Path(source["source_path"])
+              logger.info(
+                  "ingestion_start source=%s source_key=%s",
+                  source["source_name"],
+                  source["source_key"],
+              )
+              matched_key, matched_entry = _find_manifest_entry(manifest, source)
+              previous_hash = matched_entry.get("content_hash", "") if update else ""
+              previous_uri = matched_entry.get("source_uri", "") if update else ""
+              # Idempotency check: skip if source unchanged (hash match in manifest).
+              # Read bytes once here so we can reuse them in ingest_file, avoiding
+              # a second disk read inside document_ingestion_node.
+              raw_bytes = source_path.read_bytes()
+              current_hash = sha256_bytes(raw_bytes)
+              if update and previous_hash:
+                  if current_hash == previous_hash:
+                      skipped += 1
+                      if matched_key and matched_key != source["source_key"]:
+                          manifest.pop(matched_key, None)
+                      manifest[source["source_key"]] = {
+                          **matched_entry,
+                          "source": source["source_name"],
+                          "source_uri": source["source_uri"],
+                          "source_id": source["source_id"],
+                          "source_key": source["source_key"],
+                          "connector": source["connector"],
+                          "source_version": source["source_version"],
+                          "content_hash": previous_hash,
+                      }
+                      logger.info(
+                          "ingestion_skipped source=%s source_key=%s reason=unchanged",
+                          source["source_name"],
+                          source["source_key"],
+                      )
+                      continue
+              try:
+                  result = ingest_file(
+                      source_path,
+                      runtime,
+                      source_name=source["source_name"],
+                      source_uri=source["source_uri"],
+                      source_key=source["source_key"],
+                      source_id=source["source_id"],
+                      connector=source["connector"],
+                      source_version=source["source_version"],
+                      existing_hash=previous_hash if update else "",
+                      existing_source_uri=previous_uri if update else "",
+                      batch_id=batch_id,
+                      raw_bytes=raw_bytes,
+                  )
+                  if result.errors:
+                      failed += 1
+                      errors.extend(result.errors)
+                      logger.error(
+                          "ingestion_failed source=%s source_key=%s errors=%s",
+                          source["source_name"],
+                          source["source_key"],
+                          "; ".join(result.errors),
+                      )
+                      continue
 
-                processed += 1
-                stored_chunks += result.stored_count
-                logger.info(
-                    "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
-                    source["source_name"],
-                    source["source_key"],
-                    result.stored_count,
-                    result.stored_count,
-                    " > ".join(result.processing_log),
-                )
-                if matched_key and matched_key != source["source_key"]:
-                    manifest.pop(matched_key, None)
-                stem = _mirror_file_stem(source["source_name"], source["source_key"])
-                manifest[source["source_key"]] = {
-                    "source": source["source_name"],
-                    "source_uri": source["source_uri"],
-                    "source_id": source["source_id"],
-                    "source_key": source["source_key"],
-                    "connector": source["connector"],
-                    "source_version": source["source_version"],
-                    "content_hash": result.source_hash,
-                    "clean_hash": result.clean_hash,
-                    "chunk_count": result.stored_count,
-                    "summary": result.metadata_summary,
-                    "keywords": result.metadata_keywords,
-                    "processing_log": result.processing_log[-12:],
-                    "mirror_stem": stem,
-                    # -- Data Lifecycle fields (FR-3050, FR-3053, FR-3100) --
-                    "schema_version": PIPELINE_SCHEMA_VERSION,
-                    "trace_id": result.trace_id,
-                    "batch_id": batch_id,
-                    "deleted": False,
-                    "deleted_at": "",
-                    "validation": result.validation,
-                }
-                save_manifest(manifest)
+                  processed += 1
+                  stored_chunks += result.stored_count
+                  logger.info(
+                      "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
+                      source["source_name"],
+                      source["source_key"],
+                      result.stored_count,
+                      result.stored_count,
+                      " > ".join(result.processing_log),
+                  )
+                  if matched_key and matched_key != source["source_key"]:
+                      manifest.pop(matched_key, None)
+                  stem = _mirror_file_stem(source["source_name"], source["source_key"])
+                  manifest[source["source_key"]] = {
+                      "source": source["source_name"],
+                      "source_uri": source["source_uri"],
+                      "source_id": source["source_id"],
+                      "source_key": source["source_key"],
+                      "connector": source["connector"],
+                      "source_version": source["source_version"],
+                      "content_hash": result.source_hash,
+                      "clean_hash": result.clean_hash,
+                      "chunk_count": result.stored_count,
+                      "summary": result.metadata_summary,
+                      "keywords": result.metadata_keywords,
+                      "processing_log": result.processing_log[-12:],
+                      "mirror_stem": stem,
+                      # -- Data Lifecycle fields (FR-3050, FR-3053, FR-3100) --
+                      "schema_version": PIPELINE_SCHEMA_VERSION,
+                      "trace_id": result.trace_id,
+                      "batch_id": batch_id,
+                      "deleted": False,
+                      "deleted_at": "",
+                      "validation": result.validation,
+                  }
+                  save_manifest(manifest)
 
-                # Debug export is handled inside ingest_file when export_processed=True.
-            except (OSError, ValueError, RuntimeError) as exc:
-                failed += 1
-                logger.exception(
-                    "ingestion_unhandled_error source=%s error=%s",
-                    source.get("source_name", "unknown"),
-                    exc,
-                )
-                errors.append(f"unhandled:{source.get('source_name', 'unknown')}:{exc}")
-                continue
+                  # Debug export is handled inside ingest_file when export_processed=True.
+              except (OSError, ValueError, RuntimeError) as exc:
+                  failed += 1
+                  logger.exception(
+                      "ingestion_unhandled_error source=%s error=%s",
+                      source.get("source_name", "unknown"),
+                      exc,
+                  )
+                  errors.append(f"unhandled:{source.get('source_name', 'unknown')}:{exc}")
+                  continue
 
-        # KG persistence owned by KGWeave: no graph save/export here. The
-        # CLI ``--obsidian-export`` switch is now a no-op for the in-process
-        # path; export is performed by the KGWeave worker on its own backend.
+          # KG persistence owned by KGWeave: no graph save/export here. The
+          # CLI ``--obsidian-export`` switch is now a no-op for the in-process
+          # path; export is performed by the KGWeave worker on its own backend.
 
-        if _db_client is not None:
-            from src.db import close_client as _db_close_client
-            _db_close_client(_db_client)
+          if _db_client is not None:
+              from src.db import close_client as _db_close_client
+              _db_close_client(_db_client)
 
-    save_manifest(manifest)
-    return IngestionRunSummary(
-        processed=processed,
-        skipped=skipped,
-        failed=failed,
-        stored_chunks=stored_chunks,
-        removed_sources=len(removed_sources),
-        errors=errors,
-        design_warnings=design.warnings,
-    )
+      save_manifest(manifest)
+      return IngestionRunSummary(
+          processed=processed,
+          skipped=skipped,
+          failed=failed,
+          stored_chunks=stored_chunks,
+          removed_sources=len(removed_sources),
+          errors=errors,
+          design_warnings=design.warnings,
+      )
 
 
 __all__ = [
