@@ -352,16 +352,20 @@ def test_real_docling_datasheet_smoke(tmp_path: Path) -> None:
             f"section_paths={section_paths_lower!r}"
         )
 
-    # Nested heading for the bit-field table: ideally section_path includes
-    # both the outer "Bit Field Details" and the inner "CTRL Register Bits".
-    # We assert the inner sub-heading shows up at least once across tables,
-    # since heading replay is the most failure-prone bit of the chain.
-    has_nested_inner = any("ctrl register bits" in sp for sp in section_paths_lower)
-    if not has_nested_inner:
+    # Nested heading for the bit-field table: section_path now reflects the
+    # full ancestor chain, so we assert both the outer "Bit Field Details"
+    # and the inner "CTRL Register Bits" co-occur in the same breadcrumb
+    # (joined by " > "). Same-level Docling headings with no intervening
+    # body content are now treated as parent/child rather than siblings.
+    has_full_chain = any(
+        "bit field details" in sp and "ctrl register bits" in sp
+        for sp in section_paths_lower
+    )
+    if not has_full_chain:
         _fail(
-            "No table had section_path containing nested sub-heading "
-            "'CTRL Register Bits' -- heading replay across pages may be "
-            f"broken. section_paths={section_paths_lower!r}"
+            "No table had section_path containing the full nested chain "
+            "'Bit Field Details > CTRL Register Bits' -- heading replay "
+            f"across pages may be broken. section_paths={section_paths_lower!r}"
         )
 
     # ---- (4) Adaptive chunker: >= 3 table_summary chunks with distinct gids

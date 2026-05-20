@@ -707,8 +707,13 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
     if not callable(iterate):
         return paths
 
-    # Stack entries: (level:int, text:str). Lower level == shallower heading.
-    stack: list[tuple[int, str]] = []
+    # Stack entries: (level:int, text:str, had_content:bool). Lower level ==
+    # shallower heading. ``had_content`` tracks whether any non-heading body
+    # item appeared after this heading was pushed — used to disambiguate
+    # logical parent/child vs sibling-replacement when Docling assigns the
+    # same ``.level`` to both (a documented quirk on real datasheets where
+    # heading depth is inferred from font size, not outline position).
+    stack: list[list[Any]] = []
     try:
         walker = iterate()
     except Exception:  # pragma: no cover - defensive
@@ -731,14 +736,38 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
                 text = str(getattr(item, "text", "") or "")
                 if not text:
                     continue
-                # Pop entries at the same or deeper level.
-                while stack and stack[-1][0] >= level:
+                # Pop entries strictly deeper than the new heading. A deeper
+                # heading existing under a parent implies the parent "had
+                # content" (its sub-section), so mark the next surviving
+                # frame accordingly.
+                popped_deeper = False
+                while stack and stack[-1][0] > level:
                     stack.pop()
-                stack.append((level, text))
+                    popped_deeper = True
+                if popped_deeper and stack:
+                    stack[-1][2] = True
+                # Same-level handling: replace only if the prior same-level
+                # heading already had body content (a true sibling). When no
+                # content intervened, treat the new heading as a logical
+                # child (Docling sometimes assigns identical ``.level`` to
+                # logically nested headings — see project memory
+                # ``project_docling_section_path_collapse``).
+                if stack and stack[-1][0] == level and stack[-1][2]:
+                    stack.pop()
+                stack.append([level, text, False])
             elif label == "table":
                 self_ref = getattr(item, "self_ref", None)
                 if self_ref:
-                    paths[str(self_ref)] = " > ".join(t for _, t in stack)
+                    paths[str(self_ref)] = " > ".join(t for _, t, _ in stack)
+                # A table is body content for its enclosing heading(s).
+                for frame in stack:
+                    frame[2] = True
+            else:
+                # Any other body item (paragraph, list, code, figure, ...)
+                # counts as content for the active heading stack.
+                if label:
+                    for frame in stack:
+                        frame[2] = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("section_path walker aborted: %s", exc)
 
