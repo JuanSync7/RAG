@@ -479,6 +479,23 @@ single-sentence chunks (under ~50 tokens) lack contextual grounding.
 1024 keeps natural section units whole while staying comfortably below
 the dilution threshold."""
 
+RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS", "4000")
+)
+"""Maximum character length of the embedded text on ``table_summary`` chunks.
+
+At ~4 chars/token (BPE rule of thumb) this caps the summary near ~1000 tokens,
+comfortably under bge-m3's 8192-token input limit and aligned with the default
+``RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024`` budget for prose chunks.
+A 200+ row datasheet table with pathologically wide column headers can otherwise
+compose a ``Columns: ...`` line that overflows the embedder. When the cap
+triggers, the text is truncated and a clear marker (``… [truncated N chars]``)
+is appended. Set to 0 to disable truncation entirely.
+
+The full ``table_markdown`` remains stored on the summary chunk's
+``extra_metadata`` unchanged — only the embedded summary text is capped, so
+downstream table-expansion retrieval keeps the complete payload."""
+
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
 ).lower() in ("true", "1", "yes")

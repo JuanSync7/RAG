@@ -264,6 +264,90 @@ class TestAdaptiveTableChunking:
             if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row"):
                 assert c.extra_metadata.get("table_group_id") == "table-1"
 
+    def test_oversized_table_summary_text_is_truncated_under_cap(self):
+        """When summary text would exceed table_summary_max_chars, it is capped
+        with a clear truncation marker; full markdown is preserved on metadata.
+
+        Guards against 200+ row datasheet tables (or pathologically wide
+        column headers) blowing past the embedder's max-input limit.
+        """
+        # Build many wide headers so the "Columns: ..." line dominates the
+        # summary length and forces truncation under a tight cap.
+        headers = [f"col_{i:03d}_descriptor" for i in range(120)]
+        body = [[f"v{i}" for i in range(120)] for _ in range(250)]
+        cells = [headers] + body
+        tbl = _make_table_artifact(
+            cells=cells, caption="Wide datasheet table"
+        )
+        cap = 512
+        cfg = IngestionConfig(table_summary_max_chars=cap)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        summary = next(
+            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
+        )
+        # Embedded text capped.
+        assert len(summary.text) <= cap
+        # Clear truncation marker present.
+        assert "[truncated" in summary.text
+        assert summary.text.rstrip().endswith("chars]")
+        # table_markdown on metadata is unchanged (full markdown intact).
+        assert summary.extra_metadata["table_markdown"] == tbl.markdown
+        # Sanity: full markdown is much larger than the cap.
+        assert len(tbl.markdown) > cap
+
+    def test_small_summary_not_truncated_when_under_cap(self):
+        """Summaries that fit under the cap are returned byte-for-byte
+        unchanged — no false truncation, no marker appended."""
+        cells = [["Col A", "Col B"], ["x", "y"]]
+        tbl = _make_table_artifact(cells=cells, caption="Tiny")
+        cfg = IngestionConfig(table_summary_max_chars=4000)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        summary = next(
+            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
+        )
+        # No truncation marker.
+        assert "[truncated" not in summary.text
+        # Exact byte-for-byte composition.
+        expected = "Table: Tiny\nColumns: Col A | Col B\nRows: 1"
+        assert summary.text == expected
+
+    def test_summary_truncation_disabled_when_cap_zero(self):
+        """A cap of 0 disables truncation entirely — long summaries pass through."""
+        headers = [f"hdr_{i:03d}" for i in range(200)]
+        cells = [headers, [f"v{i}" for i in range(200)]]
+        tbl = _make_table_artifact(cells=cells, caption="No cap")
+        cfg = IngestionConfig(table_summary_max_chars=0)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        summary = next(
+            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
+        )
+        assert "[truncated" not in summary.text
+        # The Columns: line alone is well over 1000 chars; verify pass-through.
+        assert len(summary.text) > 1000
+
+    def test_truncation_is_deterministic_for_chunk_id_idempotency(self):
+        """Two runs over the same table produce byte-identical summary text,
+        so build_table_chunk_id (which hashes structural keys, not text) and
+        any text-hashing downstream both stay stable across re-ingest."""
+        headers = [f"col_{i:03d}" for i in range(100)]
+        cells = [headers, [f"v{i}" for i in range(100)]]
+        tbl_a = _make_table_artifact(cells=cells, caption="Det")
+        tbl_b = _make_table_artifact(cells=cells, caption="Det")
+        cfg = IngestionConfig(table_summary_max_chars=256)
+        out_a = _run_chunk([_make_raw_chunk(tbl_a.markdown)], [tbl_a], config=cfg)
+        out_b = _run_chunk([_make_raw_chunk(tbl_b.markdown)], [tbl_b], config=cfg)
+        sum_a = next(
+            c for c in out_a if c.extra_metadata.get("chunk_type") == "table_summary"
+        )
+        sum_b = next(
+            c for c in out_b if c.extra_metadata.get("chunk_type") == "table_summary"
+        )
+        assert sum_a.text == sum_b.text
+        assert "[truncated" in sum_a.text
+
     def test_metadata_propagates_to_summary_and_row_chunks(self):
         """table_id, page_ref, heading_path appear on both summary and row chunks."""
         cells = [["H1", "H2"], ["a", "b"]]

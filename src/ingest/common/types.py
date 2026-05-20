@@ -71,6 +71,7 @@ from config.settings import (
     RAG_INGESTION_VLM_MODE,
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
+    RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
     RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
@@ -201,6 +202,13 @@ class IngestionConfig:
     emitted. Larger tables emit only the summary chunk."""
     max_table_cols_for_row_chunks: int = 12
     """Maximum column count for which per-row chunks are emitted."""
+    table_summary_max_chars: int = RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS
+    """Maximum character length of the embedded ``table_summary`` chunk text.
+    Caps the text that the embedder sees on wide-header or 200+ row tables so a
+    single pathological table cannot blow the embedder's input limit. The full
+    ``table_markdown`` stays on ``extra_metadata`` unchanged for downstream
+    expansion. Default sourced from ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``
+    (4000 chars ≈ 1000 tokens). Set to 0 to disable truncation."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN

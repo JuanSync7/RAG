@@ -884,6 +884,36 @@ def _is_table_dominant(chunk_text: str, table_md: str, signature: str) -> bool:
     return (len(table_md) / text_len) >= 0.6
 
 
+def _truncate_table_summary_text(text: str, max_chars: int) -> str:
+    """Cap embedded ``table_summary`` text at ``max_chars``, appending a marker.
+
+    Guards the embedder against pathologically wide table summaries (200+ row
+    datasheets, hundreds of column headers) without altering the full
+    ``table_markdown`` stored on metadata. Deterministic: same input ⇒ same
+    output, so re-ingest stays idempotent and chunk-id formulas relying on text
+    hashes do not drift.
+
+    A non-positive ``max_chars`` disables truncation. When the input already
+    fits, it is returned unchanged byte-for-byte (no marker appended).
+    """
+    if max_chars is None or max_chars <= 0:
+        return text
+    if len(text) <= max_chars:
+        return text
+    # Marker template is fixed-length once the dropped-char count is known.
+    # Reserve room so the final string length is exactly <= max_chars.
+    marker_template = " … [truncated {n} chars]"
+    # Iterate at most twice: marker length depends on the digit count of n.
+    keep = max_chars - len(marker_template.format(n=len(text)))
+    if keep < 0:
+        # Cap so tiny it cannot fit even the marker — return marker-only,
+        # truncated to max_chars. Edge case; preserves the contract.
+        return marker_template.format(n=len(text))[:max_chars].rstrip()
+    dropped = len(text) - keep
+    marker = marker_template.format(n=dropped)
+    return text[:keep] + marker
+
+
 def _build_table_summary_text(tbl: Any) -> str:
     headers = tbl.cells[0] if tbl.has_header and tbl.cells else []
     body_rows = max(0, tbl.num_rows - (1 if tbl.has_header else 0))
@@ -928,6 +958,8 @@ def _apply_adaptive_table_chunking(
 
     max_rows = int(getattr(cfg, "max_table_rows_for_row_chunks", 32))
     max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
+    # Per-summary-text cap (chars). 0 / unset disables truncation.
+    summary_max_chars = int(getattr(cfg, "table_summary_max_chars", 0) or 0)
 
     # Compute table signatures once.
     table_meta: list[tuple[Any, str]] = []
@@ -976,7 +1008,9 @@ def _apply_adaptive_table_chunking(
             common_meta_summary["table_caption"] = tbl.caption
         out.append(
             Chunk(
-                text=_build_table_summary_text(tbl),
+                text=_truncate_table_summary_text(
+                    _build_table_summary_text(tbl), summary_max_chars
+                ),
                 section_path=tbl.section_path or "",
                 heading=heading,
                 heading_level=len(heading_path),
