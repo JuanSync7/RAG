@@ -187,6 +187,9 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                         meta["page_label"] = page_ref.page_label
                     if page_ref.bbox is not None:
                         meta["page_bbox"] = list(page_ref.bbox)
+                # Adaptive ``chunk_type`` ("table_summary"/"table_row") set upstream
+                # by docling._apply_adaptive_table_chunking falls through to ``setdefault``
+                # below — its chunk text never matches a pipe-table signature.
                 table_match = _match_table_artifact(norm_text, tables)
                 if table_match is not None:
                     meta["chunk_type"] = "table"
