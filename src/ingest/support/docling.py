@@ -967,6 +967,9 @@ def _apply_adaptive_table_chunking(
             "table_num_rows": tbl.num_rows,
             "table_num_cols": tbl.num_cols,
             "table_has_header": tbl.has_header,
+            # Stash full markdown on the summary chunk so retrieval can
+            # reconstruct the table without re-parsing the source PDF.
+            "table_markdown": getattr(tbl, "markdown", "") or "",
         }
         if tbl.caption:
             common_meta_summary["table_caption"] = tbl.caption

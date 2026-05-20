@@ -530,12 +530,20 @@ def _install_stub_modules() -> None:
                     return None
 
         class Property:
-            def __init__(self, *args, **kwargs):
-                pass
+            def __init__(self, name=None, data_type=None, description=None,
+                         index_filterable=None, index_searchable=None, **kwargs):
+                self.name = name
+                self.data_type = data_type
+                self.description = description
+                self.index_filterable = index_filterable
+                self.index_searchable = index_searchable
 
         class DataType:
             TEXT = "text"
             INT = "int"
+            NUMBER = "number"
+            BOOL = "bool"
+            TEXT_ARRAY = "text_array"
 
         class Filter:
             @staticmethod

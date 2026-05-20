@@ -22,6 +22,7 @@ from __future__ import annotations
 
 
 import hashlib
+import json
 import logging
 import uuid
 from contextlib import contextmanager
@@ -211,6 +212,88 @@ def ensure_collection(
                 index_filterable=True,
                 index_searchable=False,
             ),
+            # -- Table-aware chunking + page provenance --
+            # ``chunk_type`` is intentionally free-form TEXT: the adaptive
+            # chunker stamps "table_summary"/"table_row", while the legacy
+            # chunking node stamps "table"/"text". Both must round-trip.
+            Property(
+                name="chunk_type",
+                data_type=DataType.TEXT,
+                description='Free-form chunk kind ("table_summary"|"table_row"|"table"|"text"|...)',
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="table_id",
+                data_type=DataType.TEXT,
+                description="Parser-stable id for the originating table",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="table_group_id",
+                data_type=DataType.TEXT,
+                description="Within-document join key linking summary + row chunks",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="table_row_index",
+                data_type=DataType.INT,
+                description="Zero-based body-row index for table_row chunks",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="table_num_rows",
+                data_type=DataType.INT,
+                description="Total rows in the originating table (incl. header)",
+            ),
+            Property(
+                name="table_num_cols",
+                data_type=DataType.INT,
+                description="Total columns in the originating table",
+            ),
+            Property(
+                name="table_has_header",
+                data_type=DataType.BOOL,
+                description="Whether the originating table has a header row",
+            ),
+            Property(
+                name="table_caption",
+                data_type=DataType.TEXT,
+                description="Caption text of the originating table (query-relevant)",
+                index_filterable=False,
+                index_searchable=True,
+            ),
+            Property(
+                name="table_markdown",
+                data_type=DataType.TEXT,
+                description="Full markdown reconstruction; only set on table_summary chunks",
+                index_filterable=False,
+                index_searchable=True,
+            ),
+            Property(
+                name="page_no",
+                data_type=DataType.INT,
+                description="1-based page number of the chunk origin",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="page_label",
+                data_type=DataType.TEXT,
+                description="Human-facing page label (e.g. 'vii', 'A-3')",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="page_bbox",
+                data_type=DataType.TEXT,
+                description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
+                index_filterable=False,
+                index_searchable=False,
+            ),
         ],
     )
     span.end(status="ok")
@@ -219,6 +302,28 @@ def ensure_collection(
 def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
     """Deterministic UUID chunk ID for idempotent upserts."""
     payload = f"{source}:{chunk_index}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def build_table_chunk_id(
+    source: str,
+    table_group_id: str,
+    chunk_type: str,
+    table_row_index: object = None,
+) -> str:
+    """Deterministic UUID for table-derived chunks (summary + rows).
+
+    Derives from ``(source, table_group_id, chunk_type, table_row_index)`` so
+    re-ingesting a document with edited table content updates the same vectors
+    rather than orphaning the prior ones. ``table_row_index`` may be ``None``
+    for ``table_summary`` chunks; it is substituted with ``-1`` in the payload
+    so the summary id never collides with row 0.
+    """
+    try:
+        row = int(table_row_index) if table_row_index is not None else -1
+    except (TypeError, ValueError):
+        row = -1
+    payload = f"{source}|tbl|{table_group_id}|{chunk_type}|{row}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
 
 
@@ -291,8 +396,29 @@ def add_documents(
             source = str(metadata.get("source") or "").strip() or "unknown"
             source_identity = str(metadata.get("source_key") or "").strip() or source
             chunk_index = metadata.get("chunk_index", 0)
+            # Table-aware chunk_id: for ``table_summary``/``table_row`` chunks
+            # with a non-empty ``table_group_id`` we derive the UUID from the
+            # stable (group_id, chunk_type, row_index) tuple so re-ingests of
+            # the same document update the same vectors even when chunk_index
+            # or text drifts. Explicit ``chunk_id`` in metadata still wins via
+            # ``_normalize_chunk_uuid``.
+            explicit_chunk_id = metadata.get("chunk_id")
+            chunk_type_meta = str(metadata.get("chunk_type") or "")
+            table_group_meta = str(metadata.get("table_group_id") or "").strip()
+            candidate_id: object = explicit_chunk_id
+            if (
+                candidate_id in (None, "")
+                and chunk_type_meta.startswith("table_")
+                and table_group_meta
+            ):
+                candidate_id = build_table_chunk_id(
+                    source_identity,
+                    table_group_meta,
+                    chunk_type_meta,
+                    metadata.get("table_row_index"),
+                )
             chunk_id = _normalize_chunk_uuid(
-                metadata.get("chunk_id"), source_identity, chunk_index, text
+                candidate_id, source_identity, chunk_index, text
             )
             properties = {
                 "text": text,
@@ -333,6 +459,34 @@ def add_documents(
             heading_path_meta = metadata.get("heading_path") or []
             if not isinstance(heading_path_meta, list):
                 heading_path_meta = []
+            # Table-aware chunking + page provenance fields. ``page_bbox`` is
+            # JSON-encoded so a tuple/list survives as TEXT; "" means absent.
+            raw_bbox = metadata.get("page_bbox")
+            if raw_bbox is None:
+                bbox_str = ""
+            elif isinstance(raw_bbox, str):
+                bbox_str = raw_bbox
+            else:
+                try:
+                    bbox_str = json.dumps(list(raw_bbox))
+                except (TypeError, ValueError):
+                    bbox_str = ""
+            optional.update(
+                {
+                    "chunk_type": metadata.get("chunk_type", ""),
+                    "table_id": metadata.get("table_id", ""),
+                    "table_group_id": metadata.get("table_group_id", ""),
+                    "table_row_index": int(metadata.get("table_row_index", -1)),
+                    "table_num_rows": int(metadata.get("table_num_rows", 0)),
+                    "table_num_cols": int(metadata.get("table_num_cols", 0)),
+                    "table_has_header": bool(metadata.get("table_has_header", False)),
+                    "table_caption": metadata.get("table_caption", ""),
+                    "table_markdown": metadata.get("table_markdown", ""),
+                    "page_no": int(metadata.get("page_no", 0)),
+                    "page_label": metadata.get("page_label", ""),
+                    "page_bbox": bbox_str,
+                }
+            )
             optional.update(
                 {
                     "node_kind": metadata.get("node_kind", "chunk"),
