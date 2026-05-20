@@ -8,11 +8,12 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import orjson as json_mod
 import logging
 import time
 import uuid
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -89,6 +90,55 @@ def _autotitle_if_new(memory, *, tenant_id: str, principal, conv, query: str):
     return updated or conv
 
 
+def _decode_page_bbox(raw: Any) -> dict | None:
+    """Decode a stored ``page_bbox`` value into ``{l,t,r,b}`` or None.
+
+    The Weaviate store persists ``page_bbox`` as a JSON-encoded TEXT
+    property (see ``src/vector_db/weaviate/store.py``); the underlying
+    Docling shape is a 4-tuple ``(x0, y0, x1, y1)``. This decoder accepts
+    either a JSON list ``[x0, y0, x1, y1]`` or a JSON object with
+    ``l/t/r/b`` keys and maps both to a ``{"l","t","r","b"}`` dict.
+
+    Returns ``None`` for empty/missing values or malformed JSON — callers
+    must never crash retrieval on a bad bbox.
+    """
+    if raw is None or raw == "":
+        return None
+    # Already-decoded values from in-process callers (defensive).
+    if isinstance(raw, dict):
+        try:
+            return {k: float(raw[k]) for k in ("l", "t", "r", "b")}
+        except (KeyError, TypeError, ValueError):
+            return None
+    if isinstance(raw, (list, tuple)) and len(raw) == 4:
+        try:
+            x0, y0, x1, y1 = (float(v) for v in raw)
+        except (TypeError, ValueError):
+            return None
+        return {"l": x0, "t": y0, "r": x1, "b": y1}
+    if not isinstance(raw, str):
+        return None
+    try:
+        decoded = _json.loads(raw)
+    except (ValueError, TypeError):
+        logging.getLogger(__name__).debug(
+            "malformed page_bbox JSON; dropping bbox: %r", raw
+        )
+        return None
+    if isinstance(decoded, list) and len(decoded) == 4:
+        try:
+            x0, y0, x1, y1 = (float(v) for v in decoded)
+        except (TypeError, ValueError):
+            return None
+        return {"l": x0, "t": y0, "r": x1, "b": y1}
+    if isinstance(decoded, dict):
+        try:
+            return {k: float(decoded[k]) for k in ("l", "t", "r", "b")}
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
+
+
 def _source_refs(results: list) -> list[dict]:
     """Extract lightweight source references from RAG results (no full chunk text)."""
     refs = []
@@ -111,6 +161,16 @@ def _source_refs(results: list) -> list[dict]:
             ref["original_char_start"] = start
         if end is not None:
             ref["original_char_end"] = end
+        # Page provenance. ``page_no`` is stored as int; ``page_bbox`` is
+        # JSON-encoded TEXT in Weaviate (empty string when absent). Decode
+        # at read-time so the citation UI/API receives structured shapes.
+        page_no = meta.get("page_no")
+        if page_no is not None and page_no != "":
+            try:
+                ref["page_no"] = int(page_no)
+            except (TypeError, ValueError):
+                pass
+        ref["page_bbox"] = _decode_page_bbox(meta.get("page_bbox"))
         refs.append(ref)
     return refs
 
