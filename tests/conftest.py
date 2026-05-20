@@ -1,8 +1,18 @@
 """Test bootstrap with lightweight stubs for optional heavy dependencies."""
 
 import math
+import os
 import sys
 import types
+
+# Force observability to a known-good provider for the test suite. Without
+# this, transitive imports (notably ``litellm``) call ``dotenv.load_dotenv``,
+# which walks up the directory tree and picks up a developer ``.env`` with
+# ``RAG_OBSERVABILITY_PROVIDER=otel``. The platform module only recognizes
+# ``noop`` and ``langfuse``, so any test that opens a tracer after litellm
+# loads crashes with ``ValueError: Unknown OBSERVABILITY_PROVIDER: 'otel'``.
+# Tests that need a specific provider use ``monkeypatch.setenv`` per-test.
+os.environ["RAG_OBSERVABILITY_PROVIDER"] = "noop"
 
 
 def _install_stub_modules() -> None:
