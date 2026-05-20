@@ -805,7 +805,8 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     self_ref=str(self_ref or ""),
                 )
             )
-        except Exception as exc:
+        # Narrow catch: Docling grid/heading/export internals raise these on malformed input; AssertionError + BaseException must propagate so our invariant bugs surface.
+        except (AttributeError, KeyError, TypeError, IndexError, ValueError, RuntimeError) as exc:
             table_id = f"table-{idx + 1}"
             self_ref = getattr(tbl, "self_ref", None)
             logger.warning(

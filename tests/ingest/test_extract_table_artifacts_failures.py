@@ -184,6 +184,23 @@ class TestExtractTableArtifactsFailures:
             f"expected synthesized table_id 'table-1' in log payload, got: {joined!r}"
         )
 
+    def test_assertion_error_propagates(self):
+        """AssertionError signals an internal invariant violation, not a Docling quirk.
+
+        The narrow catch must not swallow it — otherwise our own bugs are
+        logged as generic table-skip warnings and the table is silently
+        dropped. ``pytest.raises`` confirms propagation.
+        """
+        bad = _make_exploding_table(
+            self_ref="#/tables/assert",
+            exc=AssertionError("internal invariant violated"),
+        )
+        good = _make_table_mock(self_ref="#/tables/ok")
+        doc = _make_doc(items=[bad, good], tables=[bad, good])
+
+        with pytest.raises(AssertionError):
+            _extract_table_artifacts(doc)
+
     def test_all_tables_failing_returns_empty_list_and_does_not_raise(self):
         """If every table raises, the function returns [] rather than propagating."""
         bad_a = _make_exploding_table(self_ref="#/tables/a", exc=AttributeError("grid"))
