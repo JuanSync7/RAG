@@ -112,6 +112,38 @@ def test_same_level_back_to_back_headings_nest_when_no_intervening_content() -> 
     assert paths["#/tables/0"] == "Bit Field Details > CTRL Register Bits"
 
 
+def test_flat_outline_many_same_level_headings_do_not_stack() -> None:
+    """Real datasheets emit dozens of consecutive same-level headings with no
+    body items between them (page breaks, captions, etc. don't register as
+    content). The W heuristic must not let these stack as ancestors — five
+    L1 chapter headings followed by a table should produce a breadcrumb of
+    the most recent heading only, not all five stacked.
+
+    Regression for soak finding: ESP32-S3 datasheet produced breadcrumbs up
+    to depth 15 ('Chapter1 > Chapter2 > ... > current').
+    """
+    items = [_h(f"Chapter {i}", 1) for i in range(1, 6)]
+    items.append(_table("#/tables/0"))
+    doc = _Doc(items)
+    paths = _resolve_table_section_paths(doc)
+    # Last heading should win; depth must be 1 (≤4 sanity cap also holds).
+    assert paths["#/tables/0"] == "Chapter 5"
+
+
+def test_soak_shaped_71_flat_headings_breadcrumb_depth_capped() -> None:
+    """Soak-shaped regression: 71 consecutive same-level headings with no
+    body items between them, then a table. Breadcrumb depth must be small
+    (≤4) — pre-fix this produced depth 12-15.
+    """
+    items = [_h(f"Heading {i}", 1) for i in range(71)]
+    items.append(_table("#/tables/0"))
+    doc = _Doc(items)
+    paths = _resolve_table_section_paths(doc)
+    breadcrumb = paths["#/tables/0"]
+    depth = len([s for s in breadcrumb.split(" > ") if s])
+    assert depth <= 4, f"breadcrumb depth {depth} exceeds sanity cap: {breadcrumb!r}"
+
+
 def test_multiple_tables_each_capture_current_breadcrumb() -> None:
     """Each table snapshots the stack at its position."""
     doc = _Doc([

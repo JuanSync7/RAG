@@ -642,25 +642,42 @@ def _page_ref_from_chunk_meta(meta: Any) -> Any:
             page_no = getattr(p, "page_no", None)
             if page_no is None:
                 continue
-            bbox_obj = getattr(p, "bbox", None)
-            bbox = None
-            if bbox_obj is not None:
-                # Docling BoundingBox: l, t, r, b OR x0, y0, x1, y1
-                try:
-                    bbox = (
-                        float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0))),
-                        float(getattr(bbox_obj, "t", getattr(bbox_obj, "y0", 0.0))),
-                        float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0))),
-                        float(getattr(bbox_obj, "b", getattr(bbox_obj, "y1", 0.0))),
-                    )
-                except Exception:
-                    bbox = None
-            return PageRef(page_no=int(page_no), page_label="", bbox=bbox)
+            return PageRef(
+                page_no=int(page_no),
+                page_label="",
+                bbox=_decode_docling_bbox(getattr(p, "bbox", None)),
+            )
     return None
 
 
+def _decode_docling_bbox(bbox_obj: Any) -> tuple[float, float, float, float] | None:
+    """Decode a Docling BoundingBox into a ``(x0, y0, x1, y1)`` tuple.
+
+    Tolerates both the ``l/t/r/b`` and ``x0/y0/x1/y1`` attribute shapes that
+    different Docling versions expose. Returns ``None`` when the object is
+    missing or decoding raises.
+    """
+    if bbox_obj is None:
+        return None
+    try:
+        return (
+            float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0))),
+            float(getattr(bbox_obj, "t", getattr(bbox_obj, "y0", 0.0))),
+            float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0))),
+            float(getattr(bbox_obj, "b", getattr(bbox_obj, "y1", 0.0))),
+        )
+    except Exception:
+        return None
+
+
 def _page_ref_from_table_item(tbl: Any) -> Any:
-    """Derive a PageRef from a Docling TableItem's provenance, or None."""
+    """Derive a PageRef (including bbox) from a Docling TableItem's provenance.
+
+    Returns ``None`` when no provenance entry carries a page number. The bbox
+    is decoded via :func:`_decode_docling_bbox` so table-summary chunks carry
+    the same citation provenance as text chunks (defect from the real-datasheet
+    soak: pre-fix this hardcoded ``bbox=None``).
+    """
     from src.ingest.support.parser_base import PageRef
 
     prov = getattr(tbl, "prov", None) or []
@@ -668,7 +685,11 @@ def _page_ref_from_table_item(tbl: Any) -> Any:
         page_no = getattr(p, "page_no", None)
         if page_no is None:
             continue
-        return PageRef(page_no=int(page_no), page_label="", bbox=None)
+        return PageRef(
+            page_no=int(page_no),
+            page_label="",
+            bbox=_decode_docling_bbox(getattr(p, "bbox", None)),
+        )
     return None
 
 
@@ -707,17 +728,49 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
     if not callable(iterate):
         return paths
 
+    # Materialize ``iterate_items()`` once so we can take two passes without
+    # double-consuming a generator (and to keep test fixtures that hand back a
+    # single iterator working). Real Docling produces O(N) items per document
+    # so the memory cost is bounded by the parse itself.
+    try:
+        entries = list(iterate())
+    except Exception:  # pragma: no cover - defensive
+        return paths
+
+    # First pass: collect distinct heading levels and total heading count to
+    # detect "flat outline" documents (real-world datasheets often emit dozens
+    # of chapter headings all at level=1). On flat outlines we disable the
+    # ``had_content`` implicit-nesting heuristic and treat same-level headings
+    # as siblings unconditionally — otherwise the heuristic builds a 71-deep
+    # ancestor chain out of unrelated chapters.
+    flat_outline = False
+    try:
+        levels_seen: set[int] = set()
+        heading_count = 0
+        for entry in entries:
+            item = entry[0] if isinstance(entry, tuple) and len(entry) >= 1 else entry
+            if _label_value(item) in _HEADING_LABEL_VALUES:
+                lvl = int(getattr(item, "level", 0) or 0)
+                if _label_value(item) == "title":
+                    lvl = 0
+                levels_seen.add(lvl)
+                heading_count += 1
+        # Flat-outline gate: ≥4 headings AND at most one distinct .level.
+        # Below 4 headings we keep W's implicit-nesting heuristic — that's
+        # the regime where Docling's font-size level quirk shows up in
+        # crafted/short documents (W's existing tests cover it).
+        if heading_count >= 4 and len(levels_seen) <= 1:
+            flat_outline = True
+    except Exception:  # pragma: no cover - defensive
+        flat_outline = False
+
     # Stack entries: (level:int, text:str, had_content:bool). Lower level ==
     # shallower heading. ``had_content`` tracks whether any non-heading body
     # item appeared after this heading was pushed — used to disambiguate
     # logical parent/child vs sibling-replacement when Docling assigns the
-    # same ``.level`` to both (a documented quirk on real datasheets where
-    # heading depth is inferred from font size, not outline position).
+    # same ``.level`` to both.
     stack: list[list[Any]] = []
-    try:
-        walker = iterate()
-    except Exception:  # pragma: no cover - defensive
-        return paths
+    walker = entries
 
     try:
         for entry in walker:
@@ -746,15 +799,33 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
                     popped_deeper = True
                 if popped_deeper and stack:
                     stack[-1][2] = True
-                # Same-level handling: replace only if the prior same-level
-                # heading already had body content (a true sibling). When no
-                # content intervened, treat the new heading as a logical
-                # child (Docling sometimes assigns identical ``.level`` to
-                # logically nested headings — see project memory
-                # ``project_docling_section_path_collapse``).
-                if stack and stack[-1][0] == level and stack[-1][2]:
-                    stack.pop()
+                # Same-level handling. Two competing realities:
+                #   1. Docling sometimes assigns identical ``.level`` to a
+                #      logical parent/child pair (font-size based heading
+                #      detection). When no content intervenes we tolerate
+                #      ONE such implicit nesting — see project memory
+                #      ``project_docling_section_path_collapse``.
+                #   2. On flat-outline PDFs (datasheets), dozens of unrelated
+                #      chapter headings carry the same ``.level`` with no body
+                #      items between them — page breaks, captions, etc. don't
+                #      register as content. These are siblings, not a 71-deep
+                #      ancestor chain. Cap implicit nesting at one frame.
+                if stack and stack[-1][0] == level:
+                    same_level_run = sum(1 for f in stack if f[0] == level)
+                    top_had_content = stack[-1][2]
+                    # Flat-outline docs: unconditional sibling replace.
+                    # Otherwise: replace if true sibling (had content) OR we
+                    # have already implicitly nested once at this level
+                    # (cap implicit nesting at one frame).
+                    if flat_outline or top_had_content or same_level_run >= 2:
+                        stack.pop()
                 stack.append([level, text, False])
+                # Belt-and-suspenders sanity cap: keep the deepest frames
+                # (most specific context wins). Catches pathological inputs
+                # the heuristics above don't anticipate.
+                _MAX_SECTION_DEPTH = 8
+                if len(stack) > _MAX_SECTION_DEPTH:
+                    del stack[: len(stack) - _MAX_SECTION_DEPTH]
             elif label == "table":
                 self_ref = getattr(item, "self_ref", None)
                 if self_ref:

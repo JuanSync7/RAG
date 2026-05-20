@@ -122,6 +122,31 @@ def test_page_ref_from_table_item():
     assert _page_ref_from_table_item(SimpleNamespace(prov=[])) is None
 
 
+def test_page_ref_from_table_item_decodes_bbox():
+    """Regression for DEFECT-2 from real-datasheet soak: TableItem provenance
+    carries a bbox just like ChunkMeta does — must be decoded into PageRef.bbox
+    rather than hardcoded to None (which defeated the citation-bbox plumbing).
+    """
+    from src.ingest.support.docling import _page_ref_from_table_item
+
+    bbox = SimpleNamespace(l=12.5, t=30.0, r=200.5, b=400.0)
+    tbl = SimpleNamespace(prov=[SimpleNamespace(page_no=7, bbox=bbox)])
+    p = _page_ref_from_table_item(tbl)
+    assert p is not None
+    assert p.page_no == 7
+    assert p.bbox == (12.5, 30.0, 200.5, 400.0)
+
+
+def test_page_ref_from_table_item_x0y0_bbox_variant():
+    """Some Docling versions expose x0/y0/x1/y1 instead of l/t/r/b."""
+    from src.ingest.support.docling import _page_ref_from_table_item
+
+    bbox = SimpleNamespace(x0=1.0, y0=2.0, x1=3.0, y1=4.0)
+    tbl = SimpleNamespace(prov=[SimpleNamespace(page_no=2, bbox=bbox)])
+    p = _page_ref_from_table_item(tbl)
+    assert p is not None and p.bbox == (1.0, 2.0, 3.0, 4.0)
+
+
 def test_chunking_node_legacy_fallback_emits_heading_path():
     """Regex-fallback path: no parse_result; chunks still carry heading_path
     derived from markdown headings, page_no absent (graceful degradation)."""
