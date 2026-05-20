@@ -804,8 +804,13 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     page_ref=_page_ref_from_table_item(tbl),
                 )
             )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("table extraction skipped for table %d: %s", idx, exc)
+        except Exception as exc:
+            table_id = f"table-{idx + 1}"
+            self_ref = getattr(tbl, "self_ref", None)
+            logger.warning(
+                "table extraction skipped table_id=%s self_ref=%s: %s",
+                table_id, self_ref, exc,
+            )
             continue
     return artifacts
 
