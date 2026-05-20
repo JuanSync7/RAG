@@ -216,6 +216,54 @@ class TestAdaptiveTableChunking:
         indices = [c.chunk_index for c in out]
         assert indices == list(range(len(out)))
 
+    def test_table_group_id_joins_summary_and_rows(self):
+        """All chunks from one table share table_group_id; distinct tables get distinct ids."""
+        cells_a = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+        cells_b = [["X", "Y"], ["1", "2"]]
+        tbl_a = _make_table_artifact(
+            table_id="table-1", cells=cells_a, section_path="A"
+        )
+        tbl_a.self_ref = "#/tables/0"
+        tbl_b = _make_table_artifact(
+            table_id="table-2", cells=cells_b, section_path="B"
+        )
+        tbl_b.self_ref = "#/tables/1"
+
+        chunk_a = _make_raw_chunk(tbl_a.markdown)
+        chunk_b = _make_raw_chunk(tbl_b.markdown)
+        out = _run_chunk([chunk_a, chunk_b], [tbl_a, tbl_b])
+
+        groups_a = {
+            c.extra_metadata.get("table_group_id")
+            for c in out
+            if c.extra_metadata.get("table_id") == "table-1"
+        }
+        groups_b = {
+            c.extra_metadata.get("table_group_id")
+            for c in out
+            if c.extra_metadata.get("table_id") == "table-2"
+        }
+        # Each table's chunks share one non-empty group id, and the two
+        # tables' group ids differ.
+        assert groups_a == {"#/tables/0"}
+        assert groups_b == {"#/tables/1"}
+        # Every adaptive chunk carries the field.
+        for c in out:
+            if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row"):
+                assert c.extra_metadata.get("table_group_id")
+
+    def test_table_group_id_falls_back_to_table_id_when_self_ref_missing(self):
+        """When parser has no self_ref, group_id falls back to table_id (still stable within doc)."""
+        cells = [["H1", "H2"], ["a", "b"]]
+        tbl = _make_table_artifact(cells=cells)
+        # default TableArtifact.self_ref == ""
+        assert tbl.self_ref == ""
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk([table_chunk], [tbl])
+        for c in out:
+            if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row"):
+                assert c.extra_metadata.get("table_group_id") == "table-1"
+
     def test_metadata_propagates_to_summary_and_row_chunks(self):
         """table_id, page_ref, heading_path appear on both summary and row chunks."""
         cells = [["H1", "H2"], ["a", "b"]]

@@ -802,6 +802,7 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     section_path=section_path,
                     caption=caption.strip(),
                     page_ref=_page_ref_from_table_item(tbl),
+                    self_ref=str(self_ref or ""),
                 )
             )
         except Exception as exc:
@@ -955,9 +956,14 @@ def _apply_adaptive_table_chunking(
         out: list = []
         heading_path = [h for h in (tbl.section_path or "").split(" > ") if h]
         heading = heading_path[-1] if heading_path else ""
+        # Stable within-document group key so retrieval can join a winning row
+        # chunk back to its summary (and vice versa) without fuzzy-matching on
+        # heading_path + page. Prefer parser self_ref; fall back to table_id.
+        group_id = tbl.self_ref or tbl.table_id
         common_meta_summary = {
             "chunk_type": "table_summary",
             "table_id": tbl.table_id,
+            "table_group_id": group_id,
             "table_num_rows": tbl.num_rows,
             "table_num_cols": tbl.num_cols,
             "table_has_header": tbl.has_header,
@@ -986,6 +992,7 @@ def _apply_adaptive_table_chunking(
                 row_meta = {
                     "chunk_type": "table_row",
                     "table_id": tbl.table_id,
+                    "table_group_id": group_id,
                     "table_row_index": body_idx,
                     "table_num_rows": tbl.num_rows,
                     "table_num_cols": tbl.num_cols,

@@ -67,6 +67,10 @@ class TableArtifact:
         section_path: Hierarchical breadcrumb of headings containing this
             table. Empty when no enclosing heading exists.
         caption: Caption text if the parser detected one; empty otherwise.
+        self_ref: Parser-internal stable reference (e.g., Docling
+            ``TableItem.self_ref``) used to join sibling chunks emitted from
+            the same source table. Empty string when the parser does not
+            expose one.
     """
 
     table_id: str
@@ -78,6 +82,7 @@ class TableArtifact:
     section_path: str = ""
     caption: str = ""
     page_ref: PageRef | None = None
+    self_ref: str = ""
 
 
 @dataclass
