@@ -108,3 +108,4 @@ scripts/.bench_results/*.json
 docker-compose.override.yml
 docker-compose.cpu-embed-off.yml
 .gitignore.local
+.tei_cache
