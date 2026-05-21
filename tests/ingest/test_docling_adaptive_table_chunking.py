@@ -365,3 +365,214 @@ class TestAdaptiveTableChunking:
             assert c.section_path == "Alpha > Beta"
             assert c.page_ref is not None
             assert c.page_ref.page_no == 7
+
+
+# ---------------------------------------------------------------------------
+# Observability: OTel counter coverage for the gate decisions
+# ---------------------------------------------------------------------------
+
+
+class _DeltaReader:
+    """Wrap an InMemoryMetricReader to expose post-baseline deltas.
+
+    OTel SDK only allows one global MeterProvider per process, so we install
+    a single module-scoped provider and snapshot a baseline at the start of
+    each test. ``get_metrics_data`` here returns cumulative state; the
+    helper below subtracts the baseline so each test sees only its own
+    contribution.
+    """
+
+    def __init__(self, inner: Any, baseline: dict[str, int]) -> None:
+        self._inner = inner
+        self._baseline = baseline
+
+    def collect(self) -> dict[str, int]:
+        current = _drain_counters(self._inner)
+        return {k: v - self._baseline.get(k, 0) for k, v in current.items()}
+
+
+def _drain_counters(reader: Any) -> dict[str, int]:
+    """Read cumulative ingest.table.* counter totals from an InMemoryMetricReader."""
+    data = reader.get_metrics_data()
+    out: dict[str, int] = {}
+    if data is None:
+        return out
+    for resource_metric in data.resource_metrics:
+        for scope_metric in resource_metric.scope_metrics:
+            for metric in scope_metric.metrics:
+                if not metric.name.startswith("ingest.table."):
+                    continue
+                total = 0
+                metric_data = getattr(metric, "data", None)
+                points = (
+                    getattr(metric_data, "data_points", []) if metric_data else []
+                )
+                for point in points:
+                    total += int(getattr(point, "value", 0))
+                out[metric.name] = out.get(metric.name, 0) + total
+    return out
+
+
+@pytest.fixture(scope="module")
+def _otel_module_reader():
+    """Install a single MeterProvider + InMemoryMetricReader for this module.
+
+    OTel forbids replacing the global MeterProvider, so the provider is
+    installed once per module and shared across tests via the per-test
+    ``otel_metric_reader`` fixture which snapshots a baseline.
+    """
+    from opentelemetry import metrics as otel_metrics
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from src.ingest.support import table_metrics as _tm
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    # ``set_meter_provider`` only honours the first call per process; clear the
+    # internal flag so the SDK provider replaces any proxy already installed.
+    otel_metrics._PROXY_METER_PROVIDER = None  # type: ignore[attr-defined]
+    otel_metrics.set_meter_provider(provider)
+    _tm._reset_for_tests()
+    try:
+        yield reader
+    finally:
+        try:
+            provider.shutdown()
+        except Exception:
+            pass
+        _tm._reset_for_tests()
+
+
+@pytest.fixture
+def otel_metric_reader(_otel_module_reader):
+    """Return a delta-collecting wrapper so each test sees only its own counter activity."""
+    baseline = _drain_counters(_otel_module_reader)
+    return _DeltaReader(_otel_module_reader, baseline)
+
+
+class TestAdaptiveTableChunkingMetrics:
+    """OTel counter coverage for the small / uniform gate decisions."""
+
+    def test_large_varied_table_increments_row_chunks_emitted(self, otel_metric_reader):
+        """A small-enough uniform table fires the row_chunks_emitted counter exactly once."""
+        cells = [["H1", "H2"], ["a", "b"], ["c", "d"], ["e", "f"]]
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        _run_chunk([table_chunk], [tbl])
+
+        values = otel_metric_reader.collect()
+        assert values.get("ingest.table.row_chunks_emitted") == 1
+        assert values.get("ingest.table.summary_only_due_to_small", 0) == 0
+        assert values.get("ingest.table.summary_only_due_to_uniform", 0) == 0
+
+    def test_oversized_table_increments_small_gate(self, otel_metric_reader):
+        """A table over max_table_rows_for_row_chunks fires the small-gate counter."""
+        header = ["Col A", "Col B"]
+        body = [[f"a{i}", f"b{i}"] for i in range(40)]
+        cells = [header] + body
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        _run_chunk([table_chunk], [tbl])
+
+        values = otel_metric_reader.collect()
+        assert values.get("ingest.table.summary_only_due_to_small") == 1
+        assert values.get("ingest.table.row_chunks_emitted", 0) == 0
+        assert values.get("ingest.table.summary_only_due_to_uniform", 0) == 0
+
+    def test_ragged_table_increments_uniform_gate(self, otel_metric_reader):
+        """A ragged-row table fires the uniform-gate counter (not the small gate)."""
+        cells = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        _run_chunk([table_chunk], [tbl])
+
+        values = otel_metric_reader.collect()
+        assert values.get("ingest.table.summary_only_due_to_uniform") == 1
+        assert values.get("ingest.table.summary_only_due_to_small", 0) == 0
+        assert values.get("ingest.table.row_chunks_emitted", 0) == 0
+
+    def test_three_synthetic_tables_each_increment_their_own_counter(
+        self, otel_metric_reader
+    ):
+        """One large+varied, one oversized, one ragged → each counter +1 exactly."""
+        # 1) small + uniform → row_chunks_emitted
+        cells_ok = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+        tbl_ok = _make_table_artifact(
+            table_id="ok", cells=cells_ok, section_path="A"
+        )
+        tbl_ok.self_ref = "#/tables/0"
+
+        # 2) too many rows → small_gate
+        header = ["Col A", "Col B"]
+        body = [[f"a{i}", f"b{i}"] for i in range(40)]
+        cells_big = [header] + body
+        tbl_big = _make_table_artifact(
+            table_id="big", cells=cells_big, section_path="B"
+        )
+        tbl_big.self_ref = "#/tables/1"
+
+        # 3) ragged rows → uniform_gate
+        cells_ragged = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
+        tbl_ragged = _make_table_artifact(
+            table_id="ragged", cells=cells_ragged, section_path="C"
+        )
+        tbl_ragged.self_ref = "#/tables/2"
+
+        chunks = [
+            _make_raw_chunk(tbl_ok.markdown),
+            _make_raw_chunk(tbl_big.markdown),
+            _make_raw_chunk(tbl_ragged.markdown),
+        ]
+        _run_chunk(chunks, [tbl_ok, tbl_big, tbl_ragged])
+
+        values = otel_metric_reader.collect()
+        assert values.get("ingest.table.row_chunks_emitted") == 1
+        assert values.get("ingest.table.summary_only_due_to_small") == 1
+        assert values.get("ingest.table.summary_only_due_to_uniform") == 1
+
+    def test_summary_text_truncated_counter_fires_on_truncation(
+        self, otel_metric_reader
+    ):
+        """When a summary is capped, the truncated counter increments; otherwise it stays at 0."""
+        # First: a table whose summary fits comfortably → no truncation.
+        cells_small = [["Col A", "Col B"], ["x", "y"]]
+        tbl_small = _make_table_artifact(cells=cells_small, caption="Tiny")
+        cfg_loose = IngestionConfig(table_summary_max_chars=4000)
+        _run_chunk(
+            [_make_raw_chunk(tbl_small.markdown)], [tbl_small], config=cfg_loose
+        )
+
+        # Second: a wide table under a tight cap → truncation fires.
+        headers = [f"col_{i:03d}_descriptor" for i in range(120)]
+        body = [[f"v{i}" for i in range(120)] for _ in range(5)]
+        cells_wide = [headers] + body
+        tbl_wide = _make_table_artifact(
+            table_id="wide", cells=cells_wide, caption="Wide"
+        )
+        cfg_tight = IngestionConfig(table_summary_max_chars=256)
+        _run_chunk(
+            [_make_raw_chunk(tbl_wide.markdown)], [tbl_wide], config=cfg_tight
+        )
+
+        values = otel_metric_reader.collect()
+        assert values.get("ingest.table.summary_text_truncated") == 1
+
+    def test_counters_are_noop_without_sdk_provider(self):
+        """With no SDK MeterProvider installed (the default), increments must not crash."""
+        from opentelemetry import metrics as otel_metrics
+
+        from src.ingest.support import table_metrics as _tm
+
+        prior_provider = otel_metrics.get_meter_provider()
+        # Force the proxy / default no-op provider by clearing any SDK provider.
+        otel_metrics._METER_PROVIDER = None  # type: ignore[attr-defined]
+        _tm._reset_for_tests()
+        try:
+            cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
+            tbl = _make_table_artifact(cells=cells)
+            # Should not raise, regardless of routing.
+            _run_chunk([_make_raw_chunk(tbl.markdown)], [tbl])
+        finally:
+            otel_metrics._METER_PROVIDER = prior_provider  # type: ignore[attr-defined]
+            _tm._reset_for_tests()

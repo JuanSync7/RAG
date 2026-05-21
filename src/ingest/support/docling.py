@@ -1026,23 +1026,41 @@ def _build_table_summary_text(tbl: Any) -> str:
     return "\n".join(lines)
 
 
-def _table_is_small_uniform(tbl: Any, max_rows: int, max_cols: int) -> bool:
-    if not tbl.has_header:
-        return False
-    if not tbl.cells:
-        return False
+def _classify_table_for_row_chunks(
+    tbl: Any, max_rows: int, max_cols: int
+) -> str:
+    """Classify a table's eligibility for row-chunk emission.
+
+    Returns one of:
+        ``"row_chunks"``  — table passes both gates; row chunks should be emitted.
+        ``"small_gate"``  — table failed the small/shape gate (no header, empty,
+                            too many rows/cols, or out-of-range col count).
+        ``"uniform_gate"`` — table cleared the small gate but failed the uniform
+                            gate (body rows do not match header width).
+
+    The two gates are kept independent on purpose (see
+    ``feedback_heuristic_gates_independent.md``) so observability can attribute
+    summary-only outcomes to the correct failure mode.
+    """
+    if not tbl.has_header or not tbl.cells:
+        return "small_gate"
     body = tbl.cells[1:]
     body_rows = len(body)
     if body_rows == 0:
-        return False
+        return "small_gate"
     if body_rows > max_rows:
-        return False
+        return "small_gate"
     if tbl.num_cols < 2 or tbl.num_cols > max_cols:
-        return False
+        return "small_gate"
     header_len = len(tbl.cells[0])
     if not all(len(r) == header_len for r in body):
-        return False
-    return True
+        return "uniform_gate"
+    return "row_chunks"
+
+
+def _table_is_small_uniform(tbl: Any, max_rows: int, max_cols: int) -> bool:
+    """Backward-compatible bool wrapper around :func:`_classify_table_for_row_chunks`."""
+    return _classify_table_for_row_chunks(tbl, max_rows, max_cols) == "row_chunks"
 
 
 def _apply_adaptive_table_chunking(
@@ -1055,6 +1073,12 @@ def _apply_adaptive_table_chunking(
     table-dominant chunk is absent (e.g., HybridChunker did not surface it).
     """
     from src.ingest.support.parser_base import Chunk
+    from src.ingest.support.table_metrics import (
+        increment_row_chunks_emitted,
+        increment_summary_only_small,
+        increment_summary_only_uniform,
+        increment_summary_text_truncated,
+    )
 
     max_rows = int(getattr(cfg, "max_table_rows_for_row_chunks", 32))
     max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
@@ -1106,11 +1130,13 @@ def _apply_adaptive_table_chunking(
         }
         if tbl.caption:
             common_meta_summary["table_caption"] = tbl.caption
+        raw_summary = _build_table_summary_text(tbl)
+        truncated_summary = _truncate_table_summary_text(raw_summary, summary_max_chars)
+        if truncated_summary != raw_summary:
+            increment_summary_text_truncated()
         out.append(
             Chunk(
-                text=_truncate_table_summary_text(
-                    _build_table_summary_text(tbl), summary_max_chars
-                ),
+                text=truncated_summary,
                 section_path=tbl.section_path or "",
                 heading=heading,
                 heading_level=len(heading_path),
@@ -1121,7 +1147,15 @@ def _apply_adaptive_table_chunking(
             )
         )
 
-        if _table_is_small_uniform(tbl, max_rows, max_cols):
+        gate = _classify_table_for_row_chunks(tbl, max_rows, max_cols)
+        if gate == "small_gate":
+            increment_summary_only_small()
+        elif gate == "uniform_gate":
+            increment_summary_only_uniform()
+        else:
+            increment_row_chunks_emitted()
+
+        if gate == "row_chunks":
             headers = tbl.cells[0]
             caption_prefix = (tbl.caption or "").strip()
             for body_idx, row in enumerate(tbl.cells[1:]):
