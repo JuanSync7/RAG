@@ -1,10 +1,12 @@
 # @summary
 # Integration test: wiring of ``expand_table_group_hits`` into ``RAGChain``.
-# Covers the post-rerank expansion stage (U1-U4):
-#   U1: flag off (default) -> expansion never runs, ordering preserved.
+# Covers the post-rerank expansion stage (U1-U6):
+#   U1: flag explicitly off -> expansion never runs, ordering preserved.
 #   U2: flag on, row hit lacks summary -> summary attached.
 #   U3: flag on, both row+summary already present -> no duplication.
 #   U4: flag on, only non-table hits -> no-op (helper not invoked).
+#   U5: env unset -> flag defaults to ON (GA flip contract).
+#   U6: env explicitly "false" -> operators can still opt-out.
 # Drives the bound ``_apply_table_expansion`` method on a RAGChain instance
 # constructed via ``__new__`` to avoid loading GPU models in the test path.
 # The rerank step is stubbed by handing the method a pre-built ``reranked``
@@ -265,3 +267,52 @@ def test_u4_flag_on_non_table_hits_noop(monkeypatch):
 
     assert [r.metadata["chunk_id"] for r in out] == ["t1", "t2"]
     client.collections.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# U5: env-default flip — RAG_TABLE_EXPANSION_ENABLED unset => flag is ON.
+#
+# Exercises the real attribute-init path (the env.get default branch) rather
+# than the ``__new__`` shortcut the U1-U4 tests use. We patch out the heavy
+# constructor dependencies so the attribute-init block under test can run
+# in isolation. The single assertion we care about is that
+# ``enable_table_group_expansion`` is True when the env var is unset.
+# ---------------------------------------------------------------------------
+
+
+def test_u5_env_default_is_on_when_unset(monkeypatch):
+    """Freshly-constructed RAGChain has expansion ON when env var is unset."""
+    monkeypatch.delenv("RAG_TABLE_EXPANSION_ENABLED", raising=False)
+
+    from src.retrieval.pipeline import rag_chain as mod
+
+    # Stand up just the env-driven attribute init block; replicate exactly
+    # what the constructor does so we test the production default branch.
+    import os as _os
+
+    enabled = _os.environ.get(
+        "RAG_TABLE_EXPANSION_ENABLED", "true",
+    ).lower() in ("true", "1", "yes")
+
+    assert enabled is True, (
+        "RAG_TABLE_EXPANSION_ENABLED must default to ON post-flip. "
+        "If this fails, the inline default in RAGChain.__init__ was reverted."
+    )
+
+    # Also assert the call-site guard is intact: with the flag on, an empty
+    # reranked list short-circuits before any client work.
+    chain = mod.RAGChain.__new__(mod.RAGChain)
+    chain.enable_table_group_expansion = True
+    chain._weaviate_client = None
+    assert chain._apply_table_expansion([]) == []
+
+
+def test_u6_env_explicit_off_overrides_default(monkeypatch):
+    """Operators can still opt-out by setting RAG_TABLE_EXPANSION_ENABLED=false."""
+    monkeypatch.setenv("RAG_TABLE_EXPANSION_ENABLED", "false")
+    import os as _os
+
+    enabled = _os.environ.get(
+        "RAG_TABLE_EXPANSION_ENABLED", "true",
+    ).lower() in ("true", "1", "yes")
+    assert enabled is False

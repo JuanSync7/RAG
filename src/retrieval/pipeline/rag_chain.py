@@ -269,13 +269,15 @@ class RAGChain:
             validate_visual_retrieval_config()  # FR-111: fail fast on bad config
             logger.info("Visual retrieval enabled — model will be loaded on first visual query.")
 
-        # Table-aware retrieval expansion (opt-in). When enabled, post-rerank
-        # results that contain table_row / table_summary chunks fetch the
-        # missing sibling(s) keyed by ``table_group_id`` so the LLM sees the
-        # header + caption alongside any single matched row.
-        # Env: RAG_TABLE_EXPANSION_ENABLED ("true"/"1"/"yes" -> on).
+        # Table-aware retrieval expansion. ON by default as of the
+        # table-aware-chunking GA flip — two clean real-PDF soaks plus a
+        # hierarchical DOCX smoke confirmed table-group sibling expansion is
+        # production-ready. The expansion path is itself guarded by the
+        # ``_has_table_chunk`` pre-check inside ``_apply_table_expansion`` so
+        # the cost is zero on prose-only corpora.
+        # Env: RAG_TABLE_EXPANSION_ENABLED ("false"/"0"/"no" -> off; default on).
         self.enable_table_group_expansion: bool = _os.environ.get(
-            "RAG_TABLE_EXPANSION_ENABLED", "false",
+            "RAG_TABLE_EXPANSION_ENABLED", "true",
         ).lower() in ("true", "1", "yes")
         self.table_expansion_max_rows: int = int(
             _os.environ.get("RAG_TABLE_EXPANSION_MAX_ROWS", "0")
