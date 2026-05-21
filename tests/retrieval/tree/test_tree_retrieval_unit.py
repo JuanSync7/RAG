@@ -401,6 +401,10 @@ class TestCollectCandidates:
             return []  # empty results → run returns "no results" RAGResponse
 
         chain._collect_candidates = fake_collect  # type: ignore
+        # Degraded BM25-only fallback fires when _collect_candidates returns [].
+        # Stub it to also return [] so the early no-results return is hit
+        # (rather than falling through to rerank with a NoneType reranker).
+        chain._do_search = lambda *a, **kw: []  # type: ignore
 
         chain.run(
             "what is X",
@@ -451,6 +455,8 @@ class TestCollectCandidates:
                 captured.update(tree_enabled_seen=tree_enabled) or []
             )
         )
+        # See note on degraded fallback in the previous test.
+        chain._do_search = lambda *a, **kw: []  # type: ignore
 
         chain.run(
             "what is X", skip_generation=True,
@@ -556,6 +562,8 @@ class TestCollectCandidates:
                 captured.update(tree_enabled_seen=tree_enabled) or []
             )
         )
+        # See note on degraded fallback in the tree-off test above.
+        chain._do_search = lambda *a, **kw: []  # type: ignore
 
         # Global default OFF; per-request override TRUE → tree enabled.
         monkeypatch.setattr(

@@ -364,6 +364,27 @@ RAG_INGESTION_DOCLING_STRICT = os.environ.get(
 RAG_INGESTION_DOCLING_AUTO_DOWNLOAD = os.environ.get(
     "RAG_INGESTION_DOCLING_AUTO_DOWNLOAD", "true"
 ).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_OCR: bool = os.environ.get(
+    "RAG_INGESTION_ENABLE_OCR", "true"
+).lower() in ("true", "1", "yes")
+"""Enable Docling OCR auto-trigger for image-only pages. Default: True.
+Uses RapidOCR with force_full_page_ocr=False so text-native pages are not
+re-OCR'd. Set False to disable OCR entirely (faster, but image-only pages
+yield empty text)."""
+RAG_INGESTION_OCR_ENGINE: str = os.environ.get(
+    "RAG_INGESTION_OCR_ENGINE", "rapidocr"
+)
+"""OCR engine identifier. Only "rapidocr" is wired today; reserved for
+forward-compat with easyocr/tesseract. Informational."""
+RAG_INGESTION_TABLEFORMER_MODE: str = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_MODE", "accurate"
+)
+"""TableFormer mode: "accurate" (TF v2, higher quality) or "fast" (TF v1)."""
+RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING: bool = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING", "true"
+).lower() in ("true", "1", "yes")
+"""When True, TableFormer matches PDF text cells to detected table cells
+(higher fidelity). Disable to fall back to OCR-only cell content."""
 RAG_INGESTION_EXPORT_EXTENSIONS = os.environ.get(
     "RAG_INGESTION_EXPORT_EXTENSIONS",
     ".txt,.md,.markdown,.rst,.html,.htm,.pdf,.docx,.pptx",
@@ -457,6 +478,23 @@ loses specificity (a single dense vector covers too many subtopics) and
 single-sentence chunks (under ~50 tokens) lack contextual grounding.
 1024 keeps natural section units whole while staying comfortably below
 the dilution threshold."""
+
+RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS", "4000")
+)
+"""Maximum character length of the embedded text on ``table_summary`` chunks.
+
+At ~4 chars/token (BPE rule of thumb) this caps the summary near ~1000 tokens,
+comfortably under bge-m3's 8192-token input limit and aligned with the default
+``RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024`` budget for prose chunks.
+A 200+ row datasheet table with pathologically wide column headers can otherwise
+compose a ``Columns: ...`` line that overflows the embedder. When the cap
+triggers, the text is truncated and a clear marker (``… [truncated N chars]``)
+is appended. Set to 0 to disable truncation entirely.
+
+The full ``table_markdown`` remains stored on the summary chunk's
+``extra_metadata`` unchanged — only the embedded summary text is capped, so
+downstream table-expansion retrieval keeps the complete payload."""
 
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
