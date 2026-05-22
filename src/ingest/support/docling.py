@@ -27,6 +27,35 @@ from pathlib import Path
 from typing import Any
 
 
+import re as _re_caption  # local alias to avoid colliding with downstream `re` usage
+
+
+_CAPTION_LABEL_RE = _re_caption.compile(
+    r"^\s*(Table)\s+(\d+(?:[.-]\d+)?)",
+    _re_caption.IGNORECASE,
+)
+
+
+def _extract_caption_label(caption: str) -> str:
+    """Pull the canonical ``Table N`` / ``Table N-N`` / ``Table N.N`` label out
+    of a caption string. Returns ``""`` when no label prefix can be parsed.
+
+    Preserves the user's separator (``-`` or ``.``) and titlecases the
+    ``Table`` keyword. Examples:
+
+    - ``"Table 5-2: GPIO matrix"`` → ``"Table 5-2"``
+    - ``"Table 12"``               → ``"Table 12"``
+    - ``"Table 3.1 — power modes"``→ ``"Table 3.1"``
+    - ``"GPIO matrix"``            → ``""``
+    """
+    if not caption:
+        return ""
+    m = _CAPTION_LABEL_RE.match(caption)
+    if not m:
+        return ""
+    return f"Table {m.group(2)}"
+
+
 def _stamp_xref_targets(meta: dict, text: str) -> None:
     """Populate ``meta["xref_targets"]`` from ``cross_refs(text)``.
 
@@ -919,6 +948,7 @@ def _extract_table_artifacts(docling_document: Any, document_id: str = "") -> li
                     has_header=_detect_header_row(tbl),
                     section_path=section_path,
                     caption=caption.strip(),
+                    caption_label=_extract_caption_label(caption),
                     page_ref=_page_ref_from_table_item(tbl),
                     self_ref=str(self_ref or ""),
                     document_id=document_id,
@@ -1141,6 +1171,7 @@ def _apply_adaptive_table_chunking(
             "table_id": tbl.table_id,
             "table_group_id": group_id,
             "document_id": getattr(tbl, "document_id", "") or "",
+            "caption_label": getattr(tbl, "caption_label", "") or "",
             "table_num_rows": tbl.num_rows,
             "table_num_cols": tbl.num_cols,
             "table_has_header": tbl.has_header,
@@ -1189,6 +1220,7 @@ def _apply_adaptive_table_chunking(
                     "table_id": tbl.table_id,
                     "table_group_id": group_id,
                     "document_id": getattr(tbl, "document_id", "") or "",
+                    "caption_label": getattr(tbl, "caption_label", "") or "",
                     "table_row_index": body_idx,
                     "table_num_rows": tbl.num_rows,
                     "table_num_cols": tbl.num_cols,

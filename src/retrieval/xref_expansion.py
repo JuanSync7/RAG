@@ -1,9 +1,10 @@
 # @summary
 # Query-time helper that expands retrieval hits by following the
 # cross-reference edges stamped at ingest (``xref_targets`` metadata).
-# Scoped MVP: resolves ``section`` / ``section_symbol`` refs only against
-# chunks whose ``section_path`` contains the cited section; table/figure/
-# appendix resolution is TODO (needs a caption registry — out of scope).
+# Resolves ``section`` / ``section_symbol`` refs against chunks whose
+# ``section_path`` contains the cited section, and ``table`` refs against
+# chunks whose ``caption_label`` matches (document-scoped). ``figure`` /
+# ``appendix`` resolution is still TODO (no caption registry yet).
 # One-hop only — does NOT transitively expand the targets themselves.
 # Exports: expand_xref_hits
 # Deps: weaviate (Filter), config.settings
@@ -36,15 +37,16 @@ Design contract:
    stay debuggable. Same convention as table-group expansion's
    ``expanded_from``.
 
-**Out of scope (TODO):** ``table`` / ``figure`` / ``appendix`` ref
-resolution. These require a caption-to-chunk registry (e.g. an index
-keyed on ``table_caption`` / figure caption text) that the current schema
-does not yet maintain. We log a debug line and pass through.
+**Out of scope (TODO):** ``figure`` / ``appendix`` ref resolution.
+These need a caption-to-chunk registry that the current schema does not
+yet maintain. ``table`` is supported via the ``caption_label`` property
+(stamped at ingest), scoped to the source hit's ``document_id``.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,8 +55,11 @@ logger = logging.getLogger(__name__)
 __all__ = ["expand_xref_hits"]
 
 
-# Ref types the MVP resolver currently knows how to follow.
-_SUPPORTED_REF_TYPES = frozenset({"section", "section_symbol"})
+# Ref types the resolver currently knows how to follow.
+# - section / section_symbol  → section_path contains-match (boundary post-filter)
+# - table                     → caption_label exact-match, scoped by document_id
+# TODO: figure / appendix still need a caption registry.
+_SUPPORTED_REF_TYPES = frozenset({"section", "section_symbol", "table"})
 
 # Properties we read off Weaviate objects when building expansion hits.
 _RETURN_PROPS = [
@@ -68,6 +73,7 @@ _RETURN_PROPS = [
     "source_key",
     "source_uri",
     "document_id",
+    "caption_label",
     "page_no",
     "page_label",
 ]
@@ -82,15 +88,34 @@ def _filter_for_section(section_value: str) -> Any:
     """Return a Weaviate ``Filter`` matching chunks whose ``section_path``
     contains ``section_value``.
 
-    The match is a substring-style ``like`` because ``section_path`` is a
-    breadcrumb (``"Doc > 3.1 Subsection"``) while the ref value is just
-    ``"3.1"`` — a contains-style filter is the simplest correct join.
+    NOTE: This is a **coarse prefilter** only. Weaviate's ``Filter.like``
+    is substring/glob-based and over-matches: a ref value ``"3.1"`` will
+    pull chunks whose ``section_path`` contains ``"3.10"``, ``"13.1"``,
+    etc. ``_section_value_matches_path`` applies the boundary-aware
+    post-filter in Python after objects come back.
     """
     # Lazy import so the module stays importable in light unit-test envs
     # where the weaviate client lib may not be installed.
     from weaviate.classes.query import Filter  # type: ignore
 
     return Filter.by_property("section_path").like(f"*{section_value}*")
+
+
+def _filter_for_table(label: str, document_id: str) -> Any:
+    """Return a Weaviate ``Filter`` matching chunks whose ``caption_label``
+    equals ``label`` AND whose ``document_id`` equals ``document_id``.
+
+    Tables share captions across documents (every datasheet has its own
+    "Table 5-2"), so document_id scoping is **load-bearing**, not advisory.
+    Callers MUST pass a non-empty document_id; this is enforced at the
+    dispatch site, not here.
+    """
+    from weaviate.classes.query import Filter  # type: ignore
+
+    return (
+        Filter.by_property("caption_label").equal(label)
+        & Filter.by_property("document_id").equal(document_id)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +159,29 @@ def _normalise_section_value(ref_type: str, value: str) -> str:
     return v
 
 
+def _section_value_matches_path(section_value: str, section_path: str) -> bool:
+    """Boundary-aware match of a section ref value against a section_path.
+
+    The Weaviate ``Filter.like`` prefilter is substring-based and
+    over-matches (``"3.1"`` glob-matches ``"3.10"`` / ``"13.1"`` /
+    ``"3.11"``). This helper enforces numeric token boundaries on both
+    sides of the candidate match:
+
+    - Left lookbehind ``(?<![\\d.])`` rejects ``"13.1"`` or ``"3.13.1"``
+      as a match for ``"3.1"`` (the char before the ``"3"`` is a digit or
+      a ``.``).
+    - Right lookahead ``(?![\\d])`` rejects ``"3.10"`` as a match for
+      ``"3.1"`` but **allows** ``"3.1.4"`` (``.`` is a permitted suffix —
+      ``"3.1"`` is a valid prefix of ``"3.1.4"``).
+
+    Empty inputs are treated as no-match.
+    """
+    if not section_value or not section_path:
+        return False
+    pattern = r"(?<![\d.])" + re.escape(section_value) + r"(?![\d])"
+    return re.search(pattern, section_path) is not None
+
+
 def _obj_to_hit(obj: Any, *, expanded_from: str) -> dict:
     """Convert a Weaviate object to the standard retrieval-hit dict shape."""
     props = dict(getattr(obj, "properties", {}) or {})
@@ -148,6 +196,7 @@ def _obj_to_hit(obj: Any, *, expanded_from: str) -> dict:
         "source_key": props.get("source_key", ""),
         "source_uri": props.get("source_uri", ""),
         "document_id": props.get("document_id", ""),
+        "caption_label": props.get("caption_label", ""),
         "page_no": props.get("page_no", 0),
         "page_label": props.get("page_label", ""),
         "expanded_from": expanded_from,
@@ -169,6 +218,12 @@ def _fetch_section_chunks(
 ) -> list[Any]:
     """Fetch chunks whose ``section_path`` contains ``section_value``.
 
+    The Weaviate ``Filter.like`` filter is a **coarse prefilter** — it
+    over-matches at the substring level (``"3.1"`` will pull ``"3.10"``,
+    ``"13.1"``). We apply ``_section_value_matches_path`` as a
+    boundary-aware Python post-filter on the returned objects so the
+    effective match respects numeric token boundaries.
+
     Returns ``[]`` on any failure — we never raise from the expansion path.
     """
     try:
@@ -179,11 +234,49 @@ def _fetch_section_chunks(
             limit=limit,
             return_properties=_RETURN_PROPS,
         )
-        return list(getattr(response, "objects", []) or [])
+        raw = list(getattr(response, "objects", []) or [])
+        # Boundary-aware post-filter — Weaviate's like(...) over-matches.
+        filtered: list[Any] = []
+        for obj in raw:
+            props = getattr(obj, "properties", {}) or {}
+            sp = str(props.get("section_path") or "")
+            if _section_value_matches_path(section_value, sp):
+                filtered.append(obj)
+        return filtered
     except Exception:  # pragma: no cover - defensive
         logger.debug(
             "xref_expansion fetch failed for section=%s", section_value,
             exc_info=True,
+        )
+        return []
+
+
+def _fetch_table_chunks(
+    *,
+    client: Any,
+    collection: str,
+    label: str,
+    document_id: str,
+    limit: int,
+) -> list[Any]:
+    """Fetch chunks whose ``caption_label`` exactly matches ``label`` AND
+    ``document_id`` matches the source-hit's document.
+
+    Returns ``[]`` on any failure — we never raise from the expansion path.
+    """
+    try:
+        col = client.collections.get(collection)
+        flt = _filter_for_table(label, document_id)
+        response = col.query.fetch_objects(
+            filters=flt,
+            limit=limit,
+            return_properties=_RETURN_PROPS,
+        )
+        return list(getattr(response, "objects", []) or [])
+    except Exception:  # pragma: no cover - defensive
+        logger.debug(
+            "xref_expansion fetch failed for table=%s doc=%s",
+            label, document_id, exc_info=True,
         )
         return []
 
@@ -223,10 +316,11 @@ def expand_xref_hits(
         hits carry ``metadata["expanded_from"] = "xref:{type}:{value}"``.
 
     Scope:
-        Only ``section`` and ``section_symbol`` ref types are resolved
-        (against ``section_path`` substring match). Other ref types
-        (``table`` / ``figure`` / ``appendix``) are intentionally
-        pass-through in this MVP — see module docstring.
+        ``section`` / ``section_symbol`` resolve against ``section_path``
+        substring + boundary post-filter. ``table`` resolves against
+        ``caption_label`` (exact match) scoped to the source hit's
+        ``document_id``. ``figure`` / ``appendix`` remain pass-through —
+        see module docstring.
 
         One-hop only — inserted chunks are NOT themselves expanded.
     """
@@ -256,25 +350,43 @@ def expand_xref_hits(
             if not ref_type or not ref_value:
                 continue
             if ref_type not in _SUPPORTED_REF_TYPES:
-                # TODO: implement table/figure/appendix resolution. Needs a
-                # caption registry (e.g. a property index on table_caption
-                # / figure caption text). Out of scope for the MVP.
+                # TODO: implement figure/appendix resolution. Needs a
+                # caption registry (e.g. a property index on figure caption
+                # text). Table resolution lives below.
                 logger.debug(
                     "xref_expansion: ref_type=%s not yet supported (value=%r)",
                     ref_type, ref_value,
                 )
                 continue
 
-            section_value = _normalise_section_value(ref_type, ref_value)
-            if not section_value:
-                continue
+            if ref_type == "table":
+                # Tables are document-scoped: a bare "Table 5-2" is
+                # ambiguous across datasheets. Without the source hit's
+                # document_id we cannot safely resolve.
+                src_doc_id = str(meta.get("document_id") or "")
+                if not src_doc_id:
+                    logger.debug(
+                        "xref_expansion: skipping table ref %r — source hit "
+                        "has no document_id to scope against",
+                        ref_value,
+                    )
+                    continue
+                objs = _fetch_table_chunks(
+                    client=client, collection=collection,
+                    label=ref_value, document_id=src_doc_id,
+                    limit=max(2, max_per_hit + 1),
+                )
+            else:
+                section_value = _normalise_section_value(ref_type, ref_value)
+                if not section_value:
+                    continue
 
-            objs = _fetch_section_chunks(
-                client=client, collection=collection,
-                section_value=section_value,
-                # Fetch a small window — the per-hit cap clamps anyway.
-                limit=max(2, max_per_hit + 1),
-            )
+                objs = _fetch_section_chunks(
+                    client=client, collection=collection,
+                    section_value=section_value,
+                    # Fetch a small window — the per-hit cap clamps anyway.
+                    limit=max(2, max_per_hit + 1),
+                )
             if not objs:
                 continue
 

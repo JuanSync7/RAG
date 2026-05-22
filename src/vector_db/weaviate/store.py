@@ -125,6 +125,13 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
         index_searchable=False,
     ),
     Property(
+        name="caption_label",
+        data_type=DataType.TEXT,
+        description="Normalised table caption label (e.g., 'Table 5-2') for xref resolution",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
         name="page_no",
         data_type=DataType.INT,
         description="1-based page number of the chunk origin",
