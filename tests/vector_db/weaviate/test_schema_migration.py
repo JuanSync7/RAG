@@ -1,7 +1,8 @@
 """Tests for ``schema_migrations.apply_table_property_migration``.
 
-Covers the migration tool that backfills the 12 table-aware + page-provenance
-properties (PR #100) onto Weaviate collections created before the change.
+Covers the migration tool that backfills the 14 table-aware + page-provenance
+properties (PR #100 + document_id + xref_targets follow-ups) onto Weaviate
+collections created before the change.
 
 Uses MagicMock against the v4 ``weaviate.WeaviateClient`` surface; no live
 Weaviate. The mock collection tracks ``add_property`` calls so we can verify
@@ -71,23 +72,23 @@ def _make_stub_client(
 # ---------------------------------------------------------------------------
 
 class TestDryRunDiff:
-    def test_diff_reports_all_twelve_missing_on_legacy_collection(self):
+    def test_diff_reports_all_fourteen_missing_on_legacy_collection(self):
         client = _make_stub_client(["text", "source", "source_key"])
 
         missing = diff_missing_table_properties(client, "Legacy")
 
         assert [p.name for p in missing] == [p.name for p in TABLE_AWARE_PROPERTIES]
-        assert len(missing) == 12
+        assert len(missing) == 14
 
     def test_diff_reports_only_subset_when_some_already_present(self):
-        # Three of the twelve are already present — diff should report nine.
+        # Three of the fourteen are already present — diff should report eleven.
         already = ["text", "chunk_type", "table_id", "page_no"]
         client = _make_stub_client(already)
 
         missing = diff_missing_table_properties(client, "Partial")
 
         names = [p.name for p in missing]
-        assert len(names) == 9
+        assert len(names) == 11
         for present in ("chunk_type", "table_id", "page_no"):
             assert present not in names
 
@@ -97,7 +98,7 @@ class TestDryRunDiff:
 
         lines = format_missing_diff(missing)
 
-        assert len(lines) == 12
+        assert len(lines) == 14
         assert all(line.startswith("[MISSING] ") for line in lines)
         # Spot-check: chunk_type is TEXT + filterable
         chunk_type_line = next(line for line in lines if "chunk_type" in line)
@@ -117,7 +118,7 @@ class TestApplyMigration:
 
         assert isinstance(result, MigrationResult)
         assert result.ok is True
-        # 12 missing → 12 added
+        # 14 missing → 14 added
         added_names = result.added
         assert added_names == [p.name for p in TABLE_AWARE_PROPERTIES]
         # And the client now reflects the new properties.
@@ -131,16 +132,16 @@ class TestApplyMigration:
         first = apply_table_property_migration(client, "Legacy")
         second = apply_table_property_migration(client, "Legacy")
 
-        assert len(first.added) == 12
+        assert len(first.added) == 14
         assert second.added == []
         assert second.missing_before == []
-        assert len(second.already_present) == 12
+        assert len(second.already_present) == 14
         # add_property must not be called again on the no-op run.
         col = client.collections.get.return_value
-        assert col.config.add_property.call_count == 12  # only from the first run
+        assert col.config.add_property.call_count == 14  # only from the first run
 
     def test_partial_collection_only_adds_missing(self):
-        # 4 of the 12 properties already present.
+        # 4 of the 14 properties already present.
         already = ["text", "chunk_type", "page_no", "table_id", "page_bbox"]
         client = _make_stub_client(already)
 
@@ -155,8 +156,8 @@ class TestApplyMigration:
         }
         assert "chunk_type" not in result.added
         assert "page_no" not in result.added
-        # Everything else is added (12 total − 4 already-present = 8).
-        assert len(result.added) == 8
+        # Everything else is added (14 total − 4 already-present = 10).
+        assert len(result.added) == 10
 
 
 # ---------------------------------------------------------------------------
@@ -191,5 +192,5 @@ class TestErrorSurfaces:
 
         assert result.ok is False
         assert any(name == "table_caption" for name, _ in result.errors)
-        # The other 11 still got added.
-        assert len(result.added) == 11
+        # The other 13 still got added.
+        assert len(result.added) == 13

@@ -71,6 +71,9 @@ class TableArtifact:
             ``TableItem.self_ref``) used to join sibling chunks emitted from
             the same source table. Empty string when the parser does not
             expose one.
+        document_id: Stable pointer to the parent document (e.g., the source
+            file's stem). Empty string when the parser/caller did not stamp
+            one — backward compatible with callers that pre-date the field.
     """
 
     table_id: str
@@ -83,6 +86,7 @@ class TableArtifact:
     caption: str = ""
     page_ref: PageRef | None = None
     self_ref: str = ""
+    document_id: str = ""
 
 
 @dataclass

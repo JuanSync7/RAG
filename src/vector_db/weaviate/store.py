@@ -118,6 +118,13 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
         index_searchable=True,
     ),
     Property(
+        name="document_id",
+        data_type=DataType.TEXT,
+        description="Stable pointer to the parent document (e.g., file stem)",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
         name="page_no",
         data_type=DataType.INT,
         description="1-based page number of the chunk origin",
@@ -135,6 +142,21 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
         name="page_bbox",
         data_type=DataType.TEXT,
         description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
+        index_filterable=False,
+        index_searchable=False,
+    ),
+    # xref_targets stores a JSON-encoded ``list[{type, value}]`` produced by
+    # ``src.ingest.common.shared.cross_refs``. Weaviate has no native list-of-
+    # struct type, so we serialise as TEXT and decode on the retrieval side
+    # (``src.retrieval.xref_expansion``). Encoding is JSON (not csv/yaml) so
+    # values like "§3.1" round-trip without escape hassles.
+    Property(
+        name="xref_targets",
+        data_type=DataType.TEXT,
+        description=(
+            'JSON-encoded list[{type,value}] of cross-references detected in '
+            'the chunk text; empty list "[]" when no refs.'
+        ),
         index_filterable=False,
         index_searchable=False,
     ),
