@@ -43,14 +43,19 @@ def test_encoded_payload_is_json_decodable_list_of_dicts():
         assert set(entry.keys()) == {"type", "value"}
 
 
-def test_prose_chunk_metadata_has_xref_targets_after_chunking():
+def test_prose_chunk_metadata_has_xref_targets_after_chunking(monkeypatch):
     """Smoke: invoke the ingest-side stamping function on a fake chunk dict
     and confirm xref_targets is populated.
 
     We reach into the small helper that ingest uses to populate metadata,
     not the full DoclingParser pipeline (which requires real docs).
     """
+    from config import settings as _settings
     from src.ingest.support.docling import _stamp_xref_targets
+
+    # Opt-in to figure refs for this assertion — the default-off gate is
+    # exercised by ``test_figure_refs_gated_out_by_default`` below.
+    monkeypatch.setattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", True)
 
     meta: dict = {}
     _stamp_xref_targets(meta, "see §3.1 and Figure 7-1")
@@ -66,3 +71,37 @@ def test_xref_stamp_on_empty_text_writes_empty_list():
     meta: dict = {}
     _stamp_xref_targets(meta, "")
     assert meta["xref_targets"] == "[]"
+
+
+def test_figure_refs_gated_out_by_default(monkeypatch):
+    """With ``RAG_XREF_EXTRACT_FIGURE_REFS`` False (the default), the
+    stamping helper must drop ``figure``-type refs while keeping every
+    other ref type.  Section refs and friends survive.
+    """
+    from config import settings as _settings
+    from src.ingest.support.docling import _stamp_xref_targets
+
+    monkeypatch.setattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", False)
+
+    meta: dict = {}
+    _stamp_xref_targets(meta, "see Figure 7-1 and §3.1")
+    decoded = json.loads(meta["xref_targets"])
+    assert all(r["type"] != "figure" for r in decoded), decoded
+    assert any(r["type"] == "section_symbol" for r in decoded), decoded
+
+
+def test_figure_refs_emitted_when_flag_enabled(monkeypatch):
+    """Flipping ``RAG_XREF_EXTRACT_FIGURE_REFS`` to True re-enables figure
+    emission, exercising the future code path once a FigureArtifact
+    registry exists.
+    """
+    from config import settings as _settings
+    from src.ingest.support.docling import _stamp_xref_targets
+
+    monkeypatch.setattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", True)
+
+    meta: dict = {}
+    _stamp_xref_targets(meta, "see Figure 7-1 and §3.1")
+    decoded = json.loads(meta["xref_targets"])
+    assert any(r["type"] == "figure" for r in decoded), decoded
+    assert any(r["type"] == "section_symbol" for r in decoded), decoded

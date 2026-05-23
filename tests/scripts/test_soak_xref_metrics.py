@@ -31,6 +31,10 @@ from scripts.soak_table_chunking import (
 class FakeChunk:
     text: str = ""
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+    # Direct attribute mirrors the real ``Chunk.section_path`` field in
+    # ``src.ingest.support.parser_base`` — prose chunks only carry it here,
+    # not in ``extra_metadata``.
+    section_path: str = ""
 
 
 @dataclass
@@ -44,8 +48,11 @@ def _mk_chunk(targets: list[dict] | None = None, **meta: Any) -> FakeChunk:
     em: dict[str, Any] = {}
     if targets is not None:
         em["xref_targets"] = json.dumps(targets)
+    # ``section_path`` lives on Chunk as a direct attr in production; pull it
+    # out of the kwargs so the FakeChunk mirrors real-Chunk shape.
+    section_path = str(meta.pop("section_path", "") or "")
     em.update(meta)
-    return FakeChunk(extra_metadata=em)
+    return FakeChunk(extra_metadata=em, section_path=section_path)
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +145,52 @@ class TestXrefResolvability:
             "unresolvable_figure": 0,
             "unresolvable_appendix": 0,
         }
+
+    def test_section_resolves_via_direct_section_path_attr(self):
+        # Regression for the 2026-05-23 ESP32-S3 soak bug: prose chunks
+        # carry ``section_path`` ONLY as a direct dataclass attribute, never
+        # in ``extra_metadata``. The resolvability check must prefer the
+        # direct attr.
+        chunks = [
+            FakeChunk(
+                extra_metadata={
+                    "document_id": "docA",
+                    "xref_targets": json.dumps(
+                        [{"type": "section", "value": "Section 3.4"}]
+                    ),
+                },
+                section_path="Chapter 3 > 3.4 Foo",
+            ),
+            FakeChunk(
+                extra_metadata={"document_id": "docA"},
+                section_path="Chapter 3 > 3.4 Foo",
+            ),
+        ]
+        r = _xref_resolvability(chunks, tables=[])
+        assert r["section_resolvable"] == 1
+
+    def test_section_resolves_via_extra_metadata_fallback(self):
+        # Backward-compat: callers that stuff section_path into
+        # ``extra_metadata`` (e.g. table-chunk metadata path) still resolve.
+        chunks = [
+            FakeChunk(
+                extra_metadata={
+                    "document_id": "docA",
+                    "section_path": "Chapter 3 > 3.4 Foo",
+                    "xref_targets": json.dumps(
+                        [{"type": "section", "value": "Section 3.4"}]
+                    ),
+                },
+            ),
+            FakeChunk(
+                extra_metadata={
+                    "document_id": "docA",
+                    "section_path": "Chapter 3 > 3.4 Foo",
+                },
+            ),
+        ]
+        r = _xref_resolvability(chunks, tables=[])
+        assert r["section_resolvable"] == 1
 
     def test_section_resolves_via_section_path(self):
         chunks = [

@@ -865,11 +865,24 @@ RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(
 # table-group expansion architecture (src.retrieval.xref_expansion).
 # Scoped MVP: only ``section`` / ``section_symbol`` ref types are resolved;
 # table/figure/appendix refs require a caption registry and remain TODO.
+#
+# Default flipped to ON 2026-05-23 after the ESP32-S3 datasheet soak:
+# table refs resolved 98.8% (559/566), confirming the expander is safe to
+# enable by default. Operators can still disable it via env var.
 RAG_XREF_EXPANSION_ENABLED: bool = os.environ.get(
-    "RAG_XREF_EXPANSION_ENABLED", "false"
+    "RAG_XREF_EXPANSION_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
 RAG_XREF_MAX_PER_HIT: int = int(os.environ.get("RAG_XREF_MAX_PER_HIT", "2"))
 RAG_XREF_MAX_TOTAL: int = int(os.environ.get("RAG_XREF_MAX_TOTAL", "6"))
+
+# Whether ingest-time xref extraction emits ``figure`` refs. We don't yet
+# have a FigureArtifact registry to resolve against, so figure refs are
+# pure noise downstream — default-off. Flip to "true" once figure
+# artifacts land. (Section/section_symbol/table/appendix refs continue to
+# be emitted regardless.)
+RAG_XREF_EXTRACT_FIGURE_REFS: bool = os.environ.get(
+    "RAG_XREF_EXTRACT_FIGURE_REFS", "false"
+).lower() in ("true", "1", "yes")
 
 # --- Visual Embedding Pipeline ---
 RAG_INGESTION_ENABLE_VISUAL_EMBEDDING: bool = os.environ.get(

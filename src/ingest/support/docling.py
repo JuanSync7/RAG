@@ -62,6 +62,12 @@ def _stamp_xref_targets(meta: dict, text: str) -> None:
     The payload is a JSON-encoded ``list[{type, value}]`` (Weaviate's TEXT
     column doesn't support list-of-struct natively; the retrieval-side
     expander decodes it back).  Empty text yields ``"[]"``.
+
+    ``figure``-type refs are filtered when
+    ``RAG_XREF_EXTRACT_FIGURE_REFS`` is False — we don't have a
+    FigureArtifact registry to resolve against yet, so emitting them is
+    pure downstream noise.  Read the flag fresh on each call so tests can
+    monkeypatch ``config.settings`` without re-importing this module.
     """
     # Imported here to avoid widening the module's top-of-file dep graph.
     from src.ingest.common.shared import cross_refs
@@ -70,6 +76,16 @@ def _stamp_xref_targets(meta: dict, text: str) -> None:
         refs = cross_refs(text or "")
     except Exception:  # pragma: no cover - defensive
         refs = []
+
+    try:
+        from config import settings as _settings
+
+        emit_figures = bool(getattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", False))
+    except Exception:  # pragma: no cover - defensive
+        emit_figures = False
+    if not emit_figures:
+        refs = [r for r in refs if str((r or {}).get("type") or "") != "figure"]
+
     meta["xref_targets"] = json.dumps(refs)
 
 try:

@@ -193,11 +193,17 @@ def _xref_resolvability(chunks: list, tables: list) -> dict:
     )
 
     # Index chunks by document_id → list of section_paths.
+    #
+    # ``section_path`` lives on the Chunk dataclass as a direct attribute —
+    # only table chunks redundantly copy it into ``extra_metadata``. Prose
+    # chunks do not. Prefer the direct attribute; keep the metadata fallback
+    # so callers/tests that stuff section_path into metadata still work.
+    # ``document_id`` is currently metadata-only on raw parser Chunks.
     section_paths_by_doc: dict[str, list[str]] = {}
     for c in chunks:
         meta = getattr(c, "extra_metadata", {}) or {}
         doc_id = str(meta.get("document_id") or "")
-        sp = str(meta.get("section_path") or "")
+        sp = str(getattr(c, "section_path", "") or "") or str(meta.get("section_path") or "")
         if sp:
             section_paths_by_doc.setdefault(doc_id, []).append(sp)
 
