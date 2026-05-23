@@ -677,7 +677,10 @@ services:
       net.ipv6.conf.all.disable_ipv6: 1
       net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
+      # TEI cpu-1.5 image ships without curl/wget/nc, so use bash's /dev/tcp
+      # builtin to probe the embedding HTTP port. Once the port is open the
+      # router is serving traffic.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/80"]
       interval: 10s
       timeout: 5s
       retries: 20

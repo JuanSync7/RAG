@@ -67,10 +67,16 @@ class TableArtifact:
         section_path: Hierarchical breadcrumb of headings containing this
             table. Empty when no enclosing heading exists.
         caption: Caption text if the parser detected one; empty otherwise.
+        caption_label: Normalised caption label extracted from ``caption``
+            (e.g., ``"Table 5-2"``); empty when no prefix could be parsed.
+            Surfaced into chunk metadata for xref resolution.
         self_ref: Parser-internal stable reference (e.g., Docling
             ``TableItem.self_ref``) used to join sibling chunks emitted from
             the same source table. Empty string when the parser does not
             expose one.
+        document_id: Stable pointer to the parent document (e.g., the source
+            file's stem). Empty string when the parser/caller did not stamp
+            one — backward compatible with callers that pre-date the field.
     """
 
     table_id: str
@@ -81,8 +87,10 @@ class TableArtifact:
     has_header: bool = False
     section_path: str = ""
     caption: str = ""
+    caption_label: str = ""
     page_ref: PageRef | None = None
     self_ref: str = ""
+    document_id: str = ""
 
 
 @dataclass

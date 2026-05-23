@@ -143,6 +143,7 @@ from src.retrieval.query.nodes.rerank_fusion import (
     heading_match_score,
 )
 from src.retrieval.table_group_expansion import expand_table_group_hits
+from src.retrieval.xref_expansion import expand_xref_hits
 import os as _os
 RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
     "RAG_TREE_SCHEMA_PRESENT", "true"
@@ -288,6 +289,18 @@ class RAGChain:
         self.table_expansion_fetch_summary: bool = _os.environ.get(
             "RAG_TABLE_EXPANSION_FETCH_SUMMARY", "true",
         ).lower() in ("true", "1", "yes")
+
+        # Cross-reference (xref) expansion — MVP, default-off dark launch.
+        # Resolves ``section`` / ``section_symbol`` refs only; table/figure/
+        # appendix resolution is TODO (needs a caption registry).
+        from config.settings import (
+            RAG_XREF_EXPANSION_ENABLED,
+            RAG_XREF_MAX_PER_HIT,
+            RAG_XREF_MAX_TOTAL,
+        )
+        self.xref_expansion_enabled: bool = RAG_XREF_EXPANSION_ENABLED
+        self.xref_max_per_hit: int = RAG_XREF_MAX_PER_HIT
+        self.xref_max_total: int = RAG_XREF_MAX_TOTAL
 
         logger.info("RAG chain ready.")
 
@@ -470,6 +483,37 @@ class RAGChain:
             ):
                 return True
         return False
+
+    def _apply_xref_expansion(
+        self, reranked: list[RankedResult],
+    ) -> list[RankedResult]:
+        """Expand chunk-to-chunk xref edges after rerank (default-off, MVP).
+
+        No-op unless ``xref_expansion_enabled`` is True. Falls back to the
+        original ``reranked`` on any error so retrieval is never blocked.
+        """
+        if not getattr(self, "xref_expansion_enabled", False) or not reranked:
+            return reranked
+        if getattr(self, "_weaviate_client", None) is None:
+            return reranked
+        try:
+            from config.settings import VECTOR_COLLECTION_DEFAULT
+            dict_hits = self._ranked_to_dicts(reranked)
+            expanded = expand_xref_hits(
+                dict_hits,
+                client=self._weaviate_client,
+                collection=VECTOR_COLLECTION_DEFAULT,
+                enabled=True,
+                max_per_hit=getattr(self, "xref_max_per_hit", 2),
+                max_total=getattr(self, "xref_max_total", 6),
+            )
+            return self._dicts_to_ranked(expanded)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "xref_expansion failed (non-fatal): %s — passing reranked through.",
+                exc,
+            )
+            return reranked
 
     def _apply_table_expansion(
         self, reranked: list[RankedResult],
@@ -1940,6 +1984,21 @@ class RAGChain:
                     tg_span.set_attribute("hits_before", before)
                     tg_span.set_attribute("hits_after", len(reranked))
                 tp.record("table_group_expansion", "retrieval", started_at=t0)
+
+            # Stage 5.36: Cross-reference (xref) expansion (opt-in, MVP).
+            # Follows section / section_symbol cross-refs stamped at ingest.
+            # One hop only — does NOT transitively expand. Default-off via
+            # ``RAG_XREF_EXPANSION_ENABLED``.
+            if getattr(self, "xref_expansion_enabled", False) and reranked:
+                t0 = time.perf_counter()
+                with self.tracer.span(
+                    "rag_chain.xref_expansion", parent=root_span,
+                ) as xr_span:
+                    before = len(reranked)
+                    reranked = self._apply_xref_expansion(reranked)
+                    xr_span.set_attribute("hits_before", before)
+                    xr_span.set_attribute("hits_after", len(reranked))
+                tp.record("xref_expansion", "retrieval", started_at=t0)
 
             # Stage 5.4: Visual retrieval (FR-601, FR-615, NFR-905)
             visual_results = None  # None = disabled semantics

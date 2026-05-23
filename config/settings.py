@@ -859,6 +859,18 @@ RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(
     "RAG_DOCUMENT_FORMATTING_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
 
+# --- Cross-reference (xref) expansion (MVP, default-off) ---
+# One-hop expansion that resolves chunk-text cross-references (e.g. "§3.1",
+# "see Section 4") into adjacent chunks at retrieval time. Mirrors the
+# table-group expansion architecture (src.retrieval.xref_expansion).
+# Scoped MVP: only ``section`` / ``section_symbol`` ref types are resolved;
+# table/figure/appendix refs require a caption registry and remain TODO.
+RAG_XREF_EXPANSION_ENABLED: bool = os.environ.get(
+    "RAG_XREF_EXPANSION_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+RAG_XREF_MAX_PER_HIT: int = int(os.environ.get("RAG_XREF_MAX_PER_HIT", "2"))
+RAG_XREF_MAX_TOTAL: int = int(os.environ.get("RAG_XREF_MAX_TOTAL", "6"))
+
 # --- Visual Embedding Pipeline ---
 RAG_INGESTION_ENABLE_VISUAL_EMBEDDING: bool = os.environ.get(
     "RAG_INGESTION_ENABLE_VISUAL_EMBEDDING", "false"

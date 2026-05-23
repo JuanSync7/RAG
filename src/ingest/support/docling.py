@@ -20,10 +20,57 @@ and optional multimodal processing).
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+import re as _re_caption  # local alias to avoid colliding with downstream `re` usage
+
+
+_CAPTION_LABEL_RE = _re_caption.compile(
+    r"^\s*(Table)\s+(\d+(?:[.-]\d+)?)",
+    _re_caption.IGNORECASE,
+)
+
+
+def _extract_caption_label(caption: str) -> str:
+    """Pull the canonical ``Table N`` / ``Table N-N`` / ``Table N.N`` label out
+    of a caption string. Returns ``""`` when no label prefix can be parsed.
+
+    Preserves the user's separator (``-`` or ``.``) and titlecases the
+    ``Table`` keyword. Examples:
+
+    - ``"Table 5-2: GPIO matrix"`` → ``"Table 5-2"``
+    - ``"Table 12"``               → ``"Table 12"``
+    - ``"Table 3.1 — power modes"``→ ``"Table 3.1"``
+    - ``"GPIO matrix"``            → ``""``
+    """
+    if not caption:
+        return ""
+    m = _CAPTION_LABEL_RE.match(caption)
+    if not m:
+        return ""
+    return f"Table {m.group(2)}"
+
+
+def _stamp_xref_targets(meta: dict, text: str) -> None:
+    """Populate ``meta["xref_targets"]`` from ``cross_refs(text)``.
+
+    The payload is a JSON-encoded ``list[{type, value}]`` (Weaviate's TEXT
+    column doesn't support list-of-struct natively; the retrieval-side
+    expander decodes it back).  Empty text yields ``"[]"``.
+    """
+    # Imported here to avoid widening the module's top-of-file dep graph.
+    from src.ingest.common.shared import cross_refs
+
+    try:
+        refs = cross_refs(text or "")
+    except Exception:  # pragma: no cover - defensive
+        refs = []
+    meta["xref_targets"] = json.dumps(refs)
 
 try:
     from config.settings import EMBEDDING_MODEL_PATH, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
@@ -845,7 +892,7 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
     return paths
 
 
-def _extract_table_artifacts(docling_document: Any) -> list:
+def _extract_table_artifacts(docling_document: Any, document_id: str = "") -> list:
     """Extract structured table artifacts from a DoclingDocument. FR-3211.
 
     Walks ``docling_document.tables`` (when present) and converts each entry
@@ -901,8 +948,10 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     has_header=_detect_header_row(tbl),
                     section_path=section_path,
                     caption=caption.strip(),
+                    caption_label=_extract_caption_label(caption),
                     page_ref=_page_ref_from_table_item(tbl),
                     self_ref=str(self_ref or ""),
+                    document_id=document_id,
                 )
             )
         # Narrow catch: Docling grid/heading/export internals raise these on malformed input; AssertionError + BaseException must propagate so our invariant bugs surface.
@@ -1121,6 +1170,8 @@ def _apply_adaptive_table_chunking(
             "chunk_type": "table_summary",
             "table_id": tbl.table_id,
             "table_group_id": group_id,
+            "document_id": getattr(tbl, "document_id", "") or "",
+            "caption_label": getattr(tbl, "caption_label", "") or "",
             "table_num_rows": tbl.num_rows,
             "table_num_cols": tbl.num_cols,
             "table_has_header": tbl.has_header,
@@ -1134,6 +1185,9 @@ def _apply_adaptive_table_chunking(
         truncated_summary = _truncate_table_summary_text(raw_summary, summary_max_chars)
         if truncated_summary != raw_summary:
             increment_summary_text_truncated()
+        # Stamp cross-refs detected in the table summary text (e.g. a
+        # caption like "Table 5-2 (see §3.1)" carries a §-section ref).
+        _stamp_xref_targets(common_meta_summary, truncated_summary)
         out.append(
             Chunk(
                 text=truncated_summary,
@@ -1165,10 +1219,15 @@ def _apply_adaptive_table_chunking(
                     "chunk_type": "table_row",
                     "table_id": tbl.table_id,
                     "table_group_id": group_id,
+                    "document_id": getattr(tbl, "document_id", "") or "",
+                    "caption_label": getattr(tbl, "caption_label", "") or "",
                     "table_row_index": body_idx,
                     "table_num_rows": tbl.num_rows,
                     "table_num_cols": tbl.num_cols,
                 }
+                # Row-level xref edges: most row bodies have none, but the
+                # caption-prefixed text occasionally references a section.
+                _stamp_xref_targets(row_meta, text)
                 out.append(
                     Chunk(
                         text=text,
@@ -1267,7 +1326,9 @@ class DoclingParser:
         # Encapsulate DoclingDocument — FR-3205
         self._docling_document = result.docling_document
 
-        tables = _extract_table_artifacts(self._docling_document)
+        tables = _extract_table_artifacts(
+            self._docling_document, document_id=file_path.stem
+        )
 
         return ParseResult(
             markdown=result.text_markdown,
@@ -1332,6 +1393,12 @@ class DoclingParser:
             heading_level = len(headings)
             page_ref = _page_ref_from_chunk_meta(meta)
 
+            extra_metadata: dict = {}
+            # Stamp cross-reference edges so retrieval-time expansion can
+            # walk them without re-scanning the body text. JSON-encoded
+            # list[{type,value}]; empty list when no refs present.
+            _stamp_xref_targets(extra_metadata, raw.text)
+
             chunks.append(
                 Chunk(
                     text=raw.text,
@@ -1339,7 +1406,7 @@ class DoclingParser:
                     heading=heading,
                     heading_level=heading_level,
                     chunk_index=0,  # re-sequenced below
-                    extra_metadata={},
+                    extra_metadata=extra_metadata,
                     heading_path=headings,
                     page_ref=page_ref,
                 )

@@ -1056,3 +1056,76 @@ class TestIngestDirectoryProcessedKeyMigration:
         if saved_manifests:
             final = saved_manifests[-1]
             assert old_key not in final
+
+
+# ---------------------------------------------------------------------------
+# Regression: ingest_directory must not crash when result.errors contains dicts
+# (Blocker A from 2026-05-21 e2e sanity FAIL transcript)
+# ---------------------------------------------------------------------------
+
+
+class TestIngestDirectoryMixedErrorTypes:
+    """Regression for the `"; ".join(result.errors)` site at src/ingest/impl.py:847.
+
+    Some upstream code paths emit dict-shaped errors (e.g. structured
+    failure payloads from chunker/store stages). The original join site
+    raised TypeError because str.join requires str items, masking the
+    real ingest failure with a misleading traceback.
+    """
+
+    def _make_minimal_config(self):
+        from src.ingest.common.types import IngestionConfig
+        return IngestionConfig(
+            chunk_size=512,
+            chunk_overlap=64,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+
+    def test_mock_join_survives_mixed_string_and_dict_errors(self, tmp_path):
+        """When ingest_file returns dict-valued errors, ingest_directory
+        must surface the failure via summary.failed without raising TypeError."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "file.md"
+        doc.write_text("# Hello")
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            bad_result = MagicMock()
+            bad_result.errors = [
+                "plain string error",
+                {"stage": "chunker", "reason": "boom", "code": 42},
+            ]
+            bad_result.stored_count = 0
+            bad_result.metadata_summary = ""
+            bad_result.metadata_keywords = []
+            bad_result.processing_log = []
+            bad_result.source_hash = "h"
+            bad_result.clean_hash = "ch"
+            bad_result.trace_id = "t-bad"
+            bad_result.validation = {}
+            mock_ingest_file.return_value = bad_result
+
+            from src.ingest.impl import ingest_directory
+            # Must NOT raise TypeError on the "; ".join(...) site.
+            summary = ingest_directory(tmp_path, config=config, selected_sources=[doc])
+
+        assert summary.failed == 1
+        assert summary.processed == 0
+        # Original error payloads should be preserved on the summary,
+        # so the caller can still inspect the underlying failure.
+        assert any("boom" in str(e) for e in summary.errors)

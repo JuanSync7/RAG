@@ -8,7 +8,7 @@
 #          delete_documents_by_source, delete_documents_by_source_key,
 #          delete_documents_by_staging_batch, get_source_hash,
 #          aggregate_by_source, get_collection_stats, list_collections,
-#          update_chunk_content
+#          update_chunk_content, TABLE_AWARE_PROPERTIES
 # Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
 """Low-level Weaviate operations: connection, schema, CRUD, and search.
@@ -46,6 +46,128 @@ from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.vector_db.weaviate.store")
 tracer = get_tracer()
+
+
+# ---------------------------------------------------------------------------
+# Table-aware + page provenance schema (introduced by PR #100).
+#
+# Extracted as a module-level constant so the schema-migration script
+# (``scripts/migrate_weaviate_table_schema.py``) can backfill these properties
+# on collections that pre-date the PR. The list is the single source of truth;
+# ``ensure_collection`` consumes it below so the two code paths cannot drift.
+# ---------------------------------------------------------------------------
+TABLE_AWARE_PROPERTIES: list[Property] = [
+    # ``chunk_type`` is intentionally free-form TEXT: the adaptive chunker
+    # stamps "table_summary"/"table_row", while the legacy chunking node
+    # stamps "table"/"text". Both must round-trip.
+    Property(
+        name="chunk_type",
+        data_type=DataType.TEXT,
+        description='Free-form chunk kind ("table_summary"|"table_row"|"table"|"text"|...)',
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_id",
+        data_type=DataType.TEXT,
+        description="Parser-stable id for the originating table",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_group_id",
+        data_type=DataType.TEXT,
+        description="Within-document join key linking summary + row chunks",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_row_index",
+        data_type=DataType.INT,
+        description="Zero-based body-row index for table_row chunks",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_num_rows",
+        data_type=DataType.INT,
+        description="Total rows in the originating table (incl. header)",
+    ),
+    Property(
+        name="table_num_cols",
+        data_type=DataType.INT,
+        description="Total columns in the originating table",
+    ),
+    Property(
+        name="table_has_header",
+        data_type=DataType.BOOL,
+        description="Whether the originating table has a header row",
+    ),
+    Property(
+        name="table_caption",
+        data_type=DataType.TEXT,
+        description="Caption text of the originating table (query-relevant)",
+        index_filterable=False,
+        index_searchable=True,
+    ),
+    Property(
+        name="table_markdown",
+        data_type=DataType.TEXT,
+        description="Full markdown reconstruction; only set on table_summary chunks",
+        index_filterable=False,
+        index_searchable=True,
+    ),
+    Property(
+        name="document_id",
+        data_type=DataType.TEXT,
+        description="Stable pointer to the parent document (e.g., file stem)",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="caption_label",
+        data_type=DataType.TEXT,
+        description="Normalised table caption label (e.g., 'Table 5-2') for xref resolution",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_no",
+        data_type=DataType.INT,
+        description="1-based page number of the chunk origin",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_label",
+        data_type=DataType.TEXT,
+        description="Human-facing page label (e.g. 'vii', 'A-3')",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_bbox",
+        data_type=DataType.TEXT,
+        description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
+        index_filterable=False,
+        index_searchable=False,
+    ),
+    # xref_targets stores a JSON-encoded ``list[{type, value}]`` produced by
+    # ``src.ingest.common.shared.cross_refs``. Weaviate has no native list-of-
+    # struct type, so we serialise as TEXT and decode on the retrieval side
+    # (``src.retrieval.xref_expansion``). Encoding is JSON (not csv/yaml) so
+    # values like "§3.1" round-trip without escape hassles.
+    Property(
+        name="xref_targets",
+        data_type=DataType.TEXT,
+        description=(
+            'JSON-encoded list[{type,value}] of cross-references detected in '
+            'the chunk text; empty list "[]" when no refs.'
+        ),
+        index_filterable=False,
+        index_searchable=False,
+    ),
+]
 
 
 def _connect() -> weaviate.WeaviateClient:
@@ -213,87 +335,10 @@ def ensure_collection(
                 index_searchable=False,
             ),
             # -- Table-aware chunking + page provenance --
-            # ``chunk_type`` is intentionally free-form TEXT: the adaptive
-            # chunker stamps "table_summary"/"table_row", while the legacy
-            # chunking node stamps "table"/"text". Both must round-trip.
-            Property(
-                name="chunk_type",
-                data_type=DataType.TEXT,
-                description='Free-form chunk kind ("table_summary"|"table_row"|"table"|"text"|...)',
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="table_id",
-                data_type=DataType.TEXT,
-                description="Parser-stable id for the originating table",
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="table_group_id",
-                data_type=DataType.TEXT,
-                description="Within-document join key linking summary + row chunks",
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="table_row_index",
-                data_type=DataType.INT,
-                description="Zero-based body-row index for table_row chunks",
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="table_num_rows",
-                data_type=DataType.INT,
-                description="Total rows in the originating table (incl. header)",
-            ),
-            Property(
-                name="table_num_cols",
-                data_type=DataType.INT,
-                description="Total columns in the originating table",
-            ),
-            Property(
-                name="table_has_header",
-                data_type=DataType.BOOL,
-                description="Whether the originating table has a header row",
-            ),
-            Property(
-                name="table_caption",
-                data_type=DataType.TEXT,
-                description="Caption text of the originating table (query-relevant)",
-                index_filterable=False,
-                index_searchable=True,
-            ),
-            Property(
-                name="table_markdown",
-                data_type=DataType.TEXT,
-                description="Full markdown reconstruction; only set on table_summary chunks",
-                index_filterable=False,
-                index_searchable=True,
-            ),
-            Property(
-                name="page_no",
-                data_type=DataType.INT,
-                description="1-based page number of the chunk origin",
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="page_label",
-                data_type=DataType.TEXT,
-                description="Human-facing page label (e.g. 'vii', 'A-3')",
-                index_filterable=True,
-                index_searchable=False,
-            ),
-            Property(
-                name="page_bbox",
-                data_type=DataType.TEXT,
-                description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
-                index_filterable=False,
-                index_searchable=False,
-            ),
+            # Defined as a module-level constant (TABLE_AWARE_PROPERTIES) so
+            # the schema-migration script can backfill collections created
+            # before PR #100 without duplicating these declarations.
+            *TABLE_AWARE_PROPERTIES,
         ],
     )
     span.end(status="ok")

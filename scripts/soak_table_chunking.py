@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import math
 import os
 import random
 import sys
@@ -101,6 +102,172 @@ def _bbox_of(chunk: Any) -> Any:
 
 
 # --------------------------------------------------------------------------- #
+# Xref metrics                                                                #
+# --------------------------------------------------------------------------- #
+
+
+def _decode_xref_targets(raw: Any) -> list[dict]:
+    """Decode an ``xref_targets`` payload into a list of ``{type, value}`` dicts.
+
+    Tolerates already-decoded lists and bad/empty JSON. Mirrors the leniency
+    of ``src.retrieval.xref_expansion._decode_targets`` but does not import
+    it so the soak stays self-contained on the ingest-only path.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        decoded = json.loads(raw)
+        return decoded if isinstance(decoded, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _percentile_nearest_rank(sorted_values: list[int], pct: float) -> int:
+    """Nearest-rank percentile over a pre-sorted list of ints.
+
+    Uses ``ceil(pct * N)``-1 indexing on the sorted vector, which is the
+    same convention as ``statistics.quantiles(method="inclusive")`` but
+    spelled out to keep the math obvious for small N. Returns 0 on empty.
+    """
+    if not sorted_values:
+        return 0
+    n = len(sorted_values)
+    idx = max(1, math.ceil(pct * n)) - 1
+    idx = min(idx, n - 1)
+    return int(sorted_values[idx])
+
+
+def _xref_edge_metrics(chunks: list) -> dict:
+    """Aggregate xref edge density across chunks.
+
+    Counts JSON-decoded ``xref_targets`` on every chunk and reports total
+    edges, chunks-with-edges, p50/p90 of edges-per-chunk (over the subset
+    of chunks that have at least one edge), and a by-type breakdown.
+    """
+    by_type: Counter[str] = Counter()
+    per_chunk_counts: list[int] = []
+    total_edges = 0
+
+    for c in chunks:
+        meta = getattr(c, "extra_metadata", {}) or {}
+        targets = _decode_xref_targets(meta.get("xref_targets"))
+        n = 0
+        for ref in targets:
+            ref_type = str((ref or {}).get("type") or "")
+            if not ref_type:
+                continue
+            by_type[ref_type] += 1
+            n += 1
+        if n > 0:
+            per_chunk_counts.append(n)
+            total_edges += n
+
+    per_chunk_counts.sort()
+    return {
+        "total_chunks_with_edges": len(per_chunk_counts),
+        "total_edges": total_edges,
+        "edges_per_chunk_p50": _percentile_nearest_rank(per_chunk_counts, 0.5),
+        "edges_per_chunk_p90": _percentile_nearest_rank(per_chunk_counts, 0.9),
+        "by_type": dict(by_type),
+    }
+
+
+def _xref_resolvability(chunks: list, tables: list) -> dict:
+    """Estimate how many xref edges resolve locally (no Weaviate query).
+
+    - ``section`` / ``section_symbol``: resolvable if some chunk in the
+      same ``document_id`` has a ``section_path`` containing the
+      normalised section value (boundary-aware via
+      ``src.retrieval.xref_expansion._section_value_matches_path`` —
+      shared regex; ``"3.1"`` does NOT count ``"3.10"`` as a match).
+    - ``table``: resolvable if some TableArtifact has ``caption_label``
+      equal to the surface form (document-scoped when present).
+    - ``figure`` / ``appendix``: always counted as unresolvable (no
+      caption registry for figures/appendices yet).
+    """
+    from src.retrieval.xref_expansion import (
+        _normalise_section_value,
+        _section_value_matches_path,
+    )
+
+    # Index chunks by document_id → list of section_paths.
+    section_paths_by_doc: dict[str, list[str]] = {}
+    for c in chunks:
+        meta = getattr(c, "extra_metadata", {}) or {}
+        doc_id = str(meta.get("document_id") or "")
+        sp = str(meta.get("section_path") or "")
+        if sp:
+            section_paths_by_doc.setdefault(doc_id, []).append(sp)
+
+    # Index table caption labels — both globally and per document.
+    caption_labels_global: set[str] = set()
+    caption_labels_by_doc: dict[str, set[str]] = {}
+    for t in tables:
+        label = str(getattr(t, "caption_label", "") or "")
+        if not label:
+            continue
+        caption_labels_global.add(label)
+        doc_id = str(getattr(t, "document_id", "") or "")
+        caption_labels_by_doc.setdefault(doc_id, set()).add(label)
+
+    counts = {
+        "section_resolvable": 0,
+        "table_resolvable": 0,
+        "unresolvable_table_no_label": 0,
+        "unresolvable_figure": 0,
+        "unresolvable_appendix": 0,
+    }
+
+    for c in chunks:
+        meta = getattr(c, "extra_metadata", {}) or {}
+        doc_id = str(meta.get("document_id") or "")
+        targets = _decode_xref_targets(meta.get("xref_targets"))
+        for ref in targets:
+            rt = str((ref or {}).get("type") or "")
+            rv = str((ref or {}).get("value") or "")
+            if not rt or not rv:
+                continue
+            if rt in ("section", "section_symbol"):
+                norm = _normalise_section_value(rt, rv)
+                if not norm:
+                    continue
+                candidates = section_paths_by_doc.get(doc_id, [])
+                if any(_section_value_matches_path(norm, sp) for sp in candidates):
+                    counts["section_resolvable"] += 1
+            elif rt == "table":
+                scoped = caption_labels_by_doc.get(doc_id, set())
+                if rv in scoped or rv in caption_labels_global:
+                    counts["table_resolvable"] += 1
+                else:
+                    counts["unresolvable_table_no_label"] += 1
+            elif rt == "figure":
+                counts["unresolvable_figure"] += 1
+            elif rt == "appendix":
+                counts["unresolvable_appendix"] += 1
+            # Unknown ref types are silently ignored — they're not in the
+            # extractor's vocabulary today.
+    return counts
+
+
+def _caption_label_coverage(tables: list) -> dict:
+    """Fraction of TableArtifacts that got a normalised ``caption_label``.
+
+    Catches caption-parser holes early — a low rate means
+    ``_extract_caption_label`` is missing label prefixes on real captions.
+    """
+    total = len(tables)
+    with_label = sum(1 for t in tables if str(getattr(t, "caption_label", "") or ""))
+    rate = (with_label / total) if total else 0.0
+    return {
+        "tables_total": int(total),
+        "tables_with_label": int(with_label),
+        "label_rate": float(rate),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Soak                                                                        #
 # --------------------------------------------------------------------------- #
 
@@ -135,6 +302,9 @@ def run_soak(pdf_path: Path) -> dict:
         "truncation_events": 0,
         "table_samples": [],
         "determinism": {"ok": False, "first": [], "second": []},
+        "xref_edges": {},
+        "xref_resolvability": {},
+        "caption_label_coverage": {},
         "errors": [],
     }
 
@@ -180,6 +350,14 @@ def run_soak(pdf_path: Path) -> dict:
     result["heading_depth_distribution"] = {int(k): int(v) for k, v in sorted(depths.items())}
 
     result["truncation_events"] = _truncation_events(summaries)
+
+    # --- Xref-extraction soak metrics (parse + chunk only) ------------------
+    try:
+        result["xref_edges"] = _xref_edge_metrics(chunks)
+        result["xref_resolvability"] = _xref_resolvability(chunks, tables)
+        result["caption_label_coverage"] = _caption_label_coverage(tables)
+    except Exception as exc:  # pragma: no cover - defensive
+        result["errors"].append(f"xref metrics failed: {exc!r}")
 
     # --- Spot-check three random table summary chunks -----------------------
     rng = random.Random(42)
@@ -323,6 +501,50 @@ def _render_report(pdf_path: Path, data: dict, *, today: str) -> str:
             lines.append(f"- only in first: `{df}`")
         if ds:
             lines.append(f"- only in second: `{ds}`")
+        lines.append("")
+
+    xref_edges = data.get("xref_edges") or {}
+    if xref_edges:
+        lines.append("## Xref edges")
+        lines.append("")
+        lines.append(f"- chunks with edges: {xref_edges.get('total_chunks_with_edges', 0)}")
+        lines.append(f"- total edges: {xref_edges.get('total_edges', 0)}")
+        lines.append(f"- edges per chunk p50: {xref_edges.get('edges_per_chunk_p50', 0)}")
+        lines.append(f"- edges per chunk p90: {xref_edges.get('edges_per_chunk_p90', 0)}")
+        by_type = xref_edges.get("by_type") or {}
+        if by_type:
+            parts = ", ".join(f"{k}={v}" for k, v in sorted(by_type.items()))
+            lines.append(f"- by type: {parts}")
+        else:
+            lines.append("- by type: (none)")
+        lines.append("")
+
+    xref_res = data.get("xref_resolvability") or {}
+    if xref_res:
+        lines.append("## Xref resolvability")
+        lines.append("")
+        lines.append(f"- section resolvable: {xref_res.get('section_resolvable', 0)}")
+        lines.append(f"- table resolvable: {xref_res.get('table_resolvable', 0)}")
+        lines.append(
+            f"- unresolvable table (no matching caption_label): "
+            f"{xref_res.get('unresolvable_table_no_label', 0)}"
+        )
+        lines.append(f"- unresolvable figure: {xref_res.get('unresolvable_figure', 0)}")
+        lines.append(f"- unresolvable appendix: {xref_res.get('unresolvable_appendix', 0)}")
+        lines.append("")
+
+    cap_cov = data.get("caption_label_coverage") or {}
+    if cap_cov:
+        lines.append("## Caption label coverage")
+        lines.append("")
+        lines.append(f"- tables total: {cap_cov.get('tables_total', 0)}")
+        lines.append(f"- tables with caption_label: {cap_cov.get('tables_with_label', 0)}")
+        rate = cap_cov.get("label_rate", 0.0)
+        try:
+            rate_str = f"{float(rate):.2%}"
+        except (TypeError, ValueError):
+            rate_str = str(rate)
+        lines.append(f"- label rate: {rate_str}")
         lines.append("")
 
     errs = data.get("errors") or []

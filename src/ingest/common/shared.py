@@ -40,6 +40,19 @@ _CROSS_REF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bDOC-\d{2,}\b", re.IGNORECASE), "document_id"),
     (re.compile(r"\bSection\s+\d+(?:\.\d+){0,3}\b", re.IGNORECASE), "section"),
     (re.compile(r"\bRFC\s+\d{3,5}\b", re.IGNORECASE), "standard"),
+    # Datasheet-style §-section refs: "§3", "§ 3.1", "§3.1.4".
+    # Require a digit immediately after the symbol (with optional single space)
+    # so prose like "§abc" does not match.
+    (re.compile(r"§\s?\d+(?:\.\d+){0,3}\b"), "section_symbol"),
+    # Table refs: "Table 5", "Table 5-2", "Table 5.2". Word-boundary on
+    # "Table" prevents matches inside "tablespoon".
+    (re.compile(r"\bTable\s+\d+(?:[.-]\d+)?\b", re.IGNORECASE), "table"),
+    # Figure refs: "Figure 7-1", "Fig 7-1", "Fig. 7-1". Word boundary on the
+    # head + required digit blocks "figurine".
+    (re.compile(r"\b(?:Figure|Fig\.?)\s+\d+(?:[.-]\d+)?\b", re.IGNORECASE), "figure"),
+    # Appendix refs: "Appendix A", "Appendix B.2", "appendix C". Requires a
+    # capital-letter label so plural "appendices" alone does not match.
+    (re.compile(r"\bAppendix\s+[A-Z](?:\.\d+)?\b", re.IGNORECASE), "appendix"),
 ]
 
 

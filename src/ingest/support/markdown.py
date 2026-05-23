@@ -1,5 +1,10 @@
 # @summary
 # Markdown-preserving document processor. Main exports: process_document_markdown, chunk_markdown, clean_document.
+# Also exports _embeddings_are_unusable — a defensive guard at the semantic
+# chunker boundary that detects pathological embedder outputs (all-None or
+# all-NaN rows produced by misconfigured embedding backends) and triggers a
+# safe fallback to plain sentences instead of letting np.dot crash the
+# entire chunking stage with a NoneType TypeError.
 # Deps: re, numpy, langchain_text_splitters, src.ingest.support.document, src.ingest.common.schemas, config.settings
 # @end-summary
 """
@@ -103,6 +108,55 @@ def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in raw if s.strip()]
 
 
+def _embeddings_are_unusable(embeddings: object) -> bool:
+    """Return True when an embedder's output cannot be used for cosine similarity.
+
+    Specifically guards the ``_semantic_split`` cosine path against:
+
+    * ``None`` (embedder returned nothing usable).
+    * empty sequences / arrays.
+    * any row whose values are all ``None`` or all ``NaN`` — these arise when
+      an upstream embedding service serializes NaN/Inf as JSON ``null`` (e.g.
+      a misconfigured TEI bge-m3 ONNX backend) and the JSON decoder turns
+      them back into Python ``None``. ``np.dot`` on such a row raises
+      ``TypeError: unsupported operand type(s) for *: 'NoneType' and 'NoneType'``
+      which we want to avoid letting bubble up and crash the chunking stage.
+
+    The check is intentionally cheap (samples first/last row only) and never
+    raises — when in doubt, declare the batch unusable.
+    """
+    if embeddings is None:
+        return True
+    try:
+        n = len(embeddings)
+    except TypeError:
+        return True
+    if n == 0:
+        return True
+    # Inspect the first row — that's enough to catch the all-null upstream
+    # failure mode. We deliberately do not iterate every row: a healthy
+    # embedder cannot return some-good / some-None mixes from one batch
+    # call, and per-row inspection would be O(N×D) on the hot path.
+    sample = embeddings[0]
+    if sample is None:
+        return True
+    try:
+        arr = np.asarray(sample, dtype=float)
+    except (TypeError, ValueError):
+        # ``np.asarray`` on a list-of-None coerces to dtype=object and yields
+        # ``None`` entries — convert via float to surface them as NaN. If
+        # that fails entirely, treat as unusable.
+        try:
+            arr = np.asarray([float("nan") if x is None else x for x in sample], dtype=float)
+        except Exception:
+            return True
+    if arr.size == 0:
+        return True
+    if not np.all(np.isfinite(arr)):
+        return True
+    return False
+
+
 def _semantic_split(
     text: str,
     embedder,
@@ -127,11 +181,36 @@ def _semantic_split(
         logger.debug("Semantic sentence embedding failed; falling back to plain sentences", exc_info=True)
         return sentences
 
+    # Defensive: an embedder may return an array of ``None`` (or NaN-only) rows
+    # when the upstream service is misconfigured (e.g. TEI bge-m3 ONNX yielding
+    # all-null vectors). ``np.dot(None, None)`` then raises
+    # ``TypeError: unsupported operand type(s) for *: 'NoneType' and 'NoneType'``
+    # which masks the real failure and crashes the whole chunking stage. Detect
+    # the pathological shape and fall back to plain sentences — the rest of the
+    # pipeline still runs (the embedding-storage node will surface the bad
+    # vectors as its own error, where it belongs).
+    if _embeddings_are_unusable(embeddings):
+        logger.warning(
+            "Semantic chunking embedder returned unusable vectors "
+            "(None/NaN rows or shape mismatch); falling back to plain sentences."
+        )
+        return sentences
+
     # Cosine similarity between consecutive sentences (dot product on normalized vectors)
-    similarities = np.array([
-        np.dot(embeddings[i], embeddings[i + 1])
-        for i in range(len(embeddings) - 1)
-    ])
+    try:
+        similarities = np.array([
+            np.dot(embeddings[i], embeddings[i + 1])
+            for i in range(len(embeddings) - 1)
+        ])
+    except TypeError:
+        # Belt-and-braces: if a stray None slipped past the guard above,
+        # do not crash the chunking node.
+        logger.warning(
+            "Semantic chunking similarity computation failed on None-typed "
+            "embedding rows; falling back to plain sentences.",
+            exc_info=True,
+        )
+        return sentences
 
     # Split at points where similarity drops below threshold
     chunks = []
