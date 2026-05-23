@@ -1,0 +1,105 @@
+{
+  "pdf": {
+    "path": "/home/kok-shew-juan/RagWeave/.worktrees/table-aware-chunking/data/datasheets/ti_msp430f5529.pdf",
+    "size_bytes": 4498682,
+    "page_count": 145
+  },
+  "models_ready": true,
+  "models_error": null,
+  "parse_error": null,
+  "counts": {
+    "total_chunks": 2037,
+    "tables": 144,
+    "summary_chunks": 144,
+    "row_chunks": 1539,
+    "group_ids": 144
+  },
+  "heading_depth_distribution": {
+    "0": 3,
+    "1": 141
+  },
+  "truncation_events": 0,
+  "table_samples": [
+    {
+      "table_group_id": "#/tables/130",
+      "section_path": "10.2 Device Nomenclature",
+      "table_caption": "Figure 10-1. Device Nomenclature",
+      "page_no": 114,
+      "page_bbox": [
+        110.58732604980469,
+        605.9351348876953,
+        501.1798400878906,
+        304.53497314453125
+      ],
+      "table_num_rows": 10,
+      "table_num_cols": 3,
+      "text_head": "Table: Figure 10-1. Device Nomenclature\nColumns: \nRows: 10",
+      "markdown_head": "Figure 10-1. Device Nomenclature\n\n| Processor Family              | CC = Embedded RF Radio MSP = Mixed-Signal Processor XMS = Experimental Silicon PMS = Prototype Device                    |                                                  ",
+      "markdown_len": 3575
+    },
+    {
+      "table_group_id": "#/tables/62",
+      "section_path": "9.4 Memory Organization",
+      "table_caption": "Table 9-2. Memory Organization  (1)",
+      "page_no": 56,
+      "page_bbox": [
+        55.758331298828125,
+        647.0240936279297,
+        556.0317993164062,
+        154.3128662109375
+      ],
+      "table_num_rows": 20,
+      "table_num_cols": 6,
+      "text_head": "Table: Table 9-2. Memory Organization  (1)\nColumns:  |  | MSP430F5522 MSP430F5521 MSP430F5513 | MSP430F5525 MSP430F5524 MSP430F5515 MSP430F5514 | MSP430F5527 MSP430F5526 MSP430F5517 | MSP430F5529 MSP430F5528 MSP430F5519\nRows: 19",
+      "markdown_head": "Table 9-2. Memory Organization  (1)\n\n|                                       |            | MSP430F5522 MSP430F5521 MSP430F5513   | MSP430F5525 MSP430F5524 MSP430F5515 MSP430F5514   | MSP430F5527 MSP430F5526 MSP430F5517   | MSP430F5529 MSP4",
+      "markdown_len": 4803
+    },
+    {
+      "table_group_id": "#/tables/45",
+      "section_path": "8.35 12-Bit ADC, Power Supply and Input Range Conditions",
+      "table_caption": "",
+      "page_no": 44,
+      "page_bbox": [
+        55.56804275512695,
+        688.1776275634766,
+        556.0166625976562,
+        560.2726898193359
+      ],
+      "table_num_rows": 7,
+      "table_num_cols": 8,
+      "text_head": "Columns: PARAMETER | PARAMETER | TEST CONDITIONS | V CC | MIN | TYP | MAX | UNIT\nRows: 6",
+      "markdown_head": "| PARAMETER   | PARAMETER                                       | TEST CONDITIONS                                                                                       | V CC   |   MIN |   TYP | MAX   | UNIT   |\n|-------------|-------------",
+      "markdown_len": 1695
+    }
+  ],
+  "determinism": {
+    "ok": true,
+    "first_count": 144,
+    "second_count": 144,
+    "diff_first_minus_second": [],
+    "diff_second_minus_first": []
+  },
+  "xref_edges": {
+    "total_chunks_with_edges": 598,
+    "total_edges": 710,
+    "edges_per_chunk_p50": 1,
+    "edges_per_chunk_p90": 1,
+    "by_type": {
+      "section": 82,
+      "table": 628
+    }
+  },
+  "xref_resolvability": {
+    "section_resolvable": 79,
+    "table_resolvable": 589,
+    "unresolvable_table_no_label": 39,
+    "unresolvable_figure": 0,
+    "unresolvable_appendix": 0
+  },
+  "caption_label_coverage": {
+    "tables_total": 144,
+    "tables_with_label": 40,
+    "label_rate": 0.2777777777777778
+  },
+  "errors": []
+}
