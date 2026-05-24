@@ -73,22 +73,25 @@ def _make_stub_client(
 
 class TestDryRunDiff:
     def test_diff_reports_all_fourteen_missing_on_legacy_collection(self):
+        # Legacy name retained for git-history readability — the migration
+        # now ships 16 table-aware properties (FIG-2 added figure_image_uri).
         client = _make_stub_client(["text", "source", "source_key"])
 
         missing = diff_missing_table_properties(client, "Legacy")
 
         assert [p.name for p in missing] == [p.name for p in TABLE_AWARE_PROPERTIES]
-        assert len(missing) == 15
+        assert len(missing) == len(TABLE_AWARE_PROPERTIES)
 
     def test_diff_reports_only_subset_when_some_already_present(self):
-        # Three of the fourteen are already present — diff should report eleven.
+        # Three of the properties are already present — diff should report
+        # ``len(TABLE_AWARE_PROPERTIES) - 3``.
         already = ["text", "chunk_type", "table_id", "page_no"]
         client = _make_stub_client(already)
 
         missing = diff_missing_table_properties(client, "Partial")
 
         names = [p.name for p in missing]
-        assert len(names) == 12
+        assert len(names) == len(TABLE_AWARE_PROPERTIES) - 3
         for present in ("chunk_type", "table_id", "page_no"):
             assert present not in names
 
@@ -98,7 +101,7 @@ class TestDryRunDiff:
 
         lines = format_missing_diff(missing)
 
-        assert len(lines) == 15
+        assert len(lines) == len(TABLE_AWARE_PROPERTIES)
         assert all(line.startswith("[MISSING] ") for line in lines)
         # Spot-check: chunk_type is TEXT + filterable
         chunk_type_line = next(line for line in lines if "chunk_type" in line)
@@ -132,13 +135,13 @@ class TestApplyMigration:
         first = apply_table_property_migration(client, "Legacy")
         second = apply_table_property_migration(client, "Legacy")
 
-        assert len(first.added) == 15
+        assert len(first.added) == len(TABLE_AWARE_PROPERTIES)
         assert second.added == []
         assert second.missing_before == []
-        assert len(second.already_present) == 15
+        assert len(second.already_present) == len(TABLE_AWARE_PROPERTIES)
         # add_property must not be called again on the no-op run.
         col = client.collections.get.return_value
-        assert col.config.add_property.call_count == 15  # only from the first run
+        assert col.config.add_property.call_count == len(TABLE_AWARE_PROPERTIES)
 
     def test_partial_collection_only_adds_missing(self):
         # 4 of the 15 properties already present.
@@ -156,8 +159,8 @@ class TestApplyMigration:
         }
         assert "chunk_type" not in result.added
         assert "page_no" not in result.added
-        # Everything else is added (15 total − 4 already-present = 11).
-        assert len(result.added) == 11
+        # Everything else is added (total minus four already-present).
+        assert len(result.added) == len(TABLE_AWARE_PROPERTIES) - 4
 
 
 # ---------------------------------------------------------------------------
@@ -192,5 +195,5 @@ class TestErrorSurfaces:
 
         assert result.ok is False
         assert any(name == "table_caption" for name, _ in result.errors)
-        # The other 14 still got added.
-        assert len(result.added) == 14
+        # The other props still got added — all except ``table_caption``.
+        assert len(result.added) == len(TABLE_AWARE_PROPERTIES) - 1

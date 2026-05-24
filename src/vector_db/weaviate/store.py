@@ -4,6 +4,7 @@
 # ``config.settings.RAG_WEAVIATE_MODE`` ("embedded" or "networked").
 # All collection-scoped operations accept a collection parameter for multi-collection support.
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
+#          build_table_chunk_id, build_figure_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
 #          delete_documents_by_staging_batch, get_source_hash,
@@ -149,6 +150,20 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
         name="page_bbox",
         data_type=DataType.TEXT,
         description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
+        index_filterable=False,
+        index_searchable=False,
+    ),
+    # Figure-specific provenance. Empty on non-figure chunks. ``data:`` URIs
+    # are coerced to "" at ingest time (would bloat Weaviate); ``file://`` and
+    # ``http(s)://`` URIs round-trip as-is. Non-indexed — the field is only
+    # consumed by citation/UI rendering, not query-time filtering.
+    Property(
+        name="figure_image_uri",
+        data_type=DataType.TEXT,
+        description=(
+            'Best-effort image URI for figure chunks ("file://"/"http(s)://"). '
+            'Empty for non-figure chunks or data: URIs.'
+        ),
         index_filterable=False,
         index_searchable=False,
     ),
@@ -372,6 +387,18 @@ def build_table_chunk_id(
     return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
 
 
+def build_figure_chunk_id(source: str, self_ref: str) -> str:
+    """Deterministic UUID for figure-derived chunks.
+
+    Derives from ``(source, self_ref)`` so re-ingesting a document with
+    identical Docling picture positional refs (``#/pictures/N``) updates
+    the same vector rather than orphaning the prior one. Mirrors
+    :func:`build_table_chunk_id` (memory ``project_chunk_id_idempotency``).
+    """
+    payload = f"{source}|fig|{self_ref}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
 def build_parent_section_id(document_id: str, heading_path: list[str]) -> str:
     """Stable hash for a section's parent — `(document_id, heading_path[:-1])`.
 
@@ -462,6 +489,18 @@ def add_documents(
                     chunk_type_meta,
                     metadata.get("table_row_index"),
                 )
+            # Figure chunks: derive from (source, self_ref) so re-ingests of
+            # the same Docling positional refs (``#/pictures/N``) overwrite
+            # the prior vector rather than orphaning it.
+            self_ref_meta = str(metadata.get("self_ref") or "").strip()
+            if (
+                candidate_id in (None, "")
+                and chunk_type_meta == "figure"
+                and self_ref_meta
+            ):
+                candidate_id = build_figure_chunk_id(
+                    source_identity, self_ref_meta
+                )
             chunk_id = _normalize_chunk_uuid(
                 candidate_id, source_identity, chunk_index, text
             )
@@ -530,6 +569,10 @@ def add_documents(
                     "page_no": int(metadata.get("page_no", 0)),
                     "page_label": metadata.get("page_label", ""),
                     "page_bbox": bbox_str,
+                    # Figure-only field; non-figure chunks pass through as "".
+                    # ``data:`` URIs are coerced upstream by the figure
+                    # transformer to keep payloads small.
+                    "figure_image_uri": str(metadata.get("figure_image_uri") or ""),
                 }
             )
             optional.update(
