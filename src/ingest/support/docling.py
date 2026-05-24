@@ -1100,6 +1100,85 @@ def _figure_image_uri(pic: Any) -> str:
         return ""
 
 
+def _build_unbound_caption_fallback(doc: Any) -> dict[str, str]:
+    """Map ``picture.self_ref`` → forward-walked caption text when Docling
+    failed to bind a caption to the PictureItem.
+
+    Docling 2.82.0 frequently parses a figure's caption as an ordinary
+    TextItem in the body stream rather than binding it via ``pic.captions``.
+    Triage of the 2026-05-24 ESP32-S3 soak found 4 of 5 unresolvable prose
+    figure refs were caused by this binding gap (memory:
+    ``project_docling_heading_provenance`` documents the table-side variant
+    of the same quirk).
+
+    Strategy: walk ``iterate_items()`` in document order. For each
+    PictureItem with empty ``captions``, scan forward until either
+      * we hit a TextItem on the same page whose text matches the canonical
+        figure-caption regex (``^\\s*(Figure|Fig\\.?)\\s+N(-N|.N)?``) — adopt
+        it; or
+      * we leave the page or hit another PictureItem — abort (no fallback).
+
+    Stays page-scoped so we never invent cross-page provenance. Returns an
+    empty mapping when ``iterate_items`` is unavailable.
+    """
+    fallback: dict[str, str] = {}
+    iterate = getattr(doc, "iterate_items", None)
+    if not callable(iterate):
+        return fallback
+    try:
+        entries = list(iterate())
+    except Exception:  # pragma: no cover - defensive
+        return fallback
+
+    # Flatten (item, level) -> item with index for forward scans.
+    items: list[Any] = []
+    for entry in entries:
+        if isinstance(entry, tuple) and len(entry) >= 1:
+            items.append(entry[0])
+        else:
+            items.append(entry)
+
+    def _page_of(it: Any) -> int:
+        prov = getattr(it, "prov", None) or []
+        for p in prov:
+            page_no = getattr(p, "page_no", None)
+            if page_no is None:
+                continue
+            try:
+                return int(page_no)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    for i, item in enumerate(items):
+        if _label_value(item) != "picture":
+            continue
+        if getattr(item, "captions", None):
+            continue  # Docling bound a caption; trust it.
+        self_ref = getattr(item, "self_ref", None)
+        if not self_ref:
+            continue
+        pic_page = _page_of(item)
+        if pic_page == 0:
+            continue  # no provenance to scope by; bail rather than guess
+        # Forward scan, bounded by page change or next PictureItem.
+        for j in range(i + 1, len(items)):
+            nxt = items[j]
+            nxt_label = _label_value(nxt)
+            if nxt_label == "picture":
+                break
+            nxt_page = _page_of(nxt)
+            if nxt_page and nxt_page != pic_page:
+                break
+            txt = str(getattr(nxt, "text", "") or "").strip()
+            if not txt:
+                continue
+            if _FIGURE_CAPTION_LABEL_RE.match(txt):
+                fallback[str(self_ref)] = txt
+                break
+    return fallback
+
+
 def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
     """Extract structured figure artifacts from a DoclingDocument.
 
@@ -1127,6 +1206,12 @@ def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
     # Reuses the captionable-label walker; the returned dict carries entries
     # for tables, pictures, AND charts so the same call serves both extractors.
     section_paths = _resolve_table_section_paths(doc)
+    # Forward-walked fallback for PictureItems whose ``pic.captions`` is
+    # empty even though a "Figure N-N. ..." TextItem sits on the same page.
+    # Docling 2.82.0 leaves these unbound for ~80% of figures on real-world
+    # PDFs (see FIG-4 triage). Empty dict when iterate_items is unavailable
+    # — extractor degrades to the pre-FIG-4 behaviour in that case.
+    caption_fallback = _build_unbound_caption_fallback(doc)
 
     artifacts: list[FigureArtifact] = []
     for idx, pic in enumerate(raw_pictures):
@@ -1141,6 +1226,9 @@ def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
             except Exception:
                 caption = ""
             self_ref = getattr(pic, "self_ref", None)
+            # Forward-walk fallback when Docling didn't bind a caption.
+            if not caption and self_ref:
+                caption = caption_fallback.get(str(self_ref), "")
             section_path = section_paths.get(str(self_ref), "") if self_ref else ""
             artifacts.append(
                 FigureArtifact(
