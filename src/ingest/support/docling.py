@@ -90,6 +90,23 @@ def _extract_figure_caption_label(caption: str) -> str:
     return f"Figure {m.group(1)}"
 
 
+def _normalize_figure_ref_value(value: str) -> str:
+    """Coerce a raw figure ref match (e.g. ``"Fig. 4-1"``) to the canonical
+    ``"Figure N"`` form the resolver filter expects.
+
+    Returns the input unchanged when no figure prefix matches — callers
+    decide whether to keep or drop. We anchor against the same regex
+    :data:`_FIGURE_CAPTION_LABEL_RE` uses so the round-trip (emission ↔
+    resolution) is symmetric.
+    """
+    if not value:
+        return value
+    m = _FIGURE_CAPTION_LABEL_RE.match(value)
+    if not m:
+        return value
+    return f"Figure {m.group(1)}"
+
+
 def _stamp_xref_targets(meta: dict, text: str) -> None:
     """Populate ``meta["xref_targets"]`` from ``cross_refs(text)``.
 
@@ -119,6 +136,25 @@ def _stamp_xref_targets(meta: dict, text: str) -> None:
         emit_figures = False
     if not emit_figures:
         refs = [r for r in refs if str((r or {}).get("type") or "") != "figure"]
+    else:
+        # Normalise figure ref values (``"Fig. 4-1"`` → ``"Figure 4-1"``) so
+        # the value stamped at ingest matches the resolver-side filter that
+        # FIG-2's ``_filter_for_figure`` issues against ``caption_label``.
+        # Anything that doesn't match the canonical figure-prefix regex is
+        # dropped — that path catches false positives like ``"Refigure 4-1"``
+        # that the loose ``cross_refs`` pattern would otherwise surface.
+        normalised: list[dict] = []
+        for r in refs:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("type") or "") == "figure":
+                norm_v = _normalize_figure_ref_value(str(r.get("value") or ""))
+                if not norm_v.startswith("Figure "):
+                    continue
+                normalised.append({"type": "figure", "value": norm_v})
+            else:
+                normalised.append(r)
+        refs = normalised
 
     meta["xref_targets"] = json.dumps(refs)
 
@@ -1128,6 +1164,93 @@ def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
     return artifacts
 
 
+def _figure_artifacts_to_chunks(figures: list) -> list:
+    """Turn :class:`FigureArtifact` rows into ``chunk_type="figure"`` chunks.
+
+    Mirrors :func:`_apply_adaptive_table_chunking`'s table-side transformer:
+    each chunk's ``extra_metadata`` carries the provenance the resolver
+    filter and citation UI need (``document_id``, ``caption_label``,
+    ``section_path``, ``page_no``, ``self_ref``, ``figure_image_uri``).
+
+    Rules:
+      * Skip figures with neither caption nor caption_label — there's no
+        useful text to embed.
+      * ``image_uri`` starting with ``data:`` is coerced to ``""`` so we
+        don't bloat Weaviate with base64 payloads (memory
+        ``project_weaviate_schema_drop`` reminds us the schema property
+        list is the gate, but a multi-MB ``data:`` URI is still wasteful).
+      * ``chunk_id`` is derived from ``(document_id, self_ref)`` via
+        :func:`build_figure_chunk_id` so re-ingesting overwrites in place.
+        Falls back to the parser's own chunk_id derivation when
+        ``self_ref`` is empty (rare; defensive).
+    """
+    from src.ingest.support.parser_base import Chunk, PageRef
+    from src.vector_db.weaviate.store import build_figure_chunk_id
+
+    out: list = []
+    for fig in figures or []:
+        caption = (getattr(fig, "caption", "") or "").strip()
+        label = (getattr(fig, "caption_label", "") or "").strip()
+        if not caption and not label:
+            continue
+        if caption and label and caption.lower().startswith(label.lower()):
+            # Caption already starts with the label (typical Docling case);
+            # keep the caption verbatim so we don't double-stamp.
+            text = caption
+        elif caption and label:
+            text = f"{label}: {caption}"
+        elif label:
+            text = label
+        else:
+            text = caption
+
+        section_path = getattr(fig, "section_path", "") or ""
+        heading_path = [h for h in section_path.split(" > ") if h]
+        heading = heading_path[-1] if heading_path else ""
+
+        image_uri = getattr(fig, "image_uri", "") or ""
+        if image_uri.startswith("data:"):
+            image_uri = ""
+
+        document_id = getattr(fig, "document_id", "") or ""
+        self_ref = getattr(fig, "self_ref", "") or ""
+        if document_id and self_ref:
+            chunk_id = build_figure_chunk_id(document_id, self_ref)
+        else:
+            chunk_id = ""
+
+        page_no = int(getattr(fig, "page_no", 0) or 0)
+        page_ref = PageRef(page_no=page_no, page_label="", bbox=None) if page_no else None
+
+        meta: dict = {
+            "chunk_type": "figure",
+            "document_id": document_id,
+            "caption_label": label,
+            "self_ref": self_ref,
+            "page_no": page_no,
+            "figure_image_uri": image_uri,
+        }
+        if chunk_id:
+            meta["chunk_id"] = chunk_id
+        # Stamp cross-refs detected in the figure caption text (rare but
+        # possible: "Figure 4-1: see Section 3.2 for the matrix").
+        _stamp_xref_targets(meta, text)
+
+        out.append(
+            Chunk(
+                text=text,
+                section_path=section_path,
+                heading=heading,
+                heading_level=len(heading_path),
+                chunk_index=0,
+                extra_metadata=meta,
+                heading_path=list(heading_path),
+                page_ref=page_ref,
+            )
+        )
+    return out
+
+
 def _table_to_cells(tbl: Any) -> list[list[str]]:
     """Convert a Docling TableItem into a row-major list of strings."""
     data = getattr(tbl, "data", None)
@@ -1585,6 +1708,15 @@ class DoclingParser:
             and getattr(cfg, "enable_adaptive_table_chunking", True)
         ):
             chunks = _apply_adaptive_table_chunking(chunks, tables, cfg)
+
+        # Append figure chunks. We don't try to insert them at a position in
+        # the prose stream — figures lack the row-fingerprint that lets
+        # ``_apply_adaptive_table_chunking`` anchor on a matching text chunk.
+        # Defensive ``getattr`` so ParseResult shapes that pre-date FIG-1
+        # don't trip us (memory ``project_rag_chain_defensive_init``).
+        figures = list(getattr(parse_result, "figures", []) or [])
+        if figures:
+            chunks = list(chunks) + _figure_artifacts_to_chunks(figures)
 
         for i, c in enumerate(chunks):
             c.chunk_index = i
