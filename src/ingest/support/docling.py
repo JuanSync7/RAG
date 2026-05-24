@@ -35,6 +35,18 @@ _CAPTION_LABEL_RE = _re_caption.compile(
     _re_caption.IGNORECASE,
 )
 
+# Figure-side variant. ``Fig.`` and ``Fig`` are tolerated, but a word boundary
+# after the keyword prevents matches like ``figured`` / ``configure`` /
+# ``Refigure`` that share the prefix.
+# Match ``Figure``/``Fig.``/``Fig`` at the start of the caption only when
+# followed by whitespace and a digit. Anchoring at ``^\s*`` plus the digit
+# lookahead is what excludes ``figured``/``configure``/``Refigure`` — those
+# either fail the prefix anchor or fail the trailing-digit requirement.
+_FIGURE_CAPTION_LABEL_RE = _re_caption.compile(
+    r"^\s*(?:Figure|Fig\.?)\s+(\d+(?:[.-]\d+)?)",
+    _re_caption.IGNORECASE,
+)
+
 
 def _extract_caption_label(caption: str) -> str:
     """Pull the canonical ``Table N`` / ``Table N-N`` / ``Table N.N`` label out
@@ -54,6 +66,28 @@ def _extract_caption_label(caption: str) -> str:
     if not m:
         return ""
     return f"Table {m.group(2)}"
+
+
+def _extract_figure_caption_label(caption: str) -> str:
+    """Pull the canonical ``Figure N`` / ``Figure N-N`` / ``Figure N.N`` label
+    out of a figure caption string. Returns ``""`` when no label prefix can be
+    parsed.
+
+    Accepts ``Figure``, ``Fig``, and ``Fig.`` (case-insensitive) and normalises
+    the keyword to ``Figure``. Preserves the user's separator (``-`` or ``.``).
+    Examples:
+
+    - ``"Figure 4-1: SoC block diagram"`` → ``"Figure 4-1"``
+    - ``"Fig. 2 — pin layout"``           → ``"Figure 2"``
+    - ``"FIGURE 10.3 power tree"``        → ``"Figure 10.3"``
+    - ``"figured out the wiring"``        → ``""``
+    """
+    if not caption:
+        return ""
+    m = _FIGURE_CAPTION_LABEL_RE.match(caption)
+    if not m:
+        return ""
+    return f"Figure {m.group(1)}"
 
 
 def _stamp_xref_targets(meta: dict, text: str) -> None:
@@ -758,6 +792,12 @@ def _page_ref_from_table_item(tbl: Any) -> Any:
 
 _HEADING_LABEL_VALUES = frozenset({"section_header", "title"})
 
+# Labels whose self_ref → section_path mapping the heading-stack walker
+# records. Tables and figures (pictures, charts) both need section provenance
+# resolved by replaying iterate_items() because Docling stores headings and
+# floats as flat siblings under ``body``.
+_CAPTIONABLE_LABEL_VALUES = frozenset({"table", "picture", "chart"})
+
 
 def _label_value(item: Any) -> str:
     """Return the lowercase string value of an item's ``label`` attribute.
@@ -889,11 +929,13 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
                 _MAX_SECTION_DEPTH = 8
                 if len(stack) > _MAX_SECTION_DEPTH:
                     del stack[: len(stack) - _MAX_SECTION_DEPTH]
-            elif label == "table":
+            elif label in _CAPTIONABLE_LABEL_VALUES:
+                # Tables, pictures, and charts all need section_path resolved
+                # against the live heading stack. They also count as body
+                # content for their enclosing heading(s).
                 self_ref = getattr(item, "self_ref", None)
                 if self_ref:
                     paths[str(self_ref)] = " > ".join(t for _, t, _ in stack)
-                # A table is body content for its enclosing heading(s).
                 for frame in stack:
                     frame[2] = True
             else:
@@ -977,6 +1019,110 @@ def _extract_table_artifacts(docling_document: Any, document_id: str = "") -> li
             logger.warning(
                 "table extraction skipped table_id=%s self_ref=%s: %s",
                 table_id, self_ref, exc,
+            )
+            continue
+    return artifacts
+
+
+def _figure_page_no(pic: Any) -> int:
+    """Return the 1-based page number from a Docling PictureItem's provenance.
+
+    Returns ``0`` when no provenance entry carries a page number. We don't
+    surface a full PageRef here (figures' bbox typically frames the image
+    region, which downstream callers don't yet consume) — page_no is the
+    minimum useful citation provenance for xref expansion.
+    """
+    prov = getattr(pic, "prov", None) or []
+    for p in prov:
+        page_no = getattr(p, "page_no", None)
+        if page_no is None:
+            continue
+        try:
+            return int(page_no)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _figure_image_uri(pic: Any) -> str:
+    """Best-effort image URI from a Docling PictureItem's ``image`` ref.
+
+    Docling 2.82.0 attaches an :class:`ImageRef` whose ``uri`` is either a
+    ``data:`` URI (when ``generate_picture_images=True``) or a ``file://``
+    path. Returns ``""`` when no image ref is present — common on parses
+    that didn't enable picture image generation.
+    """
+    image = getattr(pic, "image", None)
+    if image is None:
+        return ""
+    uri = getattr(image, "uri", None)
+    if uri is None:
+        return ""
+    try:
+        return str(uri)
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
+    """Extract structured figure artifacts from a DoclingDocument.
+
+    Walks ``docling_document.pictures`` (Docling 2.82.0 surfaces both
+    PICTURE and CHART items under this attribute) and converts each entry
+    into a :class:`FigureArtifact` with caption text, normalised caption
+    label, section breadcrumb, page number, and best-effort image URI.
+
+    The section breadcrumb is resolved by reusing the same heading-stack
+    replay as ``_extract_table_artifacts`` — Docling stores headings and
+    pictures as flat siblings under ``body``, so a structural parent walk
+    would surface the body group rather than the enclosing heading
+    (see memory ``project_docling_heading_provenance``).
+
+    Returns an empty list when the document has no pictures or when
+    extraction of any individual picture fails — figure extraction must
+    never break parsing.
+    """
+    from src.ingest.support.parser_base import FigureArtifact
+
+    if doc is None:
+        return []
+
+    raw_pictures = getattr(doc, "pictures", None) or []
+    # Reuses the captionable-label walker; the returned dict carries entries
+    # for tables, pictures, AND charts so the same call serves both extractors.
+    section_paths = _resolve_table_section_paths(doc)
+
+    artifacts: list[FigureArtifact] = []
+    for idx, pic in enumerate(raw_pictures):
+        try:
+            caption = ""
+            try:
+                # Defensive: Docling 2.82.0 has known API quirks; tolerate
+                # captions= absence/empty by routing through caption_text.
+                if getattr(pic, "captions", None):
+                    cap_text = pic.caption_text(doc=doc)
+                    caption = str(cap_text or "")
+            except Exception:
+                caption = ""
+            self_ref = getattr(pic, "self_ref", None)
+            section_path = section_paths.get(str(self_ref), "") if self_ref else ""
+            artifacts.append(
+                FigureArtifact(
+                    document_id=document_id,
+                    caption=caption.strip(),
+                    caption_label=_extract_figure_caption_label(caption),
+                    section_path=section_path,
+                    page_no=_figure_page_no(pic),
+                    self_ref=str(self_ref or ""),
+                    image_uri=_figure_image_uri(pic),
+                )
+            )
+        except (AttributeError, KeyError, TypeError, IndexError, ValueError, RuntimeError) as exc:
+            figure_id = f"figure-{idx + 1}"
+            self_ref = getattr(pic, "self_ref", None)
+            logger.warning(
+                "figure extraction skipped figure_id=%s self_ref=%s: %s",
+                figure_id, self_ref, exc,
             )
             continue
     return artifacts
@@ -1345,6 +1491,9 @@ class DoclingParser:
         tables = _extract_table_artifacts(
             self._docling_document, document_id=file_path.stem
         )
+        figures = _extract_figure_artifacts(
+            self._docling_document, document_id=file_path.stem
+        )
 
         return ParseResult(
             markdown=result.text_markdown,
@@ -1352,6 +1501,7 @@ class DoclingParser:
             has_figures=result.has_figures,
             page_count=result.page_count,
             tables=tables,
+            figures=figures,
         )
 
     def chunk(self, parse_result: Any) -> list:
