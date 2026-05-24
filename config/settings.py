@@ -875,13 +875,16 @@ RAG_XREF_EXPANSION_ENABLED: bool = os.environ.get(
 RAG_XREF_MAX_PER_HIT: int = int(os.environ.get("RAG_XREF_MAX_PER_HIT", "2"))
 RAG_XREF_MAX_TOTAL: int = int(os.environ.get("RAG_XREF_MAX_TOTAL", "6"))
 
-# Whether ingest-time xref extraction emits ``figure`` refs. We don't yet
-# have a FigureArtifact registry to resolve against, so figure refs are
-# pure noise downstream — default-off. Flip to "true" once figure
-# artifacts land. (Section/section_symbol/table/appendix refs continue to
-# be emitted regardless.)
+# Whether ingest-time xref extraction emits ``figure`` refs. FIG-4
+# (2026-05-24) flipped the default to "true" after the forward-walked
+# caption-binding fallback (``_build_unbound_caption_fallback``) lifted
+# the ESP32-S3 resolvable_rate from 28.57% to 85.71% (well above the 30%
+# bar). The remaining unresolved cases are prose section-references like
+# "Figure 4.1.2 …" miscategorised by ``cross_refs`` — tracked as a
+# follow-up in ``docs/soak/figure_artifacts_esp32_2026-05-24_triage.md``.
+# Operators can still disable via env var.
 RAG_XREF_EXTRACT_FIGURE_REFS: bool = os.environ.get(
-    "RAG_XREF_EXTRACT_FIGURE_REFS", "false"
+    "RAG_XREF_EXTRACT_FIGURE_REFS", "true"
 ).lower() in ("true", "1", "yes")
 
 # --- Visual Embedding Pipeline ---
