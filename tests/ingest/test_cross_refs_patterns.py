@@ -97,6 +97,36 @@ class TestFigurePattern:
         refs = cross_refs("a figurine 5 stood on the shelf")
         assert not any(r["type"] == "figure" for r in refs)
 
+    def test_figure_three_segment_dot_section_heading_does_not_match(self):
+        # Real ESP32-S3 false positive: "Figure 4.1.2 Memory Organization"
+        # is a section heading, not a figure citation. The third dot-segment
+        # is the disambiguator — figure numbers in datasheets are at most
+        # two segments (chapter.figure or chapter-figure).
+        refs = cross_refs("see Figure 4.1.2 Memory Organization for details")
+        assert not any(r["type"] == "figure" for r in refs)
+
+    def test_figure_three_segment_dot_form_does_not_match(self):
+        refs = cross_refs("see Figure 10.3.5 for details")
+        assert not any(r["type"] == "figure" for r in refs)
+
+    def test_figure_dash_then_dot_does_not_match(self):
+        # "Figure 4-1.2" — dash form then a trailing dot-segment is rejected;
+        # genuine figures use either dash or dot, not both.
+        refs = cross_refs("see Figure 4-1.2 here")
+        assert not any(r["type"] == "figure" for r in refs)
+
+    def test_figure_two_segment_dot_form_still_matches(self):
+        refs = cross_refs("see Figure 10.3 for details")
+        assert any(r["type"] == "figure" and r["value"].endswith("10.3") for r in refs)
+
+    def test_figure_two_segment_dash_form_still_matches(self):
+        refs = cross_refs("see Figure 4-1 for details")
+        assert any(r["type"] == "figure" and r["value"].endswith("4-1") for r in refs)
+
+    def test_figure_fig_dot_plain_still_matches(self):
+        refs = cross_refs("see Fig. 2 for details")
+        assert any(r["type"] == "figure" for r in refs)
+
 
 # --- appendix -----------------------------------------------------------------
 
