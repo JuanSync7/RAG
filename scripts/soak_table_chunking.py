@@ -2,8 +2,10 @@
 # Offline soak harness for the adaptive table-chunking pipeline.
 # Runs DoclingParser end-to-end on a real datasheet PDF twice (for
 # cross-reparse determinism), aggregates table / chunk / heading metrics,
-# and emits a markdown quality report.
-# Exports: main, run_soak
+# and emits a markdown quality report. Also runs FIG-3 figure-artifact
+# metrics (caption coverage, image-uri sanitisation, chunk-id
+# idempotency, xref emission/resolvability in two flag modes).
+# Exports: main, run_soak, run_figure_soak
 # Deps: src.ingest.support.docling, src.ingest.common.types
 # @end-summary
 
@@ -257,6 +259,287 @@ def _xref_resolvability(chunks: list, tables: list) -> dict:
     return counts
 
 
+# --------------------------------------------------------------------------- #
+# Figure-artifact metrics (FIG-3)                                             #
+# --------------------------------------------------------------------------- #
+
+
+def _figure_chunks(chunks: list) -> list:
+    """Subset of chunks emitted as ``chunk_type="figure"``."""
+    out = []
+    for c in chunks:
+        meta = getattr(c, "extra_metadata", {}) or {}
+        if meta.get("chunk_type") == "figure":
+            out.append(c)
+    return out
+
+
+def _figure_caption_label_rate(figures: list) -> dict:
+    """Fraction of FigureArtifacts with a non-empty ``caption_label``.
+
+    A low rate signals caption-label regex holes — figures whose captions
+    don't start with a recognised ``Figure``/``Fig.`` prefix produce empty
+    labels and are unreachable via xref expansion.
+    """
+    total = len(figures)
+    with_label = sum(
+        1 for f in figures if str(getattr(f, "caption_label", "") or "")
+    )
+    rate = (with_label / total) if total else 0.0
+    return {
+        "figures_total": int(total),
+        "figures_with_label": int(with_label),
+        "label_rate": float(rate),
+    }
+
+
+def _figure_image_uri_sanitised(figure_chunks: list) -> bool:
+    """True when no figure CHUNK carries a ``data:`` URI in storage form.
+
+    FIG-2's transformer coerces ``data:`` URIs to ``""`` to avoid bloating
+    Weaviate; this check guards against a regression where a data URI
+    sneaks through into the emitted chunk metadata.
+    """
+    for c in figure_chunks:
+        meta = getattr(c, "extra_metadata", {}) or {}
+        uri = str(meta.get("figure_image_uri") or "")
+        if uri.startswith("data:"):
+            return False
+    return True
+
+
+def _figure_chunk_idempotency(figures: list) -> dict:
+    """Recompute figure chunk_ids twice and confirm they are stable.
+
+    Mirrors the table-side determinism check. Uses
+    :func:`build_figure_chunk_id` (same function ingest uses) so the
+    soak compares apples to apples.
+    """
+    from src.vector_db.weaviate.store import build_figure_chunk_id
+
+    def _ids(figs: list) -> list[str]:
+        out: list[str] = []
+        for f in figs or []:
+            doc_id = str(getattr(f, "document_id", "") or "")
+            self_ref = str(getattr(f, "self_ref", "") or "")
+            if not doc_id or not self_ref:
+                continue
+            out.append(build_figure_chunk_id(doc_id, self_ref))
+        return sorted(out)
+
+    first = _ids(figures)
+    second = _ids(figures)
+    return {
+        "ok": first == second,
+        "first_count": len(first),
+        "second_count": len(second),
+        "duplicates_within_parse": len(first) - len(set(first)),
+    }
+
+
+class _FakeFigureObj:
+    """Mimics a Weaviate object with ``.properties`` and ``.uuid``."""
+
+    def __init__(self, props: dict, uuid: str = ""):
+        self.properties = props
+        self.uuid = uuid
+
+
+class _FakeFigureCollection:
+    """Resolves figure ref lookups against in-memory chunk metadata.
+
+    Mirrors :func:`src.retrieval.xref_expansion._fetch_figure_chunks`'s
+    side: a Weaviate filter is opaque to us, so we bypass it and resolve
+    the (label, document_id) pair directly. We accept the kwargs the
+    real client receives and discard the ``filters`` object.
+    """
+
+    def __init__(self, figure_chunks: list):
+        # (caption_label, document_id) -> list[obj]
+        self._by_key: dict[tuple[str, str], list[_FakeFigureObj]] = {}
+        for c in figure_chunks:
+            meta = getattr(c, "extra_metadata", {}) or {}
+            label = str(meta.get("caption_label") or "")
+            doc_id = str(meta.get("document_id") or "")
+            if not label or not doc_id:
+                continue
+            props = {
+                "text": getattr(c, "text", "") or "",
+                "chunk_id": str(meta.get("chunk_id") or ""),
+                "chunk_type": "figure",
+                "section_path": getattr(c, "section_path", "") or "",
+                "heading": getattr(c, "heading", "") or "",
+                "document_id": doc_id,
+                "caption_label": label,
+                "page_no": int(meta.get("page_no") or 0),
+            }
+            self._by_key.setdefault((label, doc_id), []).append(
+                _FakeFigureObj(props, uuid=props["chunk_id"])
+            )
+
+        # Track (label, doc_id) lookups so the soak can report per-ref
+        # resolution without inspecting the expanded payload.
+        self.last_request: tuple[str, str] | None = None
+
+    class _Q:
+        def __init__(self, parent: "_FakeFigureCollection"):
+            self._parent = parent
+
+        def fetch_objects(self, *, filters=None, limit=None, return_properties=None):
+            # The filter is opaque here. We rely on the caller (the soak)
+            # to invoke us via expand_xref_hits which passes
+            # (label, document_id) into the filter object. We instead
+            # snoop the last-resolved key off the parent.
+            class _Resp:
+                def __init__(self, objs):
+                    self.objects = objs
+
+            label, doc_id = self._parent.last_request or ("", "")
+            return _Resp(self._parent._by_key.get((label, doc_id), [])[: limit or 10])
+
+    @property
+    def query(self):
+        return _FakeFigureCollection._Q(self)
+
+
+class _FakeFigureClient:
+    """Top-level fake matching the ``client.collections.get(name)`` shape."""
+
+    def __init__(self, figure_chunks: list):
+        self._col = _FakeFigureCollection(figure_chunks)
+
+    class _CollectionsAccessor:
+        def __init__(self, col):
+            self._col = col
+
+        def get(self, name):
+            return self._col
+
+    @property
+    def collections(self):
+        return _FakeFigureClient._CollectionsAccessor(self._col)
+
+
+def _figure_resolvability(chunks: list, figure_chunks: list, document_id: str) -> dict:
+    """Compute figure_resolvable_rate via the real ``expand_xref_hits``.
+
+    Builds prose-chunk "hits" carrying their ``xref_targets`` and the
+    parser-derived ``document_id``, then routes each unique figure ref
+    through :func:`src.retrieval.xref_expansion.expand_xref_hits`
+    backed by a fake client that resolves on (caption_label, doc_id).
+
+    Returns ``{"figure_refs_emitted": int, "unique_targets": int,
+    "resolved": int, "resolvable_rate": float}``.
+    """
+    from src.retrieval import xref_expansion as _xx
+
+    # Monkey-patch the figure fetcher to record the (label, doc_id) the
+    # expander asks for. The real filter object is opaque so we cannot
+    # match against it inside our fake — easier to intercept here.
+    fake = _FakeFigureClient(figure_chunks)
+    col = fake._col
+    original_fetch = _xx._fetch_figure_chunks
+
+    def _patched_fetch(*, client, collection, label, document_id, limit):
+        col.last_request = (label, document_id)
+        return original_fetch(
+            client=client, collection=collection, label=label,
+            document_id=document_id, limit=limit,
+        )
+
+    _xx._fetch_figure_chunks = _patched_fetch  # type: ignore[assignment]
+    try:
+        # Build hits from prose chunks that emitted at least one figure ref.
+        hits: list[dict] = []
+        unique_targets: set[tuple[str, str]] = set()
+        figure_refs_emitted = 0
+        for c in chunks:
+            meta = getattr(c, "extra_metadata", {}) or {}
+            if meta.get("chunk_type") == "figure":
+                continue
+            raw = meta.get("xref_targets")
+            if not raw:
+                continue
+            try:
+                decoded = json.loads(raw) if isinstance(raw, str) else list(raw)
+            except (TypeError, ValueError):
+                decoded = []
+            fig_refs = [
+                r for r in decoded
+                if isinstance(r, dict) and str(r.get("type") or "") == "figure"
+            ]
+            if not fig_refs:
+                continue
+            figure_refs_emitted += len(fig_refs)
+            for r in fig_refs:
+                unique_targets.add(("figure", str(r.get("value") or "")))
+            hits.append({
+                "text": getattr(c, "text", "") or "",
+                "score": 0.0,
+                "uuid": "",
+                "metadata": {
+                    "xref_targets": raw,
+                    "document_id": document_id,
+                    "chunk_type": meta.get("chunk_type", ""),
+                    "section_path": getattr(c, "section_path", "") or "",
+                },
+            })
+
+        if not unique_targets:
+            return {
+                "figure_refs_emitted": int(figure_refs_emitted),
+                "unique_targets": 0,
+                "resolved": 0,
+                "resolvable_rate": 0.0,
+            }
+
+        # Drive resolution one unique target at a time so the
+        # ``last_request`` snoop stays unambiguous (the real expander
+        # iterates many refs in a single call; we want a clean count).
+        resolved_count = 0
+        for ref_type, ref_value in unique_targets:
+            synth_hit = {
+                "text": f"see {ref_value}",
+                "score": 0.0,
+                "uuid": "",
+                "metadata": {
+                    "xref_targets": json.dumps([{"type": ref_type, "value": ref_value}]),
+                    "document_id": document_id,
+                },
+            }
+            expanded = _xx.expand_xref_hits(
+                [synth_hit], client=fake, collection="ignored",
+                enabled=True, max_per_hit=2, max_total=2,
+            )
+            if len(expanded) > 1:
+                resolved_count += 1
+
+        return {
+            "figure_refs_emitted": int(figure_refs_emitted),
+            "unique_targets": int(len(unique_targets)),
+            "resolved": int(resolved_count),
+            "resolvable_rate": float(resolved_count) / float(len(unique_targets)),
+        }
+    finally:
+        _xx._fetch_figure_chunks = original_fetch  # type: ignore[assignment]
+
+
+def _figure_section_distribution(figures: list, top_n: int = 5) -> list[tuple[str, int]]:
+    """Top ``top_n`` section_paths by figure count — qualitative anchor for
+    the transcript ("most figures live in section X").
+    """
+    counter: Counter[str] = Counter()
+    for f in figures or []:
+        sp = str(getattr(f, "section_path", "") or "(no section)")
+        counter[sp] += 1
+    return counter.most_common(top_n)
+
+
+# --------------------------------------------------------------------------- #
+# Original table-side helpers                                                 #
+# --------------------------------------------------------------------------- #
+
+
 def _caption_label_coverage(tables: list) -> dict:
     """Fraction of TableArtifacts that got a normalised ``caption_label``.
 
@@ -276,6 +559,142 @@ def _caption_label_coverage(tables: list) -> dict:
 # --------------------------------------------------------------------------- #
 # Soak                                                                        #
 # --------------------------------------------------------------------------- #
+
+
+def _rechunk_under_flag(parser: Any, parse_result: Any, *, emit_figure_refs: bool) -> list:
+    """Re-run ``parser.chunk(parse_result)`` with the figure-ref flag set.
+
+    Mutates ``config.settings.RAG_XREF_EXTRACT_FIGURE_REFS`` for the duration
+    of the call so ``_stamp_xref_targets`` (which reads the flag fresh per
+    call) emits / suppresses figure refs accordingly.
+    """
+    from config import settings as _settings
+
+    prev = getattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", False)
+    _settings.RAG_XREF_EXTRACT_FIGURE_REFS = bool(emit_figure_refs)
+    try:
+        return parser.chunk(parse_result)
+    finally:
+        _settings.RAG_XREF_EXTRACT_FIGURE_REFS = prev
+
+
+def _stamp_document_id(chunks: list, document_id: str) -> None:
+    """Stamp ``document_id`` on prose-chunk metadata.
+
+    Production stamps this downstream in chunk_enrichment; the soak runs
+    only parser.chunk() so we mirror the stamping here to enable
+    xref expansion's document-scoped figure resolver.
+    """
+    for c in chunks:
+        meta = getattr(c, "extra_metadata", None)
+        if meta is None:
+            continue
+        if meta.get("chunk_type") == "figure":
+            continue  # figure chunks already carry document_id
+        meta.setdefault("document_id", document_id)
+
+
+def _figure_soak_verdict(soak: dict) -> dict:
+    """Apply the FIG-3 acceptance criteria. Returns per-criterion PASS/FAIL."""
+    counts = soak.get("counts") or {}
+    figs_total = counts.get("figure_count", 0) or 0
+    cap_rate = (soak.get("caption_coverage") or {}).get("label_rate", 0.0) or 0.0
+    img_ok = bool(soak.get("figure_image_uri_sanitized", False))
+    idem_ok = bool((soak.get("idempotency") or {}).get("ok", False))
+    mode_b = soak.get("mode_b") or {}
+    mode_b_rate = mode_b.get("resolvable_rate", 0.0) or 0.0
+    mode_a = soak.get("mode_a") or {}
+    mode_a_emitted = mode_a.get("figure_refs_emitted", 0) or 0
+
+    criteria = {
+        "figure_count_gt_0": {
+            "ok": figs_total > 0,
+            "value": figs_total,
+            "threshold": "> 0",
+        },
+        "figure_caption_label_rate_ge_0_30": {
+            "ok": cap_rate >= 0.30,
+            "value": round(float(cap_rate), 4),
+            "threshold": ">= 0.30",
+        },
+        "figure_image_uri_sanitized": {
+            "ok": img_ok,
+            "value": img_ok,
+            "threshold": "true",
+        },
+        "figure_chunk_idempotent": {
+            "ok": idem_ok,
+            "value": idem_ok,
+            "threshold": "true",
+        },
+        "mode_a_emits_zero_figure_refs": {
+            "ok": mode_a_emitted == 0,
+            "value": mode_a_emitted,
+            "threshold": "== 0",
+        },
+        "mode_b_resolvable_rate_ge_0_30": {
+            "ok": mode_b_rate >= 0.30,
+            "value": round(float(mode_b_rate), 4),
+            "threshold": ">= 0.30",
+        },
+    }
+    all_ok = all(v["ok"] for v in criteria.values())
+    return {"criteria": criteria, "all_pass": bool(all_ok)}
+
+
+def _run_figure_soak(*, parser: Any, parse_result: Any, document_id: str) -> dict:
+    """Compute FIG-3 figure-artifact metrics over the parsed document.
+
+    Two modes (per the FIG-3 brief):
+      - mode_a: ``RAG_XREF_EXTRACT_FIGURE_REFS=False`` — must emit 0 figure
+        refs and therefore resolve none.
+      - mode_b: ``RAG_XREF_EXTRACT_FIGURE_REFS=True`` — exercises the
+        full emit+resolve loop end-to-end.
+    """
+    figures = list(getattr(parse_result, "figures", []) or [])
+
+    out: dict[str, Any] = {
+        "counts": {
+            "figure_count": len(figures),
+        },
+        "caption_coverage": _figure_caption_label_rate(figures),
+        "section_distribution_top5": [],
+        "idempotency": {},
+        "figure_image_uri_sanitized": True,
+        "mode_a": {},
+        "mode_b": {},
+    }
+
+    # Section distribution (qualitative anchor).
+    out["section_distribution_top5"] = [
+        {"section_path": sp, "count": int(n)}
+        for sp, n in _figure_section_distribution(figures, top_n=5)
+    ]
+
+    # Idempotency over FigureArtifact chunk-id derivation.
+    out["idempotency"] = _figure_chunk_idempotency(figures)
+
+    # Mode A — flag off.
+    chunks_a = _rechunk_under_flag(parser, parse_result, emit_figure_refs=False)
+    _stamp_document_id(chunks_a, document_id)
+    fig_chunks_a = _figure_chunks(chunks_a)
+    out["figure_image_uri_sanitized"] = _figure_image_uri_sanitised(fig_chunks_a)
+    out["counts"]["figure_chunks_emitted"] = len(fig_chunks_a)
+    out["mode_a"] = _figure_resolvability(chunks_a, fig_chunks_a, document_id)
+
+    # Mode B — flag on.
+    chunks_b = _rechunk_under_flag(parser, parse_result, emit_figure_refs=True)
+    _stamp_document_id(chunks_b, document_id)
+    fig_chunks_b = _figure_chunks(chunks_b)
+    # Re-check sanitisation under mode_b too (defensive).
+    out["figure_image_uri_sanitized"] = bool(
+        out["figure_image_uri_sanitized"]
+        and _figure_image_uri_sanitised(fig_chunks_b)
+    )
+    out["mode_b"] = _figure_resolvability(chunks_b, fig_chunks_b, document_id)
+
+    out["verdict"] = _figure_soak_verdict(out)
+    return out
 
 
 def run_soak(pdf_path: Path) -> dict:
@@ -311,6 +730,7 @@ def run_soak(pdf_path: Path) -> dict:
         "xref_edges": {},
         "xref_resolvability": {},
         "caption_label_coverage": {},
+        "figure_soak": {},
         "errors": [],
     }
 
@@ -386,6 +806,17 @@ def run_soak(pdf_path: Path) -> dict:
                 "markdown_len": len(md),
             }
         )
+
+    # --- Figure-artifact soak (FIG-3) --------------------------------------
+    try:
+        result["figure_soak"] = _run_figure_soak(
+            parser=parser,
+            parse_result=parse_result,
+            document_id=pdf_path.stem,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        result["errors"].append(f"figure soak failed: {exc!r}")
+        result["figure_soak"] = {"error": repr(exc)}
 
     # --- Second parse for determinism --------------------------------------
     try:
@@ -552,6 +983,81 @@ def _render_report(pdf_path: Path, data: dict, *, today: str) -> str:
             rate_str = str(rate)
         lines.append(f"- label rate: {rate_str}")
         lines.append("")
+
+    fig_soak = data.get("figure_soak") or {}
+    if fig_soak:
+        lines.append("## Figure-artifact soak (FIG-3)")
+        lines.append("")
+        if "error" in fig_soak:
+            lines.append(f"- FAILED: `{fig_soak['error']}`")
+            lines.append("")
+        else:
+            fcounts = fig_soak.get("counts") or {}
+            cap = fig_soak.get("caption_coverage") or {}
+            idem = fig_soak.get("idempotency") or {}
+            ma = fig_soak.get("mode_a") or {}
+            mb = fig_soak.get("mode_b") or {}
+            lines.append("| Metric | Value |")
+            lines.append("|---|---|")
+            lines.append(f"| figure_count | {fcounts.get('figure_count', 0)} |")
+            lines.append(f"| figure_chunks_emitted | {fcounts.get('figure_chunks_emitted', 0)} |")
+            lines.append(f"| figures_with_caption_label | {cap.get('figures_with_label', 0)} |")
+            try:
+                rate_str = f"{float(cap.get('label_rate', 0.0)):.2%}"
+            except (TypeError, ValueError):
+                rate_str = str(cap.get("label_rate", 0.0))
+            lines.append(f"| figure_caption_label_rate | {rate_str} |")
+            lines.append(
+                f"| figure_image_uri_sanitized | {fig_soak.get('figure_image_uri_sanitized')} |"
+            )
+            lines.append(
+                f"| figure_chunk_idempotent | {idem.get('ok')} "
+                f"({idem.get('first_count', 0)} ids, "
+                f"{idem.get('duplicates_within_parse', 0)} dupes) |"
+            )
+            lines.append(
+                f"| mode_a figure_refs_emitted (flag off) | {ma.get('figure_refs_emitted', 0)} |"
+            )
+            lines.append(
+                f"| mode_b figure_refs_emitted (flag on) | {mb.get('figure_refs_emitted', 0)} |"
+            )
+            lines.append(
+                f"| mode_b unique_targets | {mb.get('unique_targets', 0)} |"
+            )
+            lines.append(
+                f"| mode_b resolved | {mb.get('resolved', 0)} |"
+            )
+            try:
+                rb_str = f"{float(mb.get('resolvable_rate', 0.0)):.2%}"
+            except (TypeError, ValueError):
+                rb_str = str(mb.get("resolvable_rate", 0.0))
+            lines.append(f"| mode_b resolvable_rate | {rb_str} |")
+            lines.append("")
+            top = fig_soak.get("section_distribution_top5") or []
+            if top:
+                lines.append("### Top section_paths by figure count")
+                lines.append("")
+                lines.append("| section_path | figures |")
+                lines.append("|---|---|")
+                for row in top:
+                    lines.append(f"| `{row['section_path']}` | {row['count']} |")
+                lines.append("")
+            verdict = fig_soak.get("verdict") or {}
+            crits = verdict.get("criteria") or {}
+            if crits:
+                lines.append("### Verdict criteria")
+                lines.append("")
+                lines.append("| criterion | threshold | actual | result |")
+                lines.append("|---|---|---|---|")
+                for k, v in crits.items():
+                    marker = "PASS" if v.get("ok") else "FAIL"
+                    lines.append(
+                        f"| {k} | {v.get('threshold')} | {v.get('value')} | **{marker}** |"
+                    )
+                lines.append("")
+            overall = "PASS" if verdict.get("all_pass") else "FAIL"
+            lines.append(f"**FIG-3 verdict: {overall}** — see criteria table above.")
+            lines.append("")
 
     errs = data.get("errors") or []
     if errs:

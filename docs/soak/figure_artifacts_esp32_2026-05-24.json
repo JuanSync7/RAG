@@ -1,0 +1,193 @@
+{
+  "pdf": {
+    "path": "/home/kok-shew-juan/RagWeave/.worktrees/table-aware-chunking/data/datasheets/esp32-s3_datasheet.pdf",
+    "size_bytes": 1098115,
+    "page_count": 87
+  },
+  "models_ready": true,
+  "models_error": null,
+  "parse_error": null,
+  "counts": {
+    "total_chunks": 837,
+    "tables": 71,
+    "summary_chunks": 71,
+    "row_chunks": 536,
+    "group_ids": 71
+  },
+  "heading_depth_distribution": {
+    "0": 6,
+    "1": 65
+  },
+  "truncation_events": 0,
+  "table_samples": [
+    {
+      "table_group_id": "#/tables/28",
+      "section_path": "3.4 JTAG Signal Source Control",
+      "table_caption": "Table 3-5. JTAG Signal Source Control",
+      "page_no": 35,
+      "page_bbox": [
+        55.898406982421875,
+        760.8178482055664,
+        559.1690063476562,
+        648.7037353515625
+      ],
+      "table_num_rows": 7,
+      "table_num_cols": 5,
+      "text_head": "Table: Table 3-5. JTAG Signal Source Control\nColumns: JTAG Signal Source | EFUSE_DIS_PAD_JTAG | EFUSE_DIS_USB_JTAG | EFUSE_STRAP_JTAG_SEL | GPIO3\nRows: 6",
+      "markdown_head": "Table 3-5. JTAG Signal Source Control\n\n| JTAG Signal Source          |   EFUSE_DIS_PAD_JTAG |   EFUSE_DIS_USB_JTAG | EFUSE_STRAP_JTAG_SEL   | GPIO3   |\n|-----------------------------|----------------------|----------------------|-----------",
+      "markdown_len": 942
+    },
+    {
+      "table_group_id": "#/tables/11",
+      "section_path": "2.3.1 IO MUX Functions",
+      "table_caption": "Table 2-3. Peripheral Signals Routed via IO MUX",
+      "page_no": 20,
+      "page_bbox": [
+        55.7794075012207,
+        508.8037414550781,
+        546.2653198242188,
+        118.4287109375
+      ],
+      "table_num_rows": 8,
+      "table_num_cols": 3,
+      "text_head": "Table: Table 2-3. Peripheral Signals Routed via IO MUX\nColumns: Pin Function | Signal | Description\nRows: 7",
+      "markdown_head": "Table 2-3. Peripheral Signals Routed via IO MUX\n\n| Pin Function                                          | Signal                                                                         | Description                                         ",
+      "markdown_len": 3216
+    },
+    {
+      "table_group_id": "#/tables/5",
+      "section_path": "",
+      "table_caption": "",
+      "page_no": 12,
+      "page_bbox": [
+        69.79170989990234,
+        746.8679275512695,
+        538.8440551757812,
+        611.82080078125
+      ],
+      "table_num_rows": 9,
+      "table_num_cols": 3,
+      "text_head": "Columns: \nRows: 9",
+      "markdown_head": "| 1-1   | ESP32-S3 Series Nomenclature                              |   13 |\n|-------|-----------------------------------------------------------|------|\n| 2-1   | ESP32-S3 Pin Layout (Top View)                            |   15 |\n| 2-2   |",
+      "markdown_len": 769
+    }
+  ],
+  "determinism": {
+    "ok": true,
+    "first_count": 71,
+    "second_count": 71,
+    "diff_first_minus_second": [],
+    "diff_second_minus_first": []
+  },
+  "xref_edges": {
+    "total_chunks_with_edges": 559,
+    "total_edges": 682,
+    "edges_per_chunk_p50": 1,
+    "edges_per_chunk_p90": 1,
+    "by_type": {
+      "section": 114,
+      "table": 567,
+      "standard": 1
+    }
+  },
+  "xref_resolvability": {
+    "section_resolvable": 94,
+    "table_resolvable": 559,
+    "unresolvable_table_no_label": 8,
+    "unresolvable_figure": 0,
+    "unresolvable_appendix": 0
+  },
+  "caption_label_coverage": {
+    "tables_total": 71,
+    "tables_with_label": 54,
+    "label_rate": 0.7605633802816901
+  },
+  "figure_soak": {
+    "counts": {
+      "figure_count": 85,
+      "figure_chunks_emitted": 6
+    },
+    "caption_coverage": {
+      "figures_total": 85,
+      "figures_with_label": 5,
+      "label_rate": 0.058823529411764705
+    },
+    "section_distribution_top5": [
+      {
+        "section_path": "Feature List",
+        "count": 9
+      },
+      {
+        "section_path": "Cont'd from previous page",
+        "count": 6
+      },
+      {
+        "section_path": "7 Packaging",
+        "count": 4
+      },
+      {
+        "section_path": "6.2.2 Bluetooth LE RF Receiver (RX) Characteristics",
+        "count": 3
+      },
+      {
+        "section_path": "List of T ables",
+        "count": 2
+      }
+    ],
+    "idempotency": {
+      "ok": true,
+      "first_count": 85,
+      "second_count": 85,
+      "duplicates_within_parse": 0
+    },
+    "figure_image_uri_sanitized": true,
+    "mode_a": {
+      "figure_refs_emitted": 0,
+      "unique_targets": 0,
+      "resolved": 0,
+      "resolvable_rate": 0.0
+    },
+    "mode_b": {
+      "figure_refs_emitted": 20,
+      "unique_targets": 7,
+      "resolved": 2,
+      "resolvable_rate": 0.2857142857142857
+    },
+    "verdict": {
+      "criteria": {
+        "figure_count_gt_0": {
+          "ok": true,
+          "value": 85,
+          "threshold": "> 0"
+        },
+        "figure_caption_label_rate_ge_0_30": {
+          "ok": false,
+          "value": 0.0588,
+          "threshold": ">= 0.30"
+        },
+        "figure_image_uri_sanitized": {
+          "ok": true,
+          "value": true,
+          "threshold": "true"
+        },
+        "figure_chunk_idempotent": {
+          "ok": true,
+          "value": true,
+          "threshold": "true"
+        },
+        "mode_a_emits_zero_figure_refs": {
+          "ok": true,
+          "value": 0,
+          "threshold": "== 0"
+        },
+        "mode_b_resolvable_rate_ge_0_30": {
+          "ok": false,
+          "value": 0.2857,
+          "threshold": ">= 0.30"
+        }
+      },
+      "all_pass": false
+    }
+  },
+  "errors": []
+}
