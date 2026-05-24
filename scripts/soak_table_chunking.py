@@ -280,16 +280,67 @@ def _figure_caption_label_rate(figures: list) -> dict:
     A low rate signals caption-label regex holes — figures whose captions
     don't start with a recognised ``Figure``/``Fig.`` prefix produce empty
     labels and are unreachable via xref expansion.
+
+    Returns both an "over all pictures" rate (``label_rate``) and a
+    secondary "over captioned pictures only" rate
+    (``label_rate_of_captioned``) — the latter excludes decorative
+    PictureItems that have no caption text at all, which is the more
+    actionable signal for vendor-specific caption-binding gaps (FIG-6
+    MSP430 generalisation pass).
     """
     total = len(figures)
     with_label = sum(
         1 for f in figures if str(getattr(f, "caption_label", "") or "")
     )
+    with_caption = sum(
+        1 for f in figures if str(getattr(f, "caption", "") or "").strip()
+    )
     rate = (with_label / total) if total else 0.0
+    rate_of_captioned = (with_label / with_caption) if with_caption else 0.0
     return {
         "figures_total": int(total),
         "figures_with_label": int(with_label),
+        "figures_with_caption": int(with_caption),
         "label_rate": float(rate),
+        "label_rate_of_captioned": float(rate_of_captioned),
+    }
+
+
+def _figure_caption_via_fallback_count(figures: list, fallback_map: dict) -> dict:
+    """Count figures whose caption came from ``_build_unbound_caption_fallback``.
+
+    Observability for FIG-6 MSP430 generalisation: a high fallback hit
+    rate means Docling's native caption binding is failing on that
+    vendor's PDFs (the parent-binding quirk documented in memory
+    ``project_docling_heading_provenance``).
+
+    A figure is counted as "via fallback" when:
+      * its ``self_ref`` appears as a key in ``fallback_map``
+      * AND the artifact's final ``caption`` is non-empty (the fallback
+        actually supplied content; otherwise the figure would still be
+        captionless regardless of fallback presence).
+
+    The complementary count is "via native binding" — captioned figures
+    whose ``self_ref`` is NOT in ``fallback_map``.
+    """
+    fallback_keys = set(fallback_map or {})
+    via_fallback = 0
+    via_native = 0
+    for f in figures or []:
+        caption = str(getattr(f, "caption", "") or "").strip()
+        if not caption:
+            continue
+        self_ref = str(getattr(f, "self_ref", "") or "")
+        if self_ref and self_ref in fallback_keys:
+            via_fallback += 1
+        else:
+            via_native += 1
+    captioned = via_fallback + via_native
+    return {
+        "captioned_total": int(captioned),
+        "via_fallback": int(via_fallback),
+        "via_native": int(via_native),
+        "fallback_share": float(via_fallback / captioned) if captioned else 0.0,
     }
 
 
@@ -653,11 +704,26 @@ def _run_figure_soak(*, parser: Any, parse_result: Any, document_id: str) -> dic
     """
     figures = list(getattr(parse_result, "figures", []) or [])
 
+    # Compute caption-binding fallback hit rate. This re-runs the
+    # forward-walk helper purely for observability — we do not mutate
+    # the artifacts. When iterate_items is unavailable (or the doc
+    # carries no pictures), the result is {} and every captioned figure
+    # is attributed to Docling's native binding.
+    fallback_map: dict[str, str] = {}
+    docling_document = getattr(parse_result, "docling_document", None)
+    if docling_document is not None:
+        try:
+            from src.ingest.support.docling import _build_unbound_caption_fallback
+            fallback_map = _build_unbound_caption_fallback(docling_document)
+        except Exception:  # pragma: no cover - defensive
+            fallback_map = {}
+
     out: dict[str, Any] = {
         "counts": {
             "figure_count": len(figures),
         },
         "caption_coverage": _figure_caption_label_rate(figures),
+        "caption_binding": _figure_caption_via_fallback_count(figures, fallback_map),
         "section_distribution_top5": [],
         "idempotency": {},
         "figure_image_uri_sanitized": True,
@@ -1007,6 +1073,26 @@ def _render_report(pdf_path: Path, data: dict, *, today: str) -> str:
             except (TypeError, ValueError):
                 rate_str = str(cap.get("label_rate", 0.0))
             lines.append(f"| figure_caption_label_rate | {rate_str} |")
+            try:
+                cap_only_str = f"{float(cap.get('label_rate_of_captioned', 0.0)):.2%}"
+            except (TypeError, ValueError):
+                cap_only_str = str(cap.get("label_rate_of_captioned", 0.0))
+            lines.append(
+                f"| figure_caption_label_rate_of_captioned | {cap_only_str} "
+                f"({cap.get('figures_with_label', 0)}/{cap.get('figures_with_caption', 0)}) |"
+            )
+            cb = fig_soak.get("caption_binding") or {}
+            try:
+                fb_share = f"{float(cb.get('fallback_share', 0.0)):.2%}"
+            except (TypeError, ValueError):
+                fb_share = str(cb.get("fallback_share", 0.0))
+            lines.append(
+                f"| figure_caption_via_fallback_count | {cb.get('via_fallback', 0)} "
+                f"(of {cb.get('captioned_total', 0)} captioned; {fb_share}) |"
+            )
+            lines.append(
+                f"| figure_caption_via_native_count | {cb.get('via_native', 0)} |"
+            )
             lines.append(
                 f"| figure_image_uri_sanitized | {fig_soak.get('figure_image_uri_sanitized')} |"
             )

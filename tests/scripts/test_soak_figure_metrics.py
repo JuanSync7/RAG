@@ -22,6 +22,7 @@ import pytest
 
 from scripts.soak_table_chunking import (
     _figure_caption_label_rate,
+    _figure_caption_via_fallback_count,
     _figure_chunk_idempotency,
     _figure_chunks,
     _figure_image_uri_sanitised,
@@ -102,28 +103,108 @@ class TestFigureChunks:
 
 class TestFigureCaptionLabelRate:
     def test_empty(self):
-        assert _figure_caption_label_rate([]) == {
-            "figures_total": 0,
-            "figures_with_label": 0,
-            "label_rate": 0.0,
-        }
+        out = _figure_caption_label_rate([])
+        assert out["figures_total"] == 0
+        assert out["figures_with_label"] == 0
+        assert out["figures_with_caption"] == 0
+        assert out["label_rate"] == 0.0
+        assert out["label_rate_of_captioned"] == 0.0
 
     def test_all_labelled(self):
-        figs = [FakeFigure(caption_label="Figure 1"), FakeFigure(caption_label="Figure 2-3")]
+        figs = [
+            FakeFigure(caption="Figure 1. A", caption_label="Figure 1"),
+            FakeFigure(caption="Figure 2-3. B", caption_label="Figure 2-3"),
+        ]
         out = _figure_caption_label_rate(figs)
-        assert out == {"figures_total": 2, "figures_with_label": 2, "label_rate": 1.0}
+        assert out["figures_total"] == 2
+        assert out["figures_with_label"] == 2
+        assert out["figures_with_caption"] == 2
+        assert out["label_rate"] == pytest.approx(1.0)
+        assert out["label_rate_of_captioned"] == pytest.approx(1.0)
 
     def test_mixed(self):
         figs = [
-            FakeFigure(caption_label="Figure 1"),
-            FakeFigure(caption_label=""),
-            FakeFigure(caption_label="Figure 3"),
-            FakeFigure(caption_label=""),
+            FakeFigure(caption="Figure 1. A", caption_label="Figure 1"),
+            FakeFigure(caption="", caption_label=""),
+            FakeFigure(caption="Figure 3. C", caption_label="Figure 3"),
+            FakeFigure(caption="", caption_label=""),
         ]
         out = _figure_caption_label_rate(figs)
         assert out["figures_total"] == 4
         assert out["figures_with_label"] == 2
+        assert out["figures_with_caption"] == 2
         assert out["label_rate"] == pytest.approx(0.5)
+        assert out["label_rate_of_captioned"] == pytest.approx(1.0)
+
+    def test_captioned_but_unlabelled_lowers_secondary_rate(self):
+        figs = [
+            FakeFigure(caption="Figure 1. A", caption_label="Figure 1"),
+            FakeFigure(caption="Some caption without label prefix", caption_label=""),
+            FakeFigure(caption="", caption_label=""),
+        ]
+        out = _figure_caption_label_rate(figs)
+        # 1 of 3 over all; 1 of 2 over captioned-only.
+        assert out["label_rate"] == pytest.approx(1 / 3)
+        assert out["label_rate_of_captioned"] == pytest.approx(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# _figure_caption_via_fallback_count                                          #
+# --------------------------------------------------------------------------- #
+
+
+class TestFigureCaptionViaFallbackCount:
+    def test_empty_inputs(self):
+        out = _figure_caption_via_fallback_count([], {})
+        assert out == {
+            "captioned_total": 0,
+            "via_fallback": 0,
+            "via_native": 0,
+            "fallback_share": 0.0,
+        }
+
+    def test_all_via_native_when_fallback_map_empty(self):
+        figs = [
+            FakeFigure(self_ref="#/pictures/0", caption="Figure 1. A"),
+            FakeFigure(self_ref="#/pictures/1", caption="Figure 2. B"),
+        ]
+        out = _figure_caption_via_fallback_count(figs, {})
+        assert out["captioned_total"] == 2
+        assert out["via_fallback"] == 0
+        assert out["via_native"] == 2
+        assert out["fallback_share"] == pytest.approx(0.0)
+
+    def test_attribution_split(self):
+        figs = [
+            FakeFigure(self_ref="#/pictures/0", caption="Figure 1. A"),  # native
+            FakeFigure(self_ref="#/pictures/1", caption="Figure 2. B"),  # fallback
+            FakeFigure(self_ref="#/pictures/2", caption="Figure 3. C"),  # fallback
+        ]
+        fb = {"#/pictures/1": "Figure 2. B", "#/pictures/2": "Figure 3. C"}
+        out = _figure_caption_via_fallback_count(figs, fb)
+        assert out["captioned_total"] == 3
+        assert out["via_fallback"] == 2
+        assert out["via_native"] == 1
+        assert out["fallback_share"] == pytest.approx(2 / 3)
+
+    def test_uncaptioned_figures_excluded(self):
+        # Figure has fallback entry but ended up with empty caption: should not count.
+        figs = [
+            FakeFigure(self_ref="#/pictures/0", caption=""),
+            FakeFigure(self_ref="#/pictures/1", caption="Figure 2. B"),
+        ]
+        fb = {"#/pictures/0": "won't apply", "#/pictures/1": "Figure 2. B"}
+        out = _figure_caption_via_fallback_count(figs, fb)
+        assert out["captioned_total"] == 1
+        assert out["via_fallback"] == 1
+        assert out["via_native"] == 0
+
+    def test_missing_self_ref_treated_as_native(self):
+        figs = [FakeFigure(self_ref="", caption="Figure X. Foo")]
+        fb = {"#/pictures/0": "irrelevant"}
+        out = _figure_caption_via_fallback_count(figs, fb)
+        assert out["via_native"] == 1
+        assert out["via_fallback"] == 0
 
 
 # --------------------------------------------------------------------------- #
