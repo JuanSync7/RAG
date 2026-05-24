@@ -59,7 +59,33 @@ __all__ = ["expand_xref_hits"]
 # - section / section_symbol  → section_path contains-match (boundary post-filter)
 # - table                     → caption_label exact-match, scoped by document_id
 # TODO: figure / appendix still need a caption registry.
-_SUPPORTED_REF_TYPES = frozenset({"section", "section_symbol", "table"})
+_SUPPORTED_REF_TYPES = frozenset({"section", "section_symbol", "table", "figure"})
+
+
+# Anchor-equivalent to ``_FIGURE_CAPTION_LABEL_RE`` in
+# ``src.ingest.support.docling`` — duplicated here so the resolver does not
+# depend on the ingest module. Both sides MUST agree on the canonical form
+# ``"Figure N"`` so the round-trip stays symmetric (FIG-2 contract).
+_FIGURE_LABEL_RE = re.compile(
+    r"^\s*(?:Figure|Fig\.?)\s+(\d+(?:[.-]\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_figure_label(value: str) -> str:
+    """Normalise a figure ref value to the canonical ``"Figure N"`` form.
+
+    Returns ``""`` when no figure-prefix matches — the caller treats empty
+    as "skip this ref". This is the only place the resolver applies its
+    own normalisation, so the ingest side's stamping of ``"Figure N"`` is
+    a fast-path; ``"Fig. N"`` / ``"Fig N"`` also round-trip.
+    """
+    if not value:
+        return ""
+    m = _FIGURE_LABEL_RE.match(value)
+    if not m:
+        return ""
+    return f"Figure {m.group(1)}"
 
 # Properties we read off Weaviate objects when building expansion hits.
 _RETURN_PROPS = [
@@ -99,6 +125,26 @@ def _filter_for_section(section_value: str) -> Any:
     from weaviate.classes.query import Filter  # type: ignore
 
     return Filter.by_property("section_path").like(f"*{section_value}*")
+
+
+def _filter_for_figure(label: str, document_id: str) -> Any:
+    """Return a Weaviate ``Filter`` matching figure chunks whose
+    ``caption_label`` equals ``label`` AND ``document_id`` matches AND
+    ``chunk_type`` is ``"figure"``.
+
+    Mirrors :func:`_filter_for_table` — the document_id scoping is
+    load-bearing (figure captions like ``"Figure 4-1"`` recur across
+    datasheets), and the ``chunk_type`` clause prevents accidental
+    cross-pollination if a non-figure chunk ever carried a figure-shaped
+    ``caption_label``.
+    """
+    from weaviate.classes.query import Filter  # type: ignore
+
+    return (
+        Filter.by_property("caption_label").equal(label)
+        & Filter.by_property("document_id").equal(document_id)
+        & Filter.by_property("chunk_type").equal("figure")
+    )
 
 
 def _filter_for_table(label: str, document_id: str) -> Any:
@@ -251,6 +297,36 @@ def _fetch_section_chunks(
         return []
 
 
+def _fetch_figure_chunks(
+    *,
+    client: Any,
+    collection: str,
+    label: str,
+    document_id: str,
+    limit: int,
+) -> list[Any]:
+    """Fetch figure chunks whose ``caption_label`` matches ``label`` and
+    whose ``document_id`` matches the source-hit's document.
+
+    Returns ``[]`` on any failure — we never raise from the expansion path.
+    """
+    try:
+        col = client.collections.get(collection)
+        flt = _filter_for_figure(label, document_id)
+        response = col.query.fetch_objects(
+            filters=flt,
+            limit=limit,
+            return_properties=_RETURN_PROPS,
+        )
+        return list(getattr(response, "objects", []) or [])
+    except Exception:  # pragma: no cover - defensive
+        logger.debug(
+            "xref_expansion fetch failed for figure=%s doc=%s",
+            label, document_id, exc_info=True,
+        )
+        return []
+
+
 def _fetch_table_chunks(
     *,
     client: Any,
@@ -317,10 +393,9 @@ def expand_xref_hits(
 
     Scope:
         ``section`` / ``section_symbol`` resolve against ``section_path``
-        substring + boundary post-filter. ``table`` resolves against
-        ``caption_label`` (exact match) scoped to the source hit's
-        ``document_id``. ``figure`` / ``appendix`` remain pass-through —
-        see module docstring.
+        substring + boundary post-filter. ``table`` and ``figure`` resolve
+        against ``caption_label`` (exact match) scoped to the source hit's
+        ``document_id`` AND ``chunk_type``. ``appendix`` remains pass-through.
 
         One-hop only — inserted chunks are NOT themselves expanded.
     """
@@ -374,6 +449,30 @@ def expand_xref_hits(
                 objs = _fetch_table_chunks(
                     client=client, collection=collection,
                     label=ref_value, document_id=src_doc_id,
+                    limit=max(2, max_per_hit + 1),
+                )
+            elif ref_type == "figure":
+                # Figures share the table contract: caption_label is unique
+                # within a document but recurs across documents, so the
+                # document_id scoping is load-bearing. Normalise the ref
+                # value first so "Fig. 4-1" still resolves the chunk that
+                # was stamped with caption_label="Figure 4-1".
+                src_doc_id = str(meta.get("document_id") or "")
+                if not src_doc_id:
+                    logger.debug(
+                        "xref_expansion: skipping figure ref %r — source hit "
+                        "has no document_id to scope against",
+                        ref_value,
+                    )
+                    continue
+                norm_label = _normalize_figure_label(ref_value)
+                if not norm_label:
+                    # False positive (e.g. "Refigure 4-1") — anchored regex
+                    # rejected it. Do not query.
+                    continue
+                objs = _fetch_figure_chunks(
+                    client=client, collection=collection,
+                    label=norm_label, document_id=src_doc_id,
                     limit=max(2, max_per_hit + 1),
                 )
             else:
