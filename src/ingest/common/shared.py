@@ -47,9 +47,19 @@ _CROSS_REF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Table refs: "Table 5", "Table 5-2", "Table 5.2". Word-boundary on
     # "Table" prevents matches inside "tablespoon".
     (re.compile(r"\bTable\s+\d+(?:[.-]\d+)?\b", re.IGNORECASE), "table"),
-    # Figure refs: "Figure 7-1", "Fig 7-1", "Fig. 7-1". Word boundary on the
-    # head + required digit blocks "figurine".
-    (re.compile(r"\b(?:Figure|Fig\.?)\s+\d+(?:[.-]\d+)?\b", re.IGNORECASE), "figure"),
+    # Figure refs: "Figure 7-1", "Fig 7-1", "Fig. 7-1", "Figure 10.3". Word
+    # boundary on the head + required digit blocks "figurine". The trailing
+    # negative lookahead `(?![.-]\d)` rejects 3-segment forms like
+    # "Figure 4.1.2" or "Figure 4-1.2" which in datasheets are section
+    # headings (e.g. "Figure 4.1.2 Memory Organization"), not figure
+    # citations — figure numbers are at most two segments.
+    (
+        re.compile(
+            r"\b(?:Figure|Fig\.?)\s+\d+(?:[.-]\d+)?\b(?![.-]\d)",
+            re.IGNORECASE,
+        ),
+        "figure",
+    ),
     # Appendix refs: "Appendix A", "Appendix B.2", "appendix C". Requires a
     # capital-letter label so plural "appendices" alone does not match.
     (re.compile(r"\bAppendix\s+[A-Z](?:\.\d+)?\b", re.IGNORECASE), "appendix"),
