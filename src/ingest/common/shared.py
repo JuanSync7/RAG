@@ -44,9 +44,14 @@ _CROSS_REF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Require a digit immediately after the symbol (with optional single space)
     # so prose like "§abc" does not match.
     (re.compile(r"§\s?\d+(?:\.\d+){0,3}\b"), "section_symbol"),
-    # Table refs: "Table 5", "Table 5-2", "Table 5.2". Word-boundary on
-    # "Table" prevents matches inside "tablespoon".
-    (re.compile(r"\bTable\s+\d+(?:[.-]\d+)?\b", re.IGNORECASE), "table"),
+    # Table refs: "Table 5", "Table 5-2", "Table 5.2", "Table 10.3". Word
+    # boundary on "Table" prevents matches inside "tablespoon". The trailing
+    # negative lookahead `(?![.-]\d)` rejects 3-segment forms like
+    # "Table 4.1.2" or "Table 4-1.2" which in datasheets are section
+    # headings (e.g. "Table 4.1.2 Memory Organization"), not table
+    # citations — table numbers are at most two segments. Mirrors the
+    # figure-pattern fix in PR #104 as a preventative parity tightening.
+    (re.compile(r"\bTable\s+\d+(?:[.-]\d+)?\b(?![.-]\d)", re.IGNORECASE), "table"),
     # Figure refs: "Figure 7-1", "Fig 7-1", "Fig. 7-1", "Figure 10.3". Word
     # boundary on the head + required digit blocks "figurine". The trailing
     # negative lookahead `(?![.-]\d)` rejects 3-segment forms like
