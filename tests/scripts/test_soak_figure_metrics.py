@@ -368,9 +368,18 @@ class TestFigureResolvability:
 
 
 def _good_soak() -> dict:
+    """A soak dict that should PASS every verdict criterion.
+
+    Mirrors real-vendor shape post-FIG-8: ``label_rate`` (over-all,
+    including decorative pictures) may be low, but
+    ``label_rate_of_captioned`` is the verdict gauge and must be high.
+    """
     return {
         "counts": {"figure_count": 10},
-        "caption_coverage": {"label_rate": 0.85},
+        "caption_coverage": {
+            "label_rate": 0.15,  # decorative-tax noise — observability only
+            "label_rate_of_captioned": 1.0,
+        },
         "figure_image_uri_sanitized": True,
         "idempotency": {"ok": True},
         "mode_a": {"figure_refs_emitted": 0},
@@ -392,12 +401,44 @@ class TestFigureSoakVerdict:
         assert v["all_pass"] is False
         assert v["criteria"]["figure_count_gt_0"]["ok"] is False
 
-    def test_low_caption_rate_fails(self):
+    def test_low_caption_of_captioned_fails(self):
+        """FIG-8: verdict now gates on the captioned-only denominator."""
         soak = _good_soak()
-        soak["caption_coverage"]["label_rate"] = 0.10
+        soak["caption_coverage"]["label_rate_of_captioned"] = 0.80
         v = _figure_soak_verdict(soak)
-        assert v["criteria"]["figure_caption_label_rate_ge_0_30"]["ok"] is False
+        assert (
+            v["criteria"]["figure_caption_label_rate_of_captioned_ge_0_95"]["ok"]
+            is False
+        )
         assert v["all_pass"] is False
+
+    def test_caption_of_captioned_at_threshold_passes(self):
+        """0.95 boundary: exact threshold should PASS."""
+        soak = _good_soak()
+        soak["caption_coverage"]["label_rate_of_captioned"] = 0.95
+        v = _figure_soak_verdict(soak)
+        assert (
+            v["criteria"]["figure_caption_label_rate_of_captioned_ge_0_95"]["ok"]
+            is True
+        )
+        assert v["all_pass"] is True
+
+    def test_low_overall_label_rate_does_not_fail_verdict(self):
+        """Decorative-tax: a low overall ``label_rate`` must NOT gate the verdict.
+
+        The whole point of FIG-8: real vendors hit ~10% / ~29% overall but
+        100% of *captioned* figures have parseable labels. The verdict
+        should reflect the meaningful denominator.
+        """
+        soak = _good_soak()
+        soak["caption_coverage"]["label_rate"] = 0.05  # very low decorative-tax rate
+        v = _figure_soak_verdict(soak)
+        assert v["all_pass"] is True
+
+    def test_old_criterion_key_removed(self):
+        """The misleading over-all criterion key must no longer be emitted."""
+        v = _figure_soak_verdict(_good_soak())
+        assert "figure_caption_label_rate_ge_0_30" not in v["criteria"]
 
     def test_data_uri_fails(self):
         soak = _good_soak()

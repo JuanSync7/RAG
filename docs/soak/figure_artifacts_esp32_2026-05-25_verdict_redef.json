@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "vendor": "Espressif",
+    "datasheet": "ESP32-S3",
+    "fixture_source": "docs/soak/figure_artifacts_esp32_2026-05-24_after_fig5.{md,json}",
+    "fig_ticket": "FIG-8",
+    "note": "Verdict-only re-evaluation: same FigureArtifact metrics as the FIG-5 transcript, replayed through the new _figure_soak_verdict (captioned-only denominator). No new Docling parse was performed because this PR only changes how the verdict is computed from existing soak metrics."
+  },
+  "counts": {
+    "figure_count": 85,
+    "figure_chunks_emitted": 10
+  },
+  "caption_coverage": {
+    "figures_total": 85,
+    "figures_with_label": 9,
+    "figures_with_caption": 9,
+    "label_rate": 0.10588235294117647,
+    "label_rate_of_captioned": 1.0
+  },
+  "caption_binding": {
+    "captioned_total": 9,
+    "via_fallback": 0,
+    "via_native": 9,
+    "fallback_share": 0.0
+  },
+  "figure_image_uri_sanitized": true,
+  "idempotency": {
+    "ok": true,
+    "first_count": 85,
+    "second_count": 85,
+    "duplicates_within_parse": 0
+  },
+  "mode_a": {
+    "figure_refs_emitted": 0,
+    "unique_targets": 0,
+    "resolved": 0,
+    "resolvable_rate": 0.0
+  },
+  "mode_b": {
+    "figure_refs_emitted": 10,
+    "unique_targets": 9,
+    "resolved": 9,
+    "resolvable_rate": 1.0
+  },
+  "verdict": {
+    "criteria": {
+      "figure_count_gt_0": {"ok": true, "value": 85, "threshold": "> 0"},
+      "figure_caption_label_rate_of_captioned_ge_0_95": {"ok": true, "value": 1.0, "threshold": ">= 0.95"},
+      "figure_image_uri_sanitized": {"ok": true, "value": true, "threshold": "true"},
+      "figure_chunk_idempotent": {"ok": true, "value": true, "threshold": "true"},
+      "mode_a_emits_zero_figure_refs": {"ok": true, "value": 0, "threshold": "== 0"},
+      "mode_b_resolvable_rate_ge_0_30": {"ok": true, "value": 1.0, "threshold": ">= 0.30"}
+    },
+    "all_pass": true
+  }
+}

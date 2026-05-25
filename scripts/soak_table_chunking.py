@@ -649,7 +649,17 @@ def _figure_soak_verdict(soak: dict) -> dict:
     """Apply the FIG-3 acceptance criteria. Returns per-criterion PASS/FAIL."""
     counts = soak.get("counts") or {}
     figs_total = counts.get("figure_count", 0) or 0
-    cap_rate = (soak.get("caption_coverage") or {}).get("label_rate", 0.0) or 0.0
+    caption_coverage = soak.get("caption_coverage") or {}
+    # FIG-8: verdict now gates on the captioned-only denominator. The
+    # over-all ``label_rate`` is still surfaced in the transcript for
+    # observability (decorative-tax visibility), but it is NOT a gate —
+    # real-vendor PDFs include many decorative pictures (icons, logos,
+    # "Cont'd" glyphs) that lower the over-all rate without indicating
+    # any caption-label regex hole. See memory
+    # ``feedback_pick_meaningful_denominators``.
+    cap_rate_of_captioned = (
+        caption_coverage.get("label_rate_of_captioned", 0.0) or 0.0
+    )
     img_ok = bool(soak.get("figure_image_uri_sanitized", False))
     idem_ok = bool((soak.get("idempotency") or {}).get("ok", False))
     mode_b = soak.get("mode_b") or {}
@@ -663,10 +673,10 @@ def _figure_soak_verdict(soak: dict) -> dict:
             "value": figs_total,
             "threshold": "> 0",
         },
-        "figure_caption_label_rate_ge_0_30": {
-            "ok": cap_rate >= 0.30,
-            "value": round(float(cap_rate), 4),
-            "threshold": ">= 0.30",
+        "figure_caption_label_rate_of_captioned_ge_0_95": {
+            "ok": cap_rate_of_captioned >= 0.95,
+            "value": round(float(cap_rate_of_captioned), 4),
+            "threshold": ">= 0.95",
         },
         "figure_image_uri_sanitized": {
             "ok": img_ok,
