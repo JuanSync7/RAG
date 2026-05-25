@@ -73,6 +73,35 @@ class TestTablePattern:
         refs = cross_refs("add a tablespoon 5 of sugar")
         assert not any(r["type"] == "table" for r in refs)
 
+    def test_table_three_segment_dot_section_heading_does_not_match(self):
+        # Mirror of the figure-pattern FP: "Table 4.1.2 Memory Organization"
+        # is a section heading, not a table citation. Table numbers in
+        # datasheets are at most two segments (chapter.table or chapter-table).
+        refs = cross_refs("see Table 4.1.2 Memory Organization for details")
+        assert not any(r["type"] == "table" for r in refs)
+
+    def test_table_three_segment_dot_form_does_not_match(self):
+        refs = cross_refs("see Table 10.3.5 for details")
+        assert not any(r["type"] == "table" for r in refs)
+
+    def test_table_dash_then_dot_does_not_match(self):
+        # "Table 4-1.2" — dash form then a trailing dot-segment is rejected;
+        # genuine tables use either dash or dot, not both.
+        refs = cross_refs("see Table 4-1.2 here")
+        assert not any(r["type"] == "table" for r in refs)
+
+    def test_table_two_segment_dash_form_still_matches(self):
+        refs = cross_refs("see Table 4-1 for details")
+        assert any(r["type"] == "table" and r["value"].endswith("4-1") for r in refs)
+
+    def test_table_two_segment_dot_form_still_matches(self):
+        refs = cross_refs("see Table 4.1 for details")
+        assert any(r["type"] == "table" and r["value"].endswith("4.1") for r in refs)
+
+    def test_table_two_segment_dot_form_ten_three_still_matches(self):
+        refs = cross_refs("see Table 10.3 for details")
+        assert any(r["type"] == "table" and r["value"].endswith("10.3") for r in refs)
+
 
 # --- figure -------------------------------------------------------------------
 
