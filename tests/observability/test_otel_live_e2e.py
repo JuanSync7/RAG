@@ -41,7 +41,7 @@ from typing import Any, Optional
 import httpx
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 
 INGEST_POLL_INTERVAL_S = 0.5

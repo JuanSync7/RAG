@@ -44,7 +44,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Module-wide marker — all tests here are live integration tests.
 # ---------------------------------------------------------------------------
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 
 # ---------------------------------------------------------------------------
