@@ -6,6 +6,10 @@
  # generate_page_images=True extracts PIL.Image (RGB) page images from the converted document.
  # page_count reflects total pages in source; page_images is empty on extraction failure (no error raised).
  # DoclingParser wraps standalone functions into the DocumentParser protocol (FR-3221, FR-3223, FR-3224).
+ # parse_with_docling builds a PdfPipelineOptions on every call: TableFormer mode
+ # (accurate=TF v2 / fast=TF v1), OCR auto-trigger via RapidOcrOptions(force_full_page_ocr=False),
+ # and optional built-in SmolVLM picture description.
+ # warmup_docling_models defaults to fetching TableFormer v2 and RapidOCR artifacts.
  # @end-summary
 """Docling integration for ingestion parsing.
 
@@ -16,10 +20,143 @@ and optional multimodal processing).
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+import re as _re_caption  # local alias to avoid colliding with downstream `re` usage
+
+
+_CAPTION_LABEL_RE = _re_caption.compile(
+    r"^\s*(Table)\s+(\d+(?:[.-]\d+)?)",
+    _re_caption.IGNORECASE,
+)
+
+# Figure-side variant. ``Fig.`` and ``Fig`` are tolerated, but a word boundary
+# after the keyword prevents matches like ``figured`` / ``configure`` /
+# ``Refigure`` that share the prefix.
+# Match ``Figure``/``Fig.``/``Fig`` at the start of the caption only when
+# followed by whitespace and a digit. Anchoring at ``^\s*`` plus the digit
+# lookahead is what excludes ``figured``/``configure``/``Refigure`` — those
+# either fail the prefix anchor or fail the trailing-digit requirement.
+_FIGURE_CAPTION_LABEL_RE = _re_caption.compile(
+    r"^\s*(?:Figure|Fig\.?)\s+(\d+(?:[.-]\d+)?)",
+    _re_caption.IGNORECASE,
+)
+
+
+def _extract_caption_label(caption: str) -> str:
+    """Pull the canonical ``Table N`` / ``Table N-N`` / ``Table N.N`` label out
+    of a caption string. Returns ``""`` when no label prefix can be parsed.
+
+    Preserves the user's separator (``-`` or ``.``) and titlecases the
+    ``Table`` keyword. Examples:
+
+    - ``"Table 5-2: GPIO matrix"`` → ``"Table 5-2"``
+    - ``"Table 12"``               → ``"Table 12"``
+    - ``"Table 3.1 — power modes"``→ ``"Table 3.1"``
+    - ``"GPIO matrix"``            → ``""``
+    """
+    if not caption:
+        return ""
+    m = _CAPTION_LABEL_RE.match(caption)
+    if not m:
+        return ""
+    return f"Table {m.group(2)}"
+
+
+def _extract_figure_caption_label(caption: str) -> str:
+    """Pull the canonical ``Figure N`` / ``Figure N-N`` / ``Figure N.N`` label
+    out of a figure caption string. Returns ``""`` when no label prefix can be
+    parsed.
+
+    Accepts ``Figure``, ``Fig``, and ``Fig.`` (case-insensitive) and normalises
+    the keyword to ``Figure``. Preserves the user's separator (``-`` or ``.``).
+    Examples:
+
+    - ``"Figure 4-1: SoC block diagram"`` → ``"Figure 4-1"``
+    - ``"Fig. 2 — pin layout"``           → ``"Figure 2"``
+    - ``"FIGURE 10.3 power tree"``        → ``"Figure 10.3"``
+    - ``"figured out the wiring"``        → ``""``
+    """
+    if not caption:
+        return ""
+    m = _FIGURE_CAPTION_LABEL_RE.match(caption)
+    if not m:
+        return ""
+    return f"Figure {m.group(1)}"
+
+
+def _normalize_figure_ref_value(value: str) -> str:
+    """Coerce a raw figure ref match (e.g. ``"Fig. 4-1"``) to the canonical
+    ``"Figure N"`` form the resolver filter expects.
+
+    Returns the input unchanged when no figure prefix matches — callers
+    decide whether to keep or drop. We anchor against the same regex
+    :data:`_FIGURE_CAPTION_LABEL_RE` uses so the round-trip (emission ↔
+    resolution) is symmetric.
+    """
+    if not value:
+        return value
+    m = _FIGURE_CAPTION_LABEL_RE.match(value)
+    if not m:
+        return value
+    return f"Figure {m.group(1)}"
+
+
+def _stamp_xref_targets(meta: dict, text: str) -> None:
+    """Populate ``meta["xref_targets"]`` from ``cross_refs(text)``.
+
+    The payload is a JSON-encoded ``list[{type, value}]`` (Weaviate's TEXT
+    column doesn't support list-of-struct natively; the retrieval-side
+    expander decodes it back).  Empty text yields ``"[]"``.
+
+    ``figure``-type refs are filtered when
+    ``RAG_XREF_EXTRACT_FIGURE_REFS`` is False — we don't have a
+    FigureArtifact registry to resolve against yet, so emitting them is
+    pure downstream noise.  Read the flag fresh on each call so tests can
+    monkeypatch ``config.settings`` without re-importing this module.
+    """
+    # Imported here to avoid widening the module's top-of-file dep graph.
+    from src.ingest.common.shared import cross_refs
+
+    try:
+        refs = cross_refs(text or "")
+    except Exception:  # pragma: no cover - defensive
+        refs = []
+
+    try:
+        from config import settings as _settings
+
+        emit_figures = bool(getattr(_settings, "RAG_XREF_EXTRACT_FIGURE_REFS", False))
+    except Exception:  # pragma: no cover - defensive
+        emit_figures = False
+    if not emit_figures:
+        refs = [r for r in refs if str((r or {}).get("type") or "") != "figure"]
+    else:
+        # Normalise figure ref values (``"Fig. 4-1"`` → ``"Figure 4-1"``) so
+        # the value stamped at ingest matches the resolver-side filter that
+        # FIG-2's ``_filter_for_figure`` issues against ``caption_label``.
+        # Anything that doesn't match the canonical figure-prefix regex is
+        # dropped — that path catches false positives like ``"Refigure 4-1"``
+        # that the loose ``cross_refs`` pattern would otherwise surface.
+        normalised: list[dict] = []
+        for r in refs:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("type") or "") == "figure":
+                norm_v = _normalize_figure_ref_value(str(r.get("value") or ""))
+                if not norm_v.startswith("Figure "):
+                    continue
+                normalised.append({"type": "figure", "value": norm_v})
+            else:
+                normalised.append(r)
+        refs = normalised
+
+    meta["xref_targets"] = json.dumps(refs)
 
 try:
     from config.settings import EMBEDDING_MODEL_PATH, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
@@ -125,7 +262,14 @@ class DoclingParseResult:
     """Total number of pages in the source document. FR-205"""
 
 
-def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = False) -> Path:
+def warmup_docling_models(
+    *,
+    artifacts_path: str = "",
+    with_smolvlm: bool = False,
+    with_tableformer_v2: bool = True,
+    with_rapidocr: bool = True,
+    with_easyocr: bool = False,
+) -> Path:
     """Download and validate core Docling models used by ingestion.
 
     Args:
@@ -133,6 +277,12 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
             empty, Docling's default cache location is used.
         with_smolvlm: If True, also download SmolVLM model artifacts.
             Must be True when vlm_mode is "builtin".
+        with_tableformer_v2: If True (default), also fetch TableFormer v2
+            artifacts so ``tableformer_mode="accurate"`` works offline.
+        with_rapidocr: If True (default), also fetch RapidOCR artifacts so OCR
+            auto-trigger works on image-only pages offline.
+        with_easyocr: If True, fetch EasyOCR artifacts. Default False — RapidOCR
+            is the wired engine.
 
     Returns:
         The resolved Docling model root directory.
@@ -161,7 +311,7 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
         progress=False,
         with_layout=True,
         with_tableformer=True,
-        with_tableformer_v2=False,
+        with_tableformer_v2=with_tableformer_v2,
         with_code_formula=False,
         with_picture_classifier=False,
         with_smolvlm=with_smolvlm,
@@ -171,8 +321,8 @@ def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = Fals
         with_smoldocling_mlx=False,
         with_granite_vision=False,
         with_granite_chart_extraction=False,
-        with_rapidocr=False,
-        with_easyocr=False,
+        with_rapidocr=with_rapidocr,
+        with_easyocr=with_easyocr,
     )
     layout_repo_dir = model_root / LayoutOptions().model_spec.model_repo_folder
     tableformer_repo_dir = model_root / TableStructureModel._model_repo_folder
@@ -331,6 +481,9 @@ def parse_with_docling(
     artifacts_path: str = "",
     vlm_mode: str = "disabled",
     generate_page_images: bool = False,
+    enable_ocr: bool = True,
+    tableformer_mode: str = "accurate",
+    tableformer_do_cell_matching: bool = True,
 ) -> DoclingParseResult:
     """Parse a source document into markdown using local Docling runtime.
 
@@ -390,36 +543,68 @@ def parse_with_docling(
         # to DocumentConverter (removed in newer Docling versions). Model location
         # is controlled by warmup_docling_models / HF cache.
 
-        if vlm_mode == "builtin":
-            # Lazy import to keep module-level import cheap.
-            _builtin_vlm_configured = False
-            try:
-                from docling.datamodel.base_models import InputFormat
-                from docling.datamodel.pipeline_options import (
-                    PdfPipelineOptions,
-                    PictureDescriptionVlmEngineOptions,
-                )
-                from docling.document_converter import PdfFormatOption
+        # Always build PdfPipelineOptions so OCR auto-trigger and TableFormer v2
+        # selection apply regardless of vlm_mode. PdfFormatOption is wired into
+        # converter_kwargs only when the import surface is available — keeps the
+        # function robust against pruned docling installs.
+        try:
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import (
+                PdfPipelineOptions,
+                RapidOcrOptions,
+                TableFormerMode,
+            )
+            from docling.document_converter import PdfFormatOption
 
-                pipeline_options = PdfPipelineOptions()
-                pipeline_options.do_picture_description = True
-                pipeline_options.picture_description_options = (
-                    PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+            pipeline_options = PdfPipelineOptions()
+
+            # --- TableFormer mode (v2 = ACCURATE, v1 = FAST) -----------------
+            mode = (
+                TableFormerMode.ACCURATE
+                if str(tableformer_mode).lower() == "accurate"
+                else TableFormerMode.FAST
+            )
+            pipeline_options.table_structure_options.mode = mode
+            pipeline_options.table_structure_options.do_cell_matching = bool(
+                tableformer_do_cell_matching
+            )
+
+            # --- OCR auto-trigger (image-only pages) -------------------------
+            pipeline_options.do_ocr = bool(enable_ocr)
+            if enable_ocr:
+                pipeline_options.ocr_options = RapidOcrOptions(
+                    force_full_page_ocr=False
                 )
-                converter_kwargs["format_options"] = {
-                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-                }
-                _builtin_vlm_configured = True
-            except (ImportError, Exception) as exc:
-                logging.getLogger(__name__).warning(
-                    "vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
-                    "proceeding without picture description.",
-                    exc,
-                )
-            converter = DocumentConverter(**converter_kwargs)
-            _ = _builtin_vlm_configured  # noqa: F841 — reserved for telemetry
-        else:
-            converter = DocumentConverter(**converter_kwargs)
+
+            # --- Built-in SmolVLM picture description ------------------------
+            if vlm_mode == "builtin":
+                try:
+                    from docling.datamodel.pipeline_options import (
+                        PictureDescriptionVlmEngineOptions,
+                    )
+
+                    pipeline_options.do_picture_description = True
+                    pipeline_options.picture_description_options = (
+                        PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "vlm_mode='builtin' requested but SmolVLM setup failed "
+                        "(%s); proceeding without picture description.",
+                        exc,
+                    )
+
+            converter_kwargs["format_options"] = {
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        except Exception as exc:
+            # If the docling pipeline_options surface is unavailable, fall back to
+            # default DocumentConverter — preserves backward compatibility.
+            logging.getLogger(__name__).warning(
+                "Docling PdfPipelineOptions unavailable (%s); using defaults.", exc
+            )
+
+        converter = DocumentConverter(**converter_kwargs)
 
         try:
             result = converter.convert(str(source_path))
@@ -615,25 +800,42 @@ def _page_ref_from_chunk_meta(meta: Any) -> Any:
             page_no = getattr(p, "page_no", None)
             if page_no is None:
                 continue
-            bbox_obj = getattr(p, "bbox", None)
-            bbox = None
-            if bbox_obj is not None:
-                # Docling BoundingBox: l, t, r, b OR x0, y0, x1, y1
-                try:
-                    bbox = (
-                        float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0))),
-                        float(getattr(bbox_obj, "t", getattr(bbox_obj, "y0", 0.0))),
-                        float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0))),
-                        float(getattr(bbox_obj, "b", getattr(bbox_obj, "y1", 0.0))),
-                    )
-                except Exception:
-                    bbox = None
-            return PageRef(page_no=int(page_no), page_label="", bbox=bbox)
+            return PageRef(
+                page_no=int(page_no),
+                page_label="",
+                bbox=_decode_docling_bbox(getattr(p, "bbox", None)),
+            )
     return None
 
 
+def _decode_docling_bbox(bbox_obj: Any) -> tuple[float, float, float, float] | None:
+    """Decode a Docling BoundingBox into a ``(x0, y0, x1, y1)`` tuple.
+
+    Tolerates both the ``l/t/r/b`` and ``x0/y0/x1/y1`` attribute shapes that
+    different Docling versions expose. Returns ``None`` when the object is
+    missing or decoding raises.
+    """
+    if bbox_obj is None:
+        return None
+    try:
+        return (
+            float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0))),
+            float(getattr(bbox_obj, "t", getattr(bbox_obj, "y0", 0.0))),
+            float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0))),
+            float(getattr(bbox_obj, "b", getattr(bbox_obj, "y1", 0.0))),
+        )
+    except Exception:
+        return None
+
+
 def _page_ref_from_table_item(tbl: Any) -> Any:
-    """Derive a PageRef from a Docling TableItem's provenance, or None."""
+    """Derive a PageRef (including bbox) from a Docling TableItem's provenance.
+
+    Returns ``None`` when no provenance entry carries a page number. The bbox
+    is decoded via :func:`_decode_docling_bbox` so table-summary chunks carry
+    the same citation provenance as text chunks (defect from the real-datasheet
+    soak: pre-fix this hardcoded ``bbox=None``).
+    """
     from src.ingest.support.parser_base import PageRef
 
     prov = getattr(tbl, "prov", None) or []
@@ -641,16 +843,185 @@ def _page_ref_from_table_item(tbl: Any) -> Any:
         page_no = getattr(p, "page_no", None)
         if page_no is None:
             continue
-        return PageRef(page_no=int(page_no), page_label="", bbox=None)
+        return PageRef(
+            page_no=int(page_no),
+            page_label="",
+            bbox=_decode_docling_bbox(getattr(p, "bbox", None)),
+        )
     return None
 
 
-def _extract_table_artifacts(docling_document: Any) -> list:
+_HEADING_LABEL_VALUES = frozenset({"section_header", "title"})
+
+# Labels whose self_ref → section_path mapping the heading-stack walker
+# records. Tables and figures (pictures, charts) both need section provenance
+# resolved by replaying iterate_items() because Docling stores headings and
+# floats as flat siblings under ``body``.
+_CAPTIONABLE_LABEL_VALUES = frozenset({"table", "picture", "chart"})
+
+
+def _label_value(item: Any) -> str:
+    """Return the lowercase string value of an item's ``label`` attribute.
+
+    Works whether ``label`` is a Docling ``DocItemLabel`` enum, a plain string,
+    or absent. Returns ``""`` when no label is present.
+    """
+    label = getattr(item, "label", None)
+    if label is None:
+        return ""
+    value = getattr(label, "value", label)
+    try:
+        return str(value).lower()
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
+    """Map each table's ``self_ref`` to its ancestor heading breadcrumb.
+
+    Walks ``docling_document.iterate_items()`` in document order, maintaining
+    a heading stack keyed by the heading's ``level`` (``TitleItem`` is treated
+    as level 0). When a ``TableItem`` is encountered, the current stack is
+    joined with ``" > "`` and recorded against the table's ``self_ref``.
+
+    Returns an empty mapping when ``iterate_items`` is unavailable or raises —
+    callers must fall back to ``section_path=""`` in that case.
+    """
+    paths: dict[str, str] = {}
+    iterate = getattr(docling_document, "iterate_items", None)
+    if not callable(iterate):
+        return paths
+
+    # Materialize ``iterate_items()`` once so we can take two passes without
+    # double-consuming a generator (and to keep test fixtures that hand back a
+    # single iterator working). Real Docling produces O(N) items per document
+    # so the memory cost is bounded by the parse itself.
+    try:
+        entries = list(iterate())
+    except Exception:  # pragma: no cover - defensive
+        return paths
+
+    # First pass: collect distinct heading levels and total heading count to
+    # detect "flat outline" documents (real-world datasheets often emit dozens
+    # of chapter headings all at level=1). On flat outlines we disable the
+    # ``had_content`` implicit-nesting heuristic and treat same-level headings
+    # as siblings unconditionally — otherwise the heuristic builds a 71-deep
+    # ancestor chain out of unrelated chapters.
+    flat_outline = False
+    try:
+        levels_seen: set[int] = set()
+        heading_count = 0
+        for entry in entries:
+            item = entry[0] if isinstance(entry, tuple) and len(entry) >= 1 else entry
+            if _label_value(item) in _HEADING_LABEL_VALUES:
+                lvl = int(getattr(item, "level", 0) or 0)
+                if _label_value(item) == "title":
+                    lvl = 0
+                levels_seen.add(lvl)
+                heading_count += 1
+        # Flat-outline gate: ≥4 headings AND at most one distinct .level.
+        # Below 4 headings we keep W's implicit-nesting heuristic — that's
+        # the regime where Docling's font-size level quirk shows up in
+        # crafted/short documents (W's existing tests cover it).
+        if heading_count >= 4 and len(levels_seen) <= 1:
+            flat_outline = True
+    except Exception:  # pragma: no cover - defensive
+        flat_outline = False
+
+    # Stack entries: (level:int, text:str, had_content:bool). Lower level ==
+    # shallower heading. ``had_content`` tracks whether any non-heading body
+    # item appeared after this heading was pushed — used to disambiguate
+    # logical parent/child vs sibling-replacement when Docling assigns the
+    # same ``.level`` to both.
+    stack: list[list[Any]] = []
+    walker = entries
+
+    try:
+        for entry in walker:
+            # iterate_items yields (node, depth). Tolerate alternate shapes.
+            if isinstance(entry, tuple) and len(entry) >= 1:
+                item = entry[0]
+            else:
+                item = entry
+
+            label = _label_value(item)
+            if label in _HEADING_LABEL_VALUES:
+                # TitleItem has no .level; treat as level 0 (root).
+                level = int(getattr(item, "level", 0) or 0)
+                if label == "title":
+                    level = 0
+                text = str(getattr(item, "text", "") or "")
+                if not text:
+                    continue
+                # Pop entries strictly deeper than the new heading. A deeper
+                # heading existing under a parent implies the parent "had
+                # content" (its sub-section), so mark the next surviving
+                # frame accordingly.
+                popped_deeper = False
+                while stack and stack[-1][0] > level:
+                    stack.pop()
+                    popped_deeper = True
+                if popped_deeper and stack:
+                    stack[-1][2] = True
+                # Same-level handling. Two competing realities:
+                #   1. Docling sometimes assigns identical ``.level`` to a
+                #      logical parent/child pair (font-size based heading
+                #      detection). When no content intervenes we tolerate
+                #      ONE such implicit nesting — see project memory
+                #      ``project_docling_section_path_collapse``.
+                #   2. On flat-outline PDFs (datasheets), dozens of unrelated
+                #      chapter headings carry the same ``.level`` with no body
+                #      items between them — page breaks, captions, etc. don't
+                #      register as content. These are siblings, not a 71-deep
+                #      ancestor chain. Cap implicit nesting at one frame.
+                if stack and stack[-1][0] == level:
+                    same_level_run = sum(1 for f in stack if f[0] == level)
+                    top_had_content = stack[-1][2]
+                    # Flat-outline docs: unconditional sibling replace.
+                    # Otherwise: replace if true sibling (had content) OR we
+                    # have already implicitly nested once at this level
+                    # (cap implicit nesting at one frame).
+                    if flat_outline or top_had_content or same_level_run >= 2:
+                        stack.pop()
+                stack.append([level, text, False])
+                # Belt-and-suspenders sanity cap: keep the deepest frames
+                # (most specific context wins). Catches pathological inputs
+                # the heuristics above don't anticipate.
+                _MAX_SECTION_DEPTH = 8
+                if len(stack) > _MAX_SECTION_DEPTH:
+                    del stack[: len(stack) - _MAX_SECTION_DEPTH]
+            elif label in _CAPTIONABLE_LABEL_VALUES:
+                # Tables, pictures, and charts all need section_path resolved
+                # against the live heading stack. They also count as body
+                # content for their enclosing heading(s).
+                self_ref = getattr(item, "self_ref", None)
+                if self_ref:
+                    paths[str(self_ref)] = " > ".join(t for _, t, _ in stack)
+                for frame in stack:
+                    frame[2] = True
+            else:
+                # Any other body item (paragraph, list, code, figure, ...)
+                # counts as content for the active heading stack.
+                if label:
+                    for frame in stack:
+                        frame[2] = True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("section_path walker aborted: %s", exc)
+
+    return paths
+
+
+def _extract_table_artifacts(docling_document: Any, document_id: str = "") -> list:
     """Extract structured table artifacts from a DoclingDocument. FR-3211.
 
     Walks ``docling_document.tables`` (when present) and converts each entry
     into a ``TableArtifact`` with markdown, row-major cell grid, and section
     breadcrumbs derived from the table's parent heading chain.
+
+    The section breadcrumb is resolved by replaying ``iterate_items()`` once
+    and snapshotting the active heading stack at each table's position — the
+    Docling object graph stores headings and tables as flat siblings under
+    ``body``, so a structural parent walk would not surface the breadcrumb.
 
     Returns an empty list when the document has no tables or when extraction
     of any individual table fails — table extraction must never break parsing.
@@ -661,6 +1032,8 @@ def _extract_table_artifacts(docling_document: Any) -> list:
         return []
 
     raw_tables = getattr(docling_document, "tables", None) or []
+    section_paths = _resolve_table_section_paths(docling_document)
+
     artifacts: list[TableArtifact] = []
     for idx, tbl in enumerate(raw_tables):
         try:
@@ -682,6 +1055,8 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                 caption = str(cap_text or "")
             except Exception:
                 caption = ""
+            self_ref = getattr(tbl, "self_ref", None)
+            section_path = section_paths.get(str(self_ref), "") if self_ref else ""
             artifacts.append(
                 TableArtifact(
                     table_id=f"table-{idx + 1}",
@@ -690,15 +1065,303 @@ def _extract_table_artifacts(docling_document: Any) -> list:
                     num_rows=num_rows,
                     num_cols=num_cols,
                     has_header=_detect_header_row(tbl),
-                    section_path="",
+                    section_path=section_path,
                     caption=caption.strip(),
+                    caption_label=_extract_caption_label(caption),
                     page_ref=_page_ref_from_table_item(tbl),
+                    self_ref=str(self_ref or ""),
+                    document_id=document_id,
                 )
             )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("table extraction skipped for table %d: %s", idx, exc)
+        # Narrow catch: Docling grid/heading/export internals raise these on malformed input; AssertionError + BaseException must propagate so our invariant bugs surface.
+        except (AttributeError, KeyError, TypeError, IndexError, ValueError, RuntimeError) as exc:
+            table_id = f"table-{idx + 1}"
+            self_ref = getattr(tbl, "self_ref", None)
+            logger.warning(
+                "table extraction skipped table_id=%s self_ref=%s: %s",
+                table_id, self_ref, exc,
+            )
             continue
     return artifacts
+
+
+def _figure_page_no(pic: Any) -> int:
+    """Return the 1-based page number from a Docling PictureItem's provenance.
+
+    Returns ``0`` when no provenance entry carries a page number. We don't
+    surface a full PageRef here (figures' bbox typically frames the image
+    region, which downstream callers don't yet consume) — page_no is the
+    minimum useful citation provenance for xref expansion.
+    """
+    prov = getattr(pic, "prov", None) or []
+    for p in prov:
+        page_no = getattr(p, "page_no", None)
+        if page_no is None:
+            continue
+        try:
+            return int(page_no)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _figure_image_uri(pic: Any) -> str:
+    """Best-effort image URI from a Docling PictureItem's ``image`` ref.
+
+    Docling 2.82.0 attaches an :class:`ImageRef` whose ``uri`` is either a
+    ``data:`` URI (when ``generate_picture_images=True``) or a ``file://``
+    path. Returns ``""`` when no image ref is present — common on parses
+    that didn't enable picture image generation.
+    """
+    image = getattr(pic, "image", None)
+    if image is None:
+        return ""
+    uri = getattr(image, "uri", None)
+    if uri is None:
+        return ""
+    try:
+        return str(uri)
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _build_unbound_caption_fallback(doc: Any) -> dict[str, str]:
+    """Map ``picture.self_ref`` → forward-walked caption text when Docling
+    failed to bind a caption to the PictureItem.
+
+    Docling 2.82.0 frequently parses a figure's caption as an ordinary
+    TextItem in the body stream rather than binding it via ``pic.captions``.
+    Triage of the 2026-05-24 ESP32-S3 soak found 4 of 5 unresolvable prose
+    figure refs were caused by this binding gap (memory:
+    ``project_docling_heading_provenance`` documents the table-side variant
+    of the same quirk).
+
+    Strategy: walk ``iterate_items()`` in document order. For each
+    PictureItem with empty ``captions``, scan forward until either
+      * we hit a TextItem on the same page whose text matches the canonical
+        figure-caption regex (``^\\s*(Figure|Fig\\.?)\\s+N(-N|.N)?``) — adopt
+        it; or
+      * we leave the page or hit another PictureItem — abort (no fallback).
+
+    Stays page-scoped so we never invent cross-page provenance. Returns an
+    empty mapping when ``iterate_items`` is unavailable.
+    """
+    fallback: dict[str, str] = {}
+    iterate = getattr(doc, "iterate_items", None)
+    if not callable(iterate):
+        return fallback
+    try:
+        entries = list(iterate())
+    except Exception:  # pragma: no cover - defensive
+        return fallback
+
+    # Flatten (item, level) -> item with index for forward scans.
+    items: list[Any] = []
+    for entry in entries:
+        if isinstance(entry, tuple) and len(entry) >= 1:
+            items.append(entry[0])
+        else:
+            items.append(entry)
+
+    def _page_of(it: Any) -> int:
+        prov = getattr(it, "prov", None) or []
+        for p in prov:
+            page_no = getattr(p, "page_no", None)
+            if page_no is None:
+                continue
+            try:
+                return int(page_no)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    for i, item in enumerate(items):
+        if _label_value(item) != "picture":
+            continue
+        if getattr(item, "captions", None):
+            continue  # Docling bound a caption; trust it.
+        self_ref = getattr(item, "self_ref", None)
+        if not self_ref:
+            continue
+        pic_page = _page_of(item)
+        if pic_page == 0:
+            continue  # no provenance to scope by; bail rather than guess
+        # Forward scan, bounded by page change or next PictureItem.
+        for j in range(i + 1, len(items)):
+            nxt = items[j]
+            nxt_label = _label_value(nxt)
+            if nxt_label == "picture":
+                break
+            nxt_page = _page_of(nxt)
+            if nxt_page and nxt_page != pic_page:
+                break
+            txt = str(getattr(nxt, "text", "") or "").strip()
+            if not txt:
+                continue
+            if _FIGURE_CAPTION_LABEL_RE.match(txt):
+                fallback[str(self_ref)] = txt
+                break
+    return fallback
+
+
+def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
+    """Extract structured figure artifacts from a DoclingDocument.
+
+    Walks ``docling_document.pictures`` (Docling 2.82.0 surfaces both
+    PICTURE and CHART items under this attribute) and converts each entry
+    into a :class:`FigureArtifact` with caption text, normalised caption
+    label, section breadcrumb, page number, and best-effort image URI.
+
+    The section breadcrumb is resolved by reusing the same heading-stack
+    replay as ``_extract_table_artifacts`` — Docling stores headings and
+    pictures as flat siblings under ``body``, so a structural parent walk
+    would surface the body group rather than the enclosing heading
+    (see memory ``project_docling_heading_provenance``).
+
+    Returns an empty list when the document has no pictures or when
+    extraction of any individual picture fails — figure extraction must
+    never break parsing.
+    """
+    from src.ingest.support.parser_base import FigureArtifact
+
+    if doc is None:
+        return []
+
+    raw_pictures = getattr(doc, "pictures", None) or []
+    # Reuses the captionable-label walker; the returned dict carries entries
+    # for tables, pictures, AND charts so the same call serves both extractors.
+    section_paths = _resolve_table_section_paths(doc)
+    # Forward-walked fallback for PictureItems whose ``pic.captions`` is
+    # empty even though a "Figure N-N. ..." TextItem sits on the same page.
+    # Docling 2.82.0 leaves these unbound for ~80% of figures on real-world
+    # PDFs (see FIG-4 triage). Empty dict when iterate_items is unavailable
+    # — extractor degrades to the pre-FIG-4 behaviour in that case.
+    caption_fallback = _build_unbound_caption_fallback(doc)
+
+    artifacts: list[FigureArtifact] = []
+    for idx, pic in enumerate(raw_pictures):
+        try:
+            caption = ""
+            try:
+                # Defensive: Docling 2.82.0 has known API quirks; tolerate
+                # captions= absence/empty by routing through caption_text.
+                if getattr(pic, "captions", None):
+                    cap_text = pic.caption_text(doc=doc)
+                    caption = str(cap_text or "")
+            except Exception:
+                caption = ""
+            self_ref = getattr(pic, "self_ref", None)
+            # Forward-walk fallback when Docling didn't bind a caption.
+            if not caption and self_ref:
+                caption = caption_fallback.get(str(self_ref), "")
+            section_path = section_paths.get(str(self_ref), "") if self_ref else ""
+            artifacts.append(
+                FigureArtifact(
+                    document_id=document_id,
+                    caption=caption.strip(),
+                    caption_label=_extract_figure_caption_label(caption),
+                    section_path=section_path,
+                    page_no=_figure_page_no(pic),
+                    self_ref=str(self_ref or ""),
+                    image_uri=_figure_image_uri(pic),
+                )
+            )
+        except (AttributeError, KeyError, TypeError, IndexError, ValueError, RuntimeError) as exc:
+            figure_id = f"figure-{idx + 1}"
+            self_ref = getattr(pic, "self_ref", None)
+            logger.warning(
+                "figure extraction skipped figure_id=%s self_ref=%s: %s",
+                figure_id, self_ref, exc,
+            )
+            continue
+    return artifacts
+
+
+def _figure_artifacts_to_chunks(figures: list) -> list:
+    """Turn :class:`FigureArtifact` rows into ``chunk_type="figure"`` chunks.
+
+    Mirrors :func:`_apply_adaptive_table_chunking`'s table-side transformer:
+    each chunk's ``extra_metadata`` carries the provenance the resolver
+    filter and citation UI need (``document_id``, ``caption_label``,
+    ``section_path``, ``page_no``, ``self_ref``, ``figure_image_uri``).
+
+    Rules:
+      * Skip figures with neither caption nor caption_label — there's no
+        useful text to embed.
+      * ``image_uri`` starting with ``data:`` is coerced to ``""`` so we
+        don't bloat Weaviate with base64 payloads (memory
+        ``project_weaviate_schema_drop`` reminds us the schema property
+        list is the gate, but a multi-MB ``data:`` URI is still wasteful).
+      * ``chunk_id`` is derived from ``(document_id, self_ref)`` via
+        :func:`build_figure_chunk_id` so re-ingesting overwrites in place.
+        Falls back to the parser's own chunk_id derivation when
+        ``self_ref`` is empty (rare; defensive).
+    """
+    from src.ingest.support.parser_base import Chunk, PageRef
+    from src.vector_db.weaviate.store import build_figure_chunk_id
+
+    out: list = []
+    for fig in figures or []:
+        caption = (getattr(fig, "caption", "") or "").strip()
+        label = (getattr(fig, "caption_label", "") or "").strip()
+        if not caption and not label:
+            continue
+        if caption and label and caption.lower().startswith(label.lower()):
+            # Caption already starts with the label (typical Docling case);
+            # keep the caption verbatim so we don't double-stamp.
+            text = caption
+        elif caption and label:
+            text = f"{label}: {caption}"
+        elif label:
+            text = label
+        else:
+            text = caption
+
+        section_path = getattr(fig, "section_path", "") or ""
+        heading_path = [h for h in section_path.split(" > ") if h]
+        heading = heading_path[-1] if heading_path else ""
+
+        image_uri = getattr(fig, "image_uri", "") or ""
+        if image_uri.startswith("data:"):
+            image_uri = ""
+
+        document_id = getattr(fig, "document_id", "") or ""
+        self_ref = getattr(fig, "self_ref", "") or ""
+        if document_id and self_ref:
+            chunk_id = build_figure_chunk_id(document_id, self_ref)
+        else:
+            chunk_id = ""
+
+        page_no = int(getattr(fig, "page_no", 0) or 0)
+        page_ref = PageRef(page_no=page_no, page_label="", bbox=None) if page_no else None
+
+        meta: dict = {
+            "chunk_type": "figure",
+            "document_id": document_id,
+            "caption_label": label,
+            "self_ref": self_ref,
+            "page_no": page_no,
+            "figure_image_uri": image_uri,
+        }
+        if chunk_id:
+            meta["chunk_id"] = chunk_id
+        # Stamp cross-refs detected in the figure caption text (rare but
+        # possible: "Figure 4-1: see Section 3.2 for the matrix").
+        _stamp_xref_targets(meta, text)
+
+        out.append(
+            Chunk(
+                text=text,
+                section_path=section_path,
+                heading=heading,
+                heading_level=len(heading_path),
+                chunk_index=0,
+                extra_metadata=meta,
+                heading_path=list(heading_path),
+                page_ref=page_ref,
+            )
+        )
+    return out
 
 
 def _table_to_cells(tbl: Any) -> list[list[str]]:
@@ -736,6 +1399,271 @@ def _cells_to_markdown(cells: list[list[str]]) -> str:
     sep = "| " + " | ".join(["---"] * width) + " |"
     body = "\n".join("| " + " | ".join(r) + " |" for r in norm[1:])
     return "\n".join([header, sep, body]).strip()
+
+
+def _table_signature(markdown: str) -> str:
+    """Return the first non-empty, non-separator row of a markdown table.
+
+    Mirrors the heuristic used by ``embedding.nodes.chunking._match_table_artifact``;
+    duplicated locally to avoid an import dependency on the embedding node.
+    """
+    if not markdown:
+        return ""
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("|---") or set(stripped) <= {"|", "-", " "}:
+            continue
+        return stripped
+    return ""
+
+
+def _is_table_dominant(chunk_text: str, table_md: str, signature: str) -> bool:
+    """A chunk is "table-dominant" iff it contains the signature row AND the
+    table markdown forms >=60% of the chunk text length.
+    """
+    if not signature or signature not in chunk_text:
+        return False
+    text_len = len(chunk_text)
+    if text_len == 0:
+        return False
+    return (len(table_md) / text_len) >= 0.6
+
+
+def _truncate_table_summary_text(text: str, max_chars: int) -> str:
+    """Cap embedded ``table_summary`` text at ``max_chars``, appending a marker.
+
+    Guards the embedder against pathologically wide table summaries (200+ row
+    datasheets, hundreds of column headers) without altering the full
+    ``table_markdown`` stored on metadata. Deterministic: same input ⇒ same
+    output, so re-ingest stays idempotent and chunk-id formulas relying on text
+    hashes do not drift.
+
+    A non-positive ``max_chars`` disables truncation. When the input already
+    fits, it is returned unchanged byte-for-byte (no marker appended).
+    """
+    if max_chars is None or max_chars <= 0:
+        return text
+    if len(text) <= max_chars:
+        return text
+    # Marker template is fixed-length once the dropped-char count is known.
+    # Reserve room so the final string length is exactly <= max_chars.
+    marker_template = " … [truncated {n} chars]"
+    # Iterate at most twice: marker length depends on the digit count of n.
+    keep = max_chars - len(marker_template.format(n=len(text)))
+    if keep < 0:
+        # Cap so tiny it cannot fit even the marker — return marker-only,
+        # truncated to max_chars. Edge case; preserves the contract.
+        return marker_template.format(n=len(text))[:max_chars].rstrip()
+    dropped = len(text) - keep
+    marker = marker_template.format(n=dropped)
+    return text[:keep] + marker
+
+
+def _build_table_summary_text(tbl: Any) -> str:
+    headers = tbl.cells[0] if tbl.has_header and tbl.cells else []
+    body_rows = max(0, tbl.num_rows - (1 if tbl.has_header else 0))
+    lines: list[str] = []
+    caption = (tbl.caption or "").strip()
+    if caption:
+        lines.append(f"Table: {caption}")
+    lines.append(f"Columns: {' | '.join(headers)}")
+    lines.append(f"Rows: {body_rows}")
+    return "\n".join(lines)
+
+
+def _classify_table_for_row_chunks(
+    tbl: Any, max_rows: int, max_cols: int
+) -> str:
+    """Classify a table's eligibility for row-chunk emission.
+
+    Returns one of:
+        ``"row_chunks"``  — table passes both gates; row chunks should be emitted.
+        ``"small_gate"``  — table failed the small/shape gate (no header, empty,
+                            too many rows/cols, or out-of-range col count).
+        ``"uniform_gate"`` — table cleared the small gate but failed the uniform
+                            gate (body rows do not match header width).
+
+    The two gates are kept independent on purpose (see
+    ``feedback_heuristic_gates_independent.md``) so observability can attribute
+    summary-only outcomes to the correct failure mode.
+    """
+    if not tbl.has_header or not tbl.cells:
+        return "small_gate"
+    body = tbl.cells[1:]
+    body_rows = len(body)
+    if body_rows == 0:
+        return "small_gate"
+    if body_rows > max_rows:
+        return "small_gate"
+    if tbl.num_cols < 2 or tbl.num_cols > max_cols:
+        return "small_gate"
+    header_len = len(tbl.cells[0])
+    if not all(len(r) == header_len for r in body):
+        return "uniform_gate"
+    return "row_chunks"
+
+
+def _table_is_small_uniform(tbl: Any, max_rows: int, max_cols: int) -> bool:
+    """Backward-compatible bool wrapper around :func:`_classify_table_for_row_chunks`."""
+    return _classify_table_for_row_chunks(tbl, max_rows, max_cols) == "row_chunks"
+
+
+def _apply_adaptive_table_chunking(
+    chunks: list, tables: list, cfg: Any
+) -> list:
+    """Drop table-dominant chunks; emit summary + (optional) row chunks per table.
+
+    Inserts emitted chunks at the position where the first table-dominant chunk
+    appeared so document order is preserved. Falls back to appending when the
+    table-dominant chunk is absent (e.g., HybridChunker did not surface it).
+    """
+    from src.ingest.support.parser_base import Chunk
+    from src.ingest.support.table_metrics import (
+        increment_row_chunks_emitted,
+        increment_summary_only_small,
+        increment_summary_only_uniform,
+        increment_summary_text_truncated,
+    )
+
+    max_rows = int(getattr(cfg, "max_table_rows_for_row_chunks", 32))
+    max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
+    # Per-summary-text cap (chars). 0 / unset disables truncation.
+    summary_max_chars = int(getattr(cfg, "table_summary_max_chars", 0) or 0)
+
+    # Compute table signatures once.
+    table_meta: list[tuple[Any, str]] = []
+    for tbl in tables:
+        md = getattr(tbl, "markdown", "") or ""
+        sig = _table_signature(md)
+        table_meta.append((tbl, sig))
+
+    # Mark indices for removal and compute insertion anchor per table.
+    drop_indices: set[int] = set()
+    insertion_anchor: dict[str, int] = {}
+    for tbl, sig in table_meta:
+        if not sig:
+            continue
+        md = tbl.markdown or ""
+        for i, c in enumerate(chunks):
+            if i in drop_indices:
+                continue
+            if _is_table_dominant(c.text, md, sig):
+                drop_indices.add(i)
+                insertion_anchor.setdefault(tbl.table_id, i)
+                # Mark only the first match per table; let other matches remain
+                # so chained tables on a page still get their own anchors.
+                break
+
+    def _make_table_chunks(tbl: Any) -> list:
+        out: list = []
+        heading_path = [h for h in (tbl.section_path or "").split(" > ") if h]
+        heading = heading_path[-1] if heading_path else ""
+        # Stable within-document group key so retrieval can join a winning row
+        # chunk back to its summary (and vice versa) without fuzzy-matching on
+        # heading_path + page. Prefer parser self_ref; fall back to table_id.
+        group_id = tbl.self_ref or tbl.table_id
+        common_meta_summary = {
+            "chunk_type": "table_summary",
+            "table_id": tbl.table_id,
+            "table_group_id": group_id,
+            "document_id": getattr(tbl, "document_id", "") or "",
+            "caption_label": getattr(tbl, "caption_label", "") or "",
+            "table_num_rows": tbl.num_rows,
+            "table_num_cols": tbl.num_cols,
+            "table_has_header": tbl.has_header,
+            # Stash full markdown on the summary chunk so retrieval can
+            # reconstruct the table without re-parsing the source PDF.
+            "table_markdown": getattr(tbl, "markdown", "") or "",
+        }
+        if tbl.caption:
+            common_meta_summary["table_caption"] = tbl.caption
+        raw_summary = _build_table_summary_text(tbl)
+        truncated_summary = _truncate_table_summary_text(raw_summary, summary_max_chars)
+        if truncated_summary != raw_summary:
+            increment_summary_text_truncated()
+        # Stamp cross-refs detected in the table summary text (e.g. a
+        # caption like "Table 5-2 (see §3.1)" carries a §-section ref).
+        _stamp_xref_targets(common_meta_summary, truncated_summary)
+        out.append(
+            Chunk(
+                text=truncated_summary,
+                section_path=tbl.section_path or "",
+                heading=heading,
+                heading_level=len(heading_path),
+                chunk_index=0,
+                extra_metadata=common_meta_summary,
+                heading_path=heading_path,
+                page_ref=tbl.page_ref,
+            )
+        )
+
+        gate = _classify_table_for_row_chunks(tbl, max_rows, max_cols)
+        if gate == "small_gate":
+            increment_summary_only_small()
+        elif gate == "uniform_gate":
+            increment_summary_only_uniform()
+        else:
+            increment_row_chunks_emitted()
+
+        if gate == "row_chunks":
+            headers = tbl.cells[0]
+            caption_prefix = (tbl.caption or "").strip()
+            for body_idx, row in enumerate(tbl.cells[1:]):
+                pairs = " | ".join(f"{h}: {v}" for h, v in zip(headers, row))
+                text = f"{caption_prefix}\n{pairs}" if caption_prefix else pairs
+                row_meta = {
+                    "chunk_type": "table_row",
+                    "table_id": tbl.table_id,
+                    "table_group_id": group_id,
+                    "document_id": getattr(tbl, "document_id", "") or "",
+                    "caption_label": getattr(tbl, "caption_label", "") or "",
+                    "table_row_index": body_idx,
+                    "table_num_rows": tbl.num_rows,
+                    "table_num_cols": tbl.num_cols,
+                }
+                # Row-level xref edges: most row bodies have none, but the
+                # caption-prefixed text occasionally references a section.
+                _stamp_xref_targets(row_meta, text)
+                out.append(
+                    Chunk(
+                        text=text,
+                        section_path=tbl.section_path or "",
+                        heading=heading,
+                        heading_level=len(heading_path),
+                        chunk_index=0,
+                        extra_metadata=row_meta,
+                        heading_path=list(heading_path),
+                        page_ref=tbl.page_ref,
+                    )
+                )
+        return out
+
+    # Assemble result preserving order: walk original chunks, drop marked ones,
+    # and insert per-table emissions at the first occurrence anchor.
+    inserted_for: set[str] = set()
+    result: list = []
+    for i, c in enumerate(chunks):
+        if i in drop_indices:
+            # Find which table anchored here and emit its chunks once.
+            for tbl, _sig in table_meta:
+                if (
+                    tbl.table_id not in inserted_for
+                    and insertion_anchor.get(tbl.table_id) == i
+                ):
+                    result.extend(_make_table_chunks(tbl))
+                    inserted_for.add(tbl.table_id)
+            continue
+        result.append(c)
+
+    # Tables that never matched a chunk — append their emissions at the end.
+    for tbl, _sig in table_meta:
+        if tbl.table_id not in inserted_for:
+            result.extend(_make_table_chunks(tbl))
+            inserted_for.add(tbl.table_id)
+
+    return result
 
 
 class DoclingParser:
@@ -786,12 +1714,22 @@ class DoclingParser:
             artifacts_path=config.docling_artifacts_path,
             vlm_mode=self._vlm_mode,
             generate_page_images=config.generate_page_images,
+            enable_ocr=getattr(config, "enable_ocr", True),
+            tableformer_mode=getattr(config, "tableformer_mode", "accurate"),
+            tableformer_do_cell_matching=getattr(
+                config, "tableformer_do_cell_matching", True
+            ),
         )
 
         # Encapsulate DoclingDocument — FR-3205
         self._docling_document = result.docling_document
 
-        tables = _extract_table_artifacts(self._docling_document)
+        tables = _extract_table_artifacts(
+            self._docling_document, document_id=file_path.stem
+        )
+        figures = _extract_figure_artifacts(
+            self._docling_document, document_id=file_path.stem
+        )
 
         return ParseResult(
             markdown=result.text_markdown,
@@ -799,6 +1737,7 @@ class DoclingParser:
             has_figures=result.has_figures,
             page_count=result.page_count,
             tables=tables,
+            figures=figures,
         )
 
     def chunk(self, parse_result: Any) -> list:
@@ -844,7 +1783,7 @@ class DoclingParser:
         raw_chunks = list(chunk_iter)
 
         chunks: list[Chunk] = []
-        for idx, raw in enumerate(raw_chunks):
+        for raw in raw_chunks:
             # Extract heading hierarchy from HybridChunker metadata
             headings: list[str] = []
             meta = getattr(raw, "meta", None)
@@ -856,18 +1795,44 @@ class DoclingParser:
             heading_level = len(headings)
             page_ref = _page_ref_from_chunk_meta(meta)
 
+            extra_metadata: dict = {}
+            # Stamp cross-reference edges so retrieval-time expansion can
+            # walk them without re-scanning the body text. JSON-encoded
+            # list[{type,value}]; empty list when no refs present.
+            _stamp_xref_targets(extra_metadata, raw.text)
+
             chunks.append(
                 Chunk(
                     text=raw.text,
                     section_path=section_path,
                     heading=heading,
                     heading_level=heading_level,
-                    chunk_index=idx,
-                    extra_metadata={},
+                    chunk_index=0,  # re-sequenced below
+                    extra_metadata=extra_metadata,
                     heading_path=headings,
                     page_ref=page_ref,
                 )
             )
+
+        tables = list(getattr(parse_result, "tables", []) or [])
+        cfg = getattr(self, "_config", None)
+        if (
+            tables
+            and getattr(cfg, "enable_adaptive_table_chunking", True)
+        ):
+            chunks = _apply_adaptive_table_chunking(chunks, tables, cfg)
+
+        # Append figure chunks. We don't try to insert them at a position in
+        # the prose stream — figures lack the row-fingerprint that lets
+        # ``_apply_adaptive_table_chunking`` anchor on a matching text chunk.
+        # Defensive ``getattr`` so ParseResult shapes that pre-date FIG-1
+        # don't trip us (memory ``project_rag_chain_defensive_init``).
+        figures = list(getattr(parse_result, "figures", []) or [])
+        if figures:
+            chunks = list(chunks) + _figure_artifacts_to_chunks(figures)
+
+        for i, c in enumerate(chunks):
+            c.chunk_index = i
         return chunks
 
     @classmethod
@@ -885,6 +1850,11 @@ class DoclingParser:
         warmup_docling_models(
             artifacts_path=config.docling_artifacts_path,
             with_smolvlm=(getattr(config, "vlm_mode", "disabled") == "builtin"),
+            with_tableformer_v2=(
+                str(getattr(config, "tableformer_mode", "accurate")).lower()
+                == "accurate"
+            ),
+            with_rapidocr=bool(getattr(config, "enable_ocr", True)),
         )
 
 

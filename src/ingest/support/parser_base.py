@@ -1,6 +1,6 @@
 # @summary
 # Abstract parser protocol and unified data contracts for the Document Parsing Abstraction.
-# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, PageRef, chunk_with_markdown, validate_extra_metadata
+# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, FigureArtifact, PageRef, chunk_with_markdown, validate_extra_metadata
 # Deps: dataclasses, pathlib, typing, src.ingest.support.markdown
 # @end-summary
 
@@ -67,6 +67,16 @@ class TableArtifact:
         section_path: Hierarchical breadcrumb of headings containing this
             table. Empty when no enclosing heading exists.
         caption: Caption text if the parser detected one; empty otherwise.
+        caption_label: Normalised caption label extracted from ``caption``
+            (e.g., ``"Table 5-2"``); empty when no prefix could be parsed.
+            Surfaced into chunk metadata for xref resolution.
+        self_ref: Parser-internal stable reference (e.g., Docling
+            ``TableItem.self_ref``) used to join sibling chunks emitted from
+            the same source table. Empty string when the parser does not
+            expose one.
+        document_id: Stable pointer to the parent document (e.g., the source
+            file's stem). Empty string when the parser/caller did not stamp
+            one — backward compatible with callers that pre-date the field.
     """
 
     table_id: str
@@ -77,7 +87,51 @@ class TableArtifact:
     has_header: bool = False
     section_path: str = ""
     caption: str = ""
+    caption_label: str = ""
     page_ref: PageRef | None = None
+    self_ref: str = ""
+    document_id: str = ""
+
+
+@dataclass
+class FigureArtifact:
+    """Structured figure/picture extracted from a parsed document.
+
+    Sibling to :class:`TableArtifact`, surfaced for xref expansion ("see Figure
+    4-1") and citation/UI rendering. Lightweight by design — image bytes are
+    not embedded; ``image_uri`` carries a best-effort pointer to where the
+    image lives (data URI, file URI, or empty when Docling did not surface
+    one).
+
+    Emitted by :class:`DoclingParser` from ``DoclingDocument.pictures``.
+    Parsers without figure support leave ``ParseResult.figures`` empty.
+
+    Attributes:
+        document_id: Stable pointer to the parent document (typically the
+            source file's stem). Empty when not stamped by the caller.
+        caption: Caption text extracted from the figure's caption refs;
+            empty when no caption was detected.
+        caption_label: Normalised caption label (e.g. ``"Figure 4-1"``)
+            parsed from ``caption``. Empty when no prefix matched.
+        section_path: Hierarchical breadcrumb of enclosing headings,
+            joined with ``" > "``. Empty when no enclosing heading exists.
+        page_no: 1-based page number from the figure's provenance.
+            ``0`` when unknown.
+        self_ref: Parser-internal stable reference (e.g. Docling
+            ``PictureItem.self_ref``). Empty when the parser does not
+            expose one.
+        image_uri: Best-effort URI for the figure image (data URI, file
+            URI, or http(s)). Empty when Docling did not attach an image
+            ref to this picture.
+    """
+
+    document_id: str = ""
+    caption: str = ""
+    caption_label: str = ""
+    section_path: str = ""
+    page_no: int = 0
+    self_ref: str = ""
+    image_uri: str = ""
 
 
 @dataclass
@@ -95,6 +149,8 @@ class ParseResult:
         page_count: Total pages in source. 0 for code/text files.
         tables: Structured table artifacts extracted by the parser. Empty
             for parsers without structured-table support. FR-3211.
+        figures: Structured figure artifacts extracted by the parser. Empty
+            for parsers without figure support.
     """
 
     markdown: str
@@ -102,6 +158,7 @@ class ParseResult:
     has_figures: bool
     page_count: int
     tables: list[TableArtifact] = field(default_factory=list)
+    figures: list[FigureArtifact] = field(default_factory=list)
 
 
 @dataclass

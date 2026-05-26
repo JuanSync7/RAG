@@ -867,7 +867,7 @@ def ingest_directory(
                           "ingestion_failed source=%s source_key=%s errors=%s",
                           source["source_name"],
                           source["source_key"],
-                          "; ".join(result.errors),
+                          "; ".join(e if isinstance(e, str) else str(e) for e in result.errors),
                       )
                       continue
 

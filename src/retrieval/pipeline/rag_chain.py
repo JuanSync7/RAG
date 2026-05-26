@@ -142,6 +142,8 @@ from src.retrieval.query.nodes.rerank_fusion import (
     fuse_scores,
     heading_match_score,
 )
+from src.retrieval.table_group_expansion import expand_table_group_hits
+from src.retrieval.xref_expansion import expand_xref_hits
 import os as _os
 RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
     "RAG_TREE_SCHEMA_PRESENT", "true"
@@ -267,6 +269,38 @@ class RAGChain:
             from config.settings import validate_visual_retrieval_config
             validate_visual_retrieval_config()  # FR-111: fail fast on bad config
             logger.info("Visual retrieval enabled — model will be loaded on first visual query.")
+
+        # Table-aware retrieval expansion. ON by default as of the
+        # table-aware-chunking GA flip — two clean real-PDF soaks plus a
+        # hierarchical DOCX smoke confirmed table-group sibling expansion is
+        # production-ready. The expansion path is itself guarded by the
+        # ``_has_table_chunk`` pre-check inside ``_apply_table_expansion`` so
+        # the cost is zero on prose-only corpora.
+        # Env: RAG_TABLE_EXPANSION_ENABLED ("false"/"0"/"no" -> off; default on).
+        self.enable_table_group_expansion: bool = _os.environ.get(
+            "RAG_TABLE_EXPANSION_ENABLED", "true",
+        ).lower() in ("true", "1", "yes")
+        self.table_expansion_max_rows: int = int(
+            _os.environ.get("RAG_TABLE_EXPANSION_MAX_ROWS", "0")
+        )
+        self.table_expansion_max_groups: int = int(
+            _os.environ.get("RAG_TABLE_EXPANSION_MAX_GROUPS", "8")
+        )
+        self.table_expansion_fetch_summary: bool = _os.environ.get(
+            "RAG_TABLE_EXPANSION_FETCH_SUMMARY", "true",
+        ).lower() in ("true", "1", "yes")
+
+        # Cross-reference (xref) expansion — MVP, default-off dark launch.
+        # Resolves ``section`` / ``section_symbol`` refs only; table/figure/
+        # appendix resolution is TODO (needs a caption registry).
+        from config.settings import (
+            RAG_XREF_EXPANSION_ENABLED,
+            RAG_XREF_MAX_PER_HIT,
+            RAG_XREF_MAX_TOTAL,
+        )
+        self.xref_expansion_enabled: bool = RAG_XREF_EXPANSION_ENABLED
+        self.xref_max_per_hit: int = RAG_XREF_MAX_PER_HIT
+        self.xref_max_total: int = RAG_XREF_MAX_TOTAL
 
         logger.info("RAG chain ready.")
 
@@ -408,6 +442,116 @@ class RAGChain:
             logger.debug("Visual results score range: %s", score_range)
         logger.info("Visual retrieval returned %d results.", len(results))
         return results
+
+    # ------------------------------------------------------------------
+    # Table-aware retrieval expansion (post-rerank).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ranked_to_dicts(results: list[RankedResult]) -> list[dict]:
+        """Adapter: RankedResult list -> dict list expected by helper."""
+        out: list[dict] = []
+        for r in results:
+            meta = dict(r.metadata or {})
+            out.append({
+                "text": r.text,
+                "score": r.score,
+                "uuid": str(meta.get("chunk_id") or meta.get("uuid") or ""),
+                "metadata": meta,
+            })
+        return out
+
+    @staticmethod
+    def _dicts_to_ranked(dicts: list[dict]) -> list[RankedResult]:
+        """Adapter: dict list (helper output) -> RankedResult list."""
+        return [
+            RankedResult(
+                text=d.get("text", ""),
+                score=float(d.get("score", 0.0)),
+                metadata=dict(d.get("metadata", {}) or {}),
+            )
+            for d in dicts
+        ]
+
+    @staticmethod
+    def _has_table_chunk(results: list[RankedResult]) -> bool:
+        """Cheap pre-check: any hit references a table_group_id."""
+        for r in results:
+            md = r.metadata or {}
+            if md.get("table_group_id") and md.get("chunk_type") in (
+                "table_row", "table_summary",
+            ):
+                return True
+        return False
+
+    def _apply_xref_expansion(
+        self, reranked: list[RankedResult],
+    ) -> list[RankedResult]:
+        """Expand chunk-to-chunk xref edges after rerank (default-off, MVP).
+
+        No-op unless ``xref_expansion_enabled`` is True. Falls back to the
+        original ``reranked`` on any error so retrieval is never blocked.
+        """
+        if not getattr(self, "xref_expansion_enabled", False) or not reranked:
+            return reranked
+        if getattr(self, "_weaviate_client", None) is None:
+            return reranked
+        try:
+            from config.settings import VECTOR_COLLECTION_DEFAULT
+            dict_hits = self._ranked_to_dicts(reranked)
+            expanded = expand_xref_hits(
+                dict_hits,
+                client=self._weaviate_client,
+                collection=VECTOR_COLLECTION_DEFAULT,
+                enabled=True,
+                max_per_hit=getattr(self, "xref_max_per_hit", 2),
+                max_total=getattr(self, "xref_max_total", 6),
+            )
+            return self._dicts_to_ranked(expanded)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "xref_expansion failed (non-fatal): %s — passing reranked through.",
+                exc,
+            )
+            return reranked
+
+    def _apply_table_expansion(
+        self, reranked: list[RankedResult],
+    ) -> list[RankedResult]:
+        """Expand table-group siblings in-place after rerank (opt-in).
+
+        No-op unless ``enable_table_group_expansion`` is True and the hit
+        list actually contains a table chunk. Falls back to the original
+        ``reranked`` on any error so retrieval is never blocked.
+        """
+        if not getattr(self, "enable_table_group_expansion", False) or not reranked:
+            return reranked
+        if not self._has_table_chunk(reranked):
+            return reranked
+        if getattr(self, "_weaviate_client", None) is None:
+            return reranked
+        try:
+            from config.settings import VECTOR_COLLECTION_DEFAULT
+            dict_hits = self._ranked_to_dicts(reranked)
+            expanded = expand_table_group_hits(
+                dict_hits,
+                client=self._weaviate_client,
+                collection=VECTOR_COLLECTION_DEFAULT,
+                max_rows_per_group=getattr(self, "table_expansion_max_rows", 0),
+                fetch_summary_for_row_hits=getattr(
+                    self, "table_expansion_fetch_summary", True,
+                ),
+                max_groups_to_expand=getattr(
+                    self, "table_expansion_max_groups", 8,
+                ),
+            )
+            return self._dicts_to_ranked(expanded)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "table_group_expansion failed (non-fatal): %s — passing reranked through.",
+                exc,
+            )
+            return reranked
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
         """Run hybrid search against the database layer (persistent or transient client)."""
@@ -1848,6 +1992,37 @@ class RAGChain:
                                     "The answer below is based on the best available evidence."
                                 )
                 tp.record("fallback_retrieval", "retrieval", started_at=t0)
+
+            # Stage 5.35: Table-aware group expansion (opt-in).
+            # Runs after rerank (and any rerank fallback) and before document
+            # formatting / context assembly so table siblings ride along into
+            # the LLM prompt. No-op when the flag is off or when no result
+            # references a table_group_id.
+            if getattr(self, "enable_table_group_expansion", False) and reranked:
+                t0 = time.perf_counter()
+                with self.tracer.span(
+                    "rag_chain.table_group_expansion", parent=root_span,
+                ) as tg_span:
+                    before = len(reranked)
+                    reranked = self._apply_table_expansion(reranked)
+                    tg_span.set_attribute("hits_before", before)
+                    tg_span.set_attribute("hits_after", len(reranked))
+                tp.record("table_group_expansion", "retrieval", started_at=t0)
+
+            # Stage 5.36: Cross-reference (xref) expansion (opt-in, MVP).
+            # Follows section / section_symbol cross-refs stamped at ingest.
+            # One hop only — does NOT transitively expand. Default-off via
+            # ``RAG_XREF_EXPANSION_ENABLED``.
+            if getattr(self, "xref_expansion_enabled", False) and reranked:
+                t0 = time.perf_counter()
+                with self.tracer.span(
+                    "rag_chain.xref_expansion", parent=root_span,
+                ) as xr_span:
+                    before = len(reranked)
+                    reranked = self._apply_xref_expansion(reranked)
+                    xr_span.set_attribute("hits_before", before)
+                    xr_span.set_attribute("hits_after", len(reranked))
+                tp.record("xref_expansion", "retrieval", started_at=t0)
 
             # Stage 5.4: Visual retrieval (FR-601, FR-615, NFR-905)
             visual_results = None  # None = disabled semantics

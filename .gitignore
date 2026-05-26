@@ -28,6 +28,9 @@ processed/
 # Clean document store (regenerable via ingestion)
 data/clean_store/
 
+# Soak-test datasheet inputs (download on demand; not redistributed in-repo)
+data/datasheets/
+
 # Models (downloaded via huggingface_hub)
 models/baai/
 
@@ -105,3 +108,4 @@ scripts/.bench_results/*.json
 docker-compose.override.yml
 docker-compose.cpu-embed-off.yml
 .gitignore.local
+.tei_cache

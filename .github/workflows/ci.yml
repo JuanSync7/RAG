@@ -17,7 +17,7 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
       - name: Run tests
-        run: uv run --no-sync python -m pytest tests/ingest tests/test_rate_limiter.py tests/test_cache_provider.py tests/test_security_auth.py tests/test_api_key_store.py tests/test_quota_store.py tests/test_query_processor.py tests/test_generator.py tests/test_validation.py tests/test_query_filters.py tests/test_rag_chain_budget.py tests/test_rag_chain_integration.py tests/test_api_schemas.py tests/test_mcp_adapter.py tests/test_api_error_envelope.py
+        run: uv run --no-sync python -m pytest -m "not slow and not integration" tests/ingest tests/test_rate_limiter.py tests/test_cache_provider.py tests/test_security_auth.py tests/test_api_key_store.py tests/test_quota_store.py tests/test_query_processor.py tests/test_generator.py tests/test_validation.py tests/test_query_filters.py tests/test_rag_chain_budget.py tests/test_rag_chain_integration.py tests/test_api_schemas.py tests/test_mcp_adapter.py tests/test_api_error_envelope.py
       - name: Build console TypeScript UI
         run: npm --prefix server/console/web ci && npm --prefix server/console/web run check && npm --prefix server/console/web run build
       - name: Compile checks

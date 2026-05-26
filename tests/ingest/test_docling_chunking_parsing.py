@@ -265,10 +265,12 @@ class TestParseWithDoclingHappyPath:
             )
 
         assert result.docling_document is mock_doc
-        # For disabled mode, DocumentConverter must be created without format_options.
+        # PdfPipelineOptions is now built unconditionally to carry TF v2 mode +
+        # OCR settings, so format_options is always present. Disabled vlm mode
+        # only suppresses do_picture_description.
         MockConverter.assert_called_once()
         _, kwargs = MockConverter.call_args
-        assert "format_options" not in kwargs
+        assert "format_options" in kwargs
 
     def test_external_vlm_mode_returns_docling_document(self, tmp_path):
         """vlm_mode='external' — same as disabled at parse time; docling_document populated.
@@ -293,7 +295,7 @@ class TestParseWithDoclingHappyPath:
         assert result.docling_document is mock_doc
         MockConverter.assert_called_once()
         _, kwargs = MockConverter.call_args
-        assert "format_options" not in kwargs
+        assert "format_options" in kwargs
 
     def test_builtin_vlm_mode_sets_do_picture_description_true(self, tmp_path):
         """vlm_mode='builtin' — PdfPipelineOptions.do_picture_description set to True
@@ -571,8 +573,9 @@ class TestParseWithDoclingErrorPaths:
 class TestParseWithDoclingBoundary:
     """Boundary condition tests for parse_with_docling."""
 
-    def test_vlm_mode_disabled_does_not_set_format_options(self, tmp_path):
-        """vlm_mode='disabled' → converter constructed without format_options."""
+    def test_vlm_mode_disabled_still_sets_format_options(self, tmp_path):
+        """vlm_mode='disabled' → converter still receives format_options because
+        PdfPipelineOptions now carries TF v2 mode + OCR settings unconditionally."""
         source_file = tmp_path / "doc.pdf"
         source_file.write_bytes(b"%PDF")
 
@@ -584,10 +587,11 @@ class TestParseWithDoclingBoundary:
             parse_with_docling(source_file, parser_model="m", vlm_mode="disabled")
 
         _, kwargs = MockConverter.call_args
-        assert "format_options" not in kwargs
+        assert "format_options" in kwargs
 
-    def test_vlm_mode_external_does_not_set_format_options(self, tmp_path):
-        """vlm_mode='external' → converter has no format_options (enrichment is post-chunking)."""
+    def test_vlm_mode_external_still_sets_format_options(self, tmp_path):
+        """vlm_mode='external' → converter receives format_options for TF v2 + OCR;
+        SmolVLM picture description is not enabled (external enrichment is post-chunking)."""
         source_file = tmp_path / "doc.pdf"
         source_file.write_bytes(b"%PDF")
 
@@ -599,7 +603,7 @@ class TestParseWithDoclingBoundary:
             parse_with_docling(source_file, parser_model="m", vlm_mode="external")
 
         _, kwargs = MockConverter.call_args
-        assert "format_options" not in kwargs
+        assert "format_options" in kwargs
 
     def test_no_pictures_produces_empty_figures_list(self, tmp_path):
         """When document.pictures is empty, figures is [] and has_figures is False."""
