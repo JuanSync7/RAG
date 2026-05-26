@@ -645,6 +645,64 @@ def _stamp_document_id(chunks: list, document_id: str) -> None:
         meta.setdefault("document_id", document_id)
 
 
+def _table_soak_verdict(soak: dict) -> dict:
+    """Apply table-side soak acceptance criteria. Returns PASS/FAIL per criterion.
+
+    Mirrors :func:`_figure_soak_verdict` (FIG-8). The over-all
+    ``caption_label_coverage.label_rate`` is still surfaced in the
+    transcript for observability — it captures "how many tables Docling
+    detected got a caption_label". But it is NOT a verdict gauge because
+    Docling reports many layout / header / continuation rows as "tables"
+    that prose never references. Counting those in the denominator
+    pollutes the rate: ESP32 hit 76% and MSP430 hit 28% on the over-all
+    rate while still being 98.76% / 93.8% resolvable on actually
+    referenced tables.
+
+    The verdict therefore gates on the *referenced-only* denominator:
+    of the table xrefs prose actually emitted, how many resolved to a
+    TableArtifact with a non-empty ``caption_label``. See memory
+    ``feedback_pick_meaningful_denominators``.
+
+    Inputs (all read from the top-level soak result dict):
+      - ``xref_resolvability.table_resolvable`` — numerator
+      - ``xref_resolvability.unresolvable_table_no_label`` — completes
+        the referenced-only denominator
+      - ``counts.tables`` — sanity check: > 0
+    """
+    counts = soak.get("counts") or {}
+    tables_total = counts.get("tables", 0) or 0
+    xref_res = soak.get("xref_resolvability") or {}
+    resolved = int(xref_res.get("table_resolvable", 0) or 0)
+    unresolved = int(xref_res.get("unresolvable_table_no_label", 0) or 0)
+    denom = resolved + unresolved
+    if denom > 0:
+        rate_of_referenced: float | None = resolved / denom
+        ref_ok = rate_of_referenced >= 0.90
+        ref_value: float | str = round(float(rate_of_referenced), 4)
+    else:
+        # No referenced tables — nothing to gate on; mirror figure-verdict
+        # tolerance by passing this criterion (a doc with zero table refs
+        # is not a regression in caption-label parsing).
+        rate_of_referenced = None
+        ref_ok = True
+        ref_value = "n/a"
+
+    criteria = {
+        "table_count_gt_0": {
+            "ok": tables_total > 0,
+            "value": int(tables_total),
+            "threshold": "> 0",
+        },
+        "table_caption_label_rate_of_referenced_ge_0_90": {
+            "ok": bool(ref_ok),
+            "value": ref_value,
+            "threshold": ">= 0.90",
+        },
+    }
+    all_ok = all(v["ok"] for v in criteria.values())
+    return {"criteria": criteria, "all_pass": bool(all_ok)}
+
+
 def _figure_soak_verdict(soak: dict) -> dict:
     """Apply the FIG-3 acceptance criteria. Returns per-criterion PASS/FAIL."""
     counts = soak.get("counts") or {}
@@ -806,6 +864,7 @@ def run_soak(pdf_path: Path) -> dict:
         "xref_edges": {},
         "xref_resolvability": {},
         "caption_label_coverage": {},
+        "table_verdict": {},
         "figure_soak": {},
         "errors": [],
     }
@@ -882,6 +941,12 @@ def run_soak(pdf_path: Path) -> dict:
                 "markdown_len": len(md),
             }
         )
+
+    # --- Table-side verdict (FIG-8-style referenced-only denominator) ------
+    try:
+        result["table_verdict"] = _table_soak_verdict(result)
+    except Exception as exc:  # pragma: no cover - defensive
+        result["errors"].append(f"table verdict failed: {exc!r}")
 
     # --- Figure-artifact soak (FIG-3) --------------------------------------
     try:
@@ -1058,6 +1123,24 @@ def _render_report(pdf_path: Path, data: dict, *, today: str) -> str:
         except (TypeError, ValueError):
             rate_str = str(rate)
         lines.append(f"- label rate: {rate_str}")
+        lines.append("")
+
+    table_verdict = data.get("table_verdict") or {}
+    if table_verdict:
+        lines.append("## Table soak verdict")
+        lines.append("")
+        crits = table_verdict.get("criteria") or {}
+        if crits:
+            lines.append("| criterion | threshold | actual | result |")
+            lines.append("|---|---|---|---|")
+            for k, v in crits.items():
+                marker = "PASS" if v.get("ok") else "FAIL"
+                lines.append(
+                    f"| {k} | {v.get('threshold')} | {v.get('value')} | **{marker}** |"
+                )
+            lines.append("")
+        overall = "PASS" if table_verdict.get("all_pass") else "FAIL"
+        lines.append(f"**Table verdict: {overall}** — see criteria table above.")
         lines.append("")
 
     fig_soak = data.get("figure_soak") or {}
