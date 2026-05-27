@@ -1,0 +1,11 @@
+name: _example_
+version: 1
+profile: asic_riscv_soc
+corpus_pin: 4839331a0e9e772730196332f1d9a1f2080e52ad3a787885a1254f4221c019dc
+description: Minimal example pack used to validate the eval_pack loader.
+collection_name_template: "ragweave_test_{name}_{corpus_pin_short}"
+judge:
+  tier1_model: gpt-4o-mini
+  tier1_prompt_version: v1
+  temperature: 0.0
+  samples_per_claim: 1
