@@ -335,6 +335,7 @@ class DeepResearch:
         self._graph_context_len: int = 0
         # Observability — set in research() before _research_impl runs.
         self._trace: Any = None
+        self._trace_entered: bool = False
 
     # ------------------------------------------------------------------
     # Entry point
@@ -346,7 +347,7 @@ class DeepResearch:
         try:
             tracer = get_tracer()
             self._trace = tracer.trace(
-                "deep_research",
+                "retrieval.deep_research",
                 metadata={
                     "original_question": self._original_question,
                     "processed_query": self._processed_query,
@@ -354,8 +355,19 @@ class DeepResearch:
                     "max_depth": self._budget.max_depth,
                 },
             )
+            # Enter the trace's context-manager so its root span is pushed
+            # into the ambient OTel context and ends with the body. The
+            # backend ABC's __enter__ is the canonical way to begin and the
+            # __exit__ is the canonical end — works for both OTel (real
+            # provider attach + span.end) and Noop (returns self / no-op).
+            try:
+                self._trace.__enter__()
+                self._trace_entered = True
+            except Exception:  # noqa: BLE001
+                self._trace_entered = False
         except Exception:  # noqa: BLE001 — fail open
             self._trace = None
+            self._trace_entered = False
         try:
             result = await self._research_impl()
             result = self._apply_per_topic_rerank(result)
@@ -378,9 +390,22 @@ class DeepResearch:
         return result
 
     def _end_trace(self, *, status: str, error: Optional[Exception] = None) -> None:
-        """Best-effort terminate the parent trace. Fails open."""
+        """Best-effort terminate the parent trace. Fails open.
+
+        Prefers the context-manager __exit__ path (the only way OTelTrace
+        finalises its root span). Falls back to a ``.end()`` method on Spy
+        backends that don't implement __exit__.
+        """
         t = self._trace
         if t is None:
+            return
+        if getattr(self, "_trace_entered", False):
+            try:
+                exc_val = error if status == "error" else None
+                t.__exit__(type(exc_val) if exc_val else None, exc_val, None)
+            except Exception:  # noqa: BLE001
+                pass
+            self._trace_entered = False
             return
         end = getattr(t, "end", None)
         if not callable(end):
@@ -493,7 +518,7 @@ class DeepResearch:
         try:
             if self._trace is not None:
                 iter_span = self._trace.span(
-                    f"dr_iteration_depth_{depth}",
+                    "retrieval.deep_research.iteration",
                     attributes={
                         "depth": depth,
                         "topic": pool.name,

@@ -16,7 +16,14 @@ dependencies = [
   "langgraph",
   "numpy",
   "temporalio>=1.23,<2",
-  "langfuse",
+  # OpenTelemetry SDK for the OTel-native observability backend
+  # (src/platform/observability/otel/backend.py). Targets OTLP/HTTP so any
+  # OTel-compatible collector (Langfuse v3 /api/public/otel/v1/traces,
+  # Phoenix, Braintrust, Honeycomb, Datadog, etc.) is reachable via
+  # OTEL_EXPORTER_OTLP_ENDPOINT.
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
   "fastapi",
   "uvicorn[standard]",
   "pydantic>=2.0",

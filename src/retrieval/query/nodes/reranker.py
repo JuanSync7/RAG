@@ -174,8 +174,12 @@ class LocalBGEReranker:
         # collection. The context-manager form defers the call to
         # invocation time, which is functionally equivalent.
         with self._torch.inference_mode(), get_tracer().span(
-            "reranker.rerank",
-            {"input_count": len(documents), "top_k": top_k},
+            "retrieval.rerank.local",
+            {
+                "candidate_count": len(documents),
+                "top_k": top_k,
+                "device": str(self.device),
+            },
         ) as span:
             if not documents:
                 logger.debug("rerank: empty document list, returning empty result")
@@ -266,8 +270,12 @@ class TEIReranker:
             return []
 
         with self.tracer.span(
-            "reranker.rerank",
-            {"input_count": len(documents), "top_k": top_k},
+            "retrieval.rerank.tei",
+            {
+                "candidate_count": len(documents),
+                "top_k": top_k,
+                "endpoint": self.base_url,
+            },
         ) as span:
             resp = self._client.post(
                 f"{self.base_url}/rerank",

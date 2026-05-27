@@ -382,7 +382,7 @@ def _detect_suppress_memory(query: str) -> bool:
 
 def _call_llm(prompt: str, system: str = "") -> Optional[str]:
     """Call LLM via the platform-layer one-shot helper, wrapped in a tracing span."""
-    with get_tracer().span("query_processor.call_llm", {"model_alias": "query"}):
+    with get_tracer().span("retrieval.query.call_llm", {"model_alias": "query"}):
         return call_oneshot(
             prompt,
             system=system,
@@ -394,7 +394,7 @@ def _call_llm(prompt: str, system: str = "") -> Optional[str]:
 
 def _check_llm_available() -> bool:
     """Check if the LLM provider is reachable."""
-    with get_tracer().span("query_processor.llm_healthcheck"):
+    with get_tracer().span("retrieval.query.llm_healthcheck"):
         try:
             provider = get_llm_provider()
             available = provider.is_available(model_alias="query")
@@ -793,7 +793,7 @@ def process_query(
             history_turns_used=turns_used,
         )
 
-    with get_tracer().span("query_processor.process_query", {"raw_query_len": len(raw_query)}) as root_span:
+    with get_tracer().span("retrieval.query.process", {"raw_query_len": len(raw_query)}) as root_span:
         ollama_available = _check_llm_available()
         if not ollama_available:
             logger.warning("LLM unavailable; falling back to heuristic mode")

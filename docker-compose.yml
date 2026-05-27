@@ -566,6 +566,11 @@ services:
         condition: service_healthy
     environment:
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
+      # LANGFUSE_INIT_ORG_ID is the gate that enables the entire init block.
+      # Without it, Langfuse v3 ignores LANGFUSE_INIT_PROJECT_PUBLIC_KEY etc.
+      # and the keys in .env never register on first bootstrap.
+      - LANGFUSE_INIT_ORG_ID=${LANGFUSE_INIT_ORG_ID:-ragweave}
+      - LANGFUSE_INIT_PROJECT_ID=${LANGFUSE_INIT_PROJECT_ID:-rag-observability}
       - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-RAG Local}
       - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-rag-observability}
       - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}

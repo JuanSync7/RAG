@@ -1,9 +1,12 @@
 # @summary
 # Input and output rail executors with parallel execution and consensus gate.
 # Runs intent, injection, PII, toxicity, and topic safety rails in parallel
-# for input; faithfulness, PII, toxicity in parallel for output.
+# for input; faithfulness, PII, toxicity in parallel for output. Emits a
+# guardrails.input/guardrails.output parent span with per-rail
+# guardrails.rail.<name> child spans (ambient OTel nesting).
 # Exports: InputRailExecutor, OutputRailExecutor
-# Deps: src.guardrails.shared.*, src.guardrails.common.schemas, concurrent.futures, logging, time
+# Deps: src.guardrails.shared.*, src.guardrails.common.schemas,
+#       src.platform.observability, concurrent.futures, logging, time
 # @end-summary
 """Rail execution orchestration for the NeMo Guardrails backend.
 
@@ -39,7 +42,7 @@ from src.guardrails.shared import IntentClassifier
 from src.guardrails.shared import PIIDetector
 from src.guardrails.shared import TopicSafetyChecker
 from src.guardrails.shared import ToxicityFilter
-from src.platform.observability import get_tracer
+from src.platform.observability import get_tracer, submit_with_context
 from src.platform import PIPELINE_STAGE_MS
 from src.platform import measure_ms
 
@@ -86,6 +89,37 @@ def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:
         PIPELINE_STAGE_MS.labels(
             stage=f"guardrail_{rail_name}", bucket="guardrails"
         ).observe(ms)
+
+
+def _aggregate_input_verdict(executions: list[RailExecution]) -> str:
+    """Roll per-rail verdicts up to a single guardrails.input span attribute.
+
+    Priority: any REJECT → "reject"; else any MODIFY → "modify"; else "pass".
+    """
+    has_reject = any(e.verdict == RailVerdict.REJECT for e in executions)
+    if has_reject:
+        return "reject"
+    has_modify = any(e.verdict == RailVerdict.MODIFY for e in executions)
+    if has_modify:
+        return "modify"
+    return "pass"
+
+
+def _aggregate_output_verdict(
+    executions: list[RailExecution], rail_results: dict
+) -> str:
+    """Roll per-rail verdicts up to the guardrails.output span attribute.
+
+    Faithfulness REJECT short-circuits the consensus gate, so it dominates
+    the rolled-up verdict.
+    """
+    faith = rail_results.get("faithfulness")
+    if faith is not None and faith.verdict == RailVerdict.REJECT:
+        return "reject"
+    has_modify = any(e.verdict == RailVerdict.MODIFY for e in executions)
+    if has_modify:
+        return "modify"
+    return "pass"
 
 
 class InputRailExecutor:
@@ -156,153 +190,189 @@ class InputRailExecutor:
         executions: list[RailExecution] = []
         query_hash = make_query_hash(query)
 
-        with ThreadPoolExecutor(
-            max_workers=RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="input_rail"
-        ) as pool:
-            futures: dict[str, Future] = {}
+        rail_count = sum(
+            1 for r in (
+                self._intent, self._injection, self._pii,
+                self._toxicity, self._topic_safety,
+            ) if r is not None
+        )
+        outer_span = self._tracer.span(
+            "guardrails.input",
+            {
+                "rail_count": rail_count,
+                "timeout_ms": int(self._timeout * 1000),
+                "query_hash": query_hash,
+            },
+        )
+        with outer_span:
+            with ThreadPoolExecutor(
+                max_workers=RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="input_rail"
+            ) as pool:
+                futures: dict[str, Future] = {}
 
-            if self._intent:
-                futures["intent"] = pool.submit(self._intent.classify, query)
-            if self._injection:
-                futures["injection"] = pool.submit(
-                    self._injection.check, query, tenant_id
-                )
-            if self._pii:
-                futures["pii"] = pool.submit(self._pii.redact, query)
-            if self._toxicity:
-                futures["toxicity"] = pool.submit(self._toxicity.check, query)
-            if self._topic_safety:
-                futures["topic_safety"] = pool.submit(self._topic_safety.check, query)
-
-            for name, fut in futures.items():
-                t0 = time.perf_counter()
-                span = self._tracer.start_span(
-                    f"guardrails.input.{name}",
-                    {"query_hash": query_hash},
-                    parent=parent_span,
-                )
-                try:
-                    rail_result = fut.result(timeout=self._timeout)
-                    ms = measure_ms(t0)
-
-                    if name == "intent":
-                        result.intent = rail_result.intent
-                        result.intent_confidence = rail_result.confidence
-                        verdict = RailVerdict.PASS
-                        executions.append(
-                            RailExecution(
-                                "intent",
-                                verdict,
-                                ms,
-                                {
-                                    "intent": rail_result.intent,
-                                    "confidence": rail_result.confidence,
-                                },
-                            )
-                        )
-                    elif name == "injection":
-                        result.injection_verdict = rail_result.verdict
-                        executions.append(
-                            RailExecution(
-                                "injection",
-                                rail_result.verdict,
-                                ms,
-                                {
-                                    "source": rail_result.detection_source or "none",
-                                    "score": rail_result.score,
-                                },
-                            )
-                        )
-                    elif name == "pii":
-                        redacted_text, detections = rail_result
-                        if detections:
-                            result.redacted_query = redacted_text
-                            result.pii_redactions = [
-                                {"type": d.pii_type} for d in detections
-                            ]
-                        verdict = (
-                            RailVerdict.MODIFY if detections else RailVerdict.PASS
-                        )
-                        executions.append(RailExecution("pii", verdict, ms))
-                    elif name == "toxicity":
-                        result.toxicity_verdict = rail_result.verdict
-                        executions.append(
-                            RailExecution(
-                                "toxicity",
-                                rail_result.verdict,
-                                ms,
-                                {"score": rail_result.score},
-                            )
-                        )
-                    elif name == "topic_safety":
-                        verdict = rail_result.verdict
-                        if not rail_result.on_topic:
-                            result.topic_off_topic = True
-                        executions.append(
-                            RailExecution(
-                                "topic_safety",
-                                verdict,
-                                ms,
-                                {"on_topic": rail_result.on_topic},
-                            )
-                        )
-
-                    _record_metric(name, executions[-1].verdict, ms)
-                    span.set_attribute("verdict", executions[-1].verdict.value)
-                    span.end(status="ok")
-
-                    logger.info(
-                        "Rail %s | verdict=%s | ms=%.0f | hash=%s | tenant=%s",
-                        name,
-                        executions[-1].verdict.value,
-                        ms,
-                        query_hash,
-                        tenant_id,
+                if self._intent:
+                    futures["intent"] = submit_with_context(pool, self._intent.classify, query)
+                if self._injection:
+                    futures["injection"] = submit_with_context(
+                        pool, self._injection.check, query, tenant_id
                     )
+                if self._pii:
+                    futures["pii"] = submit_with_context(pool, self._pii.redact, query)
+                if self._toxicity:
+                    futures["toxicity"] = submit_with_context(pool, self._toxicity.check, query)
+                if self._topic_safety:
+                    futures["topic_safety"] = submit_with_context(pool, self._topic_safety.check, query)
 
-                except TimeoutError:
-                    ms = measure_ms(t0)
-                    if name in self._fail_closed_rails:
-                        logger.warning(
-                            "Rail '%s' timed out after %.0fms — fail-closed: REJECT | hash=%s",
-                            name, ms, query_hash,
-                        )
-                        default_verdict = RailVerdict.REJECT
-                        if name == "injection":
-                            result.injection_verdict = RailVerdict.REJECT
-                        elif name == "toxicity":
-                            result.toxicity_verdict = RailVerdict.REJECT
-                    else:
-                        logger.warning(
-                            "Rail '%s' timed out after %.0fms — defaulting to pass | hash=%s",
-                            name, ms, query_hash,
-                        )
-                        default_verdict = RailVerdict.PASS
-                    executions.append(RailExecution(name, default_verdict, ms))
-                    _record_metric(name, default_verdict, ms)
-                    span.end(status="error")
+                for name, fut in futures.items():
+                    t0 = time.perf_counter()
+                    rail_span = self._tracer.span(
+                        f"guardrails.rail.{name}",
+                        {"rail_name": name, "query_hash": query_hash},
+                    )
+                    rail_error: Optional[Exception] = None
+                    try:
+                        rail_result = fut.result(timeout=self._timeout)
+                        ms = measure_ms(t0)
 
-                except Exception as e:
-                    ms = measure_ms(t0)
-                    if name in self._fail_closed_rails:
-                        logger.warning(
-                            "Rail '%s' failed: %s — fail-closed: REJECT | hash=%s",
-                            name, e, query_hash,
-                        )
-                        default_verdict = RailVerdict.REJECT
-                        if name == "injection":
-                            result.injection_verdict = RailVerdict.REJECT
+                        if name == "intent":
+                            result.intent = rail_result.intent
+                            result.intent_confidence = rail_result.confidence
+                            verdict = RailVerdict.PASS
+                            executions.append(
+                                RailExecution(
+                                    "intent",
+                                    verdict,
+                                    ms,
+                                    {
+                                        "intent": rail_result.intent,
+                                        "confidence": rail_result.confidence,
+                                    },
+                                )
+                            )
+                            rail_span.set_attribute("intent", rail_result.intent)
+                            rail_span.set_attribute("confidence", rail_result.confidence)
+                        elif name == "injection":
+                            result.injection_verdict = rail_result.verdict
+                            executions.append(
+                                RailExecution(
+                                    "injection",
+                                    rail_result.verdict,
+                                    ms,
+                                    {
+                                        "source": rail_result.detection_source or "none",
+                                        "score": rail_result.score,
+                                    },
+                                )
+                            )
+                            rail_span.set_attribute(
+                                "source", rail_result.detection_source or "none"
+                            )
+                            rail_span.set_attribute("score", rail_result.score)
+                        elif name == "pii":
+                            redacted_text, detections = rail_result
+                            if detections:
+                                result.redacted_query = redacted_text
+                                result.pii_redactions = [
+                                    {"type": d.pii_type} for d in detections
+                                ]
+                            verdict = (
+                                RailVerdict.MODIFY if detections else RailVerdict.PASS
+                            )
+                            executions.append(RailExecution("pii", verdict, ms))
+                            rail_span.set_attribute("entity_count", len(detections))
                         elif name == "toxicity":
-                            result.toxicity_verdict = RailVerdict.REJECT
-                    else:
-                        logger.warning(
-                            "Rail '%s' failed: %s — defaulting to pass | hash=%s",
-                            name, e, query_hash,
+                            result.toxicity_verdict = rail_result.verdict
+                            executions.append(
+                                RailExecution(
+                                    "toxicity",
+                                    rail_result.verdict,
+                                    ms,
+                                    {"score": rail_result.score},
+                                )
+                            )
+                            rail_span.set_attribute("score", rail_result.score)
+                        elif name == "topic_safety":
+                            verdict = rail_result.verdict
+                            if not rail_result.on_topic:
+                                result.topic_off_topic = True
+                            executions.append(
+                                RailExecution(
+                                    "topic_safety",
+                                    verdict,
+                                    ms,
+                                    {"on_topic": rail_result.on_topic},
+                                )
+                            )
+                            rail_span.set_attribute(
+                                "on_topic", bool(rail_result.on_topic)
+                            )
+
+                        _record_metric(name, executions[-1].verdict, ms)
+                        rail_span.set_attribute("verdict", executions[-1].verdict.value)
+
+                        logger.info(
+                            "Rail %s | verdict=%s | ms=%.0f | hash=%s | tenant=%s",
+                            name,
+                            executions[-1].verdict.value,
+                            ms,
+                            query_hash,
+                            tenant_id,
                         )
-                        default_verdict = RailVerdict.PASS
-                    executions.append(RailExecution(name, default_verdict, ms))
-                    _record_metric(name, default_verdict, ms)
-                    span.end(status="error", error=e)
+
+                    except TimeoutError:
+                        ms = measure_ms(t0)
+                        if name in self._fail_closed_rails:
+                            logger.warning(
+                                "Rail '%s' timed out after %.0fms — fail-closed: REJECT | hash=%s",
+                                name, ms, query_hash,
+                            )
+                            default_verdict = RailVerdict.REJECT
+                            if name == "injection":
+                                result.injection_verdict = RailVerdict.REJECT
+                            elif name == "toxicity":
+                                result.toxicity_verdict = RailVerdict.REJECT
+                        else:
+                            logger.warning(
+                                "Rail '%s' timed out after %.0fms — defaulting to pass | hash=%s",
+                                name, ms, query_hash,
+                            )
+                            default_verdict = RailVerdict.PASS
+                        executions.append(RailExecution(name, default_verdict, ms))
+                        _record_metric(name, default_verdict, ms)
+                        rail_span.set_attribute("verdict", default_verdict.value)
+                        rail_span.set_attribute("timed_out", True)
+                        rail_error = TimeoutError(f"rail {name} timed out")
+
+                    except Exception as e:
+                        ms = measure_ms(t0)
+                        if name in self._fail_closed_rails:
+                            logger.warning(
+                                "Rail '%s' failed: %s — fail-closed: REJECT | hash=%s",
+                                name, e, query_hash,
+                            )
+                            default_verdict = RailVerdict.REJECT
+                            if name == "injection":
+                                result.injection_verdict = RailVerdict.REJECT
+                            elif name == "toxicity":
+                                result.toxicity_verdict = RailVerdict.REJECT
+                        else:
+                            logger.warning(
+                                "Rail '%s' failed: %s — defaulting to pass | hash=%s",
+                                name, e, query_hash,
+                            )
+                            default_verdict = RailVerdict.PASS
+                        executions.append(RailExecution(name, default_verdict, ms))
+                        _record_metric(name, default_verdict, ms)
+                        rail_span.set_attribute("verdict", default_verdict.value)
+                        rail_error = e
+                    finally:
+                        if rail_error is not None:
+                            rail_span.end(status="error", error=rail_error)
+                        else:
+                            rail_span.end(status="ok")
+
+            outer_verdict = _aggregate_input_verdict(executions)
+            outer_span.set_attribute("verdict", outer_verdict)
 
         result.rail_executions = executions
         return result
@@ -363,138 +433,165 @@ class OutputRailExecutor:
         result = OutputRailResult(final_answer=answer)
         executions: list[RailExecution] = []
 
-        with ThreadPoolExecutor(
-            max_workers=RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="output_rail"
-        ) as pool:
-            futures: dict[str, Future] = {}
+        rail_count = sum(
+            1 for r in (self._faithfulness, self._pii, self._toxicity)
+            if r is not None
+        )
+        outer_span = self._tracer.span(
+            "guardrails.output",
+            {
+                "rail_count": rail_count,
+                "timeout_ms": int(self._timeout * 1000),
+            },
+        )
+        # Collect results from all rails — defined outside the with block so
+        # the consensus gate below can read them after spans close.
+        rail_results: dict[str, Any] = {}
+        with outer_span:
+            with ThreadPoolExecutor(
+                max_workers=RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS, thread_name_prefix="output_rail"
+            ) as pool:
+                futures: dict[str, Future] = {}
 
-            if self._faithfulness:
-                futures["faithfulness"] = pool.submit(
-                    self._faithfulness.check, answer, context_chunks
-                )
-            if self._pii:
-                futures["pii"] = pool.submit(self._pii.redact, answer)
-            if self._toxicity:
-                futures["toxicity"] = pool.submit(
-                    self._toxicity.filter_output, answer
-                )
-
-            # Collect results from all rails
-            rail_results: dict[str, Any] = {}
-            for name, fut in futures.items():
-                t0 = time.perf_counter()
-                span = self._tracer.start_span(
-                    f"guardrails.output.{name}", parent=parent_span
-                )
-                try:
-                    rail_results[name] = fut.result(timeout=self._timeout)
-                    ms = measure_ms(t0)
-
-                    if name == "faithfulness":
-                        faith_result = rail_results[name]
-                        result.faithfulness_score = faith_result.overall_score
-                        result.faithfulness_verdict = faith_result.verdict
-                        result.faithfulness_warning = faith_result.warning
-                        result.claim_scores = [
-                            {
-                                "claim": c.claim,
-                                "score": c.score,
-                                "supported": c.supported,
-                            }
-                            for c in faith_result.claim_scores
-                        ]
-                        executions.append(
-                            RailExecution(
-                                "faithfulness",
-                                faith_result.verdict,
-                                ms,
-                                {"score": faith_result.overall_score},
-                            )
-                        )
-                        _record_metric("faithfulness", faith_result.verdict, ms)
-                        span.set_attribute("score", faith_result.overall_score)
-
-                    elif name == "pii":
-                        redacted_text, detections = rail_results[name]
-                        verdict = RailVerdict.MODIFY if detections else RailVerdict.PASS
-                        executions.append(RailExecution("output_pii", verdict, ms))
-                        _record_metric("output_pii", verdict, ms)
-
-                    elif name == "toxicity":
-                        filtered_text = rail_results[name]
-                        verdict = (
-                            RailVerdict.MODIFY
-                            if filtered_text != answer
-                            else RailVerdict.PASS
-                        )
-                        executions.append(RailExecution("output_toxicity", verdict, ms))
-                        _record_metric("output_toxicity", verdict, ms)
-
-                    span.set_attribute("verdict", executions[-1].verdict.value)
-                    span.end(status="ok")
-
-                    logger.info(
-                        "Rail output.%s | verdict=%s | ms=%.0f",
-                        name,
-                        executions[-1].verdict.value,
-                        ms,
+                if self._faithfulness:
+                    futures["faithfulness"] = submit_with_context(
+                        pool, self._faithfulness.check, answer, context_chunks
+                    )
+                if self._pii:
+                    futures["pii"] = submit_with_context(pool, self._pii.redact, answer)
+                if self._toxicity:
+                    futures["toxicity"] = submit_with_context(
+                        pool, self._toxicity.filter_output, answer
                     )
 
-                except TimeoutError:
-                    ms = measure_ms(t0)
-                    if name in self._fail_closed_rails:
-                        logger.warning(
-                            "Output rail '%s' timed out after %.0fms — fail-closed: REJECT",
-                            name, ms,
-                        )
-                        default_verdict = RailVerdict.REJECT
-                        if name == "faithfulness":
-                            from src.guardrails.shared import (
-                                FaithfulnessResult,
-                                _FALLBACK_MESSAGE,
-                            )
-                            rail_results["faithfulness"] = FaithfulnessResult(
-                                overall_score=0.0,
-                                verdict=RailVerdict.REJECT,
-                                fallback_message=_FALLBACK_MESSAGE,
-                            )
-                    else:
-                        logger.warning(
-                            "Output rail '%s' timed out after %.0fms — defaulting to pass",
-                            name, ms,
-                        )
-                        default_verdict = RailVerdict.PASS
-                    executions.append(RailExecution(f"output_{name}", default_verdict, ms))
-                    _record_metric(f"output_{name}", default_verdict, ms)
-                    span.end(status="error")
+                for name, fut in futures.items():
+                    t0 = time.perf_counter()
+                    rail_span = self._tracer.span(
+                        f"guardrails.rail.{name}",
+                        {"rail_name": name},
+                    )
+                    rail_error: Optional[Exception] = None
+                    try:
+                        rail_results[name] = fut.result(timeout=self._timeout)
+                        ms = measure_ms(t0)
 
-                except Exception as e:
-                    ms = measure_ms(t0)
-                    if name in self._fail_closed_rails:
-                        logger.warning(
-                            "Output rail '%s' failed: %s — fail-closed: REJECT",
-                            name, e,
-                        )
-                        default_verdict = RailVerdict.REJECT
                         if name == "faithfulness":
-                            from src.guardrails.shared import (
-                                FaithfulnessResult,
-                                _FALLBACK_MESSAGE,
+                            faith_result = rail_results[name]
+                            result.faithfulness_score = faith_result.overall_score
+                            result.faithfulness_verdict = faith_result.verdict
+                            result.faithfulness_warning = faith_result.warning
+                            result.claim_scores = [
+                                {
+                                    "claim": c.claim,
+                                    "score": c.score,
+                                    "supported": c.supported,
+                                }
+                                for c in faith_result.claim_scores
+                            ]
+                            executions.append(
+                                RailExecution(
+                                    "faithfulness",
+                                    faith_result.verdict,
+                                    ms,
+                                    {"score": faith_result.overall_score},
+                                )
                             )
-                            rail_results["faithfulness"] = FaithfulnessResult(
-                                overall_score=0.0,
-                                verdict=RailVerdict.REJECT,
-                                fallback_message=_FALLBACK_MESSAGE,
+                            _record_metric("faithfulness", faith_result.verdict, ms)
+                            rail_span.set_attribute("score", faith_result.overall_score)
+
+                        elif name == "pii":
+                            redacted_text, detections = rail_results[name]
+                            verdict = RailVerdict.MODIFY if detections else RailVerdict.PASS
+                            executions.append(RailExecution("output_pii", verdict, ms))
+                            _record_metric("output_pii", verdict, ms)
+                            rail_span.set_attribute("entity_count", len(detections))
+
+                        elif name == "toxicity":
+                            filtered_text = rail_results[name]
+                            verdict = (
+                                RailVerdict.MODIFY
+                                if filtered_text != answer
+                                else RailVerdict.PASS
                             )
-                    else:
-                        logger.warning(
-                            "Output rail '%s' failed: %s — defaulting to pass",
-                            name, e,
+                            executions.append(RailExecution("output_toxicity", verdict, ms))
+                            _record_metric("output_toxicity", verdict, ms)
+                            rail_span.set_attribute("modified", filtered_text != answer)
+
+                        rail_span.set_attribute("verdict", executions[-1].verdict.value)
+
+                        logger.info(
+                            "Rail output.%s | verdict=%s | ms=%.0f",
+                            name,
+                            executions[-1].verdict.value,
+                            ms,
                         )
-                        default_verdict = RailVerdict.PASS
-                    executions.append(RailExecution(f"output_{name}", default_verdict, ms))
-                    _record_metric(f"output_{name}", default_verdict, ms)
-                    span.end(status="error", error=e)
+
+                    except TimeoutError:
+                        ms = measure_ms(t0)
+                        if name in self._fail_closed_rails:
+                            logger.warning(
+                                "Output rail '%s' timed out after %.0fms — fail-closed: REJECT",
+                                name, ms,
+                            )
+                            default_verdict = RailVerdict.REJECT
+                            if name == "faithfulness":
+                                from src.guardrails.shared import (
+                                    FaithfulnessResult,
+                                    _FALLBACK_MESSAGE,
+                                )
+                                rail_results["faithfulness"] = FaithfulnessResult(
+                                    overall_score=0.0,
+                                    verdict=RailVerdict.REJECT,
+                                    fallback_message=_FALLBACK_MESSAGE,
+                                )
+                        else:
+                            logger.warning(
+                                "Output rail '%s' timed out after %.0fms — defaulting to pass",
+                                name, ms,
+                            )
+                            default_verdict = RailVerdict.PASS
+                        executions.append(RailExecution(f"output_{name}", default_verdict, ms))
+                        _record_metric(f"output_{name}", default_verdict, ms)
+                        rail_span.set_attribute("verdict", default_verdict.value)
+                        rail_span.set_attribute("timed_out", True)
+                        rail_error = TimeoutError(f"output rail {name} timed out")
+
+                    except Exception as e:
+                        ms = measure_ms(t0)
+                        if name in self._fail_closed_rails:
+                            logger.warning(
+                                "Output rail '%s' failed: %s — fail-closed: REJECT",
+                                name, e,
+                            )
+                            default_verdict = RailVerdict.REJECT
+                            if name == "faithfulness":
+                                from src.guardrails.shared import (
+                                    FaithfulnessResult,
+                                    _FALLBACK_MESSAGE,
+                                )
+                                rail_results["faithfulness"] = FaithfulnessResult(
+                                    overall_score=0.0,
+                                    verdict=RailVerdict.REJECT,
+                                    fallback_message=_FALLBACK_MESSAGE,
+                                )
+                        else:
+                            logger.warning(
+                                "Output rail '%s' failed: %s — defaulting to pass",
+                                name, e,
+                            )
+                            default_verdict = RailVerdict.PASS
+                        executions.append(RailExecution(f"output_{name}", default_verdict, ms))
+                        _record_metric(f"output_{name}", default_verdict, ms)
+                        rail_span.set_attribute("verdict", default_verdict.value)
+                        rail_error = e
+                    finally:
+                        if rail_error is not None:
+                            rail_span.end(status="error", error=rail_error)
+                        else:
+                            rail_span.end(status="ok")
+
+            outer_verdict = _aggregate_output_verdict(executions, rail_results)
+            outer_span.set_attribute("verdict", outer_verdict)
 
         # ── Consensus Gate ──
         # Priority 1: faithfulness reject → discard everything, return fallback

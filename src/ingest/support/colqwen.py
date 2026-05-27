@@ -20,6 +20,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from src.platform.observability import get_tracer
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,88 +186,104 @@ def embed_page_images(
     log_progress = n_pages > 10
     progress_interval = max(1, n_pages // 10)
 
-    for batch_start in range(0, n_pages, batch_size):
-        batch_end = min(batch_start + batch_size, n_pages)
-        batch_images = images[batch_start:batch_end]
-        batch_page_numbers = page_numbers[batch_start:batch_end]
+    tracer = get_tracer()
+    model_id = str(getattr(model, "name_or_path", None) or getattr(model, "config", None) or "colqwen2")
+    span_ctx = tracer.span(
+        "ingest.embedding.colqwen",
+        {
+            "gen_ai.system": "colqwen",
+            "gen_ai.request.model": model_id,
+            "gen_ai.prompt": f"{n_pages} pages",
+            "batch_size": batch_size,
+            "page_count": n_pages,
+        },
+    )
+    with span_ctx as span:
+      for batch_start in range(0, n_pages, batch_size):
+          batch_end = min(batch_start + batch_size, n_pages)
+          batch_images = images[batch_start:batch_end]
+          batch_page_numbers = page_numbers[batch_start:batch_end]
 
-        # Get model inputs from processor; move to model device.
-        try:
-            batch_inputs = processor.process_images(batch_images)
-            batch_inputs = {k: v.to(model.device) for k, v in batch_inputs.items()}
-        except Exception as exc:
-            logger.warning(
-                "Failed to process image batch (pages %s-%s): %s — skipping batch.",
-                batch_page_numbers[0],
-                batch_page_numbers[-1],
-                exc,
-            )
-            continue
+          # Get model inputs from processor; move to model device.
+          try:
+              batch_inputs = processor.process_images(batch_images)
+              batch_inputs = {k: v.to(model.device) for k, v in batch_inputs.items()}
+          except Exception as exc:
+              logger.warning(
+                  "Failed to process image batch (pages %s-%s): %s — skipping batch.",
+                  batch_page_numbers[0],
+                  batch_page_numbers[-1],
+                  exc,
+              )
+              continue
 
-        # Run forward pass for the entire batch.
-        try:
-            with torch.inference_mode():
-                batch_output = model(**batch_inputs)
-        except Exception as exc:
-            logger.warning(
-                "Inference failed for batch (pages %s-%s): %s — skipping batch.",
-                batch_page_numbers[0],
-                batch_page_numbers[-1],
-                exc,
-            )
-            continue
+          # Run forward pass for the entire batch.
+          try:
+              with torch.inference_mode():
+                  batch_output = model(**batch_inputs)
+          except Exception as exc:
+              logger.warning(
+                  "Inference failed for batch (pages %s-%s): %s — skipping batch.",
+                  batch_page_numbers[0],
+                  batch_page_numbers[-1],
+                  exc,
+              )
+              continue
 
-        # batch_output may be a tensor or an object with a .last_hidden_state attribute.
-        # ColQwen2 returns a tensor of shape (batch_size, n_patches, 128).
-        if hasattr(batch_output, "last_hidden_state"):
-            batch_tensor = batch_output.last_hidden_state
-        elif isinstance(batch_output, torch.Tensor):
-            batch_tensor = batch_output
-        else:
-            # Some colpali_engine versions return an object directly indexable.
-            batch_tensor = batch_output
+          # batch_output may be a tensor or an object with a .last_hidden_state attribute.
+          # ColQwen2 returns a tensor of shape (batch_size, n_patches, 128).
+          if hasattr(batch_output, "last_hidden_state"):
+              batch_tensor = batch_output.last_hidden_state
+          elif isinstance(batch_output, torch.Tensor):
+              batch_tensor = batch_output
+          else:
+              # Some colpali_engine versions return an object directly indexable.
+              batch_tensor = batch_output
 
-        # Iterate over individual pages within the batch.
-        for idx_in_batch, page_num in enumerate(batch_page_numbers):
-            try:
-                # Shape: (n_patches, 128)
-                page_tensor = batch_tensor[idx_in_batch]  # type: ignore[index]
-                # Compute arithmetic mean across patches -> (128,)
-                mean_tensor = page_tensor.float().mean(dim=0)
+          # Iterate over individual pages within the batch.
+          for idx_in_batch, page_num in enumerate(batch_page_numbers):
+              try:
+                  # Shape: (n_patches, 128)
+                  page_tensor = batch_tensor[idx_in_batch]  # type: ignore[index]
+                  # Compute arithmetic mean across patches -> (128,)
+                  mean_tensor = page_tensor.float().mean(dim=0)
 
-                patch_vectors: list[list[float]] = page_tensor.float().cpu().tolist()
-                mean_vector: list[float] = mean_tensor.cpu().tolist()
-                patch_count = page_tensor.shape[0]
+                  patch_vectors: list[list[float]] = page_tensor.float().cpu().tolist()
+                  mean_vector: list[float] = mean_tensor.cpu().tolist()
+                  patch_count = page_tensor.shape[0]
 
-                results.append(
-                    ColQwen2PageEmbedding(
-                        page_number=page_num,
-                        mean_vector=mean_vector,
-                        patch_vectors=patch_vectors,
-                        patch_count=patch_count,
-                    )
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to extract embedding for page %d: %s — skipping page.",
-                    page_num,
-                    exc,
-                )
-                continue
+                  results.append(
+                      ColQwen2PageEmbedding(
+                          page_number=page_num,
+                          mean_vector=mean_vector,
+                          patch_vectors=patch_vectors,
+                          patch_count=patch_count,
+                      )
+                  )
+              except Exception as exc:
+                  logger.warning(
+                      "Failed to extract embedding for page %d: %s — skipping page.",
+                      page_num,
+                      exc,
+                  )
+                  continue
 
-        # Log progress at 10% intervals for large documents (FR-306).
-        if log_progress:
-            pages_done = batch_end
-            if pages_done % progress_interval == 0 or pages_done == n_pages:
-                pct = int(pages_done / n_pages * 100)
-                logger.info(
-                    "Visual embedding progress: %d/%d pages processed (%d%%).",
-                    pages_done,
-                    n_pages,
-                    pct,
-                )
+          # Log progress at 10% intervals for large documents (FR-306).
+          if log_progress:
+              pages_done = batch_end
+              if pages_done % progress_interval == 0 or pages_done == n_pages:
+                  pct = int(pages_done / n_pages * 100)
+                  logger.info(
+                      "Visual embedding progress: %d/%d pages processed (%d%%).",
+                      pages_done,
+                      n_pages,
+                      pct,
+                  )
 
-    return results
+      span.set_attribute("vector_count", len(results))
+      if results:
+          span.set_attribute("vector_dim", len(results[0].mean_vector))
+      return results
 
 
 def embed_text_query(model: Any, processor: Any, text: str) -> list[float]:

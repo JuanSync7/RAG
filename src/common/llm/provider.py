@@ -31,6 +31,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from src.common.llm.schemas import ModelTier
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -111,12 +112,25 @@ class ChatLLMAdapter(BaseChatModel):
         if response_format:
             overrides["response_format"] = response_format
 
-        llm_response = provider.generate(
-            msg_dicts,
-            model_alias=self.model_alias,
-            user_id=self.user_id,
-            **overrides,
-        )
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.adapter.sync",
+            model=self.model_alias,
+            input=repr(msg_dicts),
+            metadata={"gen_ai.system": "langchain"},
+        ) as gen:
+            llm_response = provider.generate(
+                msg_dicts,
+                model_alias=self.model_alias,
+                user_id=self.user_id,
+                **overrides,
+            )
+            gen.set_output(llm_response.content)
+            if llm_response.prompt_tokens or llm_response.completion_tokens:
+                gen.set_token_counts(
+                    prompt_tokens=llm_response.prompt_tokens,
+                    completion_tokens=llm_response.completion_tokens,
+                )
 
         message = AIMessage(
             content=llm_response.content,
@@ -164,18 +178,28 @@ class ChatLLMAdapter(BaseChatModel):
         if self.timeout is not None:
             overrides["timeout"] = self.timeout
 
-        for token in provider.generate_stream(
-            msg_dicts,
-            model_alias=self.model_alias,
-            user_id=self.user_id,
-            **overrides,
-        ):
-            chunk = ChatGenerationChunk(
-                message=AIMessageChunk(content=token)
-            )
-            if run_manager:
-                run_manager.on_llm_new_token(token, chunk=chunk)
-            yield chunk
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.adapter.stream",
+            model=self.model_alias,
+            input=repr(msg_dicts),
+            metadata={"gen_ai.system": "langchain"},
+        ) as gen:
+            collected: list[str] = []
+            for token in provider.generate_stream(
+                msg_dicts,
+                model_alias=self.model_alias,
+                user_id=self.user_id,
+                **overrides,
+            ):
+                collected.append(token)
+                chunk = ChatGenerationChunk(
+                    message=AIMessageChunk(content=token)
+                )
+                if run_manager:
+                    run_manager.on_llm_new_token(token, chunk=chunk)
+                yield chunk
+            gen.set_output("".join(collected))
 
 
 # ── Model tier → alias mapping ───────────────────────────────────────────

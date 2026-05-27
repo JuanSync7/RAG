@@ -427,10 +427,13 @@ class OllamaGenerator:
         )
 
         with get_tracer().span(
-            "generator.generate",
+            "retrieval.generation.answer",
             {
-                "model": self.model,
+                "gen_ai.system": "ollama",
+                "gen_ai.request.model": self.model,
                 "context_chunk_count": len(context_chunks),
+                "context_len": sum(len(c) for c in context_chunks),
+                "doc_count": len(context_chunks),
             },
         ) as span:
             try:
@@ -576,26 +579,43 @@ class OllamaGenerator:
             graph_context=graph_context,
         )
 
-        try:
-            for chunk in self._provider.generate_stream(
-                messages,
-                model_alias="default",
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            ):
-                yield TokenEvent(text=chunk)
-        except Exception as exc:
-            err = _make_error(exc)
-            logger.warning(
-                "LLM streaming failed: kind=%s detail=%s",
-                err.kind.value,
-                err.internal_detail,
-            )
-            yield ErrorEvent(error=err)
+        with get_tracer().span(
+            "retrieval.generation.stream",
+            {
+                "gen_ai.system": "ollama",
+                "gen_ai.request.model": self.model,
+                "context_chunk_count": len(context_chunks),
+                "context_len": sum(len(c) for c in context_chunks),
+                "doc_count": len(context_chunks),
+            },
+        ) as span:
+            chunk_count = 0
+            try:
+                for chunk in self._provider.generate_stream(
+                    messages,
+                    model_alias="default",
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                ):
+                    chunk_count += 1
+                    yield TokenEvent(text=chunk)
+                span.set_attribute("stream_chunk_count", chunk_count)
+            except Exception as exc:
+                err = _make_error(exc)
+                logger.warning(
+                    "LLM streaming failed: kind=%s detail=%s",
+                    err.kind.value,
+                    err.internal_detail,
+                )
+                span.set_attribute("generation_error_kind", err.kind.value)
+                yield ErrorEvent(error=err)
 
     def is_available(self) -> bool:
         """Check if the LLM provider is reachable."""
-        with get_tracer().span("generator.is_available", {"model": self.model}):
+        with get_tracer().span(
+            "retrieval.generation.is_available",
+            {"gen_ai.system": "ollama", "gen_ai.request.model": self.model},
+        ):
             try:
                 return self._provider.is_available(model_alias="default")
             except Exception:

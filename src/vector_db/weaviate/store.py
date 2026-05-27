@@ -208,7 +208,7 @@ def _connect() -> weaviate.WeaviateClient:
 
 def create_persistent_client() -> weaviate.WeaviateClient:
     """Create a long-lived Weaviate client (embedded or networked)."""
-    span = tracer.start_span("vector_store.create_persistent_client")
+    span = tracer.span("vector_store.create_persistent_client")
     client: Optional[weaviate.WeaviateClient] = None
     try:
         client = _connect()
@@ -224,7 +224,7 @@ def create_persistent_client() -> weaviate.WeaviateClient:
 @contextmanager
 def get_weaviate_client():
     """Context manager for a short-lived Weaviate client (embedded or networked)."""
-    span = tracer.start_span("vector_store.get_weaviate_client")
+    span = tracer.span("vector_store.get_weaviate_client")
     client = _connect()
     try:
         yield client
@@ -238,7 +238,7 @@ def ensure_collection(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> None:
     """Create the named collection if it does not exist (idempotent)."""
-    span = tracer.start_span("vector_store.ensure_collection", {"collection": collection})
+    span = tracer.span("vector_store.ensure_collection", {"collection": collection})
     if client.collections.exists(collection):
         span.end(status="ok")
         return
@@ -446,7 +446,7 @@ def add_documents(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Add documents with pre-computed embeddings to the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.add_documents",
         {"count": len(texts), "collection": collection},
     )
@@ -619,7 +619,7 @@ def hybrid_search(
     Returns:
         List of dicts with ``text``, ``metadata``, and ``score`` keys.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.hybrid_search",
         {"alpha": alpha, "limit": limit, "collection": collection, "has_filters": filters is not None},
     )
@@ -685,7 +685,7 @@ def delete_collection(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> None:
     """Drop the named collection."""
-    span = tracer.start_span("vector_store.delete_collection", {"collection": collection})
+    span = tracer.span("vector_store.delete_collection", {"collection": collection})
     if client.collections.exists(collection):
         client.collections.delete(collection)
     span.end(status="ok")
@@ -697,7 +697,7 @@ def delete_documents_by_source(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Delete chunks by source metadata value from the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_source",
         {"source": source, "collection": collection},
     )
@@ -721,7 +721,7 @@ def delete_documents_by_staging_batch(
     through. Matches only the active batch; chunks from prior successful
     ingests have a different (or empty) staging_batch_id and are left alone.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_staging_batch",
         {"staging_batch_id": staging_batch_id, "collection": collection},
     )
@@ -787,7 +787,7 @@ def fetch_chunks_by_parent_section(
             node_kind clauses (e.g. tenant_id, source_filter).
         collection: Target collection.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.fetch_chunks_by_parent_section",
         {"parent_count": len(parent_section_ids), "limit_per": limit_per_section},
     )
@@ -854,7 +854,7 @@ def delete_documents_by_source_key(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Delete chunks by stable source_key from the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_source_key",
         {"source_key": source_key, "collection": collection},
     )
@@ -894,7 +894,7 @@ def aggregate_by_source(
         KeyError: if the collection does not exist.
         weaviate.exceptions.WeaviateQueryError: on query failure.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.aggregate_by_source",
         {"collection": collection},
     )
@@ -946,7 +946,7 @@ def get_collection_stats(
     Raises:
         weaviate.exceptions.WeaviateQueryError: on unexpected query failure.
     """
-    span = tracer.start_span("vector_store.get_collection_stats", {"collection": collection})
+    span = tracer.span("vector_store.get_collection_stats", {"collection": collection})
     if not client.collections.exists(collection):
         span.end(status="not_found")
         return None
@@ -984,7 +984,7 @@ def list_collections(
     Raises:
         weaviate.exceptions.WeaviateConnectionError: if client is not connected.
     """
-    span = tracer.start_span("vector_store.list_collections")
+    span = tracer.span("vector_store.list_collections")
     all_cols = client.collections.list_all(simple=True)
     results: list[dict] = []
     for name in all_cols:
@@ -1029,7 +1029,7 @@ def update_chunk_content(
     Returns:
         True on success, False on error.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.update_chunk_content",
         {"collection": collection, "chunk_uuid": chunk_uuid},
     )

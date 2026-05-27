@@ -131,11 +131,19 @@ class TestGetTracerProviderSelection:
         result = get_tracer()
         assert isinstance(result, NoopBackend)
 
-    def test_env_var_unset_defaults_to_noop(self, monkeypatch):
-        """No env var returns NoopBackend (default)."""
+    def test_env_var_unset_defaults_to_otel(self, monkeypatch):
+        """No env var returns OTelBackend (new default)."""
+        from src.platform.observability.otel import OTelBackend
         _clear_provider(monkeypatch)
         result = get_tracer()
-        assert isinstance(result, NoopBackend)
+        assert isinstance(result, OTelBackend)
+
+    def test_otel_provider_explicit(self, monkeypatch):
+        """OBSERVABILITY_PROVIDER=otel returns an OTelBackend."""
+        from src.platform.observability.otel import OTelBackend
+        _patch_provider(monkeypatch, "otel")
+        result = get_tracer()
+        assert isinstance(result, OTelBackend)
 
     def test_singleton_identity_same_object(self, monkeypatch):
         """Two calls to get_tracer() return the exact same instance."""
@@ -179,11 +187,12 @@ class TestGetTracerUnknownProvider:
 class TestGetTracerBoundaryConditions:
     """Edge cases for provider string interpretation."""
 
-    def test_empty_string_provider_returns_noop(self, monkeypatch):
-        """OBSERVABILITY_PROVIDER='' (empty string) is treated as unset → NoopBackend."""
+    def test_empty_string_provider_returns_otel(self, monkeypatch):
+        """OBSERVABILITY_PROVIDER='' (empty string) is treated as unset → OTelBackend (default)."""
+        from src.platform.observability.otel import OTelBackend
         _patch_provider(monkeypatch, "")
         result = get_tracer()
-        assert isinstance(result, NoopBackend)
+        assert isinstance(result, OTelBackend)
 
     def test_uppercase_noop_returns_noop(self, monkeypatch):
         """OBSERVABILITY_PROVIDER='NOOP' (uppercase) is case-insensitive → NoopBackend."""
@@ -197,14 +206,13 @@ class TestGetTracerBoundaryConditions:
         result = get_tracer()
         assert isinstance(result, NoopBackend)
 
-    def test_langfuse_init_failure_falls_back_to_noop(self, monkeypatch, caplog):
-        """LangfuseBackend init failure falls back to NoopBackend and logs a warning."""
-        _patch_provider(monkeypatch, "langfuse")
+    def test_otel_init_failure_falls_back_to_noop(self, monkeypatch, caplog):
+        """OTelBackend init failure falls back to NoopBackend and logs a warning."""
+        _patch_provider(monkeypatch, "otel")
 
-        # Force LangfuseBackend() to raise regardless of environment
         with patch(
-            "src.platform.observability.langfuse.backend.LangfuseBackend",
-            side_effect=RuntimeError("langfuse SDK not configured"),
+            "src.platform.observability.otel.OTelBackend",
+            side_effect=RuntimeError("otel SDK broken"),
         ):
             with caplog.at_level(logging.WARNING, logger="rag.observability"):
                 result = get_tracer()
@@ -212,7 +220,19 @@ class TestGetTracerBoundaryConditions:
         assert isinstance(result, NoopBackend)
         assert len(caplog.records) >= 1
         warning_msgs = " ".join(r.message for r in caplog.records)
-        assert "langfuse" in warning_msgs.lower() or "noop" in warning_msgs.lower()
+        assert "otel" in warning_msgs.lower() or "noop" in warning_msgs.lower()
+
+    def test_langfuse_alias_routes_to_otel(self, monkeypatch):
+        """OBSERVABILITY_PROVIDER=langfuse is a deprecated alias for 'otel'."""
+        import warnings
+        from src.platform.observability.otel import OTelBackend
+        _patch_provider(monkeypatch, "langfuse")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = get_tracer()
+        assert isinstance(result, OTelBackend)
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        assert deprecations, "Expected DeprecationWarning for legacy 'langfuse' value"
 
 
 # ===========================================================================
@@ -553,8 +573,16 @@ class TestAllExports:
         assert "Generation" in obs_module.__all__
 
     def test_all_has_exactly_six_symbols(self):
-        """__all__ contains exactly the 6 expected symbols (no extras, no missing)."""
-        expected = {"get_tracer", "observe", "Tracer", "Span", "Trace", "Generation"}
+        """__all__ contains exactly the expected symbols (no extras, no missing)."""
+        expected = {
+            "get_tracer",
+            "observe",
+            "Tracer",
+            "Span",
+            "Trace",
+            "Generation",
+            "submit_with_context",
+        }
         assert set(obs_module.__all__) == expected
 
 

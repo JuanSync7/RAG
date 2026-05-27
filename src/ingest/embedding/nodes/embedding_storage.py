@@ -158,7 +158,22 @@ def _embed_batches(
 
 
 @node_span("embedding_storage")
-def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
+def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:  # noqa: D401
+    from src.platform.observability import get_tracer
+
+    tracer = get_tracer()
+    with tracer.span(
+        "ingest.embedding.store",
+        {
+            "chunk_count": len(state.get("chunks") or []),
+            "source_key": state.get("source_key", ""),
+            "batch_id": state.get("batch_id", ""),
+        },
+    ):
+        return _embedding_storage_node_impl(state)
+
+
+def _embedding_storage_node_impl(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Generate chunk embeddings and STAGE records for atomic commit (Issue #42).
 
     The actual Weaviate write (``add_documents`` / ``delete_by_source_key``) is

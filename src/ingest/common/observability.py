@@ -30,6 +30,7 @@ existing logging handlers don't need restructuring.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -37,6 +38,8 @@ import uuid
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Callable, Iterator
+
+from src.platform.observability import get_tracer
 
 _logger = logging.getLogger("rag.ingest.obs")
 
@@ -103,8 +106,31 @@ def node_span(stage_name: str) -> Callable:
         def _wrapped(state: dict, *args: Any, **kwargs: Any):
             trace_id = state.get("trace_id", "") if isinstance(state, dict) else ""
             source_key = state.get("source_key", "") if isinstance(state, dict) else ""
-            with stage_span(stage_name, trace_id=trace_id, source_key=source_key):
-                return fn(state, *args, **kwargs)
+
+            # Open a real OTel span around the node so nested
+            # get_tracer().span(...) calls inside the body nest under it via
+            # ambient OTel context. Lazy lookup of the tracer is critical —
+            # tests swap the backend singleton post-import, and capturing it
+            # at module-import time defeats that. The whole construction is
+            # wrapped fail-open so a busted backend never breaks ingest.
+            try:
+                otel_cm = get_tracer().span(
+                    f"node.{stage_name}",
+                    attributes={
+                        "stage_name": stage_name,
+                        "trace_id": trace_id,
+                        "source_key": source_key,
+                    },
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                _logger.warning("node_span OTel span construction failed: %s", exc)
+                otel_cm = contextlib.nullcontext()
+
+            # OTel span is outer so its lifetime brackets the JSON log too;
+            # stage_span is inner so the existing log shape stays untouched.
+            with otel_cm:
+                with stage_span(stage_name, trace_id=trace_id, source_key=source_key):
+                    return fn(state, *args, **kwargs)
 
         return _wrapped
 

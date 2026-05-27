@@ -57,7 +57,7 @@ def create_client() -> Minio:
 
 def ensure_bucket(client: Minio, bucket: str = MINIO_BUCKET) -> None:
     """Create the bucket if it does not exist (idempotent)."""
-    span = tracer.start_span("document_store.ensure_bucket", {"bucket": bucket})
+    span = tracer.span("document_store.ensure_bucket", {"bucket": bucket})
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
     span.end(status="ok")
@@ -76,7 +76,7 @@ def put_document(
       - ``<document_id>.md``        — the markdown content
       - ``<document_id>.meta.json`` — the metadata dict as JSON
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "document_store.put_document",
         {"document_id": document_id, "bucket": bucket, "content_bytes": len(content)},
     )
@@ -110,7 +110,7 @@ def get_document(
         Dict with ``document_id``, ``content``, ``metadata`` keys, or ``None``
         if not found.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "document_store.get_document",
         {"document_id": document_id, "bucket": bucket},
     )
@@ -154,7 +154,7 @@ def delete_document(
     Returns:
         True if the content object existed, False otherwise.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "document_store.delete_document",
         {"document_id": document_id, "bucket": bucket},
     )
@@ -215,7 +215,7 @@ def list_documents(
     Raises:
         S3Error: re-raised if bucket is unreachable (not NoSuchKey/NoSuchBucket).
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "document_store.list_documents",
         {"bucket": bucket, "prefix": prefix, "limit": limit, "offset": offset},
     )
@@ -284,7 +284,7 @@ def get_page_image_url(
         from config.settings import RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS
         expires_in_seconds = RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS
 
-    span = tracer.start_span(
+    span = tracer.span(
         "document_store.get_page_image_url",
         {"minio_key": minio_key, "bucket": bucket},
     )

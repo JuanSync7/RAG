@@ -21,6 +21,7 @@ import string
 from typing import Optional
 
 from config.settings import RAG_GENERATION_MIN_FRAGMENT_LEN
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.output_sanitizer")
 
@@ -76,38 +77,48 @@ def sanitize_answer(
     if not answer:
         return answer
 
-    lines = answer.split("\n")
-    cleaned_lines: list[str] = []
+    with get_tracer().span(
+        "retrieval.generation.sanitize",
+        {"input_len": len(answer), "has_system_prompt": bool(system_prompt)},
+    ) as _span:
+        lines = answer.split("\n")
+        cleaned_lines: list[str] = []
+        removed = 0
 
-    for line in lines:
-        stripped = line.strip()
+        for line in lines:
+            stripped = line.strip()
 
-        # Skip document boundary markers
-        if _is_boundary_marker(stripped):
-            logger.debug("Stripped boundary marker: %s", stripped[:60])
-            continue
+            # Skip document boundary markers
+            if _is_boundary_marker(stripped):
+                logger.debug("Stripped boundary marker: %s", stripped[:60])
+                removed += 1
+                continue
 
-        # Skip template artifacts
-        if _is_template_artifact(stripped):
-            logger.debug("Stripped template artifact: %s", stripped[:60])
-            continue
+            # Skip template artifacts
+            if _is_template_artifact(stripped):
+                logger.debug("Stripped template artifact: %s", stripped[:60])
+                removed += 1
+                continue
 
-        # Skip system prompt fragments (if prompt provided)
-        if system_prompt and _is_prompt_fragment(stripped, system_prompt):
-            logger.debug("Stripped prompt fragment: %s", stripped[:60])
-            continue
+            # Skip system prompt fragments (if prompt provided)
+            if system_prompt and _is_prompt_fragment(stripped, system_prompt):
+                logger.debug("Stripped prompt fragment: %s", stripped[:60])
+                removed += 1
+                continue
 
-        cleaned_lines.append(line)
+            cleaned_lines.append(line)
 
-    result = "\n".join(cleaned_lines).strip()
+        result = "\n".join(cleaned_lines).strip()
+        _span.set_attribute("lines_removed", removed)
 
-    # If sanitization removed everything, return the original
-    # (something is better than nothing)
-    if not result:
-        logger.warning("Sanitization removed all content — returning original")
-        return answer
+        # If sanitization removed everything, return the original
+        if not result:
+            logger.warning("Sanitization removed all content — returning original")
+            _span.set_attribute("output_len", len(answer))
+            return answer
 
-    return result
+        _span.set_attribute("output_len", len(result))
+        return result
 
 
 def _tokenize(text: str) -> list[str]:

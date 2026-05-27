@@ -2,23 +2,16 @@
 
 Covers:
     Scenario 3.1 — Happy Path: Full noop pipeline
-    Scenario 3.2 — Langfuse Fallback: LangfuseBackend init failure → NoopBackend
+    Scenario 3.2 — OTel Fallback: OTelBackend init failure → NoopBackend
+                   (and legacy 'langfuse' provider value routes to OTel with a
+                    DeprecationWarning)
     Scenario 3.3 — @observe Decorator Error Path
 """
-import sys
 import logging
-import types
+import warnings
 
 import pytest
 from unittest.mock import patch
-
-# --- Langfuse stub injection (module level, before any import that triggers it) ---
-# Inject a minimal stub so that importing langfuse.backend does not fail when
-# the real langfuse package is not installed.
-if "langfuse" not in sys.modules:
-    langfuse_stub = types.ModuleType("langfuse")
-    langfuse_stub.get_client = lambda: None
-    sys.modules["langfuse"] = langfuse_stub
 
 import src.platform.observability as obs_module
 from src.platform.observability import get_tracer, observe
@@ -182,48 +175,43 @@ class TestScenario31NooopHappyPath:
 
 
 # ---------------------------------------------------------------------------
-# --- Integration: Scenario 3.2 Langfuse Fallback ---
+# --- Integration: Scenario 3.2 OTel Fallback + Legacy Langfuse Alias ---
 # ---------------------------------------------------------------------------
 
-def _patch_provider_langfuse():
-    """Context manager: patch config.settings.OBSERVABILITY_PROVIDER to 'langfuse'.
+def _patch_provider(value: str):
+    """Context manager: patch config.settings.OBSERVABILITY_PROVIDER.
 
     config.settings is a module-level singleton already imported; setting the
     env var alone does not retroactively change OBSERVABILITY_PROVIDER, so we
     patch the module attribute directly as well.
     """
     import config.settings as _settings
-    return patch.object(_settings, "OBSERVABILITY_PROVIDER", "langfuse")
+    return patch.object(_settings, "OBSERVABILITY_PROVIDER", value)
 
 
-class TestScenario32LangfuseFallback:
-    """Scenario 3.2 — LangfuseBackend init failure → fallback to NoopBackend.
+class TestScenario32OTelFallback:
+    """Scenario 3.2 — OTelBackend init failure → fallback to NoopBackend.
 
-    LangfuseBackend.__init__ does `from langfuse import get_client` at call-time,
-    so the correct patch target is `langfuse.get_client` on the stub module in
-    sys.modules (not a module-level attribute on the backend file).
-
-    config.settings is already imported by the time tests run, so its
-    OBSERVABILITY_PROVIDER module attribute must be patched directly via
-    patch.object rather than relying on env var mutation alone.
+    The OTel adapter has replaced the broken langfuse SDK adapter. When the
+    OTel backend constructor raises (e.g. due to a broken SDK install), the
+    factory must log a WARNING and return NoopBackend so that the
+    application never crashes for observability reasons.
     """
 
-    def test_get_tracer_does_not_raise_on_langfuse_failure(self):
-        with _patch_provider_langfuse():
-            with patch.object(
-                sys.modules["langfuse"],
-                "get_client",
-                side_effect=ConnectionError("no server"),
+    def test_get_tracer_does_not_raise_on_otel_failure(self):
+        with _patch_provider("otel"):
+            with patch(
+                "src.platform.observability.otel.OTelBackend",
+                side_effect=RuntimeError("otel sdk broken"),
             ):
                 backend = get_tracer()
         assert backend is not None
 
     def test_fallback_returns_noop_backend(self):
-        with _patch_provider_langfuse():
-            with patch.object(
-                sys.modules["langfuse"],
-                "get_client",
-                side_effect=ConnectionError("no server"),
+        with _patch_provider("otel"):
+            with patch(
+                "src.platform.observability.otel.OTelBackend",
+                side_effect=RuntimeError("otel sdk broken"),
             ):
                 backend = get_tracer()
         assert isinstance(backend, NoopBackend), (
@@ -231,11 +219,10 @@ class TestScenario32LangfuseFallback:
         )
 
     def test_fallback_span_returns_span_instance(self):
-        with _patch_provider_langfuse():
-            with patch.object(
-                sys.modules["langfuse"],
-                "get_client",
-                side_effect=ConnectionError("no server"),
+        with _patch_provider("otel"):
+            with patch(
+                "src.platform.observability.otel.OTelBackend",
+                side_effect=RuntimeError("otel sdk broken"),
             ):
                 backend = get_tracer()
         span = backend.span("x")
@@ -243,28 +230,37 @@ class TestScenario32LangfuseFallback:
 
     def test_warning_logged_on_fallback(self, caplog):
         with caplog.at_level(logging.WARNING, logger="rag.observability"):
-            with _patch_provider_langfuse():
-                with patch.object(
-                    sys.modules["langfuse"],
-                    "get_client",
-                    side_effect=ConnectionError("no server"),
+            with _patch_provider("otel"):
+                with patch(
+                    "src.platform.observability.otel.OTelBackend",
+                    side_effect=RuntimeError("otel sdk broken"),
                 ):
                     get_tracer()
         assert any(
             record.levelno >= logging.WARNING for record in caplog.records
-        ), "A WARNING must be logged when falling back from langfuse to noop"
+        ), "A WARNING must be logged when falling back from otel to noop"
 
-    def test_warning_message_contains_fallback_hint(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="rag.observability"):
-            with _patch_provider_langfuse():
-                with patch.object(
-                    sys.modules["langfuse"],
-                    "get_client",
-                    side_effect=ConnectionError("no server"),
-                ):
-                    get_tracer()
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warning_messages, "Expected at least one warning message"
+
+class TestScenario32LangfuseAlias:
+    """The legacy 'langfuse' provider value still works (deprecation warning)."""
+
+    def test_langfuse_alias_routes_to_otel_backend(self):
+        from src.platform.observability.otel import OTelBackend
+        with _patch_provider("langfuse"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                backend = get_tracer()
+        assert isinstance(backend, OTelBackend)
+
+    def test_langfuse_alias_emits_deprecation_warning(self):
+        with _patch_provider("langfuse"):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                get_tracer()
+            deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+            assert deprecations, "Expected a DeprecationWarning for legacy 'langfuse' value"
+            msg = str(deprecations[0].message).lower()
+            assert "langfuse" in msg and "otel" in msg
 
 
 # ---------------------------------------------------------------------------

@@ -340,7 +340,7 @@ class RAGChain:
         if self._visual_model is not None:
             return  # warm path
 
-        with self.tracer.span("visual_retrieval.model_load"):
+        with self.tracer.span("retrieval.visual.model_load"):
             from src.ingest.support import (
                 ensure_colqwen_ready,
                 load_colqwen_model,
@@ -380,7 +380,7 @@ class RAGChain:
         # FR-605: encode text query (uses processed query, not raw)
         from src.ingest.support import embed_text_query
 
-        with self.tracer.span("visual_retrieval.text_encode"):
+        with self.tracer.span("retrieval.visual.text_encode"):
             query_vector = embed_text_query(
                 self._visual_model, self._visual_processor, processed_query
             )
@@ -391,7 +391,7 @@ class RAGChain:
         # FR-609: search visual collection
         from src.vector_db import search_visual
 
-        with self.tracer.span("visual_retrieval.search") as vs_span:
+        with self.tracer.span("retrieval.visual.search") as vs_span:
             page_records = search_visual(
                 client=self._weaviate_client,
                 query_vector=query_vector,
@@ -408,7 +408,7 @@ class RAGChain:
         )
 
         results: list[VisualPageResult] = []
-        with self.tracer.span("visual_retrieval.presigned_urls"):
+        with self.tracer.span("retrieval.visual.presigned_urls"):
             minio_client = create_client()
             for record in page_records:
                 try:
@@ -556,38 +556,43 @@ class RAGChain:
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
         """Run hybrid search against the database layer (persistent or transient client)."""
         _t0 = time.perf_counter()
-        try:
-            if self._weaviate_client is not None:
-                results = search(
-                    client=self._weaviate_client,
-                    query=bm25_query,
-                    query_embedding=query_embedding,
-                    alpha=alpha,
-                    limit=search_limit,
-                    filters=filters,
-                )
-            else:
-                with get_client() as client:
-                    ensure_collection(client)
+        with self.tracer.span(
+            "retrieval.search.weaviate",
+            {"alpha": float(alpha), "limit": int(search_limit)},
+        ) as _span:
+            try:
+                if self._weaviate_client is not None:
                     results = search(
-                        client=client,
+                        client=self._weaviate_client,
                         query=bm25_query,
                         query_embedding=query_embedding,
                         alpha=alpha,
                         limit=search_limit,
                         filters=filters,
                     )
-            logger.debug(
-                "_do_search returned %d hits in %.1fms (alpha=%.2f, limit=%d)",
-                len(results), (time.perf_counter() - _t0) * 1000, alpha, search_limit,
-            )
-            return results
-        except Exception as exc:
-            logger.error(
-                "_do_search failed after %.1fms: %s",
-                (time.perf_counter() - _t0) * 1000, exc,
-            )
-            raise
+                else:
+                    with get_client() as client:
+                        ensure_collection(client)
+                        results = search(
+                            client=client,
+                            query=bm25_query,
+                            query_embedding=query_embedding,
+                            alpha=alpha,
+                            limit=search_limit,
+                            filters=filters,
+                        )
+                _span.set_attribute("result_count", len(results))
+                logger.debug(
+                    "_do_search returned %d hits in %.1fms (alpha=%.2f, limit=%d)",
+                    len(results), (time.perf_counter() - _t0) * 1000, alpha, search_limit,
+                )
+                return results
+            except Exception as exc:
+                logger.error(
+                    "_do_search failed after %.1fms: %s",
+                    (time.perf_counter() - _t0) * 1000, exc,
+                )
+                raise
 
     # ─── Tree retrieval helpers (TREE_RETRIEVAL_DESIGN.md §4) ────────────
     @staticmethod
@@ -664,46 +669,46 @@ class RAGChain:
         consumes this signal when its anchor-confidence component is
         enabled (R1.3).
         """
-        section_filter = SearchFilter(
-            property="node_kind", operator="eq", value="section"
-        )
-        filters = list(base_filters or []) + [section_filter]
-        section_hits = self._do_search(
-            bm25_query, query_embedding, alpha, descent_top_k, filters
-        )
-        # Per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under section S have
-        # parent_section_id == S.chunk_id. So descent expansion uses each
-        # section's own chunk_id as the lookup key.
-        parent_ids = [
-            (h.metadata.get("chunk_id") or "")
-            for h in section_hits
-        ]
-        # Map each parent_section_id → its 0-indexed rank in the section
-        # search. The leaves returned by ``_expand_sections_to_leaves`` will
-        # be tagged with the rank of the section that produced them, looked
-        # up by their ``parent_section_id`` metadata (which production
-        # ingest writes for every leaf — see store.py prepare_object).
-        anchor_rank_by_pid: dict[str, int] = {}
-        for rank, pid in enumerate(parent_ids):
-            if pid and pid not in anchor_rank_by_pid:
-                anchor_rank_by_pid[pid] = rank
+        with self.tracer.span(
+            "retrieval.tree.descent",
+            {"descent_top_k": int(descent_top_k), "leaves_per_section": int(leaves_per_section)},
+        ) as _span:
+            section_filter = SearchFilter(
+                property="node_kind", operator="eq", value="section"
+            )
+            filters = list(base_filters or []) + [section_filter]
+            section_hits = self._do_search(
+                bm25_query, query_embedding, alpha, descent_top_k, filters
+            )
+            # Per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under section S have
+            # parent_section_id == S.chunk_id.
+            parent_ids = [
+                (h.metadata.get("chunk_id") or "")
+                for h in section_hits
+            ]
+            anchor_rank_by_pid: dict[str, int] = {}
+            for rank, pid in enumerate(parent_ids):
+                if pid and pid not in anchor_rank_by_pid:
+                    anchor_rank_by_pid[pid] = rank
 
-        leaves = self._expand_sections_to_leaves(
-            parent_ids, leaves_per_section, base_filters
-        )
-        for leaf in leaves:
-            meta = getattr(leaf, "metadata", None)
-            if meta is None:
-                meta = {}
-                try:
-                    leaf.metadata = meta
-                except AttributeError:  # pragma: no cover
-                    continue
-            pid = meta.get("parent_section_id") or ""
-            ar = anchor_rank_by_pid.get(pid)
-            if ar is not None:
-                meta["_anchor_rank"] = ar
-        return leaves
+            leaves = self._expand_sections_to_leaves(
+                parent_ids, leaves_per_section, base_filters
+            )
+            for leaf in leaves:
+                meta = getattr(leaf, "metadata", None)
+                if meta is None:
+                    meta = {}
+                    try:
+                        leaf.metadata = meta
+                    except AttributeError:  # pragma: no cover
+                        continue
+                pid = meta.get("parent_section_id") or ""
+                ar = anchor_rank_by_pid.get(pid)
+                if ar is not None:
+                    meta["_anchor_rank"] = ar
+            _span.set_attribute("leaf_count", len(leaves))
+            _span.set_attribute("section_hit_count", len(section_hits))
+            return leaves
 
     def _run_tree_lift(
         self,
@@ -719,34 +724,40 @@ class RAGChain:
         parent_section comes from the strongest seed score the highest
         anchor-confidence boost in the rerank-fusion stage (R1.3).
         """
-        seeds = list(seed_results)[:seed_top_k]
-        parent_ids: list[str] = []
-        seen: set[str] = set()
-        for seed in seeds:
-            psid = (seed.metadata or {}).get("parent_section_id") or ""
-            if not psid or psid in seen:
-                continue
-            seen.add(psid)
-            parent_ids.append(psid)
-        if not parent_ids:
-            return []
-        anchor_rank_by_pid: dict[str, int] = {
-            pid: rank for rank, pid in enumerate(parent_ids)
-        }
-        siblings = self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
-        for sib in siblings:
-            meta = getattr(sib, "metadata", None)
-            if meta is None:
-                meta = {}
-                try:
-                    sib.metadata = meta
-                except AttributeError:  # pragma: no cover
+        with self.tracer.span(
+            "retrieval.tree.lift",
+            {"seed_top_k": int(seed_top_k), "siblings_per_group": int(siblings_per_group)},
+        ) as _span:
+            seeds = list(seed_results)[:seed_top_k]
+            parent_ids: list[str] = []
+            seen: set[str] = set()
+            for seed in seeds:
+                psid = (seed.metadata or {}).get("parent_section_id") or ""
+                if not psid or psid in seen:
                     continue
-            pid = meta.get("parent_section_id") or ""
-            ar = anchor_rank_by_pid.get(pid)
-            if ar is not None:
-                meta["_anchor_rank"] = ar
-        return siblings
+                seen.add(psid)
+                parent_ids.append(psid)
+            if not parent_ids:
+                _span.set_attribute("sibling_count", 0)
+                return []
+            anchor_rank_by_pid: dict[str, int] = {
+                pid: rank for rank, pid in enumerate(parent_ids)
+            }
+            siblings = self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+            for sib in siblings:
+                meta = getattr(sib, "metadata", None)
+                if meta is None:
+                    meta = {}
+                    try:
+                        sib.metadata = meta
+                    except AttributeError:  # pragma: no cover
+                        continue
+                pid = meta.get("parent_section_id") or ""
+                ar = anchor_rank_by_pid.get(pid)
+                if ar is not None:
+                    meta["_anchor_rank"] = ar
+            _span.set_attribute("sibling_count", len(siblings))
+            return siblings
 
     def _collect_candidates(
         self,
@@ -771,54 +782,58 @@ class RAGChain:
         are doc-diversity capped before merge so one verbose document cannot
         dominate the final candidate pool.
         """
-        leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
-            schema_present=schema_present
-        )
-        leaf_results = self._do_search(
-            bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
-        )
+        with self.tracer.span(
+            "retrieval.collect_candidates",
+            {"tree_enabled": bool(tree_enabled), "search_limit": int(search_limit)},
+        ) as _span:
+            leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
+                schema_present=schema_present
+            )
+            leaf_results = self._do_search(
+                bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
+            )
 
-        if not tree_enabled:
-            return list(leaf_results)
+            if not tree_enabled:
+                _span.set_attribute("candidate_count", len(leaf_results))
+                return list(leaf_results)
 
-        descent = self._run_tree_descent(
-            bm25_query=bm25_query,
-            query_embedding=query_embedding,
-            alpha=alpha,
-            descent_top_k=descent_top_k,
-            leaves_per_section=leaves_per_section,
-            base_filters=base_filters,
-        )
-        descent_capped = self._apply_doc_diversity_cap(
-            descent, top_per_doc=doc_diversity_top_per_doc
-        )
+            descent = self._run_tree_descent(
+                bm25_query=bm25_query,
+                query_embedding=query_embedding,
+                alpha=alpha,
+                descent_top_k=descent_top_k,
+                leaves_per_section=leaves_per_section,
+                base_filters=base_filters,
+            )
+            descent_capped = self._apply_doc_diversity_cap(
+                descent, top_per_doc=doc_diversity_top_per_doc
+            )
 
-        lift = self._run_tree_lift(
-            seed_results=list(leaf_results),
-            seed_top_k=lift_seed_k,
-            siblings_per_group=siblings_per_group,
-            base_filters=base_filters,
-        )
+            lift = self._run_tree_lift(
+                seed_results=list(leaf_results),
+                seed_top_k=lift_seed_k,
+                siblings_per_group=siblings_per_group,
+                base_filters=base_filters,
+            )
 
-        # Merge with uuid (preferred) / text fallback dedup, preserving the
-        # first occurrence's score so Stage 4 hits keep their hybrid scores.
-        merged: list = []
-        seen: set[str] = set()
-        for src in (leaf_results, descent_capped, lift):
-            for item in src:
-                key = ""
-                meta = getattr(item, "metadata", None) or {}
-                key = (
-                    str(getattr(item, "uuid", "") or "")
-                    or str(meta.get("uuid", "") or "")
-                    or str(meta.get("chunk_id", "") or "")
-                    or getattr(item, "text", "")
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                merged.append(item)
-        return merged
+            # Merge with uuid (preferred) / text fallback dedup.
+            merged: list = []
+            seen: set[str] = set()
+            for src in (leaf_results, descent_capped, lift):
+                for item in src:
+                    meta = getattr(item, "metadata", None) or {}
+                    key = (
+                        str(getattr(item, "uuid", "") or "")
+                        or str(meta.get("uuid", "") or "")
+                        or str(meta.get("chunk_id", "") or "")
+                        or getattr(item, "text", "")
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+            _span.set_attribute("candidate_count", len(merged))
+            return merged
 
     @staticmethod
     def _apply_doc_diversity_cap(hits: list, top_per_doc: int) -> list:
@@ -1256,7 +1271,16 @@ class RAGChain:
                 "degraded": d.degraded,
             }
 
-        with self.tracer.span("rag_chain.run", {"query_length": len(query)}) as root_span:
+        retrieval_mode = "deep_research" if deep_research else mode
+        with self.tracer.span(
+            "retrieval.rag",
+            {
+                "query_len": len(query),
+                "retrieval_mode": retrieval_mode,
+                "generation_enabled": (not skip_generation) and (mode != "retrieval"),
+                "top_k": rerank_top_k,
+            },
+        ) as root_span:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
             rerank_top_k = validate_positive_int("rerank_top_k", rerank_top_k)
@@ -1268,7 +1292,7 @@ class RAGChain:
 
             # Stage 1: Query processing (+ input rails in parallel if NeMo enabled)
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.process_query", parent=root_span):
+            with self.tracer.span("retrieval.rag.process_query", parent=root_span):
                 processing_query = query
                 if memory_context:
                     processing_query = (
@@ -1291,7 +1315,7 @@ class RAGChain:
                     from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
 
                     # PII gate: run PII detection synchronously before parallel stage
-                    with self.tracer.span("rag_chain.pii_gate", parent=root_span):
+                    with self.tracer.span("retrieval.rag.pii_gate", parent=root_span):
                         try:
                             redacted_text, pii_detections = redact_pii(query)
                             if pii_detections:
@@ -1519,7 +1543,7 @@ class RAGChain:
 
             if _dr_active:
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.deep_research", parent=root_span) as dr_span:
+                with self.tracer.span("retrieval.deep_research", parent=root_span) as dr_span:
                     try:
                         dr_result = self._run_deep_research(
                             original_question=query,
@@ -1557,7 +1581,7 @@ class RAGChain:
 
             # Stage 2: KG expansion
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
+            with self.tracer.span("retrieval.kg_expand", parent=root_span) as kg_span:
                 if not _dr_active and self._kg_expander:
                     expansion_result = self._kg_expander.expand(processed_query, depth=1)
                     kg_expanded_terms = (
@@ -1607,7 +1631,7 @@ class RAGChain:
 
             # Stage 3: Query embedding (with LRU cache for exact repeats)
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.embed_query", parent=root_span) as embed_span:
+            with self.tracer.span("retrieval.embed_query", parent=root_span) as embed_span:
                 if not _dr_active:
                     cache_hit = processed_query in self._embedding_cache
                     if cache_hit:
@@ -1675,7 +1699,7 @@ class RAGChain:
                 if tree_retrieval is None
                 else bool(tree_retrieval)
             )
-            with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
+            with self.tracer.span("retrieval.search.hybrid", parent=root_span) as search_span:
                 if not _dr_active:
                     search_results = self.retry_provider.execute(
                         operation_name="weaviate_hybrid_search",
@@ -1794,7 +1818,7 @@ class RAGChain:
 
             # Stage 5: Reranking (cross-encoder + fusion R1)
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
+            with self.tracer.span("retrieval.rerank", parent=root_span) as rerank_span:
                 if not _dr_active:
                     # 5a. BM25-only rank lookup, used by the RRF fusion component.
                     #     Run in parallel-style alongside CE scoring; if fusion is
@@ -1901,7 +1925,7 @@ class RAGChain:
                 and query_result.standalone_query != processed_query
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.fallback_retrieval", parent=root_span) as fb_span:
+                with self.tracer.span("retrieval.fallback", parent=root_span) as fb_span:
                     # Embed standalone_query (check cache first)
                     fb_query = query_result.standalone_query
                     fb_cache_hit = fb_query in self._embedding_cache
@@ -2004,7 +2028,7 @@ class RAGChain:
             visual_results = None  # None = disabled semantics
             if self._visual_retrieval_enabled:
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.visual_retrieval", parent=root_span) as vr_span:
+                with self.tracer.span("retrieval.visual", parent=root_span) as vr_span:
                     try:
                         visual_results = self._run_visual_retrieval(
                             processed_query, tenant_id
@@ -2025,7 +2049,7 @@ class RAGChain:
             if RAG_DOCUMENT_FORMATTING_ENABLED and reranked:
                 t0 = time.perf_counter()
                 from src.retrieval.generation.nodes import format_context
-                with self.tracer.span("rag_chain.format_context", parent=root_span) as fmt_span:
+                with self.tracer.span("retrieval.generation.format_context", parent=root_span) as fmt_span:
                     formatted = format_context(reranked)
                     formatted_context_str = formatted.context_string
                     version_conflicts = formatted.version_conflicts
@@ -2041,7 +2065,7 @@ class RAGChain:
                 reranked or (query_result.has_backward_reference and (memory_context or memory_recent_turns))
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.generate", parent=root_span) as generate_span:
+                with self.tracer.span("retrieval.generation", parent=root_span) as generate_span:
                     context_chunks = [r.text for r in reranked]
                     scores = [r.score for r in reranked]
 
@@ -2166,7 +2190,7 @@ class RAGChain:
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.output_rails", parent=root_span):
+                with self.tracer.span("retrieval.rag.output_rails", parent=root_span):
                     context_chunks = [r.text for r in reranked]
                     output_rail_result = run_output_rails(
                         answer=generated_answer,
@@ -2225,7 +2249,7 @@ class RAGChain:
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.confidence_routing", parent=root_span) as conf_span:
+                with self.tracer.span("retrieval.confidence.routing", parent=root_span) as conf_span:
                     from src.retrieval.generation.confidence import compute_composite_confidence
                     from src.retrieval.generation.confidence import route_by_confidence
                     from src.retrieval.generation.confidence import PostGuardrailAction
@@ -2298,7 +2322,7 @@ class RAGChain:
                     retry_search_limit = search_limit + 5
                     retry_bm25_query = bm25_query
 
-                    with self.tracer.span("rag_chain.re_retrieval", parent=root_span) as rr_span:
+                    with self.tracer.span("retrieval.re_retrieval", parent=root_span) as rr_span:
                         rr_span.set_attribute("retry_alpha", retry_alpha)
                         rr_span.set_attribute("retry_search_limit", retry_search_limit)
 
