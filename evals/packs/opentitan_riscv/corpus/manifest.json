@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "path": "docs/ibex_overview.md",
+      "sha256": "f541d1ba9e0ebb1ffcf0455481f4cf6a4722d55e250fd2859fe2c11b2ba8cab4"
+    },
+    {
+      "path": "docs/opentitan_hmac.md",
+      "sha256": "809eb7146b9ac50eedbe53cd0a6f7050345957b9e10113a46cfd2324a113da22"
+    },
+    {
+      "path": "docs/opentitan_uart.md",
+      "sha256": "abf4ba2678a3e99500f822b12f103b18792f4cbcaea5f89e624cebbc14ab824a"
+    },
+    {
+      "path": "docs/riscv_priv_csrs.md",
+      "sha256": "2d9d61ab3b4a8aa6dc55704775b5a4ee861e60cf21e3a3650ba033f0c7dac732"
+    },
+    {
+      "path": "docs/riscv_priv_isa_intro.md",
+      "sha256": "e69713ce074388b940dbd7b49bf87fd438b0cc0191bbf20957ab23680659a32d"
+    }
+  ]
+}

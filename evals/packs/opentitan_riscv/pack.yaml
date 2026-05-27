@@ -1,0 +1,11 @@
+name: opentitan_riscv
+version: 1
+profile: asic_riscv_soc
+corpus_pin: a8e3ff902cb2d2578501a83620634792483b301b0d56fe71add49578bba2daaf
+description: Development-grade ASIC/RISC-V reference pack covering RISC-V Privileged ISA, OpenTitan UART/HMAC IPs, and the lowRISC Ibex core.
+collection_name_template: "ragweave_test_{name}_{corpus_pin_short}"
+judge:
+  tier1_model: claude-haiku-4-5-20251001
+  tier1_prompt_version: v1
+  temperature: 0.0
+  samples_per_claim: 3

@@ -1,0 +1,6 @@
+profile: asic_riscv_soc
+defaults:
+  factoid:
+    recall_at_5: 0.8
+    mrr: 0.6
+overrides: []
