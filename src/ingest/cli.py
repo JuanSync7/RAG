@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # @summary
-# Developer CLI for ingesting documents into the RAG system.
+# Developer CLI for ingesting documents into the RAG system. The CLI exposes
+# a ``--collection``/``-c`` flag (P0 collection-selection slice) which is
+# threaded into IngestionConfig.target_collection so a single run can target
+# an arbitrary Weaviate collection without env-var manipulation.
 # Exports: ingest, main
 # Deps: config.settings, src.ingest, src.platform.validation
 # @end-summary
@@ -54,6 +57,7 @@ def ingest(
     vision_max_figures: Optional[int] = None,
     vision_auto_pull: Optional[bool] = None,
     vision_strict: Optional[bool] = None,
+    collection_name: Optional[str] = None,
 ) -> None:
     """Ingest documents from a directory or a single selected file.
 
@@ -101,6 +105,8 @@ def ingest(
         cfg_kwargs["vision_auto_pull"] = vision_auto_pull
     if vision_strict is not None:
         cfg_kwargs["vision_strict"] = vision_strict
+    if collection_name:
+        cfg_kwargs["target_collection"] = collection_name
 
     cfg = IngestionConfig(
         **cfg_kwargs,
@@ -161,6 +167,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y",
         action="store_true",
         help="Skip confirmation prompt for --fresh (use with care, e.g. in CI).",
+    )
+    parser.add_argument(
+        "--collection",
+        "-c",
+        dest="collection",
+        type=str,
+        default=None,
+        help="Target Weaviate collection name. Overrides RAG_VECTOR_COLLECTION_DEFAULT "
+             "for this run; defaults to that env var (or 'RAGDocuments') when omitted.",
     )
     parser.add_argument(
         "--no-semantic",
@@ -316,8 +331,9 @@ def main() -> None:
     update_mode = not fresh_mode
 
     if fresh_mode and not args.yes:
-        from config.settings import WEAVIATE_COLLECTION_NAME
-        if not _confirm_fresh(WEAVIATE_COLLECTION_NAME):
+        from config.settings import VECTOR_COLLECTION_DEFAULT
+        target = args.collection or VECTOR_COLLECTION_DEFAULT
+        if not _confirm_fresh(target):
             print("Aborted: --fresh not confirmed.", file=sys.stderr)
             sys.exit(2)
 
@@ -343,6 +359,7 @@ def main() -> None:
         vision_max_figures=args.vision_max_figures,
         vision_auto_pull=not args.no_vision_auto_pull,
         vision_strict=args.vision_strict,
+        collection_name=args.collection,
     )
 
 

@@ -764,16 +764,18 @@ def ingest_directory(
       )
 
       with get_client() as client:
+          _ingest_collection = config.target_collection or None
           if fresh:
-              delete_collection(client)
+              delete_collection(client, collection=_ingest_collection)
               manifest = {}
-          ensure_collection(client)
+          ensure_collection(client, collection=_ingest_collection)
 
           for source in removed_sources:
               delete_by_source_key(
                   client,
                   source,
                   legacy_source=str(manifest.get(source, {}).get("source", "")),
+                  collection=_ingest_collection,
               )
               # Clean up debug export artifacts if they exist.
               if config.clean_store_dir:

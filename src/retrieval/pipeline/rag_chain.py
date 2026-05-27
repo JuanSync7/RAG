@@ -7,6 +7,11 @@
 # composite confidence is below the high threshold and retry budget remains, the chain
 # re-runs search+rerank+generate+score with broader params (alpha-=0.15, limit+=5) and
 # returns whichever attempt scores higher. Surfaces both scores in RAGResponse.
+# RAGChain.__init__ accepts an optional ``collection_name`` kwarg (P0
+# collection-selection slice) so callers can route reads/writes to an arbitrary
+# Weaviate collection without env-var manipulation; resolved value lives on
+# ``self._collection_name`` and is threaded through every internal call site
+# via ``self._resolve_collection()`` (defends against __new__-bypassed init).
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -65,6 +70,7 @@ from src.retrieval.pipeline.deep_research import (
     KGSnippet,
     TopicPool,
 )
+from config.settings import VECTOR_COLLECTION_DEFAULT
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
     KG_ENABLED, GENERATION_ENABLED,
@@ -155,8 +161,18 @@ logger = logging.getLogger("rag.rag_chain")
 class RAGChain:
     """End-to-end RAG pipeline: query processing -> KG expansion -> hybrid search -> reranking."""
 
-    def __init__(self, persistent_weaviate: bool = True):
+    def __init__(
+        self,
+        persistent_weaviate: bool = True,
+        collection_name: Optional[str] = None,
+    ):
         from concurrent.futures import ThreadPoolExecutor, Future
+
+        # Resolve target collection: explicit arg wins, otherwise fall back to
+        # the configured default. Threaded through every internal vector-store
+        # call site below so callers can route reads/writes to an arbitrary
+        # collection without env-var manipulation. (P0-collection-selection.)
+        self._collection_name: str = collection_name or VECTOR_COLLECTION_DEFAULT
 
         self.tracer = get_tracer()
         self.retry_provider = get_retry_provider()
@@ -173,7 +189,7 @@ class RAGChain:
         if persistent_weaviate:
             logger.info("Opening persistent Weaviate connection...")
             self._weaviate_client = create_persistent_client()
-            ensure_collection(self._weaviate_client)
+            ensure_collection(self._weaviate_client, collection=self._collection_name)
             logger.info("Weaviate connected (persistent mode).")
 
         # GPU models must load sequentially (parallel .to(cuda) causes meta
@@ -303,6 +319,16 @@ class RAGChain:
         self.xref_max_total: int = RAG_XREF_MAX_TOTAL
 
         logger.info("RAG chain ready.")
+
+    def _resolve_collection(self) -> str:
+        """Return the configured target collection, defending against bypassed __init__.
+
+        Several tests build a RAGChain via ``__new__`` to skip the heavy
+        initialiser. Those instances never set ``_collection_name``; the
+        default behaviour should be identical to passing no collection_name.
+        See memory ``project_rag_chain_defensive_init``.
+        """
+        return getattr(self, "_collection_name", None) or VECTOR_COLLECTION_DEFAULT
 
     def close(self) -> None:
         """Release persistent resources (database connection, visual model)."""
@@ -497,12 +523,11 @@ class RAGChain:
         if getattr(self, "_weaviate_client", None) is None:
             return reranked
         try:
-            from config.settings import VECTOR_COLLECTION_DEFAULT
             dict_hits = self._ranked_to_dicts(reranked)
             expanded = expand_xref_hits(
                 dict_hits,
                 client=self._weaviate_client,
-                collection=VECTOR_COLLECTION_DEFAULT,
+                collection=self._resolve_collection(),
                 enabled=True,
                 max_per_hit=getattr(self, "xref_max_per_hit", 2),
                 max_total=getattr(self, "xref_max_total", 6),
@@ -531,12 +556,11 @@ class RAGChain:
         if getattr(self, "_weaviate_client", None) is None:
             return reranked
         try:
-            from config.settings import VECTOR_COLLECTION_DEFAULT
             dict_hits = self._ranked_to_dicts(reranked)
             expanded = expand_table_group_hits(
                 dict_hits,
                 client=self._weaviate_client,
-                collection=VECTOR_COLLECTION_DEFAULT,
+                collection=self._resolve_collection(),
                 max_rows_per_group=getattr(self, "table_expansion_max_rows", 0),
                 fetch_summary_for_row_hits=getattr(
                     self, "table_expansion_fetch_summary", True,
@@ -569,10 +593,11 @@ class RAGChain:
                         alpha=alpha,
                         limit=search_limit,
                         filters=filters,
+                        collection=self._resolve_collection(),
                     )
                 else:
                     with get_client() as client:
-                        ensure_collection(client)
+                        ensure_collection(client, collection=self._resolve_collection())
                         results = search(
                             client=client,
                             query=bm25_query,
@@ -580,6 +605,7 @@ class RAGChain:
                             alpha=alpha,
                             limit=search_limit,
                             filters=filters,
+                            collection=self._resolve_collection(),
                         )
                 _span.set_attribute("result_count", len(results))
                 logger.debug(

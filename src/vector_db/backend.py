@@ -60,6 +60,13 @@ class VectorBackend(ABC):
         ...
 
     @abstractmethod
+    def collection_exists(
+        self, client: Any, collection: Optional[str] = None
+    ) -> bool:
+        """Return True iff the named collection exists on the server."""
+        ...
+
+    @abstractmethod
     def add_documents(
         self,
         client: Any,

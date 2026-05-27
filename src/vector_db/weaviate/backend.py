@@ -30,6 +30,7 @@ from src.vector_db.weaviate.store import (
     create_persistent_client as _wv_create_persistent,
     get_weaviate_client as _wv_get_ephemeral,
     ensure_collection as _wv_ensure_collection,
+    collection_exists as _wv_collection_exists,
     add_documents as _wv_add_documents,
     hybrid_search as _wv_hybrid_search,
     delete_collection as _wv_delete_collection,
@@ -67,6 +68,11 @@ class WeaviateBackend(VectorBackend):
 
     def ensure_collection(self, client: Any, collection: Optional[str] = None) -> None:
         _wv_ensure_collection(client, collection=self._col(collection))
+
+    def collection_exists(
+        self, client: Any, collection: Optional[str] = None
+    ) -> bool:
+        return _wv_collection_exists(client, collection=self._col(collection))
 
     def add_documents(
         self,
