@@ -129,6 +129,7 @@ def validate_pack(path: Path | str) -> None:
     golden_files = sorted(goldens_dir.glob("*.jsonl"))
     if not golden_files:
         raise PackValidationError("goldens/: no *.jsonl files found")
+    counts_by_qtype: dict[str, int] = {}
     for gf in golden_files:
         qtype = gf.stem
         rel = f"goldens/{gf.name}"
@@ -164,6 +165,7 @@ def validate_pack(path: Path | str) -> None:
                     f"{rel}:line {line_no}: golden qid={qid!r} qtype={row_qtype!r} "
                     f"failed schema validation on fields [{fields}] — {exc}"
                 ) from exc
+            counts_by_qtype[qtype] = counts_by_qtype.get(qtype, 0) + 1
 
     # --- thresholds.yaml ---
     thresholds_path = root / "thresholds.yaml"
@@ -178,3 +180,20 @@ def validate_pack(path: Path | str) -> None:
         raise PackValidationError(
             f"thresholds.yaml: profile {thresholds.profile!r} does not match pack.yaml profile {meta.profile!r}"
         )
+
+    # --- per-qtype minimum-count gate ---
+    if thresholds.min_goldens_per_qtype:
+        deficits: list[tuple[str, int, int]] = []
+        for qtype, declared_min in thresholds.min_goldens_per_qtype.items():
+            actual = counts_by_qtype.get(qtype, 0)
+            if actual < declared_min:
+                deficits.append((qtype, declared_min, actual))
+        if deficits:
+            deficits.sort(key=lambda d: d[0])
+            detail = "; ".join(
+                f"{qtype}: declared {declared}, found {found}"
+                for qtype, declared, found in deficits
+            )
+            raise PackValidationError(
+                f"thresholds.yaml: min_goldens_per_qtype not met — {detail}"
+            )
