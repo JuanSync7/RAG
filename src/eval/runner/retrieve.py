@@ -1,7 +1,7 @@
 # @summary
 # Runs each golden's query through src.vector_db.search against a named
-# collection, collecting retrieved source paths in rank order for downstream
-# recall@k scoring.
+# collection, collecting retrieved source paths AND chunk texts in rank
+# order for downstream recall@k scoring (P4) and faithfulness judging (P5).
 # Exports: QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
 # Deps: src.vector_db (search/create_persistent_client/close_client),
 #       src.core.embeddings (get_embedding_provider), src.eval.pack.schema.Golden
@@ -11,6 +11,10 @@
 Module-top imports of ``search``, ``create_persistent_client``,
 ``close_client``, and ``get_embedding_provider`` are load-bearing: tests
 monkeypatch the LOCAL names on this module.
+
+P5 additively extends ``QueryRetrievalResult`` with ``retrieved_chunks`` —
+the text of each top-k hit — so the faithfulness judge can score against
+the actual chunk contents.
 """
 from __future__ import annotations
 
@@ -27,7 +31,10 @@ class QueryRetrievalResult:
     """Retrieval outcome for a single golden query.
 
     ``retrieved_sources`` is rank-ordered (best-first) and contains the
-    ``metadata['source']`` of each top-k chunk.
+    ``metadata['source']`` of each top-k chunk. ``retrieved_chunks`` is
+    the parallel rank-ordered tuple of chunk *texts* (added in P5 for
+    faithfulness judging; defaults to ``()`` so P4 constructions remain
+    backward-compatible).
     """
 
     qid: str
@@ -35,6 +42,7 @@ class QueryRetrievalResult:
     query: str
     retrieved_sources: tuple[str, ...]
     k: int
+    retrieved_chunks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +85,7 @@ def retrieve_for_goldens(
                         query=query,
                         retrieved_sources=(),
                         k=k,
+                        retrieved_chunks=(),
                     )
                     continue
                 query_embedding = provider.embed_documents([query])[0]
@@ -91,12 +100,14 @@ def retrieve_for_goldens(
                 sources = tuple(
                     hit.metadata.get("source", "") for hit in hits
                 )
+                chunks = tuple(hit.text for hit in hits)
                 per_query[golden.qid] = QueryRetrievalResult(
                     qid=golden.qid,
                     qtype=qtype,
                     query=query,
                     retrieved_sources=sources,
                     k=k,
+                    retrieved_chunks=chunks,
                 )
         return RetrievalResults(
             collection_name=collection_name,
