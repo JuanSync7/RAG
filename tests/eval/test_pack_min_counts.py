@@ -116,6 +116,33 @@ def test_validator_accepts_when_counts_met(tmp_path: Path) -> None:
     assert loaded.thresholds.min_goldens_per_qtype == {"factoid": 3}
 
 
+def test_validator_rejects_one_below_threshold(tmp_path: Path) -> None:
+    # Discriminating companion to test_validator_accepts_when_counts_met:
+    # declared min=4 with only 3 rows must raise — confirms the gate has teeth.
+    pack = _copy_pack(tmp_path)
+    _write_thresholds(pack, min_goldens_per_qtype={"factoid": 4})
+    _write_jsonl(
+        pack / "goldens" / "factoid.jsonl",
+        [
+            {
+                "qid": f"f{i:03d}",
+                "qtype": "factoid",
+                "query": f"Q{i}",
+                "expected_answer_span": "160 MHz",
+                "expected_source_docs": ["docs/intro.md"],
+            }
+            for i in range(1, 4)  # 3 rows, < declared 4
+        ],
+    )
+    with pytest.raises(PackValidationError) as excinfo:
+        validate_pack(pack)
+    msg = str(excinfo.value)
+    assert "min_goldens_per_qtype" in msg
+    assert "factoid" in msg
+    assert "declared 4" in msg
+    assert "found 3" in msg
+
+
 def test_thresholds_schema_exposes_min_goldens_field() -> None:
     t = Thresholds(profile="generic", min_goldens_per_qtype={"factoid": 20})
     assert t.min_goldens_per_qtype == {"factoid": 20}
