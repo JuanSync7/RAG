@@ -1,0 +1,16 @@
+
+==================================== ERRORS ====================================
+__________ ERROR collecting tests/eval/test_pack_retrieve_metrics.py ___________
+ImportError while importing test module '/home/kok-shew-juan/RagWeave/.worktrees/p4-retrieval-metrics/tests/eval/test_pack_retrieve_metrics.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../../.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/eval/test_pack_retrieve_metrics.py:22: in <module>
+    from src.eval.runner import (
+E   ImportError: cannot import name 'EvalReport' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p4-retrieval-metrics/src/eval/runner/__init__.py)
+=========================== short test summary info ============================
+ERROR tests/eval/test_pack_retrieve_metrics.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 4.47s
