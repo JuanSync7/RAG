@@ -7,7 +7,7 @@
 #          aggregate_recall_by_qtype, aggregate_faithfulness_by_qtype,
 #          score_goldens, build_eval_report, build_judge_client,
 #          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
-#          read_max_parallel_judges.
+#          read_max_parallel_judges, render_ci_summary.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
@@ -26,6 +26,7 @@ the executor (``score_goldens`` + ``aggregate_faithfulness_by_qtype`` +
 """
 from __future__ import annotations
 
+from .ci import render_ci_summary
 from .execute import execute_plan
 from .gate import GateFailure, GateResult, validate_eval_report
 from .faithfulness import (
@@ -72,6 +73,7 @@ __all__ = [
     "read_max_parallel_judges",
     "read_samples_per_claim",
     "recall_at_k",
+    "render_ci_summary",
     "render_judge_prompt",
     "retrieve_for_goldens",
     "score_goldens",
