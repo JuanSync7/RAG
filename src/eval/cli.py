@@ -73,6 +73,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable verbose logging.",
     )
+    run_parser.add_argument(
+        "--samples-per-claim",
+        type=int,
+        default=None,
+        help=(
+            "Override pack.meta.judge.samples_per_claim — number of judge "
+            "invocations per golden (mean score, best reasoning)."
+        ),
+    )
     fresh_group = run_parser.add_mutually_exclusive_group()
     fresh_group.add_argument(
         "--fresh",
@@ -164,6 +173,7 @@ def run_cli(
     format: str = "text",
     verbose: bool = False,
     fresh: bool = True,
+    samples_per_claim: int | None = None,
     chat_model_factory: Callable[..., Any] | None = None,
     stdout: Any = None,
     stderr: Any = None,
@@ -207,9 +217,16 @@ def run_cli(
             aggregate_recall_by_qtype,
             build_eval_report,
             plan_pack_ingest,
+            read_samples_per_claim,
             retrieve_for_goldens,
             score_goldens,
             validate_eval_report,
+        )
+
+        effective_samples = (
+            samples_per_claim
+            if samples_per_claim is not None
+            else read_samples_per_claim(pack)
         )
 
         plan = plan_pack_ingest(pack, pack_dir)
@@ -231,7 +248,10 @@ def run_cli(
             pack_dir=pack_dir,
         )
         faithfulness_results = score_goldens(
-            retrieval_results, pack.goldens, judge_client
+            retrieval_results,
+            pack.goldens,
+            judge_client,
+            samples_per_claim=effective_samples,
         )
 
         recall_by_qtype = aggregate_recall_by_qtype(
@@ -292,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             format=args.format,
             verbose=args.verbose,
             fresh=args.fresh,
+            samples_per_claim=args.samples_per_claim,
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.

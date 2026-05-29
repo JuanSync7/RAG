@@ -64,12 +64,21 @@ def score_goldens(
     retrieval_results: RetrievalResults,
     goldens: Mapping[str, list[Golden]],
     judge_client: JudgeClient,
+    *,
+    samples_per_claim: int = 1,
 ) -> FaithfulnessResults:
     """Score each retrieved golden via the judge client.
 
     Goldens whose ``retrieved_chunks`` are empty are SKIPPED (no judge
-    call). Every other golden is judged exactly once.
+    call). Every other golden is judged ``samples_per_claim`` times; the
+    stored score is the mean across samples and the stored reasoning is
+    taken from the highest-scored sample (first-wins on ties — Python
+    ``max`` is stable).
     """
+    if samples_per_claim < 1:
+        raise ValueError(
+            f"samples_per_claim must be >= 1, got {samples_per_claim}"
+        )
     by_qid = _index_goldens_by_qid(goldens)
     per_query: dict[str, QueryFaithfulnessResult] = {}
     skipped = 0
@@ -86,12 +95,14 @@ def score_goldens(
             expected_answer_span=expected_span,
             chunk_texts=qresult.retrieved_chunks,
         )
-        judgment = judge_client.score(question)
+        samples = [judge_client.score(question) for _ in range(samples_per_claim)]
+        mean_score = statistics.mean(float(s.score) for s in samples)
+        best = max(samples, key=lambda s: s.score)
         per_query[qid] = QueryFaithfulnessResult(
             qid=qid,
             qtype=qresult.qtype,
-            score=float(judgment.score),
-            reasoning=judgment.reasoning,
+            score=float(mean_score),
+            reasoning=best.reasoning,
         )
     return FaithfulnessResults(
         collection_name=retrieval_results.collection_name,

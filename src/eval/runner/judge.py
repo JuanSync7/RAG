@@ -1,7 +1,8 @@
 # @summary
-# Pluggable judge contract for chunk-level faithfulness scoring (P5.0).
+# Pluggable judge contract for chunk-level faithfulness scoring (P5.0)
+# + multi-sample helper (P6c).
 # Exports: JudgeQuestion, JudgmentScore, JudgeClient, load_judge_prompt,
-#          render_judge_prompt, build_judge_client.
+#          render_judge_prompt, build_judge_client, read_samples_per_claim.
 # Deps: pydantic v2, src.common.llm.provider.get_llm,
 #       src.eval.pack.schema.EvalPack.
 # @end-summary
@@ -179,6 +180,26 @@ def build_judge_client(
         # Implementation detail: pass a path whose prompts/ does not exist.
         template = _load_default_template(version=judge_cfg.tier1_prompt_version)
     return JudgeClient(template=template, chat_model=chat_model)
+
+
+def read_samples_per_claim(pack: EvalPack) -> int:
+    """Read ``pack.meta.judge.samples_per_claim`` with a defensive default.
+
+    Returns 1 when the field is missing (legacy packs). Raises ``ValueError``
+    when the value is < 1, since callers will use it as a loop count.
+    """
+    n = getattr(pack.meta.judge, "samples_per_claim", 1)
+    if n is None:
+        n = 1
+    try:
+        n_int = int(n)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"samples_per_claim must be an integer >= 1, got {n!r}"
+        ) from exc
+    if n_int < 1:
+        raise ValueError(f"samples_per_claim must be >= 1, got {n_int}")
+    return n_int
 
 
 def _load_default_template(*, version: str) -> str:
