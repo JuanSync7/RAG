@@ -18,6 +18,8 @@ from .pack import EvalPack, PackValidationError, load_pack, validate_pack
 from .runner import (
     EvalReport,
     FaithfulnessResults,
+    GateFailure,
+    GateResult,
     IngestPlan,
     IngestReport,
     JudgeClient,
@@ -37,12 +39,15 @@ from .runner import (
     render_judge_prompt,
     retrieve_for_goldens,
     score_goldens,
+    validate_eval_report,
 )
 
 __all__ = [
     "EvalPack",
     "EvalReport",
     "FaithfulnessResults",
+    "GateFailure",
+    "GateResult",
     "IngestPlan",
     "IngestReport",
     "JudgeClient",
@@ -64,5 +69,6 @@ __all__ = [
     "render_judge_prompt",
     "retrieve_for_goldens",
     "score_goldens",
+    "validate_eval_report",
     "validate_pack",
 ]

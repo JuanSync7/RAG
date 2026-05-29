@@ -26,6 +26,7 @@ the executor (``score_goldens`` + ``aggregate_faithfulness_by_qtype`` +
 from __future__ import annotations
 
 from .execute import execute_plan
+from .gate import GateFailure, GateResult, validate_eval_report
 from .faithfulness import (
     FaithfulnessResults,
     QueryFaithfulnessResult,
@@ -48,6 +49,8 @@ from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_golde
 __all__ = [
     "EvalReport",
     "FaithfulnessResults",
+    "GateFailure",
+    "GateResult",
     "IngestPlan",
     "IngestReport",
     "JudgeClient",
@@ -67,4 +70,5 @@ __all__ = [
     "render_judge_prompt",
     "retrieve_for_goldens",
     "score_goldens",
+    "validate_eval_report",
 ]
