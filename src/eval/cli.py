@@ -74,6 +74,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable verbose logging.",
     )
     run_parser.add_argument(
+        "--show-samples",
+        action="store_true",
+        help=(
+            "Include per-sample judge scores and reasoning in JSON output "
+            "(default: off; silently ignored under --format text)."
+        ),
+    )
+    run_parser.add_argument(
         "--samples-per-claim",
         type=int,
         default=None,
@@ -137,8 +145,20 @@ def _emit_text(report, gate, *, stdout, stderr) -> None:
             )
 
 
-def _emit_json(report, gate, *, stdout) -> None:
-    """Emit a single-line JSON payload with the report + gate outcome."""
+def _emit_json(
+    report,
+    gate,
+    *,
+    stdout,
+    faithfulness_results=None,
+    show_samples: bool = False,
+) -> None:
+    """Emit a single-line JSON payload with the report + gate outcome.
+
+    When *show_samples* is True AND *faithfulness_results* is provided,
+    the payload also carries ``per_query_samples``: a mapping from qid
+    to a list of ``{score, reasoning}`` dicts (one per judge sample).
+    """
     payload = {
         "collection_name": report.collection_name,
         "k": report.k,
@@ -158,6 +178,14 @@ def _emit_json(report, gate, *, stdout) -> None:
         "total_queries_skipped": report.total_queries_skipped,
         "total_queries_judged": report.total_queries_judged,
     }
+    if show_samples and faithfulness_results is not None:
+        payload["per_query_samples"] = {
+            qid: [
+                {"score": float(s.score), "reasoning": s.reasoning}
+                for s in qres.samples
+            ]
+            for qid, qres in faithfulness_results.per_query.items()
+        }
     print(json.dumps(payload), file=stdout)
 
 
@@ -174,6 +202,7 @@ def run_cli(
     verbose: bool = False,
     fresh: bool = True,
     samples_per_claim: int | None = None,
+    show_samples: bool = False,
     chat_model_factory: Callable[..., Any] | None = None,
     stdout: Any = None,
     stderr: Any = None,
@@ -289,7 +318,13 @@ def run_cli(
 
     # --- Phase 3: emit + gate-to-exit-code ---
     if format == "json":
-        _emit_json(report, gate, stdout=stdout)
+        _emit_json(
+            report,
+            gate,
+            stdout=stdout,
+            faithfulness_results=faithfulness_results,
+            show_samples=show_samples,
+        )
     else:
         _emit_text(report, gate, stdout=stdout, stderr=stderr)
 
@@ -313,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             verbose=args.verbose,
             fresh=args.fresh,
             samples_per_claim=args.samples_per_claim,
+            show_samples=getattr(args, "show_samples", False),
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.
