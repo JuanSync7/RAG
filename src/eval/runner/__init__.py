@@ -6,7 +6,8 @@
 #          plan_pack_ingest, retrieve_for_goldens, recall_at_k,
 #          aggregate_recall_by_qtype, aggregate_faithfulness_by_qtype,
 #          score_goldens, build_eval_report, build_judge_client,
-#          load_judge_prompt, render_judge_prompt.
+#          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
+#          read_max_parallel_judges.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
@@ -39,6 +40,7 @@ from .judge import (
     JudgmentScore,
     build_judge_client,
     load_judge_prompt,
+    read_max_parallel_judges,
     read_samples_per_claim,
     render_judge_prompt,
 )
@@ -67,6 +69,7 @@ __all__ = [
     "execute_plan",
     "load_judge_prompt",
     "plan_pack_ingest",
+    "read_max_parallel_judges",
     "read_samples_per_claim",
     "recall_at_k",
     "render_judge_prompt",
