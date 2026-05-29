@@ -14,7 +14,8 @@
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
-#       aggregate_recall_by_qtype, validate_eval_report, plan_pack_ingest,
+#       aggregate_recall_by_qtype, aggregate_mrr_by_qtype,
+#       validate_eval_report, plan_pack_ingest,
 #       read_samples_per_claim, read_max_parallel_judges.
 # @end-summary
 """Eval CLI runner (P6b).
@@ -298,6 +299,7 @@ def run_cli(
         # Lazy import: avoid pulling LLM stubs at module-top.
         from src.eval import runner as runner_pkg
         from src.eval.runner import (
+            aggregate_mrr_by_qtype,
             aggregate_recall_by_qtype,
             build_eval_report,
             plan_pack_ingest,
@@ -348,6 +350,7 @@ def run_cli(
         recall_by_qtype = aggregate_recall_by_qtype(
             retrieval_results, pack.goldens
         )
+        mrr_by_qtype = aggregate_mrr_by_qtype(retrieval_results, pack.goldens)
         # Per-query recall: pure recall, computed in-line to keep build_eval_report happy.
         from src.eval.runner.metrics import recall_at_k as _recall_at_k
 
@@ -368,6 +371,7 @@ def run_cli(
             faithfulness_results,
             recall_by_qtype,
             per_query_recall,
+            mrr_by_qtype=mrr_by_qtype,
         )
         gate = validate_eval_report(pack, report)
     except Exception as exc:  # noqa: BLE001 — infra failures are bucketed to exit 3.

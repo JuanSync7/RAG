@@ -1,8 +1,8 @@
 # @summary
-# P7d — pure CI summary renderer. render_ci_summary(report, gate) produces a
-# deterministic GitHub-flavored-markdown PASS/FAIL summary: a status line, a
-# per-qtype metrics table (recall@k + faithfulness + per-qtype status), a
-# failures table sourced strictly from gate.failures, and a run-facts footer.
+# P7d/P7e — pure CI summary renderer. render_ci_summary(report, gate) produces
+# a deterministic GitHub-flavored-markdown PASS/FAIL summary: a status line, a
+# per-qtype metrics table (recall@k + mrr + faithfulness + per-qtype status),
+# a failures table sourced strictly from gate.failures, and a run-facts footer.
 # No I/O, no env reads — the write seam lives in src.eval.cli.
 # Exports: render_ci_summary
 # Deps: stdlib only; src.eval.runner.report.EvalReport (type only),
@@ -22,7 +22,8 @@ Design invariants
   while expected-vs-actual appears ONLY in the failures table.
 - Per-qtype status is ``FAIL`` iff some ``gate.failure`` names that qtype.
 - Faithfulness renders an em-dash (``—``) when absent for a qtype (judged-zero
-  / not faithfulness-gated) — never ``0.000``.
+  / not faithfulness-gated) — never ``0.000``. MRR renders the same em-dash
+  when absent for a qtype.
 - qtype rows and failure rows are emitted in sorted order for determinism.
 """
 from __future__ import annotations
@@ -71,15 +72,21 @@ def render_ci_summary(report: "EvalReport", gate: "GateResult") -> str:
 
     # --- Per-qtype metrics table ---
     recall_key = f"recall@{report.k}"
-    lines.append(f"| qtype | {recall_key} | faithfulness | status |")
-    lines.append("| --- | --- | --- | --- |")
-    qtypes = sorted(set(report.recall_by_qtype) | set(report.faithfulness_by_qtype))
+    lines.append(f"| qtype | {recall_key} | mrr | faithfulness | status |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    qtypes = sorted(
+        set(report.recall_by_qtype)
+        | set(report.mrr_by_qtype)
+        | set(report.faithfulness_by_qtype)
+    )
     for qt in qtypes:
         recall = report.recall_by_qtype.get(qt)
+        mrr = report.mrr_by_qtype.get(qt)
         faith = report.faithfulness_by_qtype.get(qt)
         qt_status = "FAIL" if qt in failed_qtypes else "PASS"
         lines.append(
-            f"| {qt} | {_fmt(recall)} | {_fmt(faith)} | {qt_status} |"
+            f"| {qt} | {_fmt(recall)} | {_fmt(mrr)} | "
+            f"{_fmt(faith)} | {qt_status} |"
         )
     lines.append("")
 

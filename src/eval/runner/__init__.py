@@ -4,7 +4,8 @@
 #          QueryRetrievalResult, QueryFaithfulnessResult, FaithfulnessResults,
 #          JudgeClient, JudgeQuestion, JudgmentScore, execute_plan,
 #          plan_pack_ingest, retrieve_for_goldens, recall_at_k,
-#          aggregate_recall_by_qtype, aggregate_faithfulness_by_qtype,
+#          aggregate_recall_by_qtype, reciprocal_rank, aggregate_mrr_by_qtype,
+#          aggregate_faithfulness_by_qtype,
 #          score_goldens, build_eval_report, build_judge_client,
 #          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
 #          read_max_parallel_judges, render_ci_summary.
@@ -45,7 +46,12 @@ from .judge import (
     read_samples_per_claim,
     render_judge_prompt,
 )
-from .metrics import aggregate_recall_by_qtype, recall_at_k
+from .metrics import (
+    aggregate_mrr_by_qtype,
+    aggregate_recall_by_qtype,
+    recall_at_k,
+    reciprocal_rank,
+)
 from .plan import IngestPlan, plan_pack_ingest
 from .report import EvalReport, IngestReport, build_eval_report
 from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
@@ -64,6 +70,7 @@ __all__ = [
     "QueryRetrievalResult",
     "RetrievalResults",
     "aggregate_faithfulness_by_qtype",
+    "aggregate_mrr_by_qtype",
     "aggregate_recall_by_qtype",
     "build_eval_report",
     "build_judge_client",
@@ -73,6 +80,7 @@ __all__ = [
     "read_max_parallel_judges",
     "read_samples_per_claim",
     "recall_at_k",
+    "reciprocal_rank",
     "render_ci_summary",
     "render_judge_prompt",
     "retrieve_for_goldens",

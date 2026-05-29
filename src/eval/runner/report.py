@@ -1,13 +1,14 @@
 # @summary
 # Frozen report dataclasses + builder: IngestReport (P3, post-ingest counts),
-# EvalReport (P4 + P5, aggregated retrieval recall@k + faithfulness),
-# build_eval_report (P5 helper that wires retrieval + faithfulness aggregates).
+# EvalReport (P4 + P5 + P7e, aggregated retrieval recall@k + faithfulness +
+# MRR), build_eval_report (helper wiring retrieval + faithfulness + MRR
+# aggregates).
 # Exports: IngestReport, EvalReport, build_eval_report
 # Deps: stdlib (dataclasses, typing); src.eval.runner.plan (IngestPlan);
 #       src.eval.runner.faithfulness (aggregate_faithfulness_by_qtype) — lazy.
 # @end-summary
 """Frozen reports for ingest execution (P3) and retrieval/faithfulness eval
-(P4 + P5)."""
+(P4 + P5 + P7e MRR)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -44,8 +45,10 @@ class EvalReport:
     Holds the aggregated outcome of ``retrieve_for_goldens`` +
     ``aggregate_recall_by_qtype`` (P4) over a given collection at top-k,
     extended in P5 with ``faithfulness_by_qtype`` aggregated from
-    ``score_goldens``. The faithfulness fields default to empty so P4
-    constructions remain valid without modification.
+    ``score_goldens`` and in P7e with ``mrr_by_qtype`` (mean reciprocal
+    rank, same source-path predicate as recall). The faithfulness and MRR
+    fields default to empty so earlier constructions remain valid without
+    modification.
     """
 
     collection_name: str
@@ -56,6 +59,7 @@ class EvalReport:
     total_queries_skipped: int
     faithfulness_by_qtype: Mapping[str, float] = field(default_factory=dict)
     total_queries_judged: int = 0
+    mrr_by_qtype: Mapping[str, float] = field(default_factory=dict)
 
 
 def build_eval_report(
@@ -63,13 +67,18 @@ def build_eval_report(
     faithfulness_results,
     recall_by_qtype: Mapping[str, float],
     per_query_recall: Mapping[str, float],
+    mrr_by_qtype: Mapping[str, float] | None = None,
 ) -> EvalReport:
-    """Wire P4 retrieval aggregates + P5 faithfulness aggregates into one report.
+    """Wire P4 retrieval + P5 faithfulness + P7e MRR aggregates into one report.
 
     Aggregates the faithfulness scores per qtype using the goldens *implied
     by* ``faithfulness_results.per_query`` so the helper can run without a
     direct goldens mapping. The faithfulness qtype rollup mirrors
     ``aggregate_faithfulness_by_qtype``'s contract (omit empty qtypes).
+
+    ``mrr_by_qtype`` is computed by the caller (via
+    ``aggregate_mrr_by_qtype``) and threaded through verbatim; ``None``
+    defaults to an empty mapping so existing callers stay valid.
     """
     # Build a goldens-like view: group judged qids by qtype.
     grouped: dict[str, list] = {}
@@ -92,4 +101,5 @@ def build_eval_report(
         total_queries_skipped=faithfulness_results.total_queries_skipped,
         faithfulness_by_qtype=faith_by_qtype,
         total_queries_judged=faithfulness_results.total_queries_scored,
+        mrr_by_qtype=dict(mrr_by_qtype) if mrr_by_qtype is not None else {},
     )
