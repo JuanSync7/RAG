@@ -12,6 +12,7 @@ This directory contains engineering specifications, design documents, implementa
 
 | Directory | Contents |
 | --- | --- |
+| `eval/` | Offline eval loop engineering guide (pack format, runner stages, judge, gate, CLI) |
 | `ingestion/` | Ingestion pipeline spec, design docs, implementation guides, engineering guide, onboarding checklist |
 | `retrieval/` | Retrieval pipeline spec, design docs, implementation guides, NeMo Guardrails, engineering guide, onboarding checklist |
 | `server/` | FastAPI server API spec, implementation guide, platform services spec |
@@ -28,6 +29,7 @@ This directory contains engineering specifications, design documents, implementa
 
 | Goal | Document |
 | --- | --- |
+| Understand eval loop | `eval/EVAL_LOOP_ENGINEERING_GUIDE.md` |
 | Understand ingestion pipeline | `ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md` |
 | Understand retrieval pipeline | `retrieval/RETRIEVAL_ENGINEERING_GUIDE.md` |
 | Understand server API | `server/SERVER_API_SPEC.md` |
