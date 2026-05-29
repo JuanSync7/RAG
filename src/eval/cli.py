@@ -351,10 +351,13 @@ def run_cli(
             retrieval_results, pack.goldens
         )
         mrr_by_qtype = aggregate_mrr_by_qtype(retrieval_results, pack.goldens)
-        # Per-query recall: pure recall, computed in-line to keep build_eval_report happy.
+        # Per-query recall + mrr: computed in-line (mirror each other) for the
+        # per-qid threshold-override checks in the gate (P7f).
         from src.eval.runner.metrics import recall_at_k as _recall_at_k
+        from src.eval.runner.metrics import reciprocal_rank as _reciprocal_rank
 
         per_query_recall: dict[str, float] = {}
+        per_query_mrr: dict[str, float] = {}
         for qtype, golden_list in pack.goldens.items():
             for golden in golden_list:
                 if not golden.expected_source_docs:
@@ -365,6 +368,9 @@ def run_cli(
                 per_query_recall[golden.qid] = _recall_at_k(
                     qr.retrieved_sources, golden.expected_source_docs
                 )
+                per_query_mrr[golden.qid] = _reciprocal_rank(
+                    qr.retrieved_sources, golden.expected_source_docs
+                )
 
         report = build_eval_report(
             retrieval_results,
@@ -372,6 +378,7 @@ def run_cli(
             recall_by_qtype,
             per_query_recall,
             mrr_by_qtype=mrr_by_qtype,
+            per_query_mrr=per_query_mrr,
         )
         gate = validate_eval_report(pack, report)
     except Exception as exc:  # noqa: BLE001 — infra failures are bucketed to exit 3.

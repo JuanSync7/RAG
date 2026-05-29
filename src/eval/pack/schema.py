@@ -1,6 +1,7 @@
 # @summary
 # Pydantic v2 models for the eval_pack format (P0.5 keystone).
-# Exports: PackMeta, JudgeConfig, ManifestEntry, Golden, Thresholds, EvalPack.
+# Exports: PackMeta, JudgeConfig, ManifestEntry, Golden, ThresholdOverride,
+#          Thresholds, EvalPack.
 # Deps: pydantic v2.
 # @end-summary
 """Typed contracts for the eval_pack format.
@@ -74,12 +75,69 @@ class Golden(BaseModel):
         return self
 
 
+class ThresholdOverride(BaseModel):
+    """A single threshold override entry (P7f).
+
+    An override targets EXACTLY ONE of:
+
+    - a ``qtype`` — its metric floors REPLACE (per metric, last-wins) the
+      matching entries in ``Thresholds.defaults`` and may introduce qtypes
+      or metrics absent from defaults;
+    - a ``qid`` — its metric floors are checked against that single query's
+      individual scores.
+
+    The metric floors arrive as *extra* fields (e.g. ``mrr``, ``recall_at_5``,
+    ``faithfulness``) and are surfaced via :meth:`floors`. Validation is
+    fail-fast at construction so a malformed entry rejects at pack load
+    (``loader.py`` and ``validate.py`` both build :class:`Thresholds`).
+
+    Contract:
+
+    - exactly one of ``qtype`` / ``qid`` must be set (XOR);
+    - at least one metric floor must be present and every floor value must be
+      a real number (``int``/``float``, but NOT ``bool`` and NOT a string).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    qtype: str | None = None
+    qid: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> ThresholdOverride:
+        has_qtype = self.qtype is not None
+        has_qid = self.qid is not None
+        if has_qtype == has_qid:
+            raise ValueError(
+                "threshold override must set EXACTLY ONE of 'qtype' or 'qid' "
+                f"(got qtype={self.qtype!r}, qid={self.qid!r})"
+            )
+        extras = self.model_extra or {}
+        if not extras:
+            raise ValueError(
+                "threshold override must declare at least one metric floor "
+                f"(target={'qtype=' + self.qtype if has_qtype else 'qid=' + self.qid!r})"
+            )
+        for key, value in extras.items():
+            # bool is an int subclass — exclude it explicitly.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"threshold override metric {key!r} must be a real number, "
+                    f"got {value!r} ({type(value).__name__})"
+                )
+        return self
+
+    def floors(self) -> dict[str, float]:
+        """Return the metric floors as a ``{metric: float}`` mapping."""
+        return {k: float(v) for k, v in (self.model_extra or {}).items()}
+
+
 class Thresholds(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     profile: str
     defaults: dict[str, dict[str, float]] = Field(default_factory=dict)
-    overrides: list[dict[str, Any]] = Field(default_factory=list)
+    overrides: list[ThresholdOverride] = Field(default_factory=list)
     min_goldens_per_qtype: dict[str, int] = Field(default_factory=dict)
 
 

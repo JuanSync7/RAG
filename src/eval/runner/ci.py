@@ -1,9 +1,11 @@
 # @summary
-# P7d/P7e — pure CI summary renderer. render_ci_summary(report, gate) produces
-# a deterministic GitHub-flavored-markdown PASS/FAIL summary: a status line, a
-# per-qtype metrics table (recall@k + mrr + faithfulness + per-qtype status),
-# a failures table sourced strictly from gate.failures, and a run-facts footer.
-# No I/O, no env reads — the write seam lives in src.eval.cli.
+# P7d/P7e/P7f — pure CI summary renderer. render_ci_summary(report, gate)
+# produces a deterministic GitHub-flavored-markdown PASS/FAIL summary: a status
+# line, a per-qtype metrics table (recall@k + mrr + faithfulness + per-qtype
+# status), a failures table sourced strictly from gate.failures with columns
+# qtype/qid/metric/expected/actual (qid em-dash for qtype-level failures), and
+# a run-facts footer. No I/O, no env reads — the write seam lives in
+# src.eval.cli.
 # Exports: render_ci_summary
 # Deps: stdlib only; src.eval.runner.report.EvalReport (type only),
 #       src.eval.runner.gate.GateResult (type only).
@@ -96,11 +98,11 @@ def render_ci_summary(report: "EvalReport", gate: "GateResult") -> str:
     if not gate.failures:
         lines.append("None — all declared thresholds met.")
     else:
-        lines.append("| qtype | metric | expected | actual |")
-        lines.append("| --- | --- | --- | --- |")
-        for f in sorted(gate.failures, key=lambda x: (x.qtype, x.metric)):
+        lines.append("| qtype | qid | metric | expected | actual |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for f in sorted(gate.failures, key=lambda x: (x.qtype, x.qid, x.metric)):
             lines.append(
-                f"| {f.qtype} | {f.metric} | "
+                f"| {f.qtype} | {f.qid or _DASH} | {f.metric} | "
                 f"{f.expected:.3f} | {f.actual:.3f} |"
             )
     lines.append("")
