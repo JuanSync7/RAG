@@ -272,7 +272,9 @@ def ensure_collection(
             Property(name="heading", data_type=DataType.TEXT),
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
-            Property(name="document_id", data_type=DataType.TEXT),
+            # NOTE: ``document_id`` is declared in ``TABLE_AWARE_PROPERTIES``
+            # (above) and intentionally not redeclared here — Weaviate rejects
+            # duplicate property names with HTTP 422.
             # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3.1) --
             Property(
                 name="node_kind",
@@ -678,6 +680,18 @@ def hybrid_search(
     span.set_attribute("result_count", len(documents))
     span.end(status="ok")
     return documents
+
+
+def collection_exists(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> bool:
+    """Return True iff the named collection exists on the server.
+
+    Thin wrapper around ``client.collections.exists(name)`` used by callers
+    that want to branch on collection presence without a full schema fetch.
+    """
+    return bool(client.collections.exists(collection))
 
 
 def delete_collection(
