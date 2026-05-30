@@ -196,11 +196,16 @@ def _emit_json(
                 "metric": f.metric,
                 "expected": f.expected,
                 "actual": f.actual,
+                "qid": f.qid,
             }
             for f in gate.failures
         ],
         "recall_by_qtype": dict(report.recall_by_qtype),
         "faithfulness_by_qtype": dict(report.faithfulness_by_qtype),
+        "mrr_by_qtype": dict(report.mrr_by_qtype),
+        "per_query_recall": dict(report.per_query_recall),
+        "per_query_mrr": dict(report.per_query_mrr),
+        "per_query_faithfulness": dict(report.per_query_faithfulness),
         "total_queries_scored": report.total_queries_scored,
         "total_queries_skipped": report.total_queries_skipped,
         "total_queries_judged": report.total_queries_judged,
