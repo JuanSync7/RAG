@@ -1,13 +1,14 @@
 # @summary
-# Frozen IngestReport dataclass — return value of execute_plan, capturing
-# post-ingest counts, collection routing, and back-reference to the plan.
-# Exports: IngestReport
-# Deps: stdlib (dataclasses); src.eval.runner.plan (IngestPlan).
+# Frozen report dataclasses: IngestReport (P3, post-ingest counts) and
+# EvalReport (P4, aggregated retrieval recall@k outcome).
+# Exports: IngestReport, EvalReport
+# Deps: stdlib (dataclasses, typing); src.eval.runner.plan (IngestPlan).
 # @end-summary
-"""Frozen report describing the outcome of a pack ingest execution."""
+"""Frozen reports for ingest execution (P3) and retrieval eval (P4)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 from .plan import IngestPlan
 
@@ -31,3 +32,19 @@ class IngestReport:
     document_count: int
     plan: IngestPlan
     errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EvalReport:
+    """Immutable summary of a retrieval recall@k evaluation pass.
+
+    Holds the aggregated outcome of ``retrieve_for_goldens`` +
+    ``aggregate_recall_by_qtype`` over a given collection at top-k.
+    """
+
+    collection_name: str
+    k: int
+    per_query_recall: Mapping[str, float]
+    recall_by_qtype: Mapping[str, float]
+    total_queries_scored: int
+    total_queries_skipped: int
