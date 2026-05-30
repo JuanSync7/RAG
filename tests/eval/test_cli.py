@@ -315,6 +315,10 @@ def test_cli_json_format_valid(tmp_path: Path, monkeypatch, capsys) -> None:
         "failures",
         "recall_by_qtype",
         "faithfulness_by_qtype",
+        "mrr_by_qtype",
+        "per_query_recall",
+        "per_query_mrr",
+        "per_query_faithfulness",
         "total_queries_scored",
         "total_queries_skipped",
         "total_queries_judged",
@@ -410,3 +414,125 @@ def test_cli_chat_model_factory_injected(tmp_path: Path, monkeypatch) -> None:
     rc = run_cli(str(pack_dir), chat_model_factory=my_factory)
     assert rc == 0
     assert captured["chat_model_factory"] is my_factory
+
+
+# ---------------------------------------------------------------------------
+# P7g — _emit_json metric exposure (direct unit tests on _emit_json).
+# ---------------------------------------------------------------------------
+
+
+def _make_eval_report(
+    *,
+    recall_by_qtype: dict[str, float] | None = None,
+    faithfulness_by_qtype: dict[str, float] | None = None,
+    mrr_by_qtype: dict[str, float] | None = None,
+    per_query_recall: dict[str, float] | None = None,
+    per_query_mrr: dict[str, float] | None = None,
+    per_query_faithfulness: dict[str, float] | None = None,
+):
+    """Construct a minimal valid EvalReport for _emit_json unit tests."""
+    from src.eval.runner.report import EvalReport
+
+    return EvalReport(
+        collection_name="c",
+        k=5,
+        per_query_recall=per_query_recall or {},
+        recall_by_qtype=recall_by_qtype or {},
+        total_queries_scored=1,
+        total_queries_skipped=0,
+        faithfulness_by_qtype=faithfulness_by_qtype or {},
+        total_queries_judged=1,
+        mrr_by_qtype=mrr_by_qtype or {},
+        per_query_mrr=per_query_mrr or {},
+        per_query_faithfulness=per_query_faithfulness or {},
+    )
+
+
+def test_emit_json_failure_carries_populated_qid() -> None:
+    """A per-qid GateFailure serializes its qid verbatim in the JSON payload.
+
+    Kills a hardcoded-empty mutation on the failures comprehension.
+    """
+    from src.eval.cli import _emit_json
+    from src.eval.runner.gate import GateFailure, GateResult
+
+    report = _make_eval_report()
+    gate = GateResult(
+        passed=False,
+        failures=(
+            GateFailure(
+                qtype="factoid",
+                metric="recall_at_5",
+                expected=0.8,
+                actual=0.3,
+                qid="factoid_017",
+            ),
+        ),
+    )
+    buf = io.StringIO()
+    _emit_json(report, gate, stdout=buf)
+    payload = json.loads(buf.getvalue())
+    assert payload["failures"][0]["qid"] == "factoid_017"
+
+
+def test_emit_json_qtype_failure_has_empty_qid() -> None:
+    """A qtype-level GateFailure (no qid) serializes qid as empty string.
+
+    One-step-below partner: present+empty vs present+populated gives the
+    qid serialization teeth.
+    """
+    from src.eval.cli import _emit_json
+    from src.eval.runner.gate import GateFailure, GateResult
+
+    report = _make_eval_report()
+    gate = GateResult(
+        passed=False,
+        failures=(
+            GateFailure(
+                qtype="factoid",
+                metric="recall_at_5",
+                expected=0.8,
+                actual=0.3,
+            ),
+        ),
+    )
+    buf = io.StringIO()
+    _emit_json(report, gate, stdout=buf)
+    payload = json.loads(buf.getvalue())
+    assert payload["failures"][0]["qid"] == ""
+
+
+def test_emit_json_per_query_maps_carry_distinct_sources() -> None:
+    """The three per-query maps each serialize from their OWN source.
+
+    Distinct values per map mean a copy-paste-wrong-source mutation reds
+    exactly one assertion.
+    """
+    from src.eval.cli import _emit_json
+    from src.eval.runner.gate import GateResult
+
+    report = _make_eval_report(
+        per_query_recall={"g1": 0.5},
+        per_query_mrr={"g1": 0.25},
+        per_query_faithfulness={"g1": 0.9},
+    )
+    gate = GateResult(passed=True, failures=())
+    buf = io.StringIO()
+    _emit_json(report, gate, stdout=buf)
+    payload = json.loads(buf.getvalue())
+    assert payload["per_query_recall"]["g1"] == 0.5
+    assert payload["per_query_mrr"]["g1"] == 0.25
+    assert payload["per_query_faithfulness"]["g1"] == 0.9
+
+
+def test_emit_json_includes_mrr_by_qtype() -> None:
+    """mrr_by_qtype is exposed as a top-level key with the carried value."""
+    from src.eval.cli import _emit_json
+    from src.eval.runner.gate import GateResult
+
+    report = _make_eval_report(mrr_by_qtype={"factoid": 0.42})
+    gate = GateResult(passed=True, failures=())
+    buf = io.StringIO()
+    _emit_json(report, gate, stdout=buf)
+    payload = json.loads(buf.getvalue())
+    assert payload["mrr_by_qtype"]["factoid"] == 0.42
