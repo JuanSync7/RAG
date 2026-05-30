@@ -26,18 +26,24 @@ from typing import Mapping
 
 from src.eval.pack.schema import Golden
 
-from .judge import JudgeClient, JudgeQuestion
+from .judge import JudgeClient, JudgeQuestion, JudgmentScore
 from .retrieve import RetrievalResults
 
 
 @dataclass(frozen=True)
 class QueryFaithfulnessResult:
-    """Per-query faithfulness score returned by the judge."""
+    """Per-query faithfulness score returned by the judge.
+
+    ``samples`` (P7b) carries the raw per-sample ``JudgmentScore`` tuple
+    populated by ``score_goldens``. Defaults to ``()`` for manual
+    construction without the kwarg (backwards-compat).
+    """
 
     qid: str
     qtype: str
     score: float
     reasoning: str
+    samples: tuple[JudgmentScore, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,7 @@ def score_goldens(
             qtype=qresult.qtype,
             score=float(mean_score),
             reasoning=best.reasoning,
+            samples=tuple(samples),
         )
     return FaithfulnessResults(
         collection_name=retrieval_results.collection_name,
