@@ -1,0 +1,73 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+_____________ test_execute_plan_wires_target_collection_via_config _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7d3f8c35e4e0>
+
+    def test_execute_plan_wires_target_collection_via_config(monkeypatch) -> None:
+        """execute_plan must call ingest_directory with exact kwarg shape.
+    
+        Asserts documents_dir, IngestionConfig.target_collection, selected_sources
+        (order-preserved list), and the deterministic fresh=True/update=False default.
+        """
+>       from src.eval.runner import execute_plan
+E       ImportError: cannot import name 'execute_plan' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p3-pack-ingest-runner/src/eval/runner/__init__.py)
+
+tests/eval/test_pack_ingest_execute.py:83: ImportError
+___________________ test_execute_plan_returns_ingest_report ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7d3f8c3deb40>
+
+    def test_execute_plan_returns_ingest_report(monkeypatch) -> None:
+        """execute_plan returns an IngestReport whose fields mirror the run summary
+        and post-ingest collection stats, with the plan preserved as a back-ref."""
+>       from src.eval.runner import execute_plan
+E       ImportError: cannot import name 'execute_plan' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p3-pack-ingest-runner/src/eval/runner/__init__.py)
+
+tests/eval/test_pack_ingest_execute.py:106: ImportError
+___________________ test_execute_plan_propagates_fresh_flag ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7d3f8c250530>
+
+    def test_execute_plan_propagates_fresh_flag(monkeypatch) -> None:
+        """fresh=False inverts the toggle pair: ingest_directory is called with
+        fresh=False and update=True."""
+>       from src.eval.runner import execute_plan
+E       ImportError: cannot import name 'execute_plan' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p3-pack-ingest-runner/src/eval/runner/__init__.py)
+
+tests/eval/test_pack_ingest_execute.py:126: ImportError
+_________________________ test_ingest_report_is_frozen _________________________
+
+    def test_ingest_report_is_frozen() -> None:
+        """IngestReport is an immutable (frozen) dataclass."""
+>       from src.eval.runner import IngestReport
+E       ImportError: cannot import name 'IngestReport' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p3-pack-ingest-runner/src/eval/runner/__init__.py)
+
+tests/eval/test_pack_ingest_execute.py:141: ImportError
+_______________________ test_execute_plan_opentitan_live _______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-kok-shew-juan/pytest-667/test_execute_plan_opentitan_li0')
+
+    @pytest.mark.slow
+    @pytest.mark.integration
+    def test_execute_plan_opentitan_live(tmp_path: Path) -> None:
+        """Live: execute the OpenTitan plan against real Weaviate.
+    
+        Skips on infra absence. On success: 5 distinct docs ingested with
+        non-zero stored chunks and zero failures. Best-effort cleanup.
+        """
+        pytest.importorskip("weaviate")
+        import socket
+    
+        from config.settings import MINIO_ENDPOINT
+>       from src.eval.runner import execute_plan
+E       ImportError: cannot import name 'execute_plan' from 'src.eval.runner' (/home/kok-shew-juan/RagWeave/.worktrees/p3-pack-ingest-runner/src/eval/runner/__init__.py)
+
+tests/eval/test_pack_ingest_execute.py:170: ImportError
+=========================== short test summary info ============================
+FAILED tests/eval/test_pack_ingest_execute.py::test_execute_plan_wires_target_collection_via_config
+FAILED tests/eval/test_pack_ingest_execute.py::test_execute_plan_returns_ingest_report
+FAILED tests/eval/test_pack_ingest_execute.py::test_execute_plan_propagates_fresh_flag
+FAILED tests/eval/test_pack_ingest_execute.py::test_ingest_report_is_frozen
+FAILED tests/eval/test_pack_ingest_execute.py::test_execute_plan_opentitan_live
+5 failed in 0.23s
