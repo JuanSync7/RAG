@@ -39,6 +39,7 @@ from .judge import (
     JudgmentScore,
     build_judge_client,
     load_judge_prompt,
+    read_samples_per_claim,
     render_judge_prompt,
 )
 from .metrics import aggregate_recall_by_qtype, recall_at_k
@@ -66,6 +67,7 @@ __all__ = [
     "execute_plan",
     "load_judge_prompt",
     "plan_pack_ingest",
+    "read_samples_per_claim",
     "recall_at_k",
     "render_judge_prompt",
     "retrieve_for_goldens",
