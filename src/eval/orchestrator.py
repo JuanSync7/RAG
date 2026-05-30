@@ -1,14 +1,18 @@
 # @summary
-# P8a — nightly eval orchestrator (testable core; the scripts/ shim is thin).
+# P8a/P8c — nightly eval orchestrator (testable core; the scripts/ shim is thin).
 # discover_packs globs pack dirs (those containing pack.yaml) under a root.
 # run_nightly iterates packs sequentially: run_eval → persist_eval_report →
-# build AlertPayload from the gate → alert_fn; resilient batch (one pack erroring
-# does not abort the rest); returns 0 iff EVERY pack ran AND passed, else 1.
-# NOTE: NO baseline/diff comparison here — deferred to P8b.
+# (P8c) if a committed `baseline.json` sibling exists, load it + read the
+# just-persisted report back, compute_baseline_diff, attach to AlertPayload →
+# alert_fn; resilient batch (one pack erroring does not abort the rest). Returns
+# 0 iff EVERY pack ran AND passed, else 1; when fail_on_regression=True a
+# regression vs baseline flips the exit to 1 even if the absolute gate passed.
+# Packs with no baseline behave exactly as pre-P8c (baseline_diff=None, no flip).
 # Exports: discover_packs, run_nightly
 # Deps: stdlib (json, logging, pathlib, datetime); src.eval.cli.run_eval;
 #       src.eval.runner.persistence.persist_eval_report;
-#       src.eval.runner.alert (AlertPayload, send_alert).
+#       src.eval.runner.alert (AlertPayload, send_alert);
+#       src.eval.runner.baseline.compute_baseline_diff.
 # @end-summary
 """Nightly eval orchestrator core (P8a).
 
@@ -23,11 +27,20 @@ Per-pack granularity (which pack passed / failed / errored) goes to the logs and
 the persisted JSON files; the batch return value is binary pass/fail. ``alert_fn``
 is the injection seam tests use to capture the shaped :class:`AlertPayload`.
 
-NOTE: baseline/diff comparison against a prior run is NOT part of this slice —
-it is deferred to P8b. This orchestrator only runs → persists → gates → alerts.
+Baseline diff (P8c): after persisting each pack's report, the orchestrator looks
+for a committed ``baseline.json`` sibling inside the pack directory. When present
+it loads the baseline + reads the just-persisted current report back and calls
+:func:`~src.eval.runner.baseline.compute_baseline_diff`, attaching the result to
+``AlertPayload.baseline_diff``. With ``fail_on_regression=True`` any regression
+flips the batch exit to ``1`` even if the absolute gate passed. Packs with no
+baseline — or with an UNUSABLE (corrupt/unparseable) ``baseline.json`` — behave
+exactly as before (``baseline_diff=None``, no exit flip); a bad baseline file is
+a baseline problem, not an eval error, so it is logged and skipped rather than
+marking the pack errored.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +48,7 @@ from typing import Any, Callable
 
 from src.eval.cli import run_eval
 from src.eval.runner.alert import AlertPayload, send_alert
+from src.eval.runner.baseline import compute_baseline_diff
 from src.eval.runner.persistence import persist_eval_report
 
 logger = logging.getLogger("rag.eval.orchestrator")
@@ -68,6 +82,8 @@ def run_nightly(
     chat_model_factory: Callable[..., Any] | None = None,
     alert_fn: Callable[[AlertPayload], None] = send_alert,
     now: datetime | None = None,
+    fail_on_regression: bool = False,
+    regression_epsilon: float = 0.05,
     stderr: Any = None,
 ) -> int:
     """Run the full eval loop over ``pack_paths`` and return a batch exit code.
@@ -86,10 +102,24 @@ def run_nightly(
     in ``run_eval`` does NOT abort the rest — the error is logged, the pack is
     marked errored, and the loop continues.
 
+    Between steps 2 and 3, when a committed ``baseline.json`` sibling exists in
+    the pack directory, the orchestrator loads it + reads the just-persisted
+    report back and computes a :class:`~src.eval.runner.baseline.BaselineDiff`
+    (attached to the :class:`AlertPayload` as ``baseline_diff``).
+
     **Exit code:** ``0`` iff EVERY pack ran AND passed its gate; ``1`` if any
-    pack's gate failed OR any pack errored.
+    pack's gate failed OR any pack errored. When ``fail_on_regression`` is set,
+    any pack whose baseline diff carries regressions ALSO flips the exit to
+    ``1`` — even if that pack's absolute gate passed.
 
     :param now: injected timestamp for deterministic persisted filenames.
+    :param fail_on_regression: when ``True``, a regression vs the pack's
+        committed ``baseline.json`` flips the batch exit to ``1`` even if the
+        absolute gate passed. Default ``False`` (regressions are logged/attached
+        but do not affect the exit code).
+    :param regression_epsilon: tolerance band passed to
+        :func:`~src.eval.runner.baseline.compute_baseline_diff` (default
+        ``0.05``).
     """
     # Resolve ``now`` ONCE so the persisted-filename timestamp and the alert
     # timestamp are the SAME value (and timezone-aware) on the production
@@ -112,6 +142,35 @@ def run_nightly(
             )
             report_path = persist_eval_report(result, output_dir, now=now)
 
+            baseline_diff = None
+            baseline_path = Path(pack_path) / "baseline.json"
+            if baseline_path.is_file():
+                # An UNUSABLE committed baseline (corrupt JSON, merge-conflict
+                # markers, truncation) must degrade like an ABSENT baseline — it
+                # is a baseline-file problem, not an eval-pipeline error, so it
+                # is caught HERE (narrow) rather than by the per-pack handler,
+                # which would wrongly mark the pack errored and suppress its
+                # alert even though the eval itself succeeded.
+                try:
+                    baseline_json = json.loads(
+                        baseline_path.read_text(encoding="utf-8")
+                    )
+                    current_json = json.loads(
+                        Path(report_path).read_text(encoding="utf-8")
+                    )
+                    baseline_diff = compute_baseline_diff(
+                        baseline_json, current_json, epsilon=regression_epsilon
+                    )
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning(
+                        "pack=%s unusable baseline.json (%s: %s) — treating as "
+                        "no baseline",
+                        pack_label,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    baseline_diff = None
+
             failures = [
                 {
                     "qtype": f.qtype,
@@ -129,8 +188,12 @@ def run_nightly(
                 failures=failures,
                 report_path=str(report_path),
                 timestamp=now.isoformat(),
+                baseline_diff=baseline_diff,
             )
             alert_fn(payload)
+
+            if fail_on_regression and baseline_diff is not None and baseline_diff.regressions:
+                all_passed = False
 
             logger.info(
                 "pack=%s gate=%s failures=%d report=%s",

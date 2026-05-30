@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # @summary
-# P8a — thin CLI shim for the nightly eval orchestrator. Parses argv (pack-root,
-# pack glob, output-dir, k, fresh, verbose), resolves packs via
-# discover_packs, and delegates to run_nightly. NO business logic — everything
-# lives in src.eval.orchestrator. Exit codes: run_nightly's 0/1, or 2 when no
-# packs are discovered (pack error).
+# P8a/P8c — thin CLI shim for the nightly eval orchestrator. Parses argv
+# (pack-root, pack glob, output-dir, k, fresh, verbose, plus the P8c
+# baseline-diff flags --fail-on-regression / --regression-epsilon), resolves
+# packs via discover_packs, and delegates to run_nightly. NO business logic —
+# everything lives in src.eval.orchestrator. Exit codes: run_nightly's 0/1, or 2
+# when no packs are discovered (pack error).
 # Exports: main
 # Deps: stdlib (argparse, logging, sys); src.eval.orchestrator.
 # @end-summary
@@ -18,6 +19,10 @@ This is a thin argparse adapter over :mod:`src.eval.orchestrator`. It discovers
 the requested pack(s), runs the nightly loop, and returns the orchestrator's
 exit code (0 = all passed, 1 = a gate failed or a pack errored). When no packs
 are discovered it prints to stderr and returns 2 (pack error).
+
+``--fail-on-regression`` flips the exit to 1 when any metric regressed vs the
+pack's committed ``baseline.json`` (even if the absolute gate passed), and
+``--regression-epsilon`` tunes the regression tolerance band (default 0.05).
 """
 from __future__ import annotations
 
@@ -69,6 +74,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Incremental update mode; do not drop the collection before ingest.",
     )
     parser.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        default=False,
+        help=(
+            "Exit 1 if any metric regressed vs the pack's baseline.json, even if "
+            "the absolute gate passed."
+        ),
+    )
+    parser.add_argument(
+        "--regression-epsilon",
+        type=float,
+        default=0.05,
+        help="Regression tolerance band vs baseline (default 0.05).",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose (DEBUG) logging.",
@@ -91,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         k=args.k,
         fresh=args.fresh,
+        fail_on_regression=args.fail_on_regression,
+        regression_epsilon=args.regression_epsilon,
     )
 
 
