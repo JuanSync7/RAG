@@ -240,9 +240,9 @@ profile: asic_riscv_soc                         # must match pack.yaml profile
 defaults:                                       # per-qtype floors checked by validate_eval_report
   factoid:
     recall_at_5: 0.8                            # recall_key = f"recall_at_{report.k}"
-    mrr: 0.6                                    # ignored (no MRR metric implemented yet)
+    mrr: 0.6                                    # mean reciprocal rank floor (checked by validate_eval_report)
     # faithfulness: 0.75                        # add to floor faithfulness on this qtype
-overrides: []                                   # reserved for per-qid overrides (not yet consumed)
+overrides: []                                   # list of qtype/qid floor overrides (see "Threshold Overrides")
 min_goldens_per_qtype:                          # enforced by validate_pack on pack load
   factoid: 20                                   # raises PackValidationError if file has fewer
   qfs: 10
@@ -253,7 +253,24 @@ min_goldens_per_qtype:                          # enforced by validate_pack on p
   messy: 5
 ```
 
-### `corpus/manifest.json`
+#### Threshold Overrides
+
+`overrides` is a list of `ThresholdOverride` entries (`schema.py`), each consumed by `validate_eval_report` (`src/eval/runner/gate.py`). Each entry targets **exactly one** of a `qtype` or a `qid`, and must declare **at least one numeric metric floor** (the floors arrive as extra fields, e.g. `recall_at_5`, `mrr`, `faithfulness`). Both invariants are enforced fail-fast at pack load — a malformed entry raises at `Thresholds` construction (which both `loader.py` and `validate.py` perform), so the gate never sees an invalid override.
+
+```yaml
+overrides:
+  - qtype: factoid          # qtype-level: replace the factoid mrr floor
+    mrr: 0.8
+  - qtype: adversarial      # qtype-level: introduces a qtype absent from defaults
+    recall_at_5: 0.9
+  - qid: factoid_017        # qid-level: floor a single query's individual score
+    recall_at_5: 0.4
+```
+
+- **qtype overrides** merge into the effective floors used by the gate: each override **replaces** the matching per-metric floor in `defaults` (per metric, **last-wins** on duplicates), and may **introduce** qtypes or metrics absent from `defaults`. The aggregate check then runs over the union of `defaults` and qtype-override qtypes; the recall/mrr/faithfulness check bodies are unchanged and simply read the merged floor.
+- **qid overrides** check that specific query's individual score against the floor. The metric key selects the per-query map on the `EvalReport`: `recall_at_{k}` → `per_query_recall`, `mrr` → `per_query_mrr`, `faithfulness` → `per_query_faithfulness`. A metric key that matches none of these (an unknown metric, or a `recall_at_<k>` whose `k` differs from `report.k`) is **skipped**. A qid override on a query that was skipped or not judged (absent from the selected map) is **skipped** — it never manufactures a failure. A qid failure carries `GateFailure.qid` (and the qtype resolved from `goldens`, or `""` if the qid is in no goldens file) and surfaces in the CI summary's failures table (`qtype | qid | metric | expected | actual`).
+
+
 
 ```json
 {
@@ -389,7 +406,5 @@ Practical effect: the recall path is reproducible from a fixed ingested collecti
 - **Per-sample visibility.** Multi-sample runs collapse `samples_per_claim` calls into one mean score; per-sample scores and reasonings are not surfaced in `EvalReport`. P7-series teaser: report-level per-sample arrays.
 - **Sequential sampling.** Samples are issued one at a time. With `samples_per_claim=3` and large golden counts, judge latency dominates wall time. Future P7b candidate: parallel sampling with a configurable concurrency cap.
 - **No CI gate integration.** Exit codes are defined and stable, but no CI workflow runs the eval loop yet. P7c teaser: nightly eval + PR-gated regression check.
-- **MRR is declared in `thresholds.yaml.defaults` but not computed.** `validate_eval_report` only checks `recall_at_<k>` and `faithfulness`; an `mrr: 0.6` entry is silently inert today.
-- **`overrides: []` is reserved.** Per-qid threshold overrides are part of the pack schema but not consumed by the gate yet.
 - **`expected_source_docs` matching is exact-string.** No path normalisation, no case folding. A future-work candidate is to normalise both sides through the ingest source-key contract.
 - **No end-to-end answer-faithfulness in this loop.** Production answer-vs-context faithfulness lives in `src/guardrails/`. Bridging the two surfaces is a separate scope.

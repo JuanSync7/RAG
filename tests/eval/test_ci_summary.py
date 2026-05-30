@@ -68,10 +68,12 @@ def _gate(*failures):
     return GateResult(passed=not failures_t, failures=failures_t)
 
 
-def _failure(qtype: str, metric: str, expected: float, actual: float):
+def _failure(qtype: str, metric: str, expected: float, actual: float, qid: str = ""):
     from src.eval.runner.gate import GateFailure
 
-    return GateFailure(qtype=qtype, metric=metric, expected=expected, actual=actual)
+    return GateFailure(
+        qtype=qtype, metric=metric, expected=expected, actual=actual, qid=qid
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +271,94 @@ def test_render_table_has_five_columns() -> None:
         if set(l.strip()) <= set("|-: ") and l.strip().startswith("|")
     )
     assert sep.count("|") == 6
+
+
+# ---------------------------------------------------------------------------
+# render_ci_summary — failures-table qid column (P7f)
+# ---------------------------------------------------------------------------
+
+
+def _failures_table(md: str) -> tuple[str, str, list[str]]:
+    """Return (header, separator, data_rows) of the failures table.
+
+    The failures table is the one whose header starts with '| qtype | qid'.
+    """
+    lines = md.splitlines()
+    hi = next(i for i, l in enumerate(lines) if l.startswith("| qtype | qid"))
+    header = lines[hi]
+    sep = lines[hi + 1]
+    rows = []
+    for l in lines[hi + 2:]:
+        if l.startswith("|"):
+            rows.append(l)
+        else:
+            break
+    return header, sep, rows
+
+
+def test_render_failures_table_has_qid_column() -> None:
+    """The failures table header carries a 'qid' column after 'qtype'."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={"factoid": 0.400})
+    gate = _gate(_failure("factoid", "recall_at_5", 0.700, 0.400))
+    md = render_ci_summary(report, gate)
+    header, sep, _ = _failures_table(md)
+    # 5-column GFM table → 6 pipes; qid sits between qtype and metric.
+    assert header.count("|") == 6
+    assert sep.count("|") == 6
+    cols = [c.strip() for c in header.strip().strip("|").split("|")]
+    assert cols == ["qtype", "qid", "metric", "expected", "actual"]
+
+
+def test_render_qid_failure_renders_qid() -> None:
+    """A qid-level failure renders the qid in the qid cell."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={"factoid": 0.300})
+    gate = _gate(
+        _failure("factoid", "recall_at_5", 0.400, 0.300, qid="factoid_017")
+    )
+    md = render_ci_summary(report, gate)
+    _, _, rows = _failures_table(md)
+    assert len(rows) == 1
+    cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
+    assert cells[0] == "factoid"
+    assert cells[1] == "factoid_017"  # qid cell
+    assert cells[2] == "recall_at_5"
+    assert cells[3] == "0.400"
+    assert cells[4] == "0.300"
+
+
+def test_render_qtype_failure_qid_cell_is_dash() -> None:
+    """A qtype-level failure (empty qid) renders an em-dash in the qid cell."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={"factoid": 0.400})
+    gate = _gate(_failure("factoid", "recall_at_5", 0.700, 0.400))
+    md = render_ci_summary(report, gate)
+    _, _, rows = _failures_table(md)
+    cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
+    assert cells[1] == "—"  # qid cell em-dash, not empty
+
+
+def test_render_failures_sorted_by_qtype_qid_metric() -> None:
+    """Failure rows are sorted deterministically by (qtype, qid, metric)."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={"factoid": 0.100})
+    gate = _gate(
+        _failure("factoid", "mrr", 0.6, 0.1, qid="factoid_020"),
+        _failure("factoid", "recall_at_5", 0.8, 0.1),  # qid="" sorts first
+        _failure("factoid", "recall_at_5", 0.4, 0.1, qid="factoid_010"),
+    )
+    md = render_ci_summary(report, gate)
+    _, _, rows = _failures_table(md)
+    qids = [
+        [c.strip() for c in r.strip().strip("|").split("|")][1] for r in rows
+    ]
+    # "" < "factoid_010" < "factoid_020" → em-dash, then 010, then 020.
+    assert qids == ["—", "factoid_010", "factoid_020"]
 
 
 # ---------------------------------------------------------------------------

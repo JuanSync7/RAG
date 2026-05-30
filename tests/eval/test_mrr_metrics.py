@@ -263,3 +263,84 @@ def test_build_eval_report_defaults_mrr_to_empty() -> None:
     )
 
     assert report.mrr_by_qtype == {}
+
+
+def test_build_eval_report_threads_per_query_mrr() -> None:
+    """build_eval_report threads the per_query_mrr kwarg onto the report.
+
+    MUTATION E TARGET: ignoring the kwarg (always {}) reds this.
+    """
+    from src.eval.runner import build_eval_report
+    from src.eval.runner.faithfulness import FaithfulnessResults
+    from src.eval.runner.retrieve import RetrievalResults
+
+    retrieval = RetrievalResults(collection_name="C", k=5, per_query={})
+    faith = FaithfulnessResults(
+        collection_name="C",
+        per_query={},
+        total_queries_scored=0,
+        total_queries_skipped=0,
+    )
+
+    report = build_eval_report(
+        retrieval,
+        faith,
+        recall_by_qtype={},
+        per_query_recall={"f1": 1.0},
+        mrr_by_qtype={},
+        per_query_mrr={"f1": 0.5},
+    )
+
+    assert report.per_query_mrr == {"f1": 0.5}
+
+
+def test_build_eval_report_defaults_per_query_mrr_to_empty() -> None:
+    """Omitting per_query_mrr yields an empty mapping (additive default)."""
+    from src.eval.runner import build_eval_report
+    from src.eval.runner.faithfulness import FaithfulnessResults
+    from src.eval.runner.retrieve import RetrievalResults
+
+    retrieval = RetrievalResults(collection_name="C", k=5, per_query={})
+    faith = FaithfulnessResults(
+        collection_name="C",
+        per_query={},
+        total_queries_scored=0,
+        total_queries_skipped=0,
+    )
+
+    report = build_eval_report(
+        retrieval, faith, recall_by_qtype={}, per_query_recall={}
+    )
+
+    assert report.per_query_mrr == {}
+
+
+def test_build_eval_report_computes_per_query_faithfulness() -> None:
+    """per_query_faithfulness is derived INTERNALLY from faithfulness_results."""
+    from src.eval.runner import build_eval_report
+    from src.eval.runner.faithfulness import (
+        FaithfulnessResults,
+        QueryFaithfulnessResult,
+    )
+    from src.eval.runner.retrieve import RetrievalResults
+
+    retrieval = RetrievalResults(collection_name="C", k=5, per_query={})
+    faith = FaithfulnessResults(
+        collection_name="C",
+        per_query={
+            "f1": QueryFaithfulnessResult(
+                qid="f1", qtype="factoid", score=0.8, reasoning="ok"
+            ),
+            "f2": QueryFaithfulnessResult(
+                qid="f2", qtype="factoid", score=0.4, reasoning="meh"
+            ),
+        },
+        total_queries_scored=2,
+        total_queries_skipped=0,
+    )
+
+    report = build_eval_report(
+        retrieval, faith, recall_by_qtype={}, per_query_recall={}
+    )
+
+    assert report.per_query_faithfulness == {"f1": 0.8, "f2": 0.4}
