@@ -1,8 +1,10 @@
 # @summary
-# Fast tests for P6a threshold gating (src.eval.runner.gate).
+# Fast tests for P6a/P7e threshold gating (src.eval.runner.gate).
 # Covers: pass-all, recall floor red, faithfulness floor red, qtype-absent
 # skip, recall-key-absent skip, total_queries_judged=0 anti-gaming guard,
-# multi-failure aggregation, frozen-result partner.
+# multi-failure aggregation, frozen-result partner; P7e mrr floor red,
+# mrr at-floor/above boundary pass, mrr key-absent skip, mrr qtype-absent
+# skip, and mrr-is-not-judged-guarded discriminator.
 # Deps: pytest, dataclasses (FrozenInstanceError), src.eval.runner.gate,
 #       src.eval.runner.report.EvalReport, src.eval.pack.schema (EvalPack,
 #       Thresholds, PackMeta, JudgeConfig).
@@ -51,6 +53,7 @@ def _make_report(
     k: int = 5,
     recall_by_qtype: dict[str, float] | None = None,
     faithfulness_by_qtype: dict[str, float] | None = None,
+    mrr_by_qtype: dict[str, float] | None = None,
     total_queries_judged: int = 10,
 ) -> EvalReport:
     return EvalReport(
@@ -62,6 +65,7 @@ def _make_report(
         total_queries_skipped=0,
         faithfulness_by_qtype=faithfulness_by_qtype or {},
         total_queries_judged=total_queries_judged,
+        mrr_by_qtype=mrr_by_qtype or {},
     )
 
 
@@ -208,6 +212,102 @@ def test_gate_aggregates_multiple_failures_across_qtypes() -> None:
     assert ("factoid", "recall_at_5") in by_key
     assert ("list_lookup", "recall_at_5") in by_key
     assert ("factoid", "faithfulness") in by_key
+
+
+def test_gate_fails_on_mrr_below_threshold() -> None:
+    """An mrr floor declared + report mrr below it → a GateFailure(metric=mrr).
+
+    MUTATION A TARGET: removing the gate mrr block reds this.
+    """
+    pack = _make_pack({"factoid": {"mrr": 0.6}})
+    report = _make_report(
+        recall_by_qtype={},
+        mrr_by_qtype={"factoid": 0.59},
+        total_queries_judged=0,  # MRR is retrieval-based, NOT judged-guarded.
+    )
+
+    result = validate_eval_report(pack, report)
+
+    assert result.passed is False
+    assert len(result.failures) == 1
+    fail = result.failures[0]
+    assert fail.qtype == "factoid"
+    assert fail.metric == "mrr"
+    assert fail.expected == pytest.approx(0.6)
+    assert fail.actual == pytest.approx(0.59)
+
+
+def test_gate_passes_on_mrr_at_floor_boundary() -> None:
+    """Floor semantics are >=: actual == floor passes; one notch above passes.
+
+    Discriminating partner to the FAIL test above — gives the floor teeth.
+    """
+    pack = _make_pack({"factoid": {"mrr": 0.6}})
+
+    at_floor = _make_report(
+        mrr_by_qtype={"factoid": 0.6}, total_queries_judged=0
+    )
+    result_eq = validate_eval_report(pack, at_floor)
+    assert result_eq.passed is True
+    assert result_eq.failures == ()
+
+    above = _make_report(
+        mrr_by_qtype={"factoid": 0.61}, total_queries_judged=0
+    )
+    result_gt = validate_eval_report(pack, above)
+    assert result_gt.passed is True
+    assert result_gt.failures == ()
+
+
+def test_gate_skips_mrr_when_threshold_key_absent() -> None:
+    """No 'mrr' floor declared → no mrr check even if mrr_by_qtype is below 0.6."""
+    pack = _make_pack({"factoid": {"recall_at_5": 0.8}})
+    report = _make_report(
+        recall_by_qtype={"factoid": 0.9},  # recall passes
+        mrr_by_qtype={"factoid": 0.1},  # would fail IF gated, but it isn't
+        total_queries_judged=0,
+    )
+
+    result = validate_eval_report(pack, report)
+
+    assert result.passed is True
+    assert result.failures == ()
+
+
+def test_gate_skips_mrr_when_qtype_absent_from_report() -> None:
+    """'mrr' floor declared but qtype missing from report.mrr_by_qtype → skip."""
+    pack = _make_pack({"factoid": {"mrr": 0.6}})
+    report = _make_report(
+        recall_by_qtype={},
+        mrr_by_qtype={},  # factoid absent → graceful skip, no failure
+        total_queries_judged=0,
+    )
+
+    result = validate_eval_report(pack, report)
+
+    assert result.passed is True
+    assert result.failures == ()
+
+
+def test_gate_mrr_floor_is_not_judged_guarded() -> None:
+    """MRR is retrieval-based: it gates even when total_queries_judged == 0.
+
+    Distinguishes mrr from faithfulness (which IS judged-guarded). With
+    judged=0 a faithfulness floor would be skipped, but an mrr floor fires.
+    """
+    pack = _make_pack({"factoid": {"mrr": 0.6, "faithfulness": 0.6}})
+    report = _make_report(
+        mrr_by_qtype={"factoid": 0.4},  # below mrr floor
+        faithfulness_by_qtype={"factoid": 0.1},  # below floor but judged=0
+        total_queries_judged=0,
+    )
+
+    result = validate_eval_report(pack, report)
+
+    assert result.passed is False
+    # Exactly one failure: mrr fires, faithfulness is judged-guarded away.
+    assert len(result.failures) == 1
+    assert result.failures[0].metric == "mrr"
 
 
 def test_gate_result_is_frozen() -> None:

@@ -1,6 +1,7 @@
 # @summary
-# P6a — threshold gating. Compares per-qtype recall@k and faithfulness in an
-# EvalReport against pack.thresholds.defaults floors. Pure logic, no I/O.
+# P6a/P7e — threshold gating. Compares per-qtype recall@k, faithfulness, and
+# MRR in an EvalReport against pack.thresholds.defaults floors. Pure logic,
+# no I/O.
 # Exports: GateFailure, GateResult, validate_eval_report.
 # Deps: stdlib (dataclasses); src.eval.pack.schema.EvalPack;
 #       src.eval.runner.report.EvalReport.
@@ -17,9 +18,12 @@ Semantics
 - The recall metric key compared per qtype is ``f"recall_at_{report.k}"``.
   If that key is not declared for the qtype, the recall check is skipped.
 - The faithfulness metric key is ``"faithfulness"``. If absent, skipped.
+- The MRR metric key is ``"mrr"``. If absent, skipped. Unlike faithfulness
+  it is NOT judged-guarded — MRR is retrieval-based, so it gates even when
+  ``total_queries_judged == 0``.
 - A qtype declared in thresholds but absent from the report's recall /
-  faithfulness map is skipped (graceful — likely no goldens of that qtype
-  were judged this run).
+  faithfulness / mrr map is skipped (graceful — likely no goldens of that
+  qtype were scored/judged this run).
 - If ``report.total_queries_judged == 0`` all faithfulness checks are skipped
   (anti-gaming guard so a stale eval with no judged goldens can't pass
   trivially on faithfulness).
@@ -76,6 +80,21 @@ def validate_eval_report(pack: EvalPack, report: EvalReport) -> GateResult:
                         GateFailure(
                             qtype=qtype,
                             metric=recall_key,
+                            expected=expected,
+                            actual=actual,
+                        )
+                    )
+
+        # MRR floor check (retrieval-based — NOT judged-guarded).
+        if "mrr" in floors:
+            if qtype in report.mrr_by_qtype:
+                expected = float(floors["mrr"])
+                actual = float(report.mrr_by_qtype[qtype])
+                if actual < expected:
+                    failures.append(
+                        GateFailure(
+                            qtype=qtype,
+                            metric="mrr",
                             expected=expected,
                             actual=actual,
                         )

@@ -1,9 +1,11 @@
 # @summary
-# P7d — tests for the CI eval-gate markdown summary renderer + CLI write seam.
-# Covers render_ci_summary (PASS/FAIL status, per-qtype table with actuals,
-# faithfulness "—" for absent qtypes, sorted determinism, valid GFM tables,
-# failures section) and the run_cli --summary-file / $GITHUB_STEP_SUMMARY
-# write seam (pass path, env-var path, neither-set no-op, write-on-gate-fail).
+# P7d/P7e — tests for the CI eval-gate markdown summary renderer + CLI write
+# seam. Covers render_ci_summary (PASS/FAIL status, per-qtype table with
+# actuals, faithfulness "—" for absent qtypes, sorted determinism, valid GFM
+# tables, failures section) plus the P7e mrr column (header order, actual cell
+# distinct from recall, em-dash when absent, mrr-only qtype surfaces, 5-column
+# geometry) and the run_cli --summary-file / $GITHUB_STEP_SUMMARY write seam
+# (pass path, env-var path, neither-set no-op, write-on-gate-fail).
 # Mutation A target: test_render_fail_status
 # Mutation B target: test_cli_writes_summary_via_env_var
 # Mutation C target: test_render_failures_section_lists_each
@@ -37,6 +39,7 @@ def _report(
     *,
     recall=None,
     faithfulness=None,
+    mrr=None,
     k: int = 5,
     collection: str = "test_coll",
     scored: int = 7,
@@ -54,6 +57,7 @@ def _report(
         total_queries_skipped=skipped,
         faithfulness_by_qtype=faithfulness or {},
         total_queries_judged=judged,
+        mrr_by_qtype=mrr or {},
     )
 
 
@@ -172,6 +176,99 @@ def test_render_faithfulness_absent_renders_dash() -> None:
     factoid_line = next(l for l in lines if l.lstrip("| ").startswith("factoid"))
     assert "—" in factoid_line
     assert "0.000" not in factoid_line
+
+
+# ---------------------------------------------------------------------------
+# render_ci_summary — mrr column (P7e)
+# ---------------------------------------------------------------------------
+
+
+def test_render_includes_mrr_column_header() -> None:
+    """The per-qtype table header carries an 'mrr' column between recall+faith."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(
+        recall={"factoid": 0.875},
+        mrr={"factoid": 0.640},
+        faithfulness={"factoid": 0.912},
+    )
+    md = render_ci_summary(report, _gate())
+    header = next(l for l in md.splitlines() if l.startswith("| qtype |"))
+    assert "mrr" in header
+    # Column order: recall@k before mrr before faithfulness.
+    assert header.index("recall") < header.index("mrr") < header.index(
+        "faithfulness"
+    )
+
+
+def test_render_mrr_actual_in_qtype_row() -> None:
+    """The mrr actual is rendered in the qtype row, distinct from recall.
+
+    MUTATION C TARGET: dropping the mrr cell (or rendering recall there)
+    reds this. Values chosen distinct: recall 0.875, mrr 0.640.
+    """
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(
+        recall={"factoid": 0.875},
+        mrr={"factoid": 0.640},
+        faithfulness={"factoid": 0.912},
+    )
+    md = render_ci_summary(report, _gate())
+    factoid_line = next(
+        l for l in md.splitlines() if l.lstrip("| ").startswith("factoid")
+    )
+    cells = [c.strip() for c in factoid_line.strip().strip("|").split("|")]
+    # cells: [qtype, recall, mrr, faithfulness, status]
+    assert cells[0] == "factoid"
+    assert cells[1] == "0.875"  # recall
+    assert cells[2] == "0.640"  # mrr — NOT 0.875 (would be recall echoed)
+    assert cells[3] == "0.912"  # faithfulness
+    assert "0.640" in md
+
+
+def test_render_mrr_absent_renders_dash() -> None:
+    """A qtype with recall but no mrr renders an em-dash in the mrr cell."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={"factoid": 0.875}, mrr={}, faithfulness={})
+    md = render_ci_summary(report, _gate())
+    factoid_line = next(
+        l for l in md.splitlines() if l.lstrip("| ").startswith("factoid")
+    )
+    cells = [c.strip() for c in factoid_line.strip().strip("|").split("|")]
+    assert cells[2] == "—"  # mrr cell is an em-dash, not 0.000
+    assert cells[2] != "0.000"
+
+
+def test_render_mrr_only_qtype_appears() -> None:
+    """A qtype present ONLY in mrr_by_qtype still appears in the table."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(recall={}, mrr={"factoid": 0.500}, faithfulness={})
+    md = render_ci_summary(report, _gate())
+    assert "factoid" in md
+    assert "0.500" in md
+
+
+def test_render_table_has_five_columns() -> None:
+    """Header + separator declare FIVE columns (qtype/recall/mrr/faith/status)."""
+    from src.eval.runner.ci import render_ci_summary
+
+    report = _report(
+        recall={"factoid": 0.875},
+        mrr={"factoid": 0.640},
+        faithfulness={"factoid": 0.912},
+    )
+    md = render_ci_summary(report, _gate())
+    header = next(l for l in md.splitlines() if l.startswith("| qtype |"))
+    # A 5-column GFM table has 6 pipes.
+    assert header.count("|") == 6
+    sep = next(
+        l for l in md.splitlines()
+        if set(l.strip()) <= set("|-: ") and l.strip().startswith("|")
+    )
+    assert sep.count("|") == 6
 
 
 # ---------------------------------------------------------------------------
