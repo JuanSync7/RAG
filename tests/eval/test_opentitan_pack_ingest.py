@@ -51,10 +51,23 @@ def test_pack_validates_under_p0_5_loader() -> None:
     recomputed = _recompute_corpus_pin(raw["entries"])
     assert pack.meta.corpus_pin == recomputed
 
-    # P0.5 loader requires at least one goldens/*.jsonl file; we ship an empty
-    # placeholder, so the rows list is empty.  P2 owns golden authoring.
-    for qtype, rows in pack.goldens.items():
-        assert rows == [], f"P1 declares no goldens; qtype={qtype} unexpectedly populated"
+    # P0.5 loader requires at least one goldens/*.jsonl file. P2 has now
+    # authored goldens; assert the loader sees a non-empty mapping with
+    # rows for the seven authored qtypes. Per-row content is exercised in
+    # `tests/eval/test_opentitan_goldens.py`.
+    assert pack.goldens, "expected loader to surface authored goldens"
+    expected_qtypes = {
+        "factoid",
+        "qfs",
+        "multi_topic",
+        "multi_aspect",
+        "adversarial",
+        "out_of_corpus",
+        "messy",
+    }
+    assert expected_qtypes.issubset(pack.goldens.keys()), (
+        f"missing qtypes in loader output: {expected_qtypes - set(pack.goldens.keys())}"
+    )
 
     short = pack.meta.corpus_pin[:8]
     assert pack.collection_name == f"ragweave_test_opentitan_riscv_{short}"

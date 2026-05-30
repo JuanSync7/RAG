@@ -4,3 +4,11 @@ defaults:
     recall_at_5: 0.8
     mrr: 0.6
 overrides: []
+min_goldens_per_qtype:
+  factoid: 20
+  qfs: 10
+  multi_topic: 8
+  multi_aspect: 8
+  adversarial: 5
+  out_of_corpus: 5
+  messy: 5

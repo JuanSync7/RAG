@@ -1,0 +1,44 @@
+.FFF..                                                                   [100%]
+=================================== FAILURES ===================================
+_______________________ test_per_qtype_min_counts_pinned _______________________
+
+    def test_per_qtype_min_counts_pinned() -> None:
+        """thresholds.yaml pins the exact P2.0 per-qtype minimums."""
+        data = yaml.safe_load(THRESHOLDS_PATH.read_text(encoding="utf-8"))
+>       assert "min_goldens_per_qtype" in data, "thresholds.yaml missing min_goldens_per_qtype block"
+E       AssertionError: thresholds.yaml missing min_goldens_per_qtype block
+E       assert 'min_goldens_per_qtype' in {'defaults': {'factoid': {'mrr': 0.6, 'recall_at_5': 0.8}}, 'overrides': [], 'profile': 'asic_riscv_soc'}
+
+tests/eval/test_opentitan_goldens.py:83: AssertionError
+_________________ test_actual_goldens_meet_or_exceed_minimums __________________
+
+    def test_actual_goldens_meet_or_exceed_minimums() -> None:
+        """Each goldens/<qtype>.jsonl has >= declared minimum non-blank rows."""
+        for qtype, minimum in EXPECTED_MIN_COUNTS.items():
+            path = GOLDENS_DIR / f"{qtype}.jsonl"
+            assert path.exists(), f"missing goldens file: {path}"
+            non_blank = sum(
+                1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+            )
+>           assert non_blank >= minimum, (
+                f"goldens/{qtype}.jsonl has {non_blank} rows, need >= {minimum}"
+            )
+E           AssertionError: goldens/factoid.jsonl has 0 rows, need >= 20
+E           assert 0 >= 20
+
+tests/eval/test_opentitan_goldens.py:98: AssertionError
+________________ test_factoid_spans_are_verbatim_in_source_docs ________________
+
+    def test_factoid_spans_are_verbatim_in_source_docs() -> None:
+        """Every factoid's expected_answer_span is a verbatim substring of doc[0]."""
+        rows = _read_jsonl(GOLDENS_DIR / "factoid.jsonl")
+>       assert rows, "factoid.jsonl is empty"
+E       AssertionError: factoid.jsonl is empty
+E       assert []
+
+tests/eval/test_opentitan_goldens.py:106: AssertionError
+=========================== short test summary info ============================
+FAILED tests/eval/test_opentitan_goldens.py::test_per_qtype_min_counts_pinned
+FAILED tests/eval/test_opentitan_goldens.py::test_actual_goldens_meet_or_exceed_minimums
+FAILED tests/eval/test_opentitan_goldens.py::test_factoid_spans_are_verbatim_in_source_docs
+3 failed, 3 passed in 0.99s

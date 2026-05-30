@@ -1,0 +1,6 @@
+{"qid": "adv001", "qtype": "adversarial", "query": "Does the OpenTitan UART support I2C master mode?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "adv002", "qtype": "adversarial", "query": "What is the maximum clock frequency (fmax) at which Ibex closes timing on a TSMC 7nm node?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "adv003", "qtype": "adversarial", "query": "Which OpenTitan HMAC mode implements SHA-3?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "adv004", "qtype": "adversarial", "query": "What is the throughput in MB/s of the OpenTitan UART at 115200 baud?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "adv005", "qtype": "adversarial", "query": "Which Ibex revision adds out-of-order execution?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "adv006", "qtype": "adversarial", "query": "Where is the OpenTitan UART's DMA descriptor ring stored?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
