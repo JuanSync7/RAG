@@ -1,0 +1,148 @@
+# @summary
+# P8a — nightly eval orchestrator (testable core; the scripts/ shim is thin).
+# discover_packs globs pack dirs (those containing pack.yaml) under a root.
+# run_nightly iterates packs sequentially: run_eval → persist_eval_report →
+# build AlertPayload from the gate → alert_fn; resilient batch (one pack erroring
+# does not abort the rest); returns 0 iff EVERY pack ran AND passed, else 1.
+# NOTE: NO baseline/diff comparison here — deferred to P8b.
+# Exports: discover_packs, run_nightly
+# Deps: stdlib (json, logging, pathlib, datetime); src.eval.cli.run_eval;
+#       src.eval.runner.persistence.persist_eval_report;
+#       src.eval.runner.alert (AlertPayload, send_alert).
+# @end-summary
+"""Nightly eval orchestrator core (P8a).
+
+Two public functions, both importable and unit-testable (the
+``scripts/run_nightly_eval.py`` shim only does argparse + delegation):
+
+* :func:`discover_packs` — find eval pack directories under a root.
+* :func:`run_nightly` — run the full eval loop over a list of packs, persist
+  each report, alert on each gate result, and return a binary batch exit code.
+
+Per-pack granularity (which pack passed / failed / errored) goes to the logs and
+the persisted JSON files; the batch return value is binary pass/fail. ``alert_fn``
+is the injection seam tests use to capture the shaped :class:`AlertPayload`.
+
+NOTE: baseline/diff comparison against a prior run is NOT part of this slice —
+it is deferred to P8b. This orchestrator only runs → persists → gates → alerts.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from src.eval.cli import run_eval
+from src.eval.runner.alert import AlertPayload, send_alert
+from src.eval.runner.persistence import persist_eval_report
+
+logger = logging.getLogger("rag.eval.orchestrator")
+
+
+def discover_packs(pack_root: str | Path, pack: str = "*") -> list[Path]:
+    """Return eval pack directories under ``pack_root`` matching ``pack``.
+
+    A pack directory is one that contains a ``pack.yaml``. ``pack`` may be an
+    exact name or a glob (default ``"*"`` = all). Results are sorted
+    deterministically by path. Returns ``[]`` if none match — the caller decides
+    whether an empty result is an error.
+    """
+    root = Path(pack_root)
+    if not root.is_dir():
+        return []
+    candidates = [
+        child
+        for child in root.glob(pack)
+        if child.is_dir() and (child / "pack.yaml").is_file()
+    ]
+    return sorted(candidates)
+
+
+def run_nightly(
+    pack_paths: list[Path | str],
+    *,
+    output_dir: str | Path,
+    k: int = 5,
+    fresh: bool = True,
+    chat_model_factory: Callable[..., Any] | None = None,
+    alert_fn: Callable[[AlertPayload], None] = send_alert,
+    now: datetime | None = None,
+    stderr: Any = None,
+) -> int:
+    """Run the full eval loop over ``pack_paths`` and return a batch exit code.
+
+    For EACH pack (sequentially):
+
+    1. :func:`~src.eval.cli.run_eval` — ingest → retrieve → judge → gate.
+    2. :func:`~src.eval.runner.persistence.persist_eval_report` — write the
+       report JSON under ``output_dir``.
+    3. Build an :class:`AlertPayload` from the gate result and hand it to
+       ``alert_fn`` (defaults to the real log-only :func:`send_alert`; tests
+       inject a capturing function).
+    4. Log a one-line summary.
+
+    **Resilient batch:** each pack is wrapped in try/except, so one pack raising
+    in ``run_eval`` does NOT abort the rest — the error is logged, the pack is
+    marked errored, and the loop continues.
+
+    **Exit code:** ``0`` iff EVERY pack ran AND passed its gate; ``1`` if any
+    pack's gate failed OR any pack errored.
+
+    :param now: injected timestamp for deterministic persisted filenames.
+    """
+    # Resolve ``now`` ONCE so the persisted-filename timestamp and the alert
+    # timestamp are the SAME value (and timezone-aware) on the production
+    # default path. Threading the same resolved ``now`` to both
+    # persist_eval_report and AlertPayload avoids desync / tz-naive drift.
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    all_passed = True
+
+    for pack_path in pack_paths:
+        pack_label = str(pack_path)
+        try:
+            result = run_eval(
+                str(pack_path),
+                k=k,
+                fresh=fresh,
+                chat_model_factory=chat_model_factory,
+                stderr=stderr,
+            )
+            report_path = persist_eval_report(result, output_dir, now=now)
+
+            failures = [
+                {
+                    "qtype": f.qtype,
+                    "metric": f.metric,
+                    "expected": f.expected,
+                    "actual": f.actual,
+                    "qid": f.qid,
+                }
+                for f in result.gate.failures
+            ]
+            payload = AlertPayload(
+                pack_name=result.pack.meta.name,
+                collection_name=result.collection_name,
+                gate_passed=result.gate.passed,
+                failures=failures,
+                report_path=str(report_path),
+                timestamp=now.isoformat(),
+            )
+            alert_fn(payload)
+
+            logger.info(
+                "pack=%s gate=%s failures=%d report=%s",
+                result.pack.meta.name,
+                "PASS" if result.gate.passed else "FAIL",
+                len(failures),
+                report_path,
+            )
+            if not result.gate.passed:
+                all_passed = False
+        except Exception as exc:  # noqa: BLE001 — resilient batch: log + continue.
+            all_passed = False
+            logger.error("pack=%s errored: %s: %s", pack_label, type(exc).__name__, exc)
+
+    return 0 if all_passed else 1

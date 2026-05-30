@@ -8,7 +8,8 @@
 #          aggregate_faithfulness_by_qtype,
 #          score_goldens, build_eval_report, build_judge_client,
 #          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
-#          read_max_parallel_judges, render_ci_summary, persist_eval_report.
+#          read_max_parallel_judges, render_ci_summary, persist_eval_report,
+#          AlertPayload, send_alert.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
@@ -27,6 +28,7 @@ the executor (``score_goldens`` + ``aggregate_faithfulness_by_qtype`` +
 """
 from __future__ import annotations
 
+from .alert import AlertPayload, send_alert
 from .ci import render_ci_summary
 from .execute import execute_plan
 from .gate import GateFailure, GateResult, validate_eval_report
@@ -58,6 +60,7 @@ from .report import EvalReport, IngestReport, build_eval_report
 from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
 
 __all__ = [
+    "AlertPayload",
     "EvalReport",
     "FaithfulnessResults",
     "GateFailure",
@@ -87,5 +90,6 @@ __all__ = [
     "render_judge_prompt",
     "retrieve_for_goldens",
     "score_goldens",
+    "send_alert",
     "validate_eval_report",
 ]
