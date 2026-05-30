@@ -4,10 +4,11 @@
 # tree_retrieval_eval (run_eval, build_simulated_retriever, EvalReport),
 # pack format (EvalPack, load_pack, validate_pack, PackValidationError),
 # runner (IngestPlan, IngestReport, EvalReport, RetrievalResults,
-# QueryRetrievalResult, JudgeClient, JudgeQuestion, JudgmentScore,
-# execute_plan, plan_pack_ingest, retrieve_for_goldens, recall_at_k,
-# aggregate_recall_by_qtype, build_judge_client, load_judge_prompt,
-# render_judge_prompt).
+# QueryRetrievalResult, QueryFaithfulnessResult, FaithfulnessResults,
+# JudgeClient, JudgeQuestion, JudgmentScore, execute_plan, plan_pack_ingest,
+# retrieve_for_goldens, recall_at_k, aggregate_recall_by_qtype,
+# aggregate_faithfulness_by_qtype, score_goldens, build_eval_report,
+# build_judge_client, load_judge_prompt, render_judge_prompt).
 # Deps: stdlib only (pack subpackage adds pydantic v2 + pyyaml; runner.execute
 #       adds src.ingest + src.vector_db at first use of execute_plan;
 #       runner.retrieve adds src.core.embeddings + src.vector_db;
@@ -16,14 +17,18 @@
 from .pack import EvalPack, PackValidationError, load_pack, validate_pack
 from .runner import (
     EvalReport,
+    FaithfulnessResults,
     IngestPlan,
     IngestReport,
     JudgeClient,
     JudgeQuestion,
     JudgmentScore,
+    QueryFaithfulnessResult,
     QueryRetrievalResult,
     RetrievalResults,
+    aggregate_faithfulness_by_qtype,
     aggregate_recall_by_qtype,
+    build_eval_report,
     build_judge_client,
     execute_plan,
     load_judge_prompt,
@@ -31,20 +36,25 @@ from .runner import (
     recall_at_k,
     render_judge_prompt,
     retrieve_for_goldens,
+    score_goldens,
 )
 
 __all__ = [
     "EvalPack",
     "EvalReport",
+    "FaithfulnessResults",
     "IngestPlan",
     "IngestReport",
     "JudgeClient",
     "JudgeQuestion",
     "JudgmentScore",
     "PackValidationError",
+    "QueryFaithfulnessResult",
     "QueryRetrievalResult",
     "RetrievalResults",
+    "aggregate_faithfulness_by_qtype",
     "aggregate_recall_by_qtype",
+    "build_eval_report",
     "build_judge_client",
     "execute_plan",
     "load_judge_prompt",
@@ -53,5 +63,6 @@ __all__ = [
     "recall_at_k",
     "render_judge_prompt",
     "retrieve_for_goldens",
+    "score_goldens",
     "validate_pack",
 ]
