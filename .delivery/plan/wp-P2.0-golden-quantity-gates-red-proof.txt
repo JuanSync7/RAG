@@ -1,0 +1,133 @@
+FF.F                                                                     [100%]
+=================================== FAILURES ===================================
+____________________ test_validator_rejects_undersized_pack ____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-kok-shew-juan/pytest-646/test_validator_rejects_undersi0')
+
+    def test_validator_rejects_undersized_pack(tmp_path: Path) -> None:
+        pack = _copy_pack(tmp_path)
+        _write_thresholds(pack, min_goldens_per_qtype=DECLARED_MINS)
+    
+        # One valid row per qtype, each in its own JSONL named after qtype.
+        goldens_dir = pack / "goldens"
+        # factoid already exists with f001; rewrite to be sure it has exactly 1 row.
+        _write_jsonl(
+            goldens_dir / "factoid.jsonl",
+            [
+                {
+                    "qid": "f001",
+                    "qtype": "factoid",
+                    "query": "What is the clock frequency?",
+                    "expected_answer_span": "160 MHz",
+                    "expected_source_docs": ["docs/intro.md"],
+                }
+            ],
+        )
+        for qtype in ("qfs", "multi_topic", "multi_aspect", "adversarial", "out_of_corpus", "messy"):
+            _write_jsonl(
+                goldens_dir / f"{qtype}.jsonl",
+                [{"qid": f"{qtype[0]}001", "qtype": qtype, "query": f"sample {qtype} query"}],
+            )
+    
+>       with pytest.raises(PackValidationError) as exc_info:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'src.eval.pack.errors.PackValidationError'>
+
+tests/eval/test_pack_min_counts.py:78: Failed
+_________________ test_validator_accepts_when_min_counts_unset _________________
+
+    def test_validator_accepts_when_min_counts_unset() -> None:
+        # The repo's _example_ pack does NOT declare min_goldens_per_qtype.
+        pack = load_pack(EXAMPLE_PACK)
+>       assert pack.thresholds.min_goldens_per_qtype == {}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval/test_pack_min_counts.py:93: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Thresholds(profile='asic_riscv_soc', defaults={'factoid': {'recall_at_5': 0.8}}, overrides=[])
+item = 'min_goldens_per_qtype'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'Thresholds' object has no attribute 'min_goldens_per_qtype'
+
+.venv/lib/python3.12/site-packages/pydantic/main.py:1026: AttributeError
+_______________ test_thresholds_schema_exposes_min_goldens_field _______________
+
+    def test_thresholds_schema_exposes_min_goldens_field() -> None:
+        t = Thresholds(profile="generic", min_goldens_per_qtype={"factoid": 20})
+        assert t.min_goldens_per_qtype == {"factoid": 20}
+    
+        t_default = Thresholds(profile="generic")
+>       assert t_default.min_goldens_per_qtype == {}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval/test_pack_min_counts.py:124: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Thresholds(profile='generic', defaults={}, overrides=[])
+item = 'min_goldens_per_qtype'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'Thresholds' object has no attribute 'min_goldens_per_qtype'
+
+.venv/lib/python3.12/site-packages/pydantic/main.py:1026: AttributeError
+=========================== short test summary info ============================
+FAILED tests/eval/test_pack_min_counts.py::test_validator_rejects_undersized_pack
+FAILED tests/eval/test_pack_min_counts.py::test_validator_accepts_when_min_counts_unset
+FAILED tests/eval/test_pack_min_counts.py::test_thresholds_schema_exposes_min_goldens_field
+3 failed, 1 passed in 0.30s

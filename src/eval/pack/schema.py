@@ -79,6 +79,7 @@ class Thresholds(BaseModel):
     profile: str
     defaults: dict[str, dict[str, float]] = Field(default_factory=dict)
     overrides: list[dict[str, Any]] = Field(default_factory=list)
+    min_goldens_per_qtype: dict[str, int] = Field(default_factory=dict)
 
 
 class EvalPack(BaseModel):
