@@ -7,8 +7,11 @@
 # package symbols without ordering hazards.
 # Exit codes: 0=pass, 1=gate fail, 2=pack load/validation error,
 # 3=runtime/infra error.
+# P7d adds the CI summary write seam: --summary-file / $GITHUB_STEP_SUMMARY
+# auto-detect, rendering via src.eval.runner.render_ci_summary on BOTH the
+# gate-pass and gate-fail paths (never on exit-2/exit-3 paths).
 # Exports: _build_parser, run_cli, main
-# Deps: argparse, json, logging, sys; src.eval.pack (errors, loader);
+# Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
 #       aggregate_recall_by_qtype, validate_eval_report, plan_pack_ingest,
@@ -28,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -73,6 +77,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Enable verbose logging.",
+    )
+    run_parser.add_argument(
+        "--summary-file",
+        type=str,
+        default=None,
+        help=(
+            "Write a GitHub-flavored-markdown PASS/FAIL summary to PATH. "
+            "When omitted, falls back to $GITHUB_STEP_SUMMARY if set; "
+            "otherwise no summary is written. Written on both gate-pass "
+            "and gate-fail."
+        ),
     )
     run_parser.add_argument(
         "--show-samples",
@@ -200,6 +215,33 @@ def _emit_json(
     print(json.dumps(payload), file=stdout)
 
 
+def _write_ci_summary(report, gate, summary_file, *, stderr) -> None:
+    """Resolve the effective summary path and write the CI markdown there.
+
+    The effective path is ``summary_file`` if not None, else the value of
+    ``$GITHUB_STEP_SUMMARY`` (read at call time so tests can monkeypatch it),
+    else None (no-op). The render is appended (GitHub Step Summary is
+    append-semantics) with a trailing newline; the file is created if absent.
+
+    A write failure is logged to *stderr* and swallowed so it never masks the
+    gate exit code.
+    """
+    effective = summary_file if summary_file is not None else os.environ.get(
+        "GITHUB_STEP_SUMMARY"
+    )
+    if not effective:
+        return
+    from src.eval.runner import render_ci_summary
+
+    try:
+        markdown = render_ci_summary(report, gate)
+        with open(effective, "a", encoding="utf-8") as fh:
+            fh.write(markdown)
+            fh.write("\n")
+    except OSError as exc:  # pragma: no cover — defensive: never mask gate code.
+        print(f"warning: failed to write CI summary to {effective}: {exc}", file=stderr)
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -215,6 +257,7 @@ def run_cli(
     samples_per_claim: int | None = None,
     max_parallel_judges: int | None = None,
     show_samples: bool = False,
+    summary_file: str | None = None,
     chat_model_factory: Callable[..., Any] | None = None,
     stdout: Any = None,
     stderr: Any = None,
@@ -347,6 +390,10 @@ def run_cli(
     else:
         _emit_text(report, gate, stdout=stdout, stderr=stderr)
 
+    # CI summary write seam: on BOTH gate-pass and gate-fail (a report+gate
+    # exist here). A write failure must not mask the gate exit code.
+    _write_ci_summary(report, gate, summary_file, stderr=stderr)
+
     return 0 if gate.passed else 1
 
 
@@ -369,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
             samples_per_claim=args.samples_per_claim,
             max_parallel_judges=args.max_parallel_judges,
             show_samples=getattr(args, "show_samples", False),
+            summary_file=getattr(args, "summary_file", None),
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.
