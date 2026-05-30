@@ -26,6 +26,7 @@ class JudgeConfig(BaseModel):
     tier1_prompt_version: str
     temperature: float
     samples_per_claim: int
+    max_parallel_judges: int = 1
 
 
 class PackMeta(BaseModel):

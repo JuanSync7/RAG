@@ -11,7 +11,8 @@
 # Deps: argparse, json, logging, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
-#       aggregate_recall_by_qtype, validate_eval_report, plan_pack_ingest.
+#       aggregate_recall_by_qtype, validate_eval_report, plan_pack_ingest,
+#       read_samples_per_claim, read_max_parallel_judges.
 # @end-summary
 """Eval CLI runner (P6b).
 
@@ -88,6 +89,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Override pack.meta.judge.samples_per_claim — number of judge "
             "invocations per golden (mean score, best reasoning)."
+        ),
+    )
+    run_parser.add_argument(
+        "--max-parallel-judges",
+        type=int,
+        default=None,
+        help=(
+            "Override pack.meta.judge.max_parallel_judges — bound on "
+            "concurrent judge calls (1 = sequential; >1 fans all "
+            "(golden, sample) calls into a bounded thread pool)."
         ),
     )
     fresh_group = run_parser.add_mutually_exclusive_group()
@@ -202,6 +213,7 @@ def run_cli(
     verbose: bool = False,
     fresh: bool = True,
     samples_per_claim: int | None = None,
+    max_parallel_judges: int | None = None,
     show_samples: bool = False,
     chat_model_factory: Callable[..., Any] | None = None,
     stdout: Any = None,
@@ -246,6 +258,7 @@ def run_cli(
             aggregate_recall_by_qtype,
             build_eval_report,
             plan_pack_ingest,
+            read_max_parallel_judges,
             read_samples_per_claim,
             retrieve_for_goldens,
             score_goldens,
@@ -256,6 +269,11 @@ def run_cli(
             samples_per_claim
             if samples_per_claim is not None
             else read_samples_per_claim(pack)
+        )
+        effective_parallel = (
+            max_parallel_judges
+            if max_parallel_judges is not None
+            else read_max_parallel_judges(pack)
         )
 
         plan = plan_pack_ingest(pack, pack_dir)
@@ -281,6 +299,7 @@ def run_cli(
             pack.goldens,
             judge_client,
             samples_per_claim=effective_samples,
+            max_parallel_judges=effective_parallel,
         )
 
         recall_by_qtype = aggregate_recall_by_qtype(
@@ -348,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             verbose=args.verbose,
             fresh=args.fresh,
             samples_per_claim=args.samples_per_claim,
+            max_parallel_judges=args.max_parallel_judges,
             show_samples=getattr(args, "show_samples", False),
         )
     parser.error(f"unknown command: {args.command}")

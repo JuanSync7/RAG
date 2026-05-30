@@ -2,7 +2,8 @@
 # Pluggable judge contract for chunk-level faithfulness scoring (P5.0)
 # + multi-sample helper (P6c).
 # Exports: JudgeQuestion, JudgmentScore, JudgeClient, load_judge_prompt,
-#          render_judge_prompt, build_judge_client, read_samples_per_claim.
+#          render_judge_prompt, build_judge_client, read_samples_per_claim,
+#          read_max_parallel_judges.
 # Deps: pydantic v2, src.common.llm.provider.get_llm,
 #       src.eval.pack.schema.EvalPack.
 # @end-summary
@@ -199,6 +200,27 @@ def read_samples_per_claim(pack: EvalPack) -> int:
         ) from exc
     if n_int < 1:
         raise ValueError(f"samples_per_claim must be >= 1, got {n_int}")
+    return n_int
+
+
+def read_max_parallel_judges(pack: EvalPack) -> int:
+    """Read ``pack.meta.judge.max_parallel_judges`` with a defensive default.
+
+    Mirrors :func:`read_samples_per_claim`. Returns 1 when the field is
+    missing (legacy packs) or ``None``. Raises ``ValueError`` when the value
+    is < 1, since callers use it as a thread-pool width.
+    """
+    n = getattr(pack.meta.judge, "max_parallel_judges", 1)
+    if n is None:
+        n = 1
+    try:
+        n_int = int(n)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"max_parallel_judges must be an integer >= 1, got {n!r}"
+        ) from exc
+    if n_int < 1:
+        raise ValueError(f"max_parallel_judges must be >= 1, got {n_int}")
     return n_int
 
 
