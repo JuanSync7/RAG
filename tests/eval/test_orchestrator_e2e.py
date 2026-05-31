@@ -309,3 +309,244 @@ def test_send_alert_pass_no_warning(caplog) -> None:
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert not warnings, "a passing gate must not emit a WARNING"
+
+
+# ---------------------------------------------------------------------------
+# P8c — baseline-diff wiring
+# ---------------------------------------------------------------------------
+
+
+def _write_baseline(pack_dir: Path, baseline: dict) -> Path:
+    """Dump ``baseline`` as the pack's committed ``baseline.json`` sibling."""
+    path = Path(pack_dir) / "baseline.json"
+    path.write_text(json.dumps(baseline), encoding="utf-8")
+    return path
+
+
+# A baseline where recall is steady (1.0) but faithfulness was higher (1.0) than
+# the current run (0.9) → faithfulness is the SOLE regression past epsilon 0.05.
+_BASELINE_FAITHFULNESS_REGRESSED = {
+    "pack_name": "synpack",
+    "timestamp": "2025-01-01T00:00:00+00:00",
+    "passed": True,
+    "recall_by_qtype": {"factoid": 1.0},
+    "mrr_by_qtype": {"factoid": 1.0},
+    "faithfulness_by_qtype": {"factoid": 1.0},
+}
+
+
+def test_baseline_present_attaches_diff_with_regressions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A committed baseline.json → AlertPayload.baseline_diff carries the diff.
+
+    Gate PASSES (recall 1.0 >= 0.5, faithfulness 0.9 >= 0.5) but faithfulness
+    REGRESSED vs the baseline's 1.0 (delta -0.1, past epsilon). Default
+    fail_on_regression=False → rc stays 0 (no flip).
+    """
+    from src.eval.orchestrator import run_nightly
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    _write_baseline(pack_dir, _BASELINE_FAITHFULNESS_REGRESSED)
+
+    captured: list = []
+    out_dir = tmp_path / "reports"
+
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        alert_fn=captured.append,
+    )
+
+    assert rc == 0, "gate passed and fail_on_regression is False by default"
+    assert len(captured) == 1
+    diff = captured[0].baseline_diff
+    assert diff is not None, "a committed baseline.json must attach a diff"
+    assert diff.regressions, "faithfulness 0.9 vs baseline 1.0 must regress"
+    metrics = {md.metric for md in diff.regressions}
+    assert metrics == {"faithfulness"}, (
+        f"faithfulness is the sole regression; recall (1.0==1.0) is not: {metrics}"
+    )
+    (faith,) = [md for md in diff.regressions if md.metric == "faithfulness"]
+    assert faith.delta == pytest.approx(-0.1)
+
+
+def test_no_baseline_leaves_diff_none_and_unchanged_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """No baseline.json → baseline_diff is None and rc is unchanged (pre-P8c)."""
+    from src.eval.orchestrator import run_nightly
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    # Intentionally DO NOT write baseline.json.
+
+    captured: list = []
+    out_dir = tmp_path / "reports"
+
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        alert_fn=captured.append,
+    )
+
+    assert rc == 0
+    assert len(captured) == 1
+    assert captured[0].baseline_diff is None
+
+
+def test_fail_on_regression_flips_exit_despite_gate_pass(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """fail_on_regression=True flips rc to 1 on a regression even when gate passes.
+
+    DISCRIMINATING PARTNER to test_baseline_present_attaches_diff_with_regressions:
+    identical setup (gate passes, faithfulness regresses), only the flag flips.
+    Proves the flip is regression-driven (gate_passed is still True) and kills a
+    "default True" mutation of fail_on_regression.
+    """
+    from src.eval.orchestrator import run_nightly
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    _write_baseline(pack_dir, _BASELINE_FAITHFULNESS_REGRESSED)
+
+    captured: list = []
+    out_dir = tmp_path / "reports"
+
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        alert_fn=captured.append,
+        fail_on_regression=True,
+    )
+
+    assert rc == 1, "a regression with fail_on_regression=True must flip the exit"
+    assert len(captured) == 1
+    assert captured[0].gate_passed is True, (
+        "the flip is regression-driven, not gate-driven"
+    )
+    assert captured[0].baseline_diff is not None
+    assert captured[0].baseline_diff.regressions
+
+
+def test_send_alert_logs_regression_even_on_gate_pass(caplog) -> None:
+    """send_alert logs a REGRESSION WARNING when the diff has regressions.
+
+    Partner assertion: a passing payload with baseline_diff=None emits NO
+    REGRESSION warning (only the INFO pass line).
+    """
+    from src.eval.runner.alert import AlertPayload, send_alert
+    from src.eval.runner.baseline import BaselineDiff, MetricDelta
+
+    md = MetricDelta(
+        qtype="factoid",
+        metric="faithfulness",
+        baseline_value=1.0,
+        current_value=0.9,
+        delta=-0.1,
+        regressed=True,
+    )
+    diff = BaselineDiff(
+        pack_name="synpack",
+        baseline_timestamp="2025-01-01T00:00:00+00:00",
+        current_timestamp=FIXED_NOW.isoformat(),
+        passed_baseline=True,
+        passed_current=True,
+        regressions=(md,),
+        improvements=(),
+        unchanged=(),
+        new_qtypes=(),
+        dropped_qtypes=(),
+        gate_flipped_to_fail=False,
+    )
+    payload = AlertPayload(
+        pack_name="synpack",
+        collection_name="test_coll",
+        gate_passed=True,
+        failures=[],
+        report_path="/tmp/report.json",
+        timestamp=FIXED_NOW.isoformat(),
+        baseline_diff=diff,
+    )
+
+    with caplog.at_level(logging.INFO, logger="rag.eval.alert"):
+        send_alert(payload)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "a regression must emit a WARNING even on gate pass"
+    assert any("REGRESSION" in r.getMessage() for r in warnings)
+
+    # Partner: gate-pass + no diff → no REGRESSION warning.
+    caplog.clear()
+    no_diff_payload = AlertPayload(
+        pack_name="synpack",
+        collection_name="test_coll",
+        gate_passed=True,
+        failures=[],
+        report_path="/tmp/report.json",
+        timestamp=FIXED_NOW.isoformat(),
+        baseline_diff=None,
+    )
+    with caplog.at_level(logging.INFO, logger="rag.eval.alert"):
+        send_alert(no_diff_payload)
+
+    regression_warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "REGRESSION" in r.getMessage()
+    ]
+    assert not regression_warnings, "no diff → no REGRESSION warning"
+
+
+def test_corrupt_baseline_degrades_gracefully_not_errored(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A malformed/corrupt baseline.json must NOT mark the pack errored.
+
+    A committed baseline that won't parse as JSON (hand-edit, merge-conflict
+    markers, truncation) should degrade like an ABSENT baseline: the pack's eval
+    still ran and persisted, so its alert must still fire with baseline_diff=None
+    and the exit code must reflect the GATE only — never a spurious error-exit.
+    """
+    from src.eval.orchestrator import run_nightly
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    # Garbage that json.loads cannot parse (e.g. a merge-conflict leftover).
+    (Path(pack_dir) / "baseline.json").write_text(
+        "<<<<<<< HEAD\nnot json\n", encoding="utf-8"
+    )
+
+    captured: list = []
+    out_dir = tmp_path / "reports"
+
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        # fail_on_regression on to prove a corrupt baseline can't flip either.
+        fail_on_regression=True,
+        alert_fn=captured.append,
+    )
+
+    # Gate passes (recall 1.0, faithfulness 0.9 ≥ floors) → rc 0, NOT errored.
+    assert rc == 0
+    # The pack's alert still fired (not swallowed by an exception) ...
+    assert len(captured) == 1
+    # ... and the unusable baseline is treated as absent.
+    assert captured[0].baseline_diff is None
+    # The report was still persisted.
+    assert len(list(out_dir.glob("*.json"))) == 1
