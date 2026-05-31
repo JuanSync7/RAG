@@ -19,6 +19,11 @@
 # P8b adds the promote-baseline subcommand: promote_baseline(pack, ...) writes
 # the latest (or given) report JSON to <packs_root>/<pack>/baseline.json (the
 # git-tracked baseline that runner.baseline diffs against); no git-commit.
+# P10 adds three default-preserving DI seams to run_eval: execute_fn /
+# retrieve_fn / judge_client_factory (each defaulting to None and resolved to
+# the live runner symbol at CALL TIME after the lazy import). These let the
+# offline CI smoke (src.eval.smoke) drive the FULL loop with no live infra and
+# no monkeypatch; run_cli is unchanged (live CLI keeps the live defaults).
 # Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli,
 #          promote_baseline, main
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
@@ -332,6 +337,9 @@ def run_eval(
     chat_model_factory: Callable[..., Any] | None = None,
     verbose: bool = False,
     stderr: Any = None,
+    execute_fn: Callable[..., Any] | None = None,
+    retrieve_fn: Callable[..., Any] | None = None,
+    judge_client_factory: Callable[..., Any] | None = None,
 ) -> "EvalRunResult":
     """Run the full eval pipeline against ``pack_path`` and RETURN the results.
 
@@ -349,6 +357,22 @@ def run_eval(
 
     Emission, CI-summary writing, and exit-code translation are the CLI's
     responsibility and live in :func:`run_cli`.
+
+    **Dependency-injection seams (P10).** The three external touchpoints —
+    ingest, retrieval, and judge-client construction — are injectable for the
+    offline CI smoke (:mod:`src.eval.smoke`) so the full loop can run with NO
+    live Weaviate / embeddings / LLM and NO monkeypatching:
+
+    * ``execute_fn`` — defaults to ``runner.execute_plan``; called as
+      ``execute_fn(plan, fresh=fresh)``.
+    * ``retrieve_fn`` — defaults to ``runner.retrieve_for_goldens``; called as
+      ``retrieve_fn(collection_name, pack.goldens, k=k)``.
+    * ``judge_client_factory`` — defaults to ``runner.build_judge_client``;
+      called as ``judge_client_factory(pack, chat_model_factory=..., pack_dir=...)``.
+
+    Each defaults to ``None`` and is resolved to the live implementation at
+    CALL TIME (after the lazy ``runner`` import) so existing tests that
+    monkeypatch ``src.eval.runner.*`` symbols keep working unchanged.
     """
     if stderr is None:
         stderr = sys.stderr
@@ -377,6 +401,12 @@ def run_eval(
         validate_eval_report,
     )
 
+    # Resolve the DI seams to their live defaults at CALL TIME (after the lazy
+    # ``runner`` import) so monkeypatched ``runner.*`` symbols still take effect.
+    execute_fn = execute_fn or runner_pkg.execute_plan
+    retrieve_fn = retrieve_fn or retrieve_for_goldens
+    judge_client_factory = judge_client_factory or runner_pkg.build_judge_client
+
     effective_samples = (
         samples_per_claim
         if samples_per_claim is not None
@@ -389,7 +419,7 @@ def run_eval(
     )
 
     plan = plan_pack_ingest(pack, pack_dir)
-    ingest_report = runner_pkg.execute_plan(plan, fresh=fresh)
+    ingest_report = execute_fn(plan, fresh=fresh)
     logger.info(
         "Ingest complete: collection=%s docs=%d chunks=%d",
         ingest_report.collection_name,
@@ -397,11 +427,11 @@ def run_eval(
         ingest_report.stored_chunks,
     )
 
-    retrieval_results = retrieve_for_goldens(
+    retrieval_results = retrieve_fn(
         ingest_report.collection_name, pack.goldens, k=k
     )
 
-    judge_client = runner_pkg.build_judge_client(
+    judge_client = judge_client_factory(
         pack,
         chat_model_factory=chat_model_factory,
         pack_dir=pack_dir,

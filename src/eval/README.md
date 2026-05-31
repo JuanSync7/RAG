@@ -21,7 +21,9 @@ into a single CLI subcommand. End-to-end answer-faithfulness for production runt
 | --- | --- |
 | `pack/` | Eval-pack format: typed schema (Pydantic), structural validator, loader, single error type. |
 | `runner/` | Pure planner, live ingest executor, retrieval + recall@k, judge contract, faithfulness executor, gate. |
-| `cli.py` | `python -m src.eval run <pack>` orchestrator. Deterministic exit codes. |
+| `cli.py` | `python -m src.eval run <pack>` orchestrator. Deterministic exit codes. `run_eval(...)` exposes three default-preserving DI seams — `execute_fn` / `retrieve_fn` / `judge_client_factory` (resolved to the live `runner.*` symbols at call time) — so the offline smoke can drive the loop with no live infra. |
+| `orchestrator.py` | Nightly batch core: `run_nightly(...)` runs the loop per pack, persists, alerts, and returns a binary pass/fail code. Forwards the three `run_eval` DI seams. |
+| `smoke.py` | Offline PR-gate smoke (P10): `python -m src.eval.smoke` drives the FULL loop (`run_nightly → run_eval → persist → gate → alert`) against a tiny synthetic pack via the DI seams — no live Weaviate/embeddings/LLM. Runs a clean (rc 0) and an injected-regression (rc 1) scenario; exits 0 iff BOTH behave. |
 | `__main__.py` | Module entry — delegates to `cli.main`. |
 
 ## Quick Start

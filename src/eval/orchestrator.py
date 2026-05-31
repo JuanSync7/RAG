@@ -8,6 +8,9 @@
 # 0 iff EVERY pack ran AND passed, else 1; when fail_on_regression=True a
 # regression vs baseline flips the exit to 1 even if the absolute gate passed.
 # Packs with no baseline behave exactly as pre-P8c (baseline_diff=None, no flip).
+# P10: run_nightly accepts + forwards execute_fn/retrieve_fn/judge_client_factory
+# to run_eval so the offline CI smoke (src.eval.smoke) drives the full loop with
+# no live infra; each defaults to None (live behaviour unchanged).
 # Exports: discover_packs, run_nightly
 # Deps: stdlib (json, logging, pathlib, datetime); src.eval.cli.run_eval;
 #       src.eval.runner.persistence.persist_eval_report;
@@ -85,6 +88,9 @@ def run_nightly(
     fail_on_regression: bool = False,
     regression_epsilon: float = 0.05,
     stderr: Any = None,
+    execute_fn: Callable[..., Any] | None = None,
+    retrieve_fn: Callable[..., Any] | None = None,
+    judge_client_factory: Callable[..., Any] | None = None,
 ) -> int:
     """Run the full eval loop over ``pack_paths`` and return a batch exit code.
 
@@ -120,6 +126,14 @@ def run_nightly(
     :param regression_epsilon: tolerance band passed to
         :func:`~src.eval.runner.baseline.compute_baseline_diff` (default
         ``0.05``).
+    :param execute_fn: optional ingest seam forwarded verbatim to
+        :func:`~src.eval.cli.run_eval` (default ``None`` → live ``execute_plan``).
+    :param retrieve_fn: optional retrieval seam forwarded to ``run_eval``
+        (default ``None`` → live ``retrieve_for_goldens``).
+    :param judge_client_factory: optional judge-client seam forwarded to
+        ``run_eval`` (default ``None`` → live ``build_judge_client``). These
+        three seams let the offline CI smoke (:mod:`src.eval.smoke`) drive the
+        full loop with no live infra and no monkeypatch.
     """
     # Resolve ``now`` ONCE so the persisted-filename timestamp and the alert
     # timestamp are the SAME value (and timezone-aware) on the production
@@ -139,6 +153,9 @@ def run_nightly(
                 fresh=fresh,
                 chat_model_factory=chat_model_factory,
                 stderr=stderr,
+                execute_fn=execute_fn,
+                retrieve_fn=retrieve_fn,
+                judge_client_factory=judge_client_factory,
             )
             report_path = persist_eval_report(result, output_dir, now=now)
 
