@@ -9,11 +9,14 @@
 #          score_goldens, build_eval_report, build_judge_client,
 #          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
 #          read_max_parallel_judges, render_ci_summary, persist_eval_report,
-#          AlertPayload, send_alert.
+#          AlertPayload, send_alert, CalibrationResult, CalibrationRecord,
+#          CalibrationAlert, cohens_kappa, binarize_score, compute_calibration,
+#          detect_drift, persist_calibration_record, send_calibration_alert.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
-#       contract; P5.0), .faithfulness (P5 executor).
+#       contract; P5.0), .faithfulness (P5 executor), .calibration (P9
+#       judge-calibration: Cohen's kappa + drift alert).
 # @end-summary
 """Eval runner — pack-to-ingest orchestration + retrieval metrics + judge
 + faithfulness scoring.
@@ -30,6 +33,17 @@ from __future__ import annotations
 
 from .alert import AlertPayload, send_alert
 from .baseline import BaselineDiff, MetricDelta, compute_baseline_diff
+from .calibration import (
+    CalibrationAlert,
+    CalibrationRecord,
+    CalibrationResult,
+    binarize_score,
+    cohens_kappa,
+    compute_calibration,
+    detect_drift,
+    persist_calibration_record,
+    send_calibration_alert,
+)
 from .ci import render_ci_summary
 from .execute import execute_plan
 from .gate import GateFailure, GateResult, validate_eval_report
@@ -67,6 +81,9 @@ from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_golde
 __all__ = [
     "AlertPayload",
     "BaselineDiff",
+    "CalibrationAlert",
+    "CalibrationRecord",
+    "CalibrationResult",
     "EvalReport",
     "FaithfulnessResults",
     "GateFailure",
@@ -83,11 +100,16 @@ __all__ = [
     "aggregate_faithfulness_by_qtype",
     "aggregate_mrr_by_qtype",
     "aggregate_recall_by_qtype",
+    "binarize_score",
     "build_eval_report",
     "build_judge_client",
+    "cohens_kappa",
     "compute_baseline_diff",
+    "compute_calibration",
+    "detect_drift",
     "execute_plan",
     "load_judge_prompt",
+    "persist_calibration_record",
     "persist_eval_report",
     "plan_pack_ingest",
     "read_max_parallel_judges",
@@ -101,5 +123,6 @@ __all__ = [
     "retrieve_for_goldens",
     "score_goldens",
     "send_alert",
+    "send_calibration_alert",
     "validate_eval_report",
 ]
