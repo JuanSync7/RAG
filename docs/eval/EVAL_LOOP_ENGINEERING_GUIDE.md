@@ -401,10 +401,46 @@ Practical effect: the recall path is reproducible from a fixed ingested collecti
 | `eval runtime error: ... RuntimeError: Post-ingest stats unavailable` (exit 3) | Weaviate collection didn't materialise. Inspect `ingest_directory` logs; verify the collection name template and that Weaviate is reachable. |
 | Recall stays at `0.0` for a qtype with non-empty expected docs | Check `metadata['source']` shape — `recall_at_k` compares raw source strings. If ingestion stores absolute paths but goldens reference filenames, the set intersection is always empty. |
 
+## CI Gating
+
+The eval loop is wired into CI on two complementary tracks:
+
+### Offline PR-gate smoke (`python -m src.eval.smoke`)
+
+A required step in `ci.yml` (the `test` job, which runs on every `pull_request`).
+This is a fully **offline** smoke: it drives the entire loop —
+`run_nightly → run_eval → persist → gate → alert` — against a tiny synthetic pack
+built on disk in a temp dir, using the `run_eval` dependency-injection seams
+(`execute_fn` / `retrieve_fn` / `judge_client_factory`, threaded through
+`run_nightly`) to swap in deterministic in-process fakes. No live Weaviate,
+embeddings, or LLM are touched, and there is no monkeypatching — the real loop
+code paths run end to end.
+
+`main()` runs TWO scenarios and exits `0` iff BOTH behave correctly:
+
+- **clean** — good retrieval (`doc1.md`) + a low recall floor (`0.5`) → the loop
+  returns `0`.
+- **regression** — wrong retrieved doc (`other.md`) + a high recall floor (`0.9`)
+  → the loop returns `1`, proving the gate CORRECTLY catches the regression.
+
+If either scenario returns the wrong code the loop itself is broken (e.g. the
+gate stopped failing), and the smoke exits non-zero — so a regression in the
+gating machinery fails the PR even though no live infra ran. Implemented in
+[`src/eval/smoke.py`](../../src/eval/smoke.py); tested in
+[`tests/eval/test_smoke.py`](../../tests/eval/test_smoke.py).
+
+### Live judge-calibrated gate (`eval-gate.yml`, workflow_dispatch)
+
+Running the loop against a real pack with live retrieval and a real judge LLM is
+a separate, manually/scheduled-triggered job (it needs Weaviate, embeddings, and
+LLM credentials). That track is the source of truth for absolute pack quality and
+baseline-diff regression detection; the offline smoke above only guards the
+*plumbing* of the loop, not the quality of any real pack.
+
 ## Known Limitations and Future Work
 
 - **Per-sample visibility.** Multi-sample runs collapse `samples_per_claim` calls into one mean score; per-sample scores and reasonings are not surfaced in `EvalReport`. P7-series teaser: report-level per-sample arrays.
 - **Sequential sampling.** Samples are issued one at a time. With `samples_per_claim=3` and large golden counts, judge latency dominates wall time. Future P7b candidate: parallel sampling with a configurable concurrency cap.
-- **No CI gate integration.** Exit codes are defined and stable, but no CI workflow runs the eval loop yet. P7c teaser: nightly eval + PR-gated regression check.
+- **Live-infra PR gating is still out of the PR critical path.** The offline smoke (see [CI Gating](#ci-gating)) guards the loop plumbing on every PR, but running a real pack with live retrieval + judge against PRs (rather than on-demand via `eval-gate.yml`) remains future work — it would require provisioning Weaviate/embeddings/LLM in the PR runner.
 - **`expected_source_docs` matching is exact-string.** No path normalisation, no case folding. A future-work candidate is to normalise both sides through the ingest source-key contract.
 - **No end-to-end answer-faithfulness in this loop.** Production answer-vs-context faithfulness lives in `src/guardrails/`. Bridging the two surfaces is a separate scope.
