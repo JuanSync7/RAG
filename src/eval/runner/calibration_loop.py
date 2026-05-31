@@ -39,8 +39,10 @@ Design rationale
   "behaviour controlled by typed config, fail fast" rule.
 * All side effects are injected (``judge_client``, ``output_dir``, ``alert_fn``,
   ``now``) so the loop is a pure orchestrator, mirroring the seams in
-  :func:`src.eval.orchestrator.run_nightly` (alert sink defaults to the real
-  sink; ``now`` defaults are applied inside the composed pieces).
+  :func:`src.eval.orchestrator.run_nightly`. The alert sink defaults to the real
+  sink; ``now`` is resolved ONCE at the top (not forwarded as ``None`` to each
+  composed piece) so the record timestamp, its filename, and the alert timestamp
+  cannot drift apart.
 
 The persist step runs *before* the alert so the alert payload can carry the
 written record's path.
@@ -48,7 +50,7 @@ written record's path.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .calibration import (
@@ -111,12 +113,20 @@ def run_calibration(
         the run is pooled across qtypes).
     :param alert_fn: the alert sink (default: the real
         :func:`send_calibration_alert`). Injected so tests can capture alerts.
-    :param now: injected timestamp for deterministic results/filenames; forwarded
-        to the composed pieces, which default to ``datetime.now(timezone.utc)``.
+    :param now: injected timestamp for deterministic results/filenames. Resolved
+        once (defaults to ``datetime.now(timezone.utc)``) and shared by the result
+        timestamp, the persisted filename, and the alert timestamp.
     :returns: the persisted :class:`CalibrationRecord`.
     """
     if examples is None:
         examples = load_calibration_fixture()
+
+    # Resolve ``now`` ONCE so the record's internal timestamp, its filename, and
+    # the alert's timestamp all agree (forwarding ``None`` to both
+    # compute_calibration and persist would let each read the wall clock
+    # independently and drift apart). Mirrors run_nightly's single-now pattern.
+    if now is None:
+        now = datetime.now(timezone.utc)
 
     judge_scores = _score_examples(judge_client, examples)
     reference_labels = [ex.reference_label for ex in examples]

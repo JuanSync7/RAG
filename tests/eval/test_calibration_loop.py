@@ -7,7 +7,9 @@
 # example once, kappa=1.0, exactly one JSON written), the alert carrying the
 # persisted record path, the end-to-end WARNING through the real log sink on
 # drift, and that the binarization threshold is load-bearing (different
-# thresholds -> different confusion).
+# thresholds -> different confusion), the facade re-export contract, and that
+# `now` is resolved once so the record timestamp / filename / alert timestamp
+# agree on the production path.
 # Exports: test_run_calibration_seeded_oracle and the rest of the loop matrix.
 # Deps: src.eval.runner.calibration_loop (module under test);
 #       src.eval.runner.calibration_fixture (CalibrationExample),
@@ -239,3 +241,45 @@ def test_run_calibration_threshold_changes_binarization(tmp_path: Path) -> None:
     assert low.result.confusion_counts != high.result.confusion_counts
     assert low.result.confusion_counts == {"tp": 2, "tn": 1, "fp": 0, "fn": 0}
     assert high.result.confusion_counts == {"tp": 1, "tn": 1, "fp": 0, "fn": 1}
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — the stable import surface re-exports run_calibration (gives the
+# __init__/__all__ facade contract teeth — removing the re-export reds this).
+# ---------------------------------------------------------------------------
+def test_run_calibration_is_exported_from_facade() -> None:
+    from src.eval.runner import run_calibration as facade_run
+    from src.eval.runner.calibration_loop import run_calibration as module_run
+
+    assert facade_run is module_run
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — on the production path (now=None) the record timestamp, the persisted
+# filename, and the alert timestamp all agree. `now` must be resolved ONCE; if it
+# were read independently by compute_calibration and persist they would diverge at
+# microsecond resolution and the filename would not match result.timestamp.
+# ---------------------------------------------------------------------------
+def test_run_calibration_resolves_now_once(tmp_path: Path) -> None:
+    from src.eval.runner.calibration_loop import run_calibration
+
+    captured: list = []
+    record = run_calibration(
+        _StubJudge(_oracle_scores()),
+        pack_name="nowpack",
+        threshold=0.5,
+        min_kappa=0.6,
+        output_dir=tmp_path,
+        examples=_oracle_examples(),
+        alert_fn=captured.append,
+        # now=None -> production path: the orchestrator resolves the clock once.
+    )
+
+    written = list(tmp_path.glob("*.json"))
+    assert len(written) == 1
+
+    alert = captured[0]
+    assert alert.timestamp == record.result.timestamp
+    # Filename is the SAME instant with colons stripped -> all three agree.
+    expected_name = f"nowpack_{record.result.timestamp.replace(':', '')}.json"
+    assert written[0].name == expected_name
