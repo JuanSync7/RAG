@@ -109,3 +109,7 @@ docker-compose.override.yml
 docker-compose.cpu-embed-off.yml
 .gitignore.local
 .tei_cache
+
+# Persisted nightly eval reports (P8a orchestrator) — generated, not source.
+eval_reports/
+evals/*/reports/
