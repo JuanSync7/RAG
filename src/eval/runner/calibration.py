@@ -178,12 +178,25 @@ def compute_calibration(
     :param threshold: binarization threshold (inclusive ``>=`` boundary).
     :param now: injected timestamp for deterministic tests; defaults to
         ``datetime.now(timezone.utc)`` (timezone-aware, never ``utcnow()``).
-    :raises ValueError: if the score/label sequences differ in length.
+    :raises ValueError: if the score/label sequences differ in length, or if
+        ``reference_labels`` contains a label other than ``"pass"``/``"fail"``
+        (the confusion matrix is binary-only).
     """
     if len(judge_scores) != len(reference_labels):
         raise ValueError(
             "judge_scores and reference_labels differ in length: "
             f"{len(judge_scores)} != {len(reference_labels)}"
+        )
+
+    # Fail fast on a contradictory contract: the confusion matrix is defined for
+    # the binary "pass"/"fail" class set only (a stray third label would be
+    # silently absorbed into the ``tn`` bucket below). ``cohens_kappa`` itself is
+    # multi-class, but ``compute_calibration``'s confusion counts are not.
+    invalid = sorted(set(reference_labels) - {"pass", "fail"})
+    if invalid:
+        raise ValueError(
+            "reference_labels must be 'pass'/'fail' only; got unexpected "
+            f"label(s): {invalid}"
         )
 
     judge_labels = [binarize_score(s, threshold) for s in judge_scores]

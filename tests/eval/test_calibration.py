@@ -266,3 +266,36 @@ def test_calibration_result_is_frozen() -> None:
     assert dataclasses.is_dataclass(result)
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.kappa = 0.99  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Test 10 — compute_calibration enforces the binary reference contract.
+# A stray third label would otherwise be silently absorbed into "tn".
+# ---------------------------------------------------------------------------
+def test_compute_calibration_rejects_non_binary_reference() -> None:
+    from src.eval.runner.calibration import compute_calibration
+
+    # Discriminating partner: the all-pass/fail set is accepted ...
+    ok = compute_calibration([0.9, 0.1], ["pass", "fail"], threshold=0.5)
+    assert ok.n == 2
+
+    # ... but a stray "partial" label fails fast rather than miscounting.
+    with pytest.raises(ValueError):
+        compute_calibration(
+            [0.9, 0.1, 0.5], ["pass", "fail", "partial"], threshold=0.5
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — empty input is vacuous perfect agreement (no 0/0, no crash).
+# ---------------------------------------------------------------------------
+def test_empty_input_is_vacuous_agreement() -> None:
+    from src.eval.runner.calibration import cohens_kappa, compute_calibration
+
+    assert cohens_kappa([], []) == 1.0
+
+    result = compute_calibration([], [], threshold=0.5, now=FIXED_NOW)
+    assert result.kappa == 1.0
+    assert result.n == 0
+    assert result.agreement_rate == 1.0
+    assert result.confusion_counts == {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
