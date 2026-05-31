@@ -11,12 +11,15 @@
 #          read_max_parallel_judges, render_ci_summary, persist_eval_report,
 #          AlertPayload, send_alert, CalibrationResult, CalibrationRecord,
 #          CalibrationAlert, cohens_kappa, binarize_score, compute_calibration,
-#          detect_drift, persist_calibration_record, send_calibration_alert.
+#          detect_drift, persist_calibration_record, send_calibration_alert,
+#          CalibrationExample, load_calibration_fixture,
+#          DEFAULT_CALIBRATION_FIXTURE_PATH, CALIBRATION_FIXTURE_SHA.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
 #       contract; P5.0), .faithfulness (P5 executor), .calibration (P9
-#       judge-calibration: Cohen's kappa + drift alert).
+#       judge-calibration: Cohen's kappa + drift alert), .calibration_fixture
+#       (P5.0 tamper-evident ground-truth calibration fixture + loader).
 # @end-summary
 """Eval runner — pack-to-ingest orchestration + retrieval metrics + judge
 + faithfulness scoring.
@@ -43,6 +46,12 @@ from .calibration import (
     detect_drift,
     persist_calibration_record,
     send_calibration_alert,
+)
+from .calibration_fixture import (
+    CALIBRATION_FIXTURE_SHA,
+    DEFAULT_CALIBRATION_FIXTURE_PATH,
+    CalibrationExample,
+    load_calibration_fixture,
 )
 from .ci import render_ci_summary
 from .execute import execute_plan
@@ -81,9 +90,12 @@ from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_golde
 __all__ = [
     "AlertPayload",
     "BaselineDiff",
+    "CALIBRATION_FIXTURE_SHA",
     "CalibrationAlert",
+    "CalibrationExample",
     "CalibrationRecord",
     "CalibrationResult",
+    "DEFAULT_CALIBRATION_FIXTURE_PATH",
     "EvalReport",
     "FaithfulnessResults",
     "GateFailure",
@@ -108,6 +120,7 @@ __all__ = [
     "compute_calibration",
     "detect_drift",
     "execute_plan",
+    "load_calibration_fixture",
     "load_judge_prompt",
     "persist_calibration_record",
     "persist_eval_report",
