@@ -15,6 +15,7 @@
 #       runner.retrieve adds src.core.embeddings + src.vector_db;
 #       runner.judge adds src.common.llm.provider at first use).
 # @end-summary
+from .cli import EvalRunResult, run_eval
 from .pack import EvalPack, PackValidationError, load_pack, validate_pack
 from .runner import (
     EvalReport,
@@ -51,6 +52,7 @@ from .runner import (
 __all__ = [
     "EvalPack",
     "EvalReport",
+    "EvalRunResult",
     "FaithfulnessResults",
     "GateFailure",
     "GateResult",
@@ -79,6 +81,7 @@ __all__ = [
     "render_ci_summary",
     "render_judge_prompt",
     "retrieve_for_goldens",
+    "run_eval",
     "score_goldens",
     "validate_eval_report",
     "validate_pack",

@@ -8,7 +8,7 @@
 #          aggregate_faithfulness_by_qtype,
 #          score_goldens, build_eval_report, build_judge_client,
 #          load_judge_prompt, render_judge_prompt, read_samples_per_claim,
-#          read_max_parallel_judges, render_ci_summary.
+#          read_max_parallel_judges, render_ci_summary, persist_eval_report.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
@@ -52,6 +52,7 @@ from .metrics import (
     recall_at_k,
     reciprocal_rank,
 )
+from .persistence import persist_eval_report
 from .plan import IngestPlan, plan_pack_ingest
 from .report import EvalReport, IngestReport, build_eval_report
 from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
@@ -76,6 +77,7 @@ __all__ = [
     "build_judge_client",
     "execute_plan",
     "load_judge_prompt",
+    "persist_eval_report",
     "plan_pack_ingest",
     "read_max_parallel_judges",
     "read_samples_per_claim",

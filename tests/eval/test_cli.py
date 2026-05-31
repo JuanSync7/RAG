@@ -246,6 +246,65 @@ def test_cli_gate_fail_returns_one(tmp_path: Path, monkeypatch, capsys) -> None:
     assert "recall_at_5" in err
 
 
+def test_cli_missing_pack_judge_prompt_exits_2(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A Phase-2 FileNotFoundError (missing pack-referenced judge prompt) maps to
+    exit 2 (pack error), not exit 3 — pins the P8a.0 refactor's exit-code contract.
+
+    The pack authors a ``prompts/`` directory but omits ``judge_v1.md`` for its
+    declared ``tier1_prompt_version: v1``. Phase 1 (load_pack) succeeds — the
+    missing prompt is NOT a load-time concern — so we exercise the REAL Phase-2
+    judge path: ``build_judge_client`` → ``load_judge_prompt`` raises a genuine
+    ``FileNotFoundError`` (see src/eval/runner/judge.py: when ``prompts/`` exists
+    we do not fall back to the packaged default). The single
+    ``except (PackValidationError, FileNotFoundError)`` branch must catch it →
+    exit 2, NOT the ``except Exception`` → exit 3 branch.
+    """
+    from src.eval.cli import run_cli
+
+    pack_dir = _make_synthetic_pack(tmp_path)
+    # Author a prompts/ dir WITHOUT judge_v1.md → load_judge_prompt raises a
+    # real FileNotFoundError (no silent fallback to the packaged default).
+    (pack_dir / "prompts").mkdir()
+
+    # Patch execute_plan + retrieval infra so Phase 2 reaches the judge step
+    # WITHOUT touching Weaviate, but leave build_judge_client REAL so the
+    # FileNotFoundError originates specifically from the judge-prompt path.
+    from src.eval.runner import retrieve as retrieve_mod
+    from src.eval.runner import report as report_mod
+    from src.vector_db.common.schemas import SearchResult
+    import src.eval.runner as runner_pkg
+
+    def fake_execute_plan(plan, *, fresh: bool = True):
+        return report_mod.IngestReport(
+            collection_name=plan.collection_name,
+            processed=1, skipped=0, failed=0, stored_chunks=1,
+            document_count=1, plan=plan, errors=(),
+        )
+
+    def fake_search(client, query, query_embedding, alpha, limit, **kwargs):
+        return [SearchResult(text="alpha", score=1.0, metadata={"source": "doc1.md"})]
+
+    monkeypatch.setattr(runner_pkg, "execute_plan", fake_execute_plan)
+    monkeypatch.setattr(retrieve_mod, "search", fake_search)
+    monkeypatch.setattr(retrieve_mod, "get_embedding_provider", lambda: _FakeEmbedder())
+    monkeypatch.setattr(retrieve_mod, "create_persistent_client", lambda: object())
+    monkeypatch.setattr(retrieve_mod, "close_client", lambda _c: None)
+
+    # Real build_judge_client constructs a chat model BEFORE loading the prompt;
+    # inject a no-op factory so no live LLM is touched and the FileNotFoundError
+    # comes solely from load_judge_prompt.
+    def noop_factory(*, model_alias, temperature):
+        return object()
+
+    rc = run_cli(str(pack_dir), chat_model_factory=noop_factory)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "pack load error" in err
+    assert "judge_v1.md" in err
+
+
 def test_cli_runtime_error_exits_3(tmp_path: Path, monkeypatch, capsys) -> None:
     """execute_plan raises → exit 3 (infra error)."""
     from src.eval.cli import run_cli
