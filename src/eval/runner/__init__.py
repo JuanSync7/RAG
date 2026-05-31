@@ -13,13 +13,15 @@
 #          CalibrationAlert, cohens_kappa, binarize_score, compute_calibration,
 #          detect_drift, persist_calibration_record, send_calibration_alert,
 #          CalibrationExample, load_calibration_fixture,
-#          DEFAULT_CALIBRATION_FIXTURE_PATH, CALIBRATION_FIXTURE_SHA.
+#          DEFAULT_CALIBRATION_FIXTURE_PATH, CALIBRATION_FIXTURE_SHA,
+#          run_calibration.
 # Deps: .plan (pure), .report (frozen dataclasses + build_eval_report),
 #       .execute (ingest + vector_db), .retrieve (vector_db search +
 #       embeddings), .metrics (pure recall@k), .judge (pluggable judge
 #       contract; P5.0), .faithfulness (P5 executor), .calibration (P9
 #       judge-calibration: Cohen's kappa + drift alert), .calibration_fixture
-#       (P5.0 tamper-evident ground-truth calibration fixture + loader).
+#       (P5.0 tamper-evident ground-truth calibration fixture + loader),
+#       .calibration_loop (P9 one-shot run_calibration orchestrator).
 # @end-summary
 """Eval runner — pack-to-ingest orchestration + retrieval metrics + judge
 + faithfulness scoring.
@@ -53,6 +55,7 @@ from .calibration_fixture import (
     CalibrationExample,
     load_calibration_fixture,
 )
+from .calibration_loop import run_calibration
 from .ci import render_ci_summary
 from .execute import execute_plan
 from .gate import GateFailure, GateResult, validate_eval_report
@@ -134,6 +137,7 @@ __all__ = [
     "render_judge_prompt",
     "render_regression_section",
     "retrieve_for_goldens",
+    "run_calibration",
     "score_goldens",
     "send_alert",
     "send_calibration_alert",
