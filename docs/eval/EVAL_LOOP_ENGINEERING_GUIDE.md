@@ -437,6 +437,23 @@ LLM credentials). That track is the source of truth for absolute pack quality an
 baseline-diff regression detection; the offline smoke above only guards the
 *plumbing* of the loop, not the quality of any real pack.
 
+### Run-history index (`runner/run_history.py`)
+
+After each pack's persist + per-qtype baseline diff, `run_nightly` appends one
+JSONL line to a per-pack append-only run-history index at
+`<output_dir>/<pack>.history.jsonl` via
+[`src/eval/runner/run_history.py`](../../src/eval/runner/run_history.py). Each
+line carries `timestamp`, `pack_name`, `k`, `gate_passed`, `per_query_deltas`
+(per-qid `{metric: delta}`, sign = current − baseline mirroring `baseline.py`,
+empty on the first run with no baseline) and `per_qtype_deltas` (reused from
+`compute_baseline_diff`). The path is keyed on `pack_name` only — the timestamp
+lives inside the line. Indexing is best-effort: a failure logs a warning and
+never fails the run or changes `run_nightly`'s return value/alert payload.
+`load_run_history(pack, dir)` reads the index back sorted by timestamp (missing
+file → `[]`). This per-qid history layer exists so a future
+Ralph-on-regression auto-fixer can identify the worst-regressing query across
+runs.
+
 ## Known Limitations and Future Work
 
 - **Per-sample visibility.** Multi-sample runs collapse `samples_per_claim` calls into one mean score; per-sample scores and reasonings are not surfaced in `EvalReport`. P7-series teaser: report-level per-sample arrays.

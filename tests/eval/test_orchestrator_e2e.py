@@ -11,11 +11,14 @@
 #   M-B remove per-pack try/except          → test_run_nightly_continues_after_pack_error
 #   M-C send_alert info-only on failure     → test_send_alert_logs_failure
 #   M-D discover_packs returns all subdirs  → test_discover_packs_globs_pack_dirs
+#   M-E remove/mis-wire index_run_report     → test_run_nightly_writes_run_history_index
 # Exports: test_full_loop_with_injected_regression,
 #          test_full_loop_all_pass_returns_zero,
 #          test_run_nightly_continues_after_pack_error,
 #          test_discover_packs_globs_pack_dirs,
-#          test_send_alert_logs_failure, test_send_alert_pass_no_warning
+#          test_send_alert_logs_failure, test_send_alert_pass_no_warning,
+#          test_run_nightly_writes_run_history_index,
+#          test_run_nightly_run_history_appends_across_runs
 # Deps: src.eval.orchestrator, src.eval.runner.alert, tests.eval.test_cli
 # @end-summary
 """P8a — nightly orchestrator tests."""
@@ -550,3 +553,113 @@ def test_corrupt_baseline_degrades_gracefully_not_errored(
     assert captured[0].baseline_diff is None
     # The report was still persisted.
     assert len(list(out_dir.glob("*.json"))) == 1
+
+
+# ---------------------------------------------------------------------------
+# Run-history index wiring (gives the orchestrator integration seam teeth)
+#   M-E remove/mis-wire index_run_report call → test_run_nightly_writes_run_history_index
+# ---------------------------------------------------------------------------
+
+
+# Baseline carrying BOTH per-qtype and per-query maps: per-qid faithfulness for
+# g1 was 1.0; the current run scores 0.9 → the history index must record a
+# faithfulness delta of -0.1 for qid g1 (sign = current - baseline).
+_BASELINE_WITH_PER_QUERY = {
+    "pack_name": "synpack",
+    "timestamp": "2025-01-01T00:00:00+00:00",
+    "passed": True,
+    "recall_by_qtype": {"factoid": 1.0},
+    "mrr_by_qtype": {"factoid": 1.0},
+    "faithfulness_by_qtype": {"factoid": 1.0},
+    "per_query_recall": {"g1": 1.0},
+    "per_query_mrr": {"g1": 1.0},
+    "per_query_faithfulness": {"g1": 1.0},
+}
+
+
+def test_run_nightly_writes_run_history_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """run_nightly appends a per-pack run-history entry with per-qid deltas.
+
+    Gives the orchestrator's ``index_run_report`` wiring END-TO-END teeth: with a
+    committed baseline carrying per-query maps, a nightly run must write
+    ``<output_dir>/synpack.history.jsonl`` whose single entry records the per-qid
+    faithfulness delta (current 0.9 - baseline 1.0 = -0.1) and the per-qtype
+    delta. Deleting or mis-wiring the ``index_run_report`` call reds this (no
+    file, or wrong/swapped delta); the per-qtype-only baseline tests above stay
+    green and do NOT catch it.
+    """
+    from src.eval.orchestrator import run_nightly
+    from src.eval.runner.run_history import load_run_history
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    _write_baseline(pack_dir, _BASELINE_WITH_PER_QUERY)
+
+    out_dir = tmp_path / "reports"
+
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        alert_fn=lambda _p: None,
+    )
+
+    assert rc == 0
+    index_path = out_dir / "synpack.history.jsonl"
+    assert index_path.is_file(), (
+        "run_nightly must append the per-pack run-history index"
+    )
+
+    history = load_run_history("synpack", out_dir)
+    assert len(history) == 1, "exactly one nightly run was indexed"
+    entry = history[0]
+    assert entry["pack_name"] == "synpack"
+    assert entry["timestamp"] == FIXED_NOW.isoformat()
+    # Per-qid teeth: g1 faithfulness regressed by 0.9 - 1.0 = -0.1 (sign =
+    # current - baseline; a swapped payload arg would flip this to +0.1).
+    assert entry["per_query_deltas"]["g1"]["faithfulness"] == pytest.approx(-0.1)
+    # Per-qtype layer is present and single-sourced from compute_baseline_diff.
+    assert entry["per_qtype_deltas"]["factoid"]["faithfulness"] == pytest.approx(
+        -0.1
+    )
+
+
+def test_run_nightly_run_history_appends_across_runs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two nightly runs for one pack append two timestamp-sorted lines.
+
+    Proves the accumulation contract (append, not overwrite) at the ORCHESTRATOR
+    level — the whole point of "trusted signal over time". An ``"a"``→``"w"``
+    regression in index_run_report reds here via run_nightly, not only via the
+    unit test.
+    """
+    from src.eval.orchestrator import run_nightly
+    from src.eval.runner.run_history import load_run_history
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    _write_baseline(pack_dir, _BASELINE_WITH_PER_QUERY)
+
+    out_dir = tmp_path / "reports"
+    later = datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc)
+
+    run_nightly(
+        [pack_dir], output_dir=out_dir, now=FIXED_NOW, alert_fn=lambda _p: None
+    )
+    run_nightly(
+        [pack_dir], output_dir=out_dir, now=later, alert_fn=lambda _p: None
+    )
+
+    history = load_run_history("synpack", out_dir)
+    assert len(history) == 2, "each run appends one entry (no overwrite)"
+    assert [e["timestamp"] for e in history] == [
+        FIXED_NOW.isoformat(),
+        later.isoformat(),
+    ], "entries are timestamp-sorted across runs"

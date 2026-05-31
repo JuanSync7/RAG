@@ -11,11 +11,16 @@
 # P10: run_nightly accepts + forwards execute_fn/retrieve_fn/judge_client_factory
 # to run_eval so the offline CI smoke (src.eval.smoke) drives the full loop with
 # no live infra; each defaults to None (live behaviour unchanged).
+# After each persist+baseline-diff, the orchestrator also appends the run to a
+# per-pack append-only run-history index (per-qid + per-qtype deltas vs the
+# loaded baseline) via run_history.index_run_report; this is best-effort and
+# never fails the run or changes run_nightly's return value/alert payload.
 # Exports: discover_packs, run_nightly
 # Deps: stdlib (json, logging, pathlib, datetime); src.eval.cli.run_eval;
 #       src.eval.runner.persistence.persist_eval_report;
 #       src.eval.runner.alert (AlertPayload, send_alert);
-#       src.eval.runner.baseline.compute_baseline_diff.
+#       src.eval.runner.baseline.compute_baseline_diff;
+#       src.eval.runner.run_history.index_run_report.
 # @end-summary
 """Nightly eval orchestrator core (P8a).
 
@@ -53,6 +58,7 @@ from src.eval.cli import run_eval
 from src.eval.runner.alert import AlertPayload, send_alert
 from src.eval.runner.baseline import compute_baseline_diff
 from src.eval.runner.persistence import persist_eval_report
+from src.eval.runner.run_history import index_run_report
 
 logger = logging.getLogger("rag.eval.orchestrator")
 
@@ -160,6 +166,7 @@ def run_nightly(
             report_path = persist_eval_report(result, output_dir, now=now)
 
             baseline_diff = None
+            baseline_json: dict | None = None
             baseline_path = Path(pack_path) / "baseline.json"
             if baseline_path.is_file():
                 # An UNUSABLE committed baseline (corrupt JSON, merge-conflict
@@ -187,6 +194,32 @@ def run_nightly(
                         exc,
                     )
                     baseline_diff = None
+                    baseline_json = None
+
+            # Append this run to the per-pack run-history index (per-qid +
+            # per-qtype deltas vs the loaded baseline). Best-effort: an indexing
+            # failure must NOT fail the run or change the return value/alert
+            # payload — it writes into the SAME output_dir the report uses. The
+            # baseline dict is reused (None when absent OR unusable). Caught
+            # NARROWLY (I/O + value/key shape) so real bugs are not swallowed.
+            try:
+                current_payload = json.loads(
+                    Path(report_path).read_text(encoding="utf-8")
+                )
+                index_run_report(
+                    result,
+                    baseline_payload=baseline_json,
+                    current_payload=current_payload,
+                    history_dir=output_dir,
+                    now=now,
+                )
+            except (OSError, json.JSONDecodeError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "pack=%s run-history indexing failed (%s: %s) — skipping",
+                    pack_label,
+                    type(exc).__name__,
+                    exc,
+                )
 
             failures = [
                 {
