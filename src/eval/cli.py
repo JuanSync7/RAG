@@ -16,7 +16,11 @@
 # raised errors to exit codes (2/3) and runs Phase 3 (emit + CI summary)
 # unchanged. _report_payload single-sources the JSON shape shared by
 # _emit_json and runner.persistence.persist_eval_report.
-# Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli, main
+# P8b adds the promote-baseline subcommand: promote_baseline(pack, ...) writes
+# the latest (or given) report JSON to <packs_root>/<pack>/baseline.json (the
+# git-tracked baseline that runner.baseline diffs against); no git-commit.
+# Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli,
+#          promote_baseline, main
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
@@ -26,9 +30,11 @@
 # @end-summary
 """Eval CLI runner (P6b).
 
-Single subcommand ``run`` that chains the full eval pipeline against a
-loaded eval_pack and exits with a deterministic code reflecting the
-gate outcome. The CLI is a thin orchestrator — no business logic.
+The ``run`` subcommand chains the full eval pipeline against a loaded
+eval_pack and exits with a deterministic code reflecting the gate outcome.
+The ``promote-baseline`` subcommand (P8b) writes a report to the pack's
+committed ``baseline.json``. The CLI is a thin orchestrator — no business
+logic.
 
 Lazy imports for heavy modules keep argparse-time work to a minimum and
 sidestep langchain_core stub-timing hazards in the test environment.
@@ -138,6 +144,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Incremental update mode; do not drop the collection.",
     )
     run_parser.set_defaults(fresh=True)
+
+    # --- promote-baseline subcommand (P8b) ---
+    promote_parser = subparsers.add_parser(
+        "promote-baseline",
+        help="Promote an eval report to the pack's committed baseline.json.",
+    )
+    promote_parser.add_argument(
+        "pack",
+        help="Pack name (directory under --packs-root).",
+    )
+    promote_parser.add_argument(
+        "--report-json",
+        default=None,
+        help="Report JSON to promote. If omitted, the latest "
+        "<reports-dir>/<pack>_*.json (by filename) is used.",
+    )
+    promote_parser.add_argument(
+        "--packs-root",
+        default="evals/packs",
+        help="Root directory containing pack directories (default: evals/packs).",
+    )
+    promote_parser.add_argument(
+        "--reports-dir",
+        default="eval_reports",
+        help="Directory of persisted reports for latest-discovery "
+        "(default: eval_reports).",
+    )
     return parser
 
 
@@ -514,8 +547,72 @@ def run_cli(
 # ---------------------------------------------------------------------------
 
 
+def promote_baseline(
+    pack: str,
+    *,
+    report_json: str | None = None,
+    packs_root: str = "evals/packs",
+    reports_dir: str = "eval_reports",
+    stdout: Any = None,
+    stderr: Any = None,
+) -> int:
+    """Promote an eval report to ``<packs_root>/<pack>/baseline.json``.
+
+    Resolves the report to promote (explicit ``report_json`` or the latest
+    ``<reports_dir>/<pack>_*.json`` by sorted filename — ISO timestamps in the
+    filename sort chronologically), then writes it verbatim to the pack's
+    committed ``baseline.json``. Does NOT git-commit — versioning the baseline
+    is the caller's deliberate step.
+
+    Returns 0 on success; 2 on a pack/report resolution error (no git side
+    effects). Deterministic and side-effect-light beyond the single write.
+    """
+    out = stdout if stdout is not None else sys.stdout
+    err = stderr if stderr is not None else sys.stderr
+
+    pack_dir = Path(packs_root) / pack
+    if not pack_dir.is_dir():
+        print(f"promote-baseline: pack not found: {pack_dir}", file=err)
+        return 2
+
+    if report_json is not None:
+        report_path = Path(report_json)
+        if not report_path.is_file():
+            print(
+                f"promote-baseline: report not found: {report_path}", file=err
+            )
+            return 2
+    else:
+        candidates = sorted(Path(reports_dir).glob(f"{pack}_*.json"))
+        if not candidates:
+            print(
+                f"promote-baseline: no reports found for {pack!r} under "
+                f"{reports_dir}",
+                file=err,
+            )
+            return 2
+        report_path = candidates[-1]  # latest by sorted (ISO) filename
+
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"promote-baseline: cannot read report: {exc}", file=err)
+        return 2
+    if not isinstance(payload, dict) or "passed" not in payload:
+        print(
+            f"promote-baseline: malformed report (missing keys): {report_path}",
+            file=err,
+        )
+        return 2
+
+    baseline_path = pack_dir / "baseline.json"
+    baseline_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"Promoted baseline -> {baseline_path}", file=out)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Parse argv, dispatch to ``run_cli``, return its exit code."""
+    """Parse argv, dispatch to a subcommand, return its exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "run":
@@ -529,6 +626,13 @@ def main(argv: list[str] | None = None) -> int:
             max_parallel_judges=args.max_parallel_judges,
             show_samples=getattr(args, "show_samples", False),
             summary_file=getattr(args, "summary_file", None),
+        )
+    if args.command == "promote-baseline":
+        return promote_baseline(
+            args.pack,
+            report_json=args.report_json,
+            packs_root=args.packs_root,
+            reports_dir=args.reports_dir,
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.

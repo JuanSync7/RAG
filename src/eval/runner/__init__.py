@@ -29,6 +29,7 @@ the executor (``score_goldens`` + ``aggregate_faithfulness_by_qtype`` +
 from __future__ import annotations
 
 from .alert import AlertPayload, send_alert
+from .baseline import BaselineDiff, MetricDelta, compute_baseline_diff
 from .ci import render_ci_summary
 from .execute import execute_plan
 from .gate import GateFailure, GateResult, validate_eval_report
@@ -57,10 +58,15 @@ from .metrics import (
 from .persistence import persist_eval_report
 from .plan import IngestPlan, plan_pack_ingest
 from .report import EvalReport, IngestReport, build_eval_report
+from .reporting import (
+    render_baseline_diff_markdown,
+    render_regression_section,
+)
 from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
 
 __all__ = [
     "AlertPayload",
+    "BaselineDiff",
     "EvalReport",
     "FaithfulnessResults",
     "GateFailure",
@@ -70,6 +76,7 @@ __all__ = [
     "JudgeClient",
     "JudgeQuestion",
     "JudgmentScore",
+    "MetricDelta",
     "QueryFaithfulnessResult",
     "QueryRetrievalResult",
     "RetrievalResults",
@@ -78,6 +85,7 @@ __all__ = [
     "aggregate_recall_by_qtype",
     "build_eval_report",
     "build_judge_client",
+    "compute_baseline_diff",
     "execute_plan",
     "load_judge_prompt",
     "persist_eval_report",
@@ -86,8 +94,10 @@ __all__ = [
     "read_samples_per_claim",
     "recall_at_k",
     "reciprocal_rank",
+    "render_baseline_diff_markdown",
     "render_ci_summary",
     "render_judge_prompt",
+    "render_regression_section",
     "retrieve_for_goldens",
     "score_goldens",
     "send_alert",
