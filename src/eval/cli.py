@@ -24,8 +24,12 @@
 # the live runner symbol at CALL TIME after the lazy import). These let the
 # offline CI smoke (src.eval.smoke) drive the FULL loop with no live infra and
 # no monkeypatch; run_cli is unchanged (live CLI keeps the live defaults).
+# show-trend adds a READ-ONLY run-history inspection subcommand:
+# show_trend(pack, ...) calls load_run_history → render_trend_table and prints a
+# markdown per-(qtype, metric) trend table. It performs NO writes/ingest/
+# retrieve/judge; missing/empty history → friendly message at exit 0.
 # Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli,
-#          promote_baseline, main
+#          promote_baseline, show_trend, main
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
@@ -38,8 +42,10 @@
 The ``run`` subcommand chains the full eval pipeline against a loaded
 eval_pack and exits with a deterministic code reflecting the gate outcome.
 The ``promote-baseline`` subcommand (P8b) writes a report to the pack's
-committed ``baseline.json``. The CLI is a thin orchestrator — no business
-logic.
+committed ``baseline.json``. The ``show-trend`` subcommand is a READ-ONLY
+inspection surface that loads a pack's append-only run-history index and prints
+a markdown per-``(qtype, metric)`` trend table (no ingest/retrieve/judge, no
+writes). The CLI is a thin orchestrator — no business logic.
 
 Lazy imports for heavy modules keep argparse-time work to a minimum and
 sidestep langchain_core stub-timing hazards in the test environment.
@@ -175,6 +181,49 @@ def _build_parser() -> argparse.ArgumentParser:
         default="eval_reports",
         help="Directory of persisted reports for latest-discovery "
         "(default: eval_reports).",
+    )
+
+    # --- show-trend subcommand (read-only run-history inspection) ---
+    trend_parser = subparsers.add_parser(
+        "show-trend",
+        help="Print a markdown per-(qtype, metric) trend table from a pack's "
+        "run-history index (read-only; no ingest/retrieve/judge).",
+    )
+    trend_parser.add_argument(
+        "pack",
+        help="Pack name whose <pack>.history.jsonl lives under --reports-dir.",
+    )
+    trend_parser.add_argument(
+        "--reports-dir",
+        default="eval_reports",
+        help="Directory containing <pack>.history.jsonl (default: eval_reports).",
+    )
+    trend_parser.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="How many most-recent runs to show as delta columns (default: 3).",
+    )
+    trend_parser.add_argument(
+        "--window",
+        type=int,
+        default=3,
+        help="Detector lookback: recent runs inspected for sustained "
+        "regression (default: 3).",
+    )
+    trend_parser.add_argument(
+        "--min-regressed",
+        type=int,
+        default=2,
+        help="Min regressed runs in the window to flag a pair sustained "
+        "(default: 2).",
+    )
+    trend_parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.05,
+        help="Regression tolerance band; predicate is strict delta < -epsilon "
+        "(default: 0.05).",
     )
     return parser
 
@@ -641,6 +690,53 @@ def promote_baseline(
     return 0
 
 
+def show_trend(
+    pack: str,
+    *,
+    reports_dir: str = "eval_reports",
+    runs: int = 3,
+    window: int = 3,
+    min_regressed: int = 2,
+    epsilon: float = 0.05,
+    stdout: Any = None,
+) -> int:
+    """Print a markdown trend table from ``pack``'s run-history index.
+
+    READ-ONLY inspection surface: loads the append-only history index via
+    :func:`~src.eval.runner.run_history.load_run_history` (missing file → ``[]``),
+    renders it with the pure
+    :func:`~src.eval.runner.show_trend.render_trend_table`, prints to stdout, and
+    returns ``0``. Does NOT write anything, load the pack, ingest, retrieve,
+    judge, or run the loop. An empty/missing history renders a friendly one-line
+    message — still exit ``0`` (a pack with no runs yet is normal, not an error).
+
+    :param pack: pack name whose ``<pack>.history.jsonl`` lives under
+        ``reports_dir``.
+    :param reports_dir: directory holding the history index (default
+        ``eval_reports``; maps to ``history_dir``).
+    :param runs: how many most-recent runs to show as delta columns.
+    :param window: detector lookback (distinct from ``runs``).
+    :param min_regressed: min regressed runs in the window to flag a pair.
+    :param epsilon: regression tolerance band (strict ``delta < -epsilon``).
+    :returns: ``0`` always (including empty/missing history and no-sustained).
+    """
+    out = stdout if stdout is not None else sys.stdout
+
+    from src.eval.runner.run_history import load_run_history
+    from src.eval.runner.show_trend import render_trend_table
+
+    history = load_run_history(pack, reports_dir)
+    table = render_trend_table(
+        history,
+        runs=runs,
+        window=window,
+        min_regressed=min_regressed,
+        epsilon=epsilon,
+    )
+    print(table, file=out)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to a subcommand, return its exit code."""
     parser = _build_parser()
@@ -663,6 +759,15 @@ def main(argv: list[str] | None = None) -> int:
             report_json=args.report_json,
             packs_root=args.packs_root,
             reports_dir=args.reports_dir,
+        )
+    if args.command == "show-trend":
+        return show_trend(
+            args.pack,
+            reports_dir=args.reports_dir,
+            runs=args.runs,
+            window=args.window,
+            min_regressed=args.min_regressed,
+            epsilon=args.epsilon,
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.

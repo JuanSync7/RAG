@@ -175,7 +175,7 @@ evals/packs/opentitan_riscv/        # Reference pack
 
 ## CLI Interface
 
-The CLI is a single subcommand. See [`cli.py`](../../src/eval/cli.py) (`_build_parser`).
+The `run` subcommand drives the full loop. See [`cli.py`](../../src/eval/cli.py) (`_build_parser`). Sibling subcommands: `promote-baseline` (commits a report to the pack baseline) and the read-only `show-trend` (run-history inspection — see [Inspecting the trend](#inspecting-the-trend-show-trend-subcommand--runnershow_trendpy)).
 
 ```bash
 python -m src.eval run <pack_path> \
@@ -478,6 +478,29 @@ or alters any other alert field. Granularity is per-QTYPE (parity with
 explicitly out of scope here and noted as future work.** This slice adds NO CLI
 changes, NO pack-format changes, and does NOT touch the gate or
 `fail_on_regression` exit-flip behaviour.
+
+### Inspecting the trend (`show-trend` subcommand + `runner/show_trend.py`)
+
+`python -m src.eval show-trend <pack> [--reports-dir eval_reports] [--runs 3]
+[--window 3] [--min-regressed 2] [--epsilon 0.05]` is a **read-only** inspection
+surface over the data the two layers above produce. It loads the pack's
+append-only history index via `load_run_history(pack, reports_dir)` (missing file
+→ `[]`) and renders it with the pure
+[`render_trend_table`](../../src/eval/runner/show_trend.py)`(history, *, runs,
+window, min_regressed, epsilon)`. The table has one row per `(qtype, metric)`
+seen in the last `runs` runs (sorted for determinism): a delta column per
+displayed run (em-dash when a run lacks the pair, via `ci._fmt(None)`), then
+`regressed/window`, `latest`, and a `sustained` YES/NO flag. The YES flag and its
+`runs_regressed`/`window`/`latest` figures come straight from
+`detect_sustained_regressions` so the strict `delta < -epsilon` predicate stays
+single-sourced — `show_trend.py` never re-implements regression logic.
+
+`--runs` (how many recent runs to **display** as columns) is deliberately
+distinct from `--window` (how many recent runs the **detector** looks back over).
+The command performs NO writes, NO pack load, and NO ingest/retrieve/judge; an
+empty or missing history renders `(no run history yet)` and still exits `0` (a
+pack with no runs yet is normal, not an error). The only exit code other than `0`
+is argparse's own `2` for bad arguments.
 
 ## Known Limitations and Future Work
 
