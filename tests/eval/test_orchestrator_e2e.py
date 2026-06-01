@@ -663,3 +663,86 @@ def test_run_nightly_run_history_appends_across_runs(
         FIXED_NOW.isoformat(),
         later.isoformat(),
     ], "entries are timestamp-sorted across runs"
+
+
+# ---------------------------------------------------------------------------
+# Sustained-regression detector wiring (multi-run verdict on AlertPayload)
+#   delete the orchestrator detector wiring → test_run_nightly_attaches_
+#   sustained_regressions reds (empty tuple, no entry)
+# ---------------------------------------------------------------------------
+
+
+def _history_entry(timestamp: str, per_qtype_deltas: dict) -> dict:
+    """A run-history JSONL entry in the exact shape ``load_run_history`` parses."""
+    return {
+        "timestamp": timestamp,
+        "pack_name": "synpack",
+        "k": 5,
+        "gate_passed": True,
+        "per_query_deltas": {},
+        "per_qtype_deltas": per_qtype_deltas,
+    }
+
+
+def test_run_nightly_attaches_sustained_regressions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """run_nightly attaches the multi-run sustained-regression verdict.
+
+    PRE-SEED ``<out_dir>/synpack.history.jsonl`` with 2 prior entries where
+    ``(factoid, faithfulness)`` regressed in both (timestamps BEFORE FIXED_NOW so
+    the appended current run sorts last). The current run scores faithfulness 0.9
+    vs the committed baseline's 1.0 → also regresses (delta -0.1). After
+    ``index_run_report`` appends the current run, the detector sees a 3-run window
+    with faithfulness regressed in all 3 → the captured AlertPayload must carry
+    a ``(factoid, faithfulness)`` sustained regression with ``runs_regressed==3``.
+
+    Deleting the orchestrator detector wiring reds this (empty tuple).
+    """
+    from src.eval.orchestrator import run_nightly
+
+    pack_dir = _make_synthetic_pack(
+        tmp_path, recall_floor=0.5, faithfulness_floor=0.5
+    )
+    _patch_full_chain(monkeypatch, retrieved_source="doc1.md", judge_score=0.9)
+    _write_baseline(pack_dir, _BASELINE_WITH_PER_QUERY)
+
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Pre-seed two prior runs; both have (factoid, faithfulness) regressed.
+    seed = [
+        _history_entry(
+            "2026-05-28T12:00:00+00:00", {"factoid": {"faithfulness": -0.2}}
+        ),
+        _history_entry(
+            "2026-05-29T12:00:00+00:00", {"factoid": {"faithfulness": -0.15}}
+        ),
+    ]
+    index_path = out_dir / "synpack.history.jsonl"
+    index_path.write_text(
+        "\n".join(json.dumps(e) for e in seed) + "\n", encoding="utf-8"
+    )
+
+    captured: list = []
+    rc = run_nightly(
+        [pack_dir],
+        output_dir=out_dir,
+        now=FIXED_NOW,
+        alert_fn=captured.append,
+    )
+
+    assert rc == 0
+    assert len(captured) == 1
+    sustained = captured[0].sustained_regressions
+    assert sustained, "the 3-run faithfulness regression must be flagged"
+    faith = [
+        s
+        for s in sustained
+        if s.qtype == "factoid" and s.metric == "faithfulness"
+    ]
+    assert len(faith) == 1, f"factoid/faithfulness must be flagged: {sustained}"
+    assert faith[0].runs_regressed == 3, (
+        "2 pre-seeded + the current run = all 3 in the window regressed"
+    )
+    assert faith[0].window == 3
+    assert faith[0].latest_delta == pytest.approx(-0.1)

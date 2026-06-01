@@ -15,12 +15,18 @@
 # per-pack append-only run-history index (per-qid + per-qtype deltas vs the
 # loaded baseline) via run_history.index_run_report; this is best-effort and
 # never fails the run or changes run_nightly's return value/alert payload.
+# Then (also best-effort) it reloads that history — now including the just-
+# appended current run — and runs detect_sustained_regressions to flag any
+# (qtype, metric) that regressed across >=K-of-N consecutive runs, attaching the
+# verdict to AlertPayload.sustained_regressions. Detection failure is caught
+# narrowly and never fails the run or alters any other field.
 # Exports: discover_packs, run_nightly
 # Deps: stdlib (json, logging, pathlib, datetime); src.eval.cli.run_eval;
 #       src.eval.runner.persistence.persist_eval_report;
 #       src.eval.runner.alert (AlertPayload, send_alert);
 #       src.eval.runner.baseline.compute_baseline_diff;
-#       src.eval.runner.run_history.index_run_report.
+#       src.eval.runner.run_history (index_run_report, load_run_history);
+#       src.eval.runner.sustained_regression.detect_sustained_regressions.
 # @end-summary
 """Nightly eval orchestrator core (P8a).
 
@@ -58,7 +64,8 @@ from src.eval.cli import run_eval
 from src.eval.runner.alert import AlertPayload, send_alert
 from src.eval.runner.baseline import compute_baseline_diff
 from src.eval.runner.persistence import persist_eval_report
-from src.eval.runner.run_history import index_run_report
+from src.eval.runner.run_history import index_run_report, load_run_history
+from src.eval.runner.sustained_regression import detect_sustained_regressions
 
 logger = logging.getLogger("rag.eval.orchestrator")
 
@@ -202,6 +209,7 @@ def run_nightly(
             # payload — it writes into the SAME output_dir the report uses. The
             # baseline dict is reused (None when absent OR unusable). Caught
             # NARROWLY (I/O + value/key shape) so real bugs are not swallowed.
+            current_payload: dict | None = None
             try:
                 current_payload = json.loads(
                     Path(report_path).read_text(encoding="utf-8")
@@ -221,6 +229,32 @@ def run_nightly(
                     exc,
                 )
 
+            # Sustained-regression verdict: reload the per-pack history (now
+            # INCLUDING the run just appended above as the most-recent window
+            # entry) and flag any (qtype, metric) that regressed across
+            # >=K-of-N consecutive runs. Best-effort: a detection failure must
+            # NOT fail the run, change ``rc``, or alter any other AlertPayload
+            # field. Keyed on the SAME pack_name the history file is keyed on
+            # (the persisted report's ``pack_name``). Caught NARROWLY so real
+            # bugs are not swallowed. ``regression_epsilon`` is reused for
+            # parity with the single-run baseline diff.
+            sustained: tuple = ()
+            history_pack_name = (current_payload or {}).get("pack_name")
+            if history_pack_name:
+                try:
+                    history = load_run_history(history_pack_name, output_dir)
+                    sustained = detect_sustained_regressions(
+                        history, epsilon=regression_epsilon
+                    )
+                except (OSError, ValueError, KeyError) as exc:
+                    logger.warning(
+                        "pack=%s sustained-regression detection failed (%s: %s) "
+                        "— skipping",
+                        pack_label,
+                        type(exc).__name__,
+                        exc,
+                    )
+
             failures = [
                 {
                     "qtype": f.qtype,
@@ -239,6 +273,7 @@ def run_nightly(
                 report_path=str(report_path),
                 timestamp=now.isoformat(),
                 baseline_diff=baseline_diff,
+                sustained_regressions=sustained,
             )
             alert_fn(payload)
 

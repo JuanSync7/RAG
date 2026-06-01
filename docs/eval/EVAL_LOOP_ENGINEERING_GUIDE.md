@@ -454,6 +454,31 @@ file → `[]`). This per-qid history layer exists so a future
 Ralph-on-regression auto-fixer can identify the worst-regressing query across
 runs.
 
+### Sustained-regression detector (`runner/sustained_regression.py`)
+
+The single-run `baseline_diff` + `fail_on_regression` path fires on ONE current
+run vs ONE baseline — noisy, since a one-off judge or retrieval dip alarms even
+when the metric recovers next run. After appending the current run to the
+history index (so the loaded history's most-recent entry IS the current run),
+`run_nightly` reloads the per-pack history and calls
+[`detect_sustained_regressions`](../../src/eval/runner/sustained_regression.py)`(history, *, window=3, min_regressed=2, epsilon=0.05)`.
+It inspects the most-recent `window` entries' `per_qtype_deltas` and flags each
+`(qtype, metric)` that regressed (delta ≤ −epsilon — `<=`, mirroring
+`baseline.py`'s sign convention `current − baseline`) in ≥`min_regressed` of the
+considered runs. When fewer than `window` entries exist the available count is
+used and reported in the `SustainedMetricRegression.window` field. Output is a
+deterministically `(qtype, metric)`-sorted tuple of frozen
+`SustainedMetricRegression(qtype, metric, runs_regressed, window, latest_delta)`,
+surfaced on `AlertPayload.sustained_regressions` (default `()`) and logged by
+`send_alert` as a `SUSTAINED REGRESSION` WARNING per entry. Detection is
+best-effort and reuses `regression_epsilon` for parity with the single-run
+diff: a failure logs a warning and never fails the run, changes the exit code,
+or alters any other alert field. Granularity is per-QTYPE (parity with
+`baseline_diff`); **per-QID sustained detection over `per_query_deltas` is
+explicitly out of scope here and noted as future work.** This slice adds NO CLI
+changes, NO pack-format changes, and does NOT touch the gate or
+`fail_on_regression` exit-flip behaviour.
+
 ## Known Limitations and Future Work
 
 - **Per-sample visibility.** Multi-sample runs collapse `samples_per_claim` calls into one mean score; per-sample scores and reasonings are not surfaced in `EvalReport`. P7-series teaser: report-level per-sample arrays.
@@ -461,3 +486,4 @@ runs.
 - **Live-infra PR gating is still out of the PR critical path.** The offline smoke (see [CI Gating](#ci-gating)) guards the loop plumbing on every PR, but running a real pack with live retrieval + judge against PRs (rather than on-demand via `eval-gate.yml`) remains future work — it would require provisioning Weaviate/embeddings/LLM in the PR runner.
 - **`expected_source_docs` matching is exact-string.** No path normalisation, no case folding. A future-work candidate is to normalise both sides through the ingest source-key contract.
 - **No end-to-end answer-faithfulness in this loop.** Production answer-vs-context faithfulness lives in `src/guardrails/`. Bridging the two surfaces is a separate scope.
+- **Per-QID sustained-regression detection.** `detect_sustained_regressions` operates at per-QTYPE granularity (parity with `baseline_diff`). Detecting a single golden query that regresses across consecutive runs (over `per_query_deltas`) is a natural follow-up but explicitly out of scope for this slice.

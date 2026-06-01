@@ -89,6 +89,10 @@ from .reporting import (
     render_regression_section,
 )
 from .retrieve import QueryRetrievalResult, RetrievalResults, retrieve_for_goldens
+from .sustained_regression import (
+    SustainedMetricRegression,
+    detect_sustained_regressions,
+)
 
 __all__ = [
     "AlertPayload",
@@ -112,6 +116,7 @@ __all__ = [
     "QueryFaithfulnessResult",
     "QueryRetrievalResult",
     "RetrievalResults",
+    "SustainedMetricRegression",
     "aggregate_faithfulness_by_qtype",
     "aggregate_mrr_by_qtype",
     "aggregate_recall_by_qtype",
@@ -122,6 +127,7 @@ __all__ = [
     "compute_baseline_diff",
     "compute_calibration",
     "detect_drift",
+    "detect_sustained_regressions",
     "execute_plan",
     "load_calibration_fixture",
     "load_judge_prompt",

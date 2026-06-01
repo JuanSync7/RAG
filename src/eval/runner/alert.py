@@ -2,12 +2,16 @@
 # P8a/P8c — eval alert payload + log-only sink. AlertPayload is the frozen,
 # transport-agnostic shape of a nightly gate result (pack/collection/passed/
 # failures/report_path/timestamp) plus an optional trailing baseline_diff
-# (BaselineDiff | None) attached by the orchestrator when a baseline exists.
+# (BaselineDiff | None) attached by the orchestrator when a baseline exists, and
+# a trailing sustained_regressions tuple (the multi-run sustained-regression
+# verdict from src.eval.runner.sustained_regression; defaults to ()).
 # send_alert is a LOG-ONLY stub: info on pass, warning (per-failure) on fail,
-# AND a warning per regression when baseline_diff carries regressions (logged
-# even on gate pass). Real Slack/webhook wiring is a later slice.
+# a warning per single-run regression when baseline_diff carries regressions,
+# AND a warning per sustained (>=K-of-N runs) regression — all logged even on
+# gate pass. Real Slack/webhook wiring is a later slice.
 # Exports: AlertPayload, send_alert
-# Deps: stdlib (dataclasses, logging); src.eval.runner.baseline (BaselineDiff).
+# Deps: stdlib (dataclasses, logging); src.eval.runner.baseline (BaselineDiff);
+#       src.eval.runner.sustained_regression (SustainedMetricRegression).
 # @end-summary
 """Eval alert payload + log-only sink (P8a).
 
@@ -23,6 +27,7 @@ import logging
 from dataclasses import dataclass
 
 from .baseline import BaselineDiff
+from .sustained_regression import SustainedMetricRegression
 
 logger = logging.getLogger("rag.eval.alert")
 
@@ -42,6 +47,13 @@ class AlertPayload:
         the orchestrator computed against the pack's committed
         ``baseline.json`` sibling, or ``None`` when no baseline exists. Trailing
         additive field (defaults to ``None`` so prior call sites are unaffected).
+    :param sustained_regressions: the multi-run sustained-regression verdict
+        (a tuple of
+        :class:`~src.eval.runner.sustained_regression.SustainedMetricRegression`)
+        the orchestrator computed over the per-pack run-history index — each
+        entry is a ``(qtype, metric)`` that regressed across ``>=K-of-N``
+        consecutive runs. Trailing additive field (defaults to ``()`` so prior
+        call sites are unaffected).
     """
 
     pack_name: str
@@ -51,6 +63,7 @@ class AlertPayload:
     report_path: str
     timestamp: str
     baseline_diff: BaselineDiff | None = None
+    sustained_regressions: tuple[SustainedMetricRegression, ...] = ()
 
 
 def send_alert(payload: AlertPayload) -> None:
@@ -62,7 +75,10 @@ def send_alert(payload: AlertPayload) -> None:
     Independently of the gate outcome, if ``payload.baseline_diff`` carries any
     regressions, a ``WARNING`` summary line plus one ``WARNING`` line per
     regressed metric are emitted — so a regression vs baseline is surfaced even
-    when the absolute gate passed. Real delivery (Slack/webhook) is wired in a
+    when the absolute gate passed. Likewise, if ``payload.sustained_regressions``
+    is non-empty, one ``WARNING`` line per sustained ``(qtype, metric)`` is
+    emitted (a metric that regressed across ``>=K-of-N`` consecutive runs) — also
+    independent of the gate outcome. Real delivery (Slack/webhook) is wired in a
     later slice; this keeps the orchestrator's alert seam observable today.
     """
     if payload.gate_passed:
@@ -102,4 +118,14 @@ def send_alert(payload: AlertPayload) -> None:
                 "  pack=%s REGRESSION qtype=%s metric=%s baseline=%s current=%s delta=%s",
                 payload.pack_name, md.qtype, md.metric,
                 md.baseline_value, md.current_value, md.delta,
+            )
+
+    sustained = payload.sustained_regressions
+    if sustained:
+        for sr in sustained:
+            logger.warning(
+                "SUSTAINED REGRESSION pack=%s qtype=%s metric=%s regressed in "
+                "%d/%d runs (latest Δ=%.3f)",
+                payload.pack_name, sr.qtype, sr.metric,
+                sr.runs_regressed, sr.window, sr.latest_delta,
             )
