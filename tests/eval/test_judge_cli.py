@@ -300,8 +300,16 @@ def test_score_is_error_true_raises() -> None:
     """is_error: true in the envelope raises JudgeBackendError."""
     from src.eval.runner.judge_cli import JudgeBackendError
 
+    # A VALID score payload so the is_error guard is the ONLY thing that can
+    # raise — otherwise an empty "{}" result would raise KeyError on score
+    # extraction and the test would pass even with the is_error guard removed.
     envelope = json.dumps(
-        {"type": "result", "subtype": "success", "is_error": True, "result": "{}"}
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "result": json.dumps({"score": 0.5, "reasoning": "x"}),
+        }
     )
     run_fn = _make_run_fn(envelope)
     with pytest.raises(JudgeBackendError):
