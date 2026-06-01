@@ -24,6 +24,11 @@
 # the live runner symbol at CALL TIME after the lazy import). These let the
 # offline CI smoke (src.eval.smoke) drive the FULL loop with no live infra and
 # no monkeypatch; run_cli is unchanged (live CLI keeps the live defaults).
+# --judge-backend {litellm,claude-cli} selects the LLM-as-judge backend on the
+# run subcommand: litellm (default, in-process chat model) or claude-cli (shells
+# out to the headless `claude` CLI via runner.build_claude_cli_judge_client).
+# The default path is unchanged; selection is resolved at CALL TIME in run_eval
+# after the lazy runner import (an explicit judge_client_factory still wins).
 # show-trend adds a READ-ONLY run-history inspection subcommand:
 # show_trend(pack, ...) calls load_run_history → render_trend_table and prints a
 # markdown per-(qtype, metric) trend table. It performs NO writes/ingest/
@@ -112,6 +117,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "When omitted, falls back to $GITHUB_STEP_SUMMARY if set; "
             "otherwise no summary is written. Written on both gate-pass "
             "and gate-fail."
+        ),
+    )
+    run_parser.add_argument(
+        "--judge-backend",
+        choices=("litellm", "claude-cli"),
+        default="litellm",
+        help=(
+            "LLM-as-judge backend. 'litellm' (default) uses the in-process "
+            "litellm chat model; 'claude-cli' shells out to the local headless "
+            "`claude` CLI (constrained: no tools, clean-room settings)."
         ),
     )
     run_parser.add_argument(
@@ -384,6 +399,7 @@ def run_eval(
     samples_per_claim: int | None = None,
     max_parallel_judges: int | None = None,
     chat_model_factory: Callable[..., Any] | None = None,
+    judge_backend: str = "litellm",
     verbose: bool = False,
     stderr: Any = None,
     execute_fn: Callable[..., Any] | None = None,
@@ -454,7 +470,14 @@ def run_eval(
     # ``runner`` import) so monkeypatched ``runner.*`` symbols still take effect.
     execute_fn = execute_fn or runner_pkg.execute_plan
     retrieve_fn = retrieve_fn or retrieve_for_goldens
-    judge_client_factory = judge_client_factory or runner_pkg.build_judge_client
+    # Backend selection: an explicit ``judge_client_factory`` (DI seam / tests)
+    # always wins; otherwise pick the litellm default or the headless claude-cli
+    # factory. Resolved at CALL TIME so monkeypatched runner symbols take effect.
+    if judge_client_factory is None:
+        if judge_backend == "claude-cli":
+            judge_client_factory = runner_pkg.build_claude_cli_judge_client
+        else:
+            judge_client_factory = runner_pkg.build_judge_client
 
     effective_samples = (
         samples_per_claim
@@ -552,6 +575,7 @@ def run_cli(
     show_samples: bool = False,
     summary_file: str | None = None,
     chat_model_factory: Callable[..., Any] | None = None,
+    judge_backend: str = "litellm",
     stdout: Any = None,
     stderr: Any = None,
 ) -> int:
@@ -584,6 +608,7 @@ def run_cli(
             samples_per_claim=samples_per_claim,
             max_parallel_judges=max_parallel_judges,
             chat_model_factory=chat_model_factory,
+            judge_backend=judge_backend,
             verbose=verbose,
             stderr=stderr,
         )
@@ -752,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
             max_parallel_judges=args.max_parallel_judges,
             show_samples=getattr(args, "show_samples", False),
             summary_file=getattr(args, "summary_file", None),
+            judge_backend=getattr(args, "judge_backend", "litellm"),
         )
     if args.command == "promote-baseline":
         return promote_baseline(
