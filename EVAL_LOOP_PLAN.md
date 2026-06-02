@@ -19,9 +19,10 @@ The plan below describes the *intended* architecture. This ledger records what i
 | Run-history index (#140) | ✅ shipped | `src/eval/runner/run_history.py` → `<pack>.history.jsonl` |
 | Sustained-regression detector (#141) | ✅ shipped | `src/eval/runner/sustained_regression.py`, wired into `run_nightly` |
 | show-trend inspection CLI (#142) | ✅ shipped | `src/eval/runner/show_trend.py`, `src/eval/cli.py show-trend` |
-| **Headless Claude CLI judge backend (P14)** | 🚧 this initiative | `src/eval/runner/judge_cli.py` (new), `--judge-backend` flag |
-| **Judge-call robustness: isolation + timeout/retry (P15)** | 🚧 this initiative | `src/eval/runner/faithfulness.py`, `judge.py` |
-| Ralph-A eval-failure investigator (P11) | ⏸️ HELD by decision | §10.3; un-defer once headless driver + signal trio are trusted |
+| Headless Claude CLI judge backend (P14) | ✅ shipped (#143) | `src/eval/runner/judge_cli.py`, `--judge-backend` flag |
+| Judge-call robustness: per-golden isolation + retry (P15) | ✅ shipped (#143) | `src/eval/runner/faithfulness.py`, `--judge-retries` |
+| **Ralph-A proposal-only investigator (P11a)** | 🚧 this initiative | `src/eval/runner/ralph.py`, `ralph` CLI subcommand |
+| Ralph-A apply+measure+open-PR (P11b) | ⏸️ deferred | the riskier actuation; build on P11a once proposals are trusted |
 | Real Slack/webhook alert delivery | ⏸️ deferred | `src/eval/runner/alert.py` is a log-only sink today |
 | Cross-pack dashboard (Grafana) | ⏸️ deferred | premature until multiple customer packs exist |
 
@@ -310,17 +311,19 @@ Each slice prompt is self-contained: file paths, contracts, DoD, E2E test all sp
 
 ### 10.3 Ralph loops (where they fit)
 
-**Ralph-A — Eval-failure investigator (non-merging) — HELD until P14+P15 land:**
+**Ralph-A — Eval-failure investigator (non-merging) — split into two slices:**
 ```
 while sustained_regressions_exist and iterations < cap:
-    pick the worst SUSTAINED-regressing (qtype, metric)        # from #141 detector
-    dispatch subagent: "diagnose + propose minimal patch"
-    apply patch in isolated branch
-    re-run smoke eval (and, where credentialled, --judge-backend claude-cli)  # P14 driver
-    if improvement: commit + open PR for human review
-    else: revert + try next hypothesis
+    pick the worst SUSTAINED-regressing (qtype, metric)        # from #141 detector  ─┐
+    investigate: "diagnose + propose minimal fix"  (headless claude, constrained)    │ P11a (shipped):
+    record into a human-reviewable RalphReport                                       ─┘ proposal-only, NEVER mutates
+    apply proposal in an ISOLATED branch                                             ─┐
+    re-run smoke eval (and, where credentialled, --judge-backend claude-cli)         │ P11b (deferred):
+    if improvement: commit + open PR for human review                                │ apply + measure + draft PR
+    else: discard + try next hypothesis                                              ─┘
 ```
-Never auto-merges. Bounded iterations. Each PR human-reviewed. It reads `load_run_history` + `detect_sustained_regressions` (the signal trio) and actuates through the P14 headless driver (no API key needed). P15 ensures a flaky judge call doesn't abort its smoke re-runs.
+- **P11a (shipped, proposal-only):** `run_ralph_a` (`src/eval/runner/ralph.py`) loads `load_run_history` + `detect_sustained_regressions` (the signal trio), ranks worst-first (`latest_delta` asc, then `runs_regressed` desc), and for the top-K invokes a CONSTRAINED headless-claude investigator (reusing P14's `build_claude_argv`) to emit a `RalphReport` of diagnoses + suggested fixes. **It applies nothing, commits nothing, opens no PR, merges nothing — proven empirically (repo tree byte-identical before/after).** `investigate_fn` is an injectable seam (default real headless claude; tests inject fakes). CLI: `python -m src.eval ralph <pack>`.
+- **P11b (deferred):** apply a proposal in an isolated worktree, re-run the eval via the P14 driver to MEASURE improvement, and (if improved) open a DRAFT PR for human review. Never auto-merges. Bounded iterations + diff-size cap. P15 ensures a flaky judge call doesn't abort its re-runs.
 
 **Ralph-B — Golden expander (human-gated):** drafts to `goldens/_drafts/`; human promotes. Unchanged.
 
