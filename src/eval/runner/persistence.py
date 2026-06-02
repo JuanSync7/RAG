@@ -4,8 +4,10 @@
 # <pack_name>_<filesafe-iso-timestamp>.json, carrying the same eval payload
 # shape _emit_json produces (single-sourced via cli._report_payload) PLUS
 # top-level pack_name + timestamp. The orchestrator (P8a) consumes these files
-# to persist and alert on eval runs.
-# Exports: persist_eval_report
+# to persist and alert on eval runs. P11a adds persist_ralph_report, which
+# mirrors the same filesafe-timestamp + mkdir(parents=True) convention to write
+# a RalphReport (proposal-only investigation) to <output_dir>/ralph/.
+# Exports: persist_eval_report, persist_ralph_report
 # Deps: stdlib (datetime, json, pathlib); src.eval.cli._report_payload (shared
 #       payload builder — single source for the JSON shape).
 # @end-summary
@@ -68,5 +70,62 @@ def persist_eval_report(
     # Filesafe timestamp: colons are illegal on some filesystems, so drop them.
     filesafe_ts = now.isoformat().replace(":", "")
     path = out_dir / f"{pack_name}_{filesafe_ts}.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def persist_ralph_report(
+    report: Any,
+    output_dir: str | Path,
+    *,
+    now: datetime | None = None,
+) -> Path:
+    """Write a :class:`~src.eval.runner.ralph.RalphReport` to a JSON file.
+
+    Mirrors :func:`persist_eval_report`'s conventions: a filesafe ISO timestamp
+    (colons dropped) and ``mkdir(parents=True, exist_ok=True)``. The file lands
+    under ``<output_dir>/ralph/`` named
+    ``<pack_name>_ralph_<filesafe-iso-ts>.json`` and carries all report fields
+    plus the flattened investigations list.
+
+    This is the ONLY write in the Ralph-A surface — the loop itself
+    (:func:`~src.eval.runner.ralph.run_ralph_a`) writes nothing, so persistence
+    is an explicit, opt-in step the CLI performs.
+
+    :param report: the :class:`~src.eval.runner.ralph.RalphReport` to persist.
+    :param output_dir: base directory; the report is written under a ``ralph/``
+        subdirectory (created if absent).
+    :param now: injected timestamp for the filesafe filename; defaults to
+        ``datetime.now(timezone.utc)``. (The payload ``timestamp`` always comes
+        from ``report.timestamp`` — single-sourced with the run.)
+    :returns: the :class:`~pathlib.Path` written.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    payload = {
+        "pack_name": report.pack_name,
+        "timestamp": report.timestamp,
+        "sustained_count": report.sustained_count,
+        "max_iterations": report.max_iterations,
+        "investigations": [
+            {
+                "qtype": inv.qtype,
+                "metric": inv.metric,
+                "runs_regressed": inv.runs_regressed,
+                "window": inv.window,
+                "latest_delta": inv.latest_delta,
+                "diagnosis": inv.diagnosis,
+                "suggested_fix": inv.suggested_fix,
+            }
+            for inv in report.investigations
+        ],
+    }
+
+    out_dir = Path(output_dir) / "ralph"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    filesafe_ts = now.isoformat().replace(":", "")
+    path = out_dir / f"{report.pack_name}_ralph_{filesafe_ts}.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path

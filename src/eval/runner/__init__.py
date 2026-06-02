@@ -86,8 +86,18 @@ from .metrics import (
     recall_at_k,
     reciprocal_rank,
 )
-from .persistence import persist_eval_report
+from .persistence import persist_eval_report, persist_ralph_report
 from .plan import IngestPlan, plan_pack_ingest
+from .ralph import (
+    InvestigationProposal,
+    RalphInvestigation,
+    RalphReport,
+    build_investigation_context,
+    build_ralph_investigator,
+    rank_regressions,
+    run_ralph_a,
+    select_worst_regression,
+)
 from .report import EvalReport, IngestReport, build_eval_report
 from .reporting import (
     render_baseline_diff_markdown,
@@ -115,6 +125,7 @@ __all__ = [
     "GateResult",
     "IngestPlan",
     "IngestReport",
+    "InvestigationProposal",
     "JudgeBackendError",
     "JudgeClient",
     "JudgeQuestion",
@@ -122,6 +133,8 @@ __all__ = [
     "MetricDelta",
     "QueryFaithfulnessResult",
     "QueryRetrievalResult",
+    "RalphInvestigation",
+    "RalphReport",
     "RetrievalResults",
     "SustainedMetricRegression",
     "aggregate_faithfulness_by_qtype",
@@ -130,7 +143,9 @@ __all__ = [
     "binarize_score",
     "build_claude_cli_judge_client",
     "build_eval_report",
+    "build_investigation_context",
     "build_judge_client",
+    "build_ralph_investigator",
     "cohens_kappa",
     "compute_baseline_diff",
     "compute_calibration",
@@ -141,7 +156,9 @@ __all__ = [
     "load_judge_prompt",
     "persist_calibration_record",
     "persist_eval_report",
+    "persist_ralph_report",
     "plan_pack_ingest",
+    "rank_regressions",
     "read_max_parallel_judges",
     "read_samples_per_claim",
     "recall_at_k",
@@ -152,7 +169,9 @@ __all__ = [
     "render_regression_section",
     "retrieve_for_goldens",
     "run_calibration",
+    "run_ralph_a",
     "score_goldens",
+    "select_worst_regression",
     "send_alert",
     "send_calibration_alert",
     "validate_eval_report",

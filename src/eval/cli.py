@@ -36,8 +36,12 @@
 # show_trend(pack, ...) calls load_run_history → render_trend_table and prints a
 # markdown per-(qtype, metric) trend table. It performs NO writes/ingest/
 # retrieve/judge; missing/empty history → friendly message at exit 0.
+# ralph adds a PROPOSAL-ONLY regression investigator subcommand: ralph(pack,...)
+# calls run_ralph_a to rank+investigate the worst sustained regressions, prints
+# a markdown diagnosis/suggested-fix report, and persists it under
+# <reports-dir>/ralph/. It never applies patches, commits, opens PRs, or merges.
 # Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli,
-#          promote_baseline, show_trend, main
+#          promote_baseline, show_trend, ralph, main
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
@@ -247,6 +251,58 @@ def _build_parser() -> argparse.ArgumentParser:
         "(default: 2).",
     )
     trend_parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.05,
+        help="Regression tolerance band; predicate is strict delta < -epsilon "
+        "(default: 0.05).",
+    )
+
+    # --- ralph subcommand (proposal-only regression investigator, P11a) ---
+    ralph_parser = subparsers.add_parser(
+        "ralph",
+        help="Investigate a pack's worst sustained regressions with a "
+        "constrained headless investigator and print a human-reviewable "
+        "diagnosis + suggested fix. PROPOSAL-ONLY: never applies patches, "
+        "commits, opens PRs, or merges.",
+    )
+    ralph_parser.add_argument(
+        "pack",
+        help="Pack name whose <pack>.history.jsonl lives under --reports-dir.",
+    )
+    ralph_parser.add_argument(
+        "--reports-dir",
+        default="eval_reports",
+        help="Directory containing <pack>.history.jsonl; the ralph report is "
+        "persisted under <reports-dir>/ralph/ (default: eval_reports).",
+    )
+    ralph_parser.add_argument(
+        "--packs-root",
+        default="evals/packs",
+        help="Root holding pack source dirs; <packs-root>/<pack> supplies "
+        "golden context when it exists (default: evals/packs).",
+    )
+    ralph_parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=3,
+        help="Top-K worst sustained regressions to investigate (default: 3).",
+    )
+    ralph_parser.add_argument(
+        "--window",
+        type=int,
+        default=3,
+        help="Detector lookback: recent runs inspected for sustained "
+        "regression (default: 3).",
+    )
+    ralph_parser.add_argument(
+        "--min-regressed",
+        type=int,
+        default=2,
+        help="Min regressed runs in the window to flag a pair sustained "
+        "(default: 2).",
+    )
+    ralph_parser.add_argument(
         "--epsilon",
         type=float,
         default=0.05,
@@ -779,6 +835,105 @@ def show_trend(
     return 0
 
 
+def ralph(
+    pack: str,
+    *,
+    reports_dir: str = "eval_reports",
+    packs_root: str = "evals/packs",
+    max_iterations: int = 3,
+    window: int = 3,
+    min_regressed: int = 2,
+    epsilon: float = 0.05,
+    investigate_fn: Any = None,
+    stdout: Any = None,
+) -> int:
+    """Investigate a pack's worst sustained regressions — proposal-only.
+
+    Calls :func:`~src.eval.runner.ralph.run_ralph_a` (which reads the run-history
+    + sustained-regression detector and ranks worst-first), prints a markdown
+    report (one section per investigation, or a friendly line when there are no
+    sustained regressions), and persists the report under
+    ``<reports-dir>/ralph/`` via
+    :func:`~src.eval.runner.persistence.persist_ralph_report`. Returns ``0``.
+
+    PROPOSAL-ONLY: this never applies patches, commits, opens PRs, or merges —
+    ``run_ralph_a`` performs no git/subprocess except the read-only investigator
+    CLI call, and persistence writes only the advisory JSON report.
+
+    :param pack: pack name whose ``<pack>.history.jsonl`` lives under
+        ``reports_dir`` (also the history dir).
+    :param reports_dir: directory holding the history index + the persisted
+        ralph report subdir.
+    :param packs_root: root holding pack source dirs; ``<packs_root>/<pack>``
+        supplies golden context when it exists.
+    :param max_iterations: top-K worst regressions to investigate.
+    :param window: detector lookback (default 3).
+    :param min_regressed: min regressed runs in the window to flag (default 2).
+    :param epsilon: regression tolerance band (strict ``delta < -epsilon``).
+    :param investigate_fn: optional fake investigator for tests; ``None`` uses
+        the real constrained headless investigator.
+    :param stdout: optional stream for the markdown report.
+    :returns: ``0`` always.
+    """
+    out = stdout if stdout is not None else sys.stdout
+
+    from src.eval.runner.persistence import persist_ralph_report
+    from src.eval.runner.ralph import run_ralph_a
+
+    # Only pass a pack_dir when it actually exists on disk.
+    pack_dir: str | None = None
+    candidate = Path(packs_root) / pack
+    if candidate.exists():
+        pack_dir = str(candidate)
+
+    report = run_ralph_a(
+        pack,
+        history_dir=reports_dir,
+        pack_dir=pack_dir,
+        max_iterations=max_iterations,
+        window=window,
+        min_regressed=min_regressed,
+        epsilon=epsilon,
+        investigate_fn=investigate_fn,
+    )
+
+    print(_render_ralph_markdown(report), file=out)
+    persist_ralph_report(report, reports_dir)
+    return 0
+
+
+def _render_ralph_markdown(report: Any) -> str:
+    """Render a :class:`~src.eval.runner.ralph.RalphReport` as markdown.
+
+    One section per investigation (target + delta + diagnosis + suggested_fix),
+    or a friendly ``(no sustained regressions)`` line when there are none.
+    """
+    lines: list[str] = []
+    lines.append(f"# Ralph-A report — {report.pack_name}")
+    lines.append(f"timestamp: {report.timestamp}")
+    lines.append(
+        f"sustained regressions: {report.sustained_count} "
+        f"(investigating up to {report.max_iterations})"
+    )
+    lines.append("")
+    if not report.investigations:
+        lines.append("(no sustained regressions)")
+        return "\n".join(lines)
+
+    for inv in report.investigations:
+        lines.append(f"## {inv.qtype} / {inv.metric}")
+        lines.append(
+            f"latest_delta: {inv.latest_delta} "
+            f"(regressed {inv.runs_regressed}/{inv.window} runs)"
+        )
+        lines.append("")
+        lines.append(f"**Diagnosis:** {inv.diagnosis}")
+        lines.append("")
+        lines.append(f"**Suggested fix:** {inv.suggested_fix}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to a subcommand, return its exit code."""
     parser = _build_parser()
@@ -809,6 +964,16 @@ def main(argv: list[str] | None = None) -> int:
             args.pack,
             reports_dir=args.reports_dir,
             runs=args.runs,
+            window=args.window,
+            min_regressed=args.min_regressed,
+            epsilon=args.epsilon,
+        )
+    if args.command == "ralph":
+        return ralph(
+            args.pack,
+            reports_dir=args.reports_dir,
+            packs_root=args.packs_root,
+            max_iterations=args.max_iterations,
             window=args.window,
             min_regressed=args.min_regressed,
             epsilon=args.epsilon,
