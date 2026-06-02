@@ -6,8 +6,9 @@
 # step, measures the target metric again in the sandbox (after), and ONLY keeps
 # a committed branch when the metric IMPROVED past epsilon (strict `>`). On
 # no-changes / diff-too-large / not-improved / ANY exception the sandbox is
-# discarded so the primary worktree is NEVER mutated. This module imports NO
-# GitHub PR tooling (no g-h CLI, no Py-GitHub) and opens NO pull request — actuation stops at a committed branch
+# discarded so the primary worktree is NEVER mutated. This module imports no
+# GitHub client and never shells out to the gh CLI; it opens NO pull request —
+# actuation stops at a committed branch
 # for human review. Determinism: `now` resolved ONCE at top via
 # datetime.now(timezone.utc); the report timestamp is single-sourced from it.
 # All external touchpoints (the git-worktree sandbox, the headless-claude coding
@@ -39,7 +40,7 @@ Safety invariants (load-bearing):
   no-changes, diff-too-large, not-improved, or ANY exception the sandbox is
   discarded. This module NEVER runs ``git checkout``/``restore``/``stash``/
   ``reset``/``clean`` against a tracked file in the primary worktree.
-* This module imports NO GitHub PR tooling (no g-h CLI, no Py-GitHub) and opens NO pull request. Actuation stops
+* This module imports no GitHub client and never invokes the gh CLI; it opens NO pull request. Actuation stops
   at a committed branch for a human to review and PR.
 
 All three external seams — ``sandbox_factory``, ``apply_fn``, ``measure_fn`` —
@@ -191,8 +192,8 @@ def run_ralph_b(
        otherwise discard and drop the branch.
 
     The sandbox is ALWAYS discarded on any exception (then re-raised — see
-    below), so the primary worktree is NEVER mutated. This function imports NO
-    GitHub PR tooling (no g-h CLI, no Py-GitHub) and opens NO pull request.
+    below), so the primary worktree is NEVER mutated. This function imports no
+    GitHub client and never invokes the gh CLI; it opens NO pull request.
 
     **Exception policy (SA1 left this to SA2 — chosen: discard-then-re-raise).**
     If ANY step after the sandbox is opened raises, the sandbox is discarded
