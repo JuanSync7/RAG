@@ -21,8 +21,9 @@ The plan below describes the *intended* architecture. This ledger records what i
 | show-trend inspection CLI (#142) | ✅ shipped | `src/eval/runner/show_trend.py`, `src/eval/cli.py show-trend` |
 | Headless Claude CLI judge backend (P14) | ✅ shipped (#143) | `src/eval/runner/judge_cli.py`, `--judge-backend` flag |
 | Judge-call robustness: per-golden isolation + retry (P15) | ✅ shipped (#143) | `src/eval/runner/faithfulness.py`, `--judge-retries` |
-| **Ralph-A proposal-only investigator (P11a)** | 🚧 this initiative | `src/eval/runner/ralph.py`, `ralph` CLI subcommand |
-| Ralph-A apply+measure+open-PR (P11b) | ⏸️ deferred | the riskier actuation; build on P11a once proposals are trusted |
+| Ralph-A proposal-only investigator (P11a) | ✅ shipped (#144) | `src/eval/runner/ralph.py`, `ralph` CLI subcommand |
+| **Ralph-B actuation: apply+measure+ready-branch (P11b)** | 🚧 this initiative | `src/eval/runner/ralph_apply.py`, `ralph-apply` CLI subcommand — leaves a committed branch, NEVER opens a PR |
+| Ralph-B auto-open-draft-PR (P11c) | ⏸️ deferred | the outward-facing step; default-OFF flag gating `gh pr create --draft` on a measured improvement, behind explicit auth |
 | Real Slack/webhook alert delivery | ⏸️ deferred | `src/eval/runner/alert.py` is a log-only sink today |
 | Cross-pack dashboard (Grafana) | ⏸️ deferred | premature until multiple customer packs exist |
 
@@ -317,13 +318,15 @@ while sustained_regressions_exist and iterations < cap:
     pick the worst SUSTAINED-regressing (qtype, metric)        # from #141 detector  ─┐
     investigate: "diagnose + propose minimal fix"  (headless claude, constrained)    │ P11a (shipped):
     record into a human-reviewable RalphReport                                       ─┘ proposal-only, NEVER mutates
-    apply proposal in an ISOLATED branch                                             ─┐
-    re-run smoke eval (and, where credentialled, --judge-backend claude-cli)         │ P11b (deferred):
-    if improvement: commit + open PR for human review                                │ apply + measure + draft PR
-    else: discard + try next hypothesis                                              ─┘
+    apply proposal in an ISOLATED sandbox worktree                                   ─┐
+    re-run smoke eval (and, where credentialled, --judge-backend claude-cli)         │ P11b (shipped):
+    if improvement: commit → leave a READY local branch for human review            │ apply + measure +
+    else: discard the sandbox + try next hypothesis                                  │ ready-branch (NO PR)
+                                                                                     ─┘
 ```
 - **P11a (shipped, proposal-only):** `run_ralph_a` (`src/eval/runner/ralph.py`) loads `load_run_history` + `detect_sustained_regressions` (the signal trio), ranks worst-first (`latest_delta` asc, then `runs_regressed` desc), and for the top-K invokes a CONSTRAINED headless-claude investigator (reusing P14's `build_claude_argv`) to emit a `RalphReport` of diagnoses + suggested fixes. **It applies nothing, commits nothing, opens no PR, merges nothing — proven empirically (repo tree byte-identical before/after).** `investigate_fn` is an injectable seam (default real headless claude; tests inject fakes). CLI: `python -m src.eval ralph <pack>`.
-- **P11b (deferred):** apply a proposal in an isolated worktree, re-run the eval via the P14 driver to MEASURE improvement, and (if improved) open a DRAFT PR for human review. Never auto-merges. Bounded iterations + diff-size cap. P15 ensures a flaky judge call doesn't abort its re-runs.
+- **P11b (shipped, apply+measure+ready-branch):** `run_ralph_b` (`src/eval/runner/ralph_apply.py`) takes a P11a `InvestigationProposal` + a `SustainedMetricRegression` target, applies the fix inside an ISOLATED sandbox worktree (`sandbox_factory` seam), re-measures the target `(qtype, metric)` before/after via the P14 driver (`measure_fn` seam), and decides improvement by strict `delta > epsilon`. **If improved it commits and leaves a READY local branch for human review; otherwise it discards the sandbox. It NEVER opens a PR and NEVER mutates the primary worktree** — both proven empirically (repo tree byte-identical) and statically (an AST guard asserts no `github` import / no `gh`-CLI subprocess). Diff-size cap rejects oversized applies; any exception discards the sandbox then re-raises. `apply_fn`/`measure_fn`/`sandbox_factory` are injectable seams (defaults are live-only, like P11a's `investigate_fn`). CLI: `python -m src.eval ralph-apply <pack>`.
+- **P11c (deferred):** the outward-facing actuation — gate `gh pr create --draft` on a measured P11b improvement behind a default-OFF flag and explicit authorization. Never auto-merges. This is the only step that touches GitHub; held out of P11b deliberately to keep actuation offline-and-reviewable.
 
 **Ralph-B — Golden expander (human-gated):** drafts to `goldens/_drafts/`; human promotes. Unchanged.
 
