@@ -307,6 +307,59 @@ def test_run_ralph_a_respects_max_iterations(tmp_path: Path) -> None:
     assert ("howto", "faithfulness") not in investigated
 
 
+def test_run_ralph_a_degrades_when_pack_dir_missing_or_invalid(tmp_path: Path) -> None:
+    """A missing OR invalid pack_dir degrades to pack=None — investigation still runs.
+
+    The optional pack context has THREE states: present / absent / **invalid**.
+    Absent and invalid must BOTH degrade like "no extra context" via the narrow
+    catch, never crash the investigation. Removing/​broadening that catch (so
+    load_pack's error escapes) reds this test — giving the degrade branch teeth.
+    """
+    from src.eval.runner.ralph import run_ralph_a
+
+    pack = "p"
+    deltas = {"factoid": {"recall": -0.40}}
+    _write_history(
+        tmp_path,
+        pack,
+        [
+            _entry("2026-01-01T00:00:00", deltas),
+            _entry("2026-01-02T00:00:00", deltas),
+            _entry("2026-01-03T00:00:00", deltas),
+        ],
+    )
+
+    # (a) pack_dir points at a path that does not exist.
+    missing = tmp_path / "no_such_pack"
+    rec_a: list = []
+    report_a = run_ralph_a(
+        pack,
+        history_dir=tmp_path,
+        pack_dir=missing,
+        max_iterations=1,
+        investigate_fn=_recording_investigate_fn(rec_a),
+    )
+    assert report_a.sustained_count == 1
+    assert len(report_a.investigations) == 1  # did not crash; investigated
+    assert len(rec_a) == 1
+
+    # (b) pack_dir exists but is NOT a valid pack (no pack.yaml/manifest/goldens).
+    invalid = tmp_path / "invalid_pack"
+    invalid.mkdir()
+    (invalid / "junk.txt").write_text("not a pack")
+    rec_b: list = []
+    report_b = run_ralph_a(
+        pack,
+        history_dir=tmp_path,
+        pack_dir=invalid,
+        max_iterations=1,
+        investigate_fn=_recording_investigate_fn(rec_b),
+    )
+    assert report_b.sustained_count == 1
+    assert len(report_b.investigations) == 1  # degraded to pack=None, still ran
+    assert len(rec_b) == 1
+
+
 # ===========================================================================
 # persist_ralph_report — filename + round-trip
 # ===========================================================================
