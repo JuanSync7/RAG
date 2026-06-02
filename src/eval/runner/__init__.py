@@ -75,6 +75,11 @@ from .judge import (
     read_samples_per_claim,
     render_judge_prompt,
 )
+from .judge_cli import (
+    ClaudeCliJudgeClient,
+    JudgeBackendError,
+    build_claude_cli_judge_client,
+)
 from .metrics import (
     aggregate_mrr_by_qtype,
     aggregate_recall_by_qtype,
@@ -102,6 +107,7 @@ __all__ = [
     "CalibrationExample",
     "CalibrationRecord",
     "CalibrationResult",
+    "ClaudeCliJudgeClient",
     "DEFAULT_CALIBRATION_FIXTURE_PATH",
     "EvalReport",
     "FaithfulnessResults",
@@ -109,6 +115,7 @@ __all__ = [
     "GateResult",
     "IngestPlan",
     "IngestReport",
+    "JudgeBackendError",
     "JudgeClient",
     "JudgeQuestion",
     "JudgmentScore",
@@ -121,6 +128,7 @@ __all__ = [
     "aggregate_mrr_by_qtype",
     "aggregate_recall_by_qtype",
     "binarize_score",
+    "build_claude_cli_judge_client",
     "build_eval_report",
     "build_judge_client",
     "cohens_kappa",
