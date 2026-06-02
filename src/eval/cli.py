@@ -40,8 +40,13 @@
 # calls run_ralph_a to rank+investigate the worst sustained regressions, prints
 # a markdown diagnosis/suggested-fix report, and persists it under
 # <reports-dir>/ralph/. It never applies patches, commits, opens PRs, or merges.
+# ralph-apply adds the P11b ACTUATION subcommand: ralph_apply(pack,...) ranks the
+# worst sustained regression, gets a P11a proposal for it, then calls run_ralph_b
+# to apply+measure it inside an ISOLATED sandbox, persists the ActuationReport
+# under <reports-dir>/ralph_apply/ and prints a markdown summary. It NEVER mutates
+# the primary worktree and NEVER opens a PR. run_b_fn/investigate_fn are DI seams.
 # Exports: _build_parser, _report_payload, run_eval, EvalRunResult, run_cli,
-#          promote_baseline, show_trend, ralph, main
+#          promote_baseline, show_trend, ralph, ralph_apply, main
 # Deps: argparse, json, logging, os, sys; src.eval.pack (errors, loader);
 #       src.eval.runner (lazy) — execute_plan, retrieve_for_goldens,
 #       score_goldens, build_judge_client, build_eval_report,
@@ -308,6 +313,63 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.05,
         help="Regression tolerance band; predicate is strict delta < -epsilon "
         "(default: 0.05).",
+    )
+
+    # --- ralph-apply subcommand (Ralph-B sandboxed actuation, P11b) ---
+    ralph_apply_parser = subparsers.add_parser(
+        "ralph-apply",
+        help="Actuate the worst sustained regression: get a P11a proposal, then "
+        "apply it inside an ISOLATED git-worktree sandbox, measure the target "
+        "metric before/after, and keep a committed branch only when it improved "
+        "past epsilon. NEVER mutates the primary worktree; NEVER opens a PR.",
+    )
+    ralph_apply_parser.add_argument(
+        "pack",
+        help="Pack name whose <pack>.history.jsonl lives under --reports-dir.",
+    )
+    ralph_apply_parser.add_argument(
+        "--reports-dir",
+        default="eval_reports",
+        help="Directory containing <pack>.history.jsonl; the actuation report is "
+        "persisted under <reports-dir>/ralph_apply/ (default: eval_reports).",
+    )
+    ralph_apply_parser.add_argument(
+        "--packs-root",
+        default="evals/packs",
+        help="Root holding pack source dirs; <packs-root>/<pack> supplies golden "
+        "context for the proposal step (default: evals/packs).",
+    )
+    ralph_apply_parser.add_argument(
+        "--history-dir",
+        default=None,
+        help="Directory holding <pack>.history.jsonl; defaults to --reports-dir.",
+    )
+    ralph_apply_parser.add_argument(
+        "--window",
+        type=int,
+        default=3,
+        help="Detector lookback: recent runs inspected for sustained "
+        "regression (default: 3).",
+    )
+    ralph_apply_parser.add_argument(
+        "--min-regressed",
+        type=int,
+        default=2,
+        help="Min regressed runs in the window to flag a pair sustained "
+        "(default: 2).",
+    )
+    ralph_apply_parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.05,
+        help="Improvement band; the kept-branch predicate is strict "
+        "delta > epsilon (default: 0.05).",
+    )
+    ralph_apply_parser.add_argument(
+        "--max-diff-lines",
+        type=int,
+        default=200,
+        help="Reject (discard) any applied diff larger than this (default: 200).",
     )
     return parser
 
@@ -934,6 +996,149 @@ def _render_ralph_markdown(report: Any) -> str:
     return "\n".join(lines)
 
 
+def ralph_apply(
+    pack: str,
+    *,
+    reports_dir: str = "eval_reports",
+    packs_root: str = "evals/packs",
+    history_dir: str | None = None,
+    window: int = 3,
+    min_regressed: int = 2,
+    epsilon: float = 0.05,
+    max_diff_lines: int = 200,
+    investigate_fn: Any = None,
+    run_b_fn: Any = None,
+    stdout: Any = None,
+) -> int:
+    """Actuate a pack's WORST sustained regression in an isolated sandbox (P11b).
+
+    Pipeline:
+
+    1. load the run-history + detect sustained regressions (reusing the P11a
+       :func:`~src.eval.runner.ralph.rank_regressions` /
+       :func:`~src.eval.runner.sustained_regression.detect_sustained_regressions`);
+    2. pick the single WORST regression (worst-first ranking);
+    3. obtain a P11a :class:`~src.eval.runner.ralph.InvestigationProposal` for it
+       (via :func:`~src.eval.runner.ralph.run_ralph_a` on the worst target);
+    4. call :func:`~src.eval.runner.ralph_apply.run_ralph_b` on the worst target
+       with that proposal;
+    5. persist the :class:`~src.eval.runner.ralph_apply.ActuationReport` under
+       ``<reports-dir>/ralph_apply/`` and print a markdown summary.
+
+    When there are no sustained regressions, prints a friendly line and exits
+    ``0`` without opening a sandbox. NEVER opens a pull request.
+
+    :param pack: pack name whose ``<pack>.history.jsonl`` lives under
+        ``history_dir`` (defaults to ``reports_dir``).
+    :param reports_dir: directory holding the persisted actuation-report subdir.
+    :param packs_root: root holding pack source dirs (golden context + the
+        live measure seam).
+    :param history_dir: directory holding the history index; ``None`` =
+        ``reports_dir``.
+    :param window: detector lookback (default 3).
+    :param min_regressed: min regressed runs in the window to flag (default 2).
+    :param epsilon: improvement band; strict ``delta > epsilon`` keeps a branch.
+    :param max_diff_lines: reject (discard) any applied diff larger than this.
+    :param investigate_fn: DI seam — the per-target proposal investigator; ``None``
+        uses the real constrained headless investigator (live-only).
+    :param run_b_fn: DI seam — the actuation function; ``None`` uses
+        :func:`~src.eval.runner.ralph_apply.run_ralph_b` (live-only).
+    :param stdout: optional stream for the markdown summary.
+    :returns: ``0`` always.
+    """
+    out = stdout if stdout is not None else sys.stdout
+    hist_dir = history_dir if history_dir is not None else reports_dir
+
+    from src.eval.runner.persistence import persist_actuation_report
+    from src.eval.runner.ralph import (
+        InvestigationProposal,
+        rank_regressions,
+        run_ralph_a,
+    )
+    from src.eval.runner.run_history import load_run_history
+    from src.eval.runner.sustained_regression import detect_sustained_regressions
+
+    history = load_run_history(pack, hist_dir)
+    sustained = detect_sustained_regressions(
+        history, window=window, min_regressed=min_regressed, epsilon=epsilon
+    )
+    ranked = rank_regressions(sustained)
+    if not ranked:
+        print(f"# Ralph-B actuation — {pack}", file=out)
+        print("", file=out)
+        print("(no sustained regressions)", file=out)
+        return 0
+
+    worst = ranked[0]  # worst-first ranking → index 0 is the worst regression.
+
+    # Only pass a pack_dir to the proposal step when it actually exists.
+    pack_dir: str | None = None
+    candidate = Path(packs_root) / pack
+    if candidate.exists():
+        pack_dir = str(candidate)
+
+    # Obtain a proposal for the worst regression (top-1 Ralph-A investigation).
+    investigation_report = run_ralph_a(
+        pack,
+        history_dir=hist_dir,
+        pack_dir=pack_dir,
+        max_iterations=1,
+        window=window,
+        min_regressed=min_regressed,
+        epsilon=epsilon,
+        investigate_fn=investigate_fn,
+    )
+    inv = investigation_report.investigations[0]
+    proposal = InvestigationProposal(
+        diagnosis=inv.diagnosis, suggested_fix=inv.suggested_fix
+    )
+
+    run_b = run_b_fn
+    if run_b is None:
+        from src.eval.runner.ralph_apply import run_ralph_b
+
+        run_b = run_ralph_b
+
+    report = run_b(
+        pack,
+        proposal=proposal,
+        target=worst,
+        packs_root=packs_root,
+        epsilon=epsilon,
+        max_diff_lines=max_diff_lines,
+    )
+
+    print(_render_actuation_markdown(report), file=out)
+    persist_actuation_report(report, reports_dir)
+    return 0
+
+
+def _render_actuation_markdown(report: Any) -> str:
+    """Render an :class:`~src.eval.runner.ralph_apply.ActuationReport` as markdown."""
+    out = report.outcome
+    lines: list[str] = []
+    lines.append(f"# Ralph-B actuation — {report.pack_name}")
+    lines.append(f"timestamp: {report.timestamp}")
+    lines.append(f"target: {report.target_qtype} / {report.target_metric}")
+    lines.append("")
+    lines.append(f"**Diagnosis:** {report.diagnosis}")
+    lines.append(f"**Suggested fix:** {report.suggested_fix}")
+    lines.append("")
+    lines.append(
+        f"before={out.before_value} after={out.after_value} delta={out.delta}"
+    )
+    if out.improved:
+        lines.append(
+            f"**Improved** (delta > epsilon) — kept branch `{out.branch_name}` "
+            f"at `{out.sandbox_path}` for human review."
+        )
+    elif out.reject_reason is not None:
+        lines.append(f"**Rejected** ({out.reject_reason}) — sandbox discarded.")
+    else:
+        lines.append("**Not improved** — sandbox discarded.")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to a subcommand, return its exit code."""
     parser = _build_parser()
@@ -977,6 +1182,17 @@ def main(argv: list[str] | None = None) -> int:
             window=args.window,
             min_regressed=args.min_regressed,
             epsilon=args.epsilon,
+        )
+    if args.command == "ralph-apply":
+        return ralph_apply(
+            args.pack,
+            reports_dir=args.reports_dir,
+            packs_root=args.packs_root,
+            history_dir=args.history_dir,
+            window=args.window,
+            min_regressed=args.min_regressed,
+            epsilon=args.epsilon,
+            max_diff_lines=args.max_diff_lines,
         )
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover — parser.error() exits.

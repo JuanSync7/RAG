@@ -6,8 +6,11 @@
 # top-level pack_name + timestamp. The orchestrator (P8a) consumes these files
 # to persist and alert on eval runs. P11a adds persist_ralph_report, which
 # mirrors the same filesafe-timestamp + mkdir(parents=True) convention to write
-# a RalphReport (proposal-only investigation) to <output_dir>/ralph/.
-# Exports: persist_eval_report, persist_ralph_report
+# a RalphReport (proposal-only investigation) to <output_dir>/ralph/. P11b adds
+# persist_actuation_report, mirroring the same convention to write an
+# ActuationReport (Ralph-B actuation) to <output_dir>/ralph_apply/ with the
+# payload + filename timestamp single-sourced from report.timestamp.
+# Exports: persist_eval_report, persist_ralph_report, persist_actuation_report
 # Deps: stdlib (datetime, json, pathlib); src.eval.cli._report_payload (shared
 #       payload builder — single source for the JSON shape).
 # @end-summary
@@ -127,5 +130,64 @@ def persist_ralph_report(
 
     filesafe_ts = now.isoformat().replace(":", "")
     path = out_dir / f"{report.pack_name}_ralph_{filesafe_ts}.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def persist_actuation_report(
+    report: Any,
+    output_dir: str | Path,
+    *,
+    now: datetime | None = None,
+) -> Path:
+    """Write a :class:`~src.eval.runner.ralph_apply.ActuationReport` to JSON.
+
+    Mirrors :func:`persist_ralph_report`'s conventions: a filesafe ISO timestamp
+    (colons dropped) and ``mkdir(parents=True, exist_ok=True)``. The file lands
+    under ``<output_dir>/ralph_apply/`` named
+    ``<pack_name>_actuation_<filesafe-iso-ts>.json`` and carries all report
+    fields plus the flattened outcome.
+
+    The payload ``timestamp`` and the filesafe filename are BOTH single-sourced
+    from ``report.timestamp`` (the run's resolved ``now``), so the ``now``
+    parameter here only exists for signature parity with the sibling persisters
+    and is otherwise unused for the filename.
+
+    :param report: the :class:`~src.eval.runner.ralph_apply.ActuationReport`.
+    :param output_dir: base directory; the report is written under a
+        ``ralph_apply/`` subdirectory (created if absent).
+    :param now: unused for the filename (kept for signature parity); the
+        filesafe timestamp comes from ``report.timestamp``.
+    :returns: the :class:`~pathlib.Path` written.
+    """
+    outcome = report.outcome
+    payload = {
+        "pack_name": report.pack_name,
+        "timestamp": report.timestamp,
+        "target_qtype": report.target_qtype,
+        "target_metric": report.target_metric,
+        "diagnosis": report.diagnosis,
+        "suggested_fix": report.suggested_fix,
+        "outcome": {
+            "target_qtype": outcome.target_qtype,
+            "target_metric": outcome.target_metric,
+            "before_value": outcome.before_value,
+            "after_value": outcome.after_value,
+            "delta": outcome.delta,
+            "improved": outcome.improved,
+            "applied": outcome.applied,
+            "branch_name": outcome.branch_name,
+            "sandbox_path": outcome.sandbox_path,
+            "reject_reason": outcome.reject_reason,
+        },
+        "notes": list(report.notes),
+    }
+
+    out_dir = Path(output_dir) / "ralph_apply"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Single-source the filesafe timestamp from report.timestamp (colons dropped).
+    filesafe_ts = report.timestamp.replace(":", "")
+    path = out_dir / f"{report.pack_name}_actuation_{filesafe_ts}.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
