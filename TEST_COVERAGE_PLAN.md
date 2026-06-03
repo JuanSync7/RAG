@@ -45,7 +45,7 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 3 | platform-timing-unit | src/platform/timing.py [221] | unit | none | S | ✅ 18d4894 (26 tests, 7 mutations bit) |
 | 4 | platform-cli-log-formatting-unit | src/platform/cli_log_formatting.py [240] | unit | none | S | ✅ 77b0ff7 (31 tests, 6 mutations bit) |
 | 5 | platform-cli-interactive-unit | src/platform/cli_interactive.py [322] | unit | none | M | ✅ 3a1ddff (29 tests, 7 mutations bit) |
-| 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ⏳ |
+| 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ✅ cda1912 (36 tests, 8 mutations bit) |
 | 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ⏳ |
 | 8 | vector-db-backend-contract | src/vector_db/backend.py | contract | none | M | ⏳ |
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ⏳ |
@@ -83,5 +83,11 @@ Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
   Author correctly substituted a load-bearing mutation. Don't force teeth on equivalent mutants.
 - Author subagents must be handed the FULL source inline (or told to read the exact worktree
   path) + env facts + a concrete mutation list. This gives precise, high-teeth tests fast.
-- NEXT: db tier (slices 6–8 — minio store mocked-integration, db backend contract,
-  vector_db backend contract), then server routes (9–12), then real-infra (13–15) + frontend (16–17).
+- **Latent weak test found in EXISTING suite (slice 6):** `tests/test_document_management_backend.py`
+  builds `S3Error` POSITIONALLY (`S3Error("NoSuchKey", ...)`), but the real signature is
+  `S3Error(response, code, message, resource, request_id, host_id, ...)` — so "NoSuchKey" lands
+  in `response` and `.code` becomes "not found". Those tests may not exercise the code-branch
+  they intend. FOLLOW-UP: audit + fix (build S3Error with keywords). Slice 6 built errors with kwargs.
+- db tier: slice 6 done. NEXT: slice 7 (db backend ABC contract), slice 8 (vector_db backend
+  contract), then server routes (9–12 — query/ingest/documents, the largest untested product
+  surface), then real-infra (13–15) + frontend (16–17). Offline CI after slice 6: 2410 passed.
