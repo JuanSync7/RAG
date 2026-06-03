@@ -5,7 +5,12 @@ import sys
 from typing import Iterator
 
 # tests/conftest.py installs a minimal langchain_core stub. Evict it before
-# importing the real package needed by these tests.
+# importing the real package needed by these tests. Also evict the src LLM
+# modules that capture langchain symbols at import time: if a sibling test
+# imported them while the (stubbed or earlier-real) langchain was live, a bare
+# re-import here would be a stale sys.modules cache hit bound to a different
+# langchain identity, desyncing isinstance/pydantic checks. Dropping them forces
+# a fresh re-import against the real langchain we load below.
 for _mod in list(sys.modules):
     if (
         _mod == "langchain_core"
@@ -13,6 +18,10 @@ for _mod in list(sys.modules):
         or _mod == "langgraph"
         or _mod.startswith("langgraph.")
         or _mod == "langchain_text_splitters"
+        or _mod == "src.common.llm"
+        or _mod.startswith("src.common.llm.")
+        or _mod == "src.platform.llm"
+        or _mod.startswith("src.platform.llm.")
     ):
         del sys.modules[_mod]
 

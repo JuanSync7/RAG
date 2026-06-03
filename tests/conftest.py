@@ -751,3 +751,122 @@ def _install_stub_modules() -> None:
 
 
 _install_stub_modules()
+
+
+# ── langchain stub/real boundary enforcement ────────────────────────────────
+#
+# The tests under tests/llm/ deliberately evict the lightweight langchain stub
+# installed above and import the *real* langchain_core / langgraph (which are
+# installed in the venv) so they can exercise real Runnable / cache / output
+# behaviour. The rest of the suite depends on the stub. Because pytest imports
+# every selected test module up front (collection), an eviction performed while
+# collecting tests/llm leaks the real packages into modules collected
+# afterwards (e.g. src.ingest.support.markdown binds its text splitter at import
+# time). The hook below makes the boundary explicit and order-independent:
+# before collecting any module *outside* tests/llm, the stub is restored; the
+# src modules that capture langchain symbols at import time are evicted so they
+# rebind to the stub on their next import.
+
+_LANGCHAIN_REAL_PREFIXES = ("langchain_core", "langgraph", "langchain_text_splitters")
+_SRC_LANGCHAIN_DEPENDENT = ("src.common.llm", "src.platform.llm", "src.ingest", "src.query")
+
+
+def _evict_modules(prefixes) -> None:
+    for _mod in list(sys.modules):
+        if any(_mod == p or _mod.startswith(p + ".") for p in prefixes):
+            del sys.modules[_mod]
+
+
+def _stub_is_active() -> bool:
+    lc = sys.modules.get("langchain_core")
+    # The stub is a bare types.ModuleType with no __file__; the real package
+    # has one.
+    return lc is not None and getattr(lc, "__file__", None) is None
+
+
+def _restore_stub_environment() -> None:
+    """Re-install the lightweight langchain stub if the real package is live."""
+    if _stub_is_active():
+        return
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES + _SRC_LANGCHAIN_DEPENDENT)
+    _install_stub_modules()
+
+
+def _ensure_real_langchain_environment() -> None:
+    """Evict the langchain stub so the real installed package is imported.
+
+    Also drops the src modules that capture langchain symbols at import time so
+    they rebind to the real package on their next import.
+    """
+    if not _stub_is_active():
+        return
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES + _SRC_LANGCHAIN_DEPENDENT)
+
+
+def _snapshot_langchain_modules() -> dict:
+    return {
+        name: mod
+        for name, mod in sys.modules.items()
+        if any(name == p or name.startswith(p + ".") for p in _LANGCHAIN_REAL_PREFIXES)
+    }
+
+
+# Cached module-object trees for each flavour, captured the first time we see
+# them live. Used to swap the langchain packages in sys.modules at runtime
+# without re-importing (re-import is both slow and identity-breaking).
+_REAL_LANGCHAIN_SNAPSHOT: dict = {}
+_STUB_LANGCHAIN_SNAPSHOT: dict = {}
+
+
+def _swap_langchain_in_sysmodules(snapshot: dict) -> None:
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES)
+    sys.modules.update(snapshot)
+
+
+def _is_llm_node(nodeid: str, fspath: str) -> bool:
+    return nodeid.startswith("tests/llm") or "/tests/llm/" in fspath.replace("\\", "/")
+
+
+def pytest_collectstart(collector) -> None:
+    """Bind the right langchain (stub vs real) before importing each test module.
+
+    pytest collects directory collectors for *all* args first, then the module
+    collectors, so a single one-directional restore is not enough: collecting
+    the tests/ingest directory can flip the environment back to the stub before
+    the tests/llm modules are imported. We therefore set the environment
+    explicitly per collected node based on whether it lives under tests/llm,
+    and snapshot each flavour's module objects for the runtime swap below.
+    """
+    nodeid = getattr(collector, "nodeid", "") or ""
+    fspath = str(getattr(collector, "fspath", "") or "")
+    if _is_llm_node(nodeid, fspath):
+        _ensure_real_langchain_environment()
+    else:
+        _restore_stub_environment()
+    snapshot = _snapshot_langchain_modules()
+    if snapshot:
+        if _stub_is_active():
+            _STUB_LANGCHAIN_SNAPSHOT.clear()
+            _STUB_LANGCHAIN_SNAPSHOT.update(snapshot)
+        else:
+            _REAL_LANGCHAIN_SNAPSHOT.update(snapshot)
+
+
+def pytest_runtest_setup(item) -> None:
+    """Make sure the *running* test sees the langchain flavour it imported.
+
+    Collection and execution are separate phases sharing sys.modules; the env
+    left after collection may be the wrong flavour for the first tests to run.
+    Real langchain performs lazy sub-imports at call time (e.g.
+    ``langchain_core.prompt_values``), so the real package tree must be live in
+    sys.modules while a tests/llm test executes — and the stub while others do.
+    We swap the cached module trees rather than re-importing.
+    """
+    nodeid = getattr(item, "nodeid", "") or ""
+    fspath = str(getattr(item, "fspath", "") or "")
+    if _is_llm_node(nodeid, fspath):
+        if _stub_is_active() and _REAL_LANGCHAIN_SNAPSHOT:
+            _swap_langchain_in_sysmodules(_REAL_LANGCHAIN_SNAPSHOT)
+    else:
+        if not _stub_is_active() and _STUB_LANGCHAIN_SNAPSHOT:
+            _swap_langchain_in_sysmodules(_STUB_LANGCHAIN_SNAPSHOT)
