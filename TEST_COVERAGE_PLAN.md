@@ -64,6 +64,25 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
 ## Progress tally
+- **13 slices COMPLETE (~430 new tests: ~370 Python + 60 TS), all mutation-proven.**
+  Latest: slice 13 (src/common/llm: 68 tests across utils/fallback/stream/output/cache/memory).
+  Combined offline gate **independently re-run by main: 2737 passed, 4 skipped, 0 failed**
+  (slice 13 touched shared tests/conftest.py — langchain stub-vs-real boundary mgmt via
+  pytest_collectstart + pytest_runtest_setup, order-independent; verified green).
+  CI path list now adds tests/llm. Branch commits 9f950ad..2e12f55.
+  - **FINDING (pre-existing, NOT fixed here):** the checked-in esbuild bundle
+    `server/console/static/user-console.js(.map)` is STALE vs its TS source (source already
+    has `ask_user_reason` clarification labels the bundle lacks). Slice-12's `npm run build`
+    regenerated it; I reverted that from this branch to keep it additive/test-only.
+    FOLLOW-UP: rebuild + commit the console bundle in a separate chore (CI rebuilds fresh, so
+    runtime is unaffected, but the committed artifact is out of sync).
+- **NEXT CHAPTER = the goal's explicit e2e / real-DB / real-frontend pillars** (best started
+  fresh, not at the tail of a long context): stand up the real stack (docker-compose:
+  Weaviate+MinIO+Temporal) and write/execute slices 13(real-Weaviate search), 14(query e2e via
+  Temporal), 15(ingest→MinIO→Weaviate→retrieve e2e), 17(console e2e browser+stack). Write these
+  as dual-marked `slow+integration` tests (deselected offline) and confirm they run against a
+  live stack. Remaining infra-FREE leftovers: 7b db-facade-factory, 10b/11b/12 route endpoints
+  via TestClient, parallel.py/batch.py/graph, guardrails fill.
 - **12 slices COMPLETE (~360 new tests: ~300 Python + 60 TS), all mutation-proven.**
   Branch `test/coverage-initiative` (off develop @ 9106490), commits 9f950ad..aabaf89.
   Python offline CI gate: **2661 passed**. Frontend: vitest stood up, 60 tests, tsc+build green.
