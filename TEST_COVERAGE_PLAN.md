@@ -58,12 +58,30 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 13 | vector-db-weaviate-search-integration | src/vector_db/weaviate/store.py | real-integration | real-Weaviate | M | ⏳ |
 | 14 | query-e2e-mocked | server query→workflow→activity | mocked-integration | Temporal | L | ⏳ |
 | 15 | ingest-e2e-real-stack | ingest→MinIO→Weaviate→retrieve | real-integration | full stack | L | ⏳ |
-| 16 | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ⏳ |
+| 12fe | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ✅ aabaf89 (60 tests, vitest+jsdom stood up, 8 mutations bit) |
 | 17 | console-web-e2e | console against running backend | frontend e2e | browser+stack | L | ⏳ |
 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
 ## Progress tally
+- **12 slices COMPLETE (~360 new tests: ~300 Python + 60 TS), all mutation-proven.**
+  Branch `test/coverage-initiative` (off develop @ 9106490), commits 9f950ad..aabaf89.
+  Python offline CI gate: **2661 passed**. Frontend: vitest stood up, 60 tests, tsc+build green.
+  CI path list now: tests/platform, tests/db, tests/vector_db, tests/server (+ existing roots);
+  console step runs `npm test`. NOT pushed / no PR — accumulating on the branch.
+  - Done: platform(1-5), minio store(6), db backend(7), vector_db backend(8),
+    server api.py(9), query helpers(10), ingest JobRegistry(11), frontend vitest(12fe).
+- **REMAINING WORK (sequenced):**
+  - Infra-FREE (land in offline CI): 7b db-facade-factory; 10b query endpoints (TestClient+mock
+    Temporal/RAGChain); 11b ingest endpoints (TestClient+Temporal mock); documents.py routes+helpers;
+    admin.py/system.py routes; **src/common/ llm stack (1818 lines, NONE coverage — biggest remaining
+    Python gap: provider/parallel/memory/cache/output/stream/fallback)**; guardrails (PARTIAL→fill).
+  - Infra-DEPENDENT (the goal's explicit "real db / e2e / real frontend" pillars — write as
+    dual-marked `pytest.mark.slow + integration` tests per [[feedback_dual_marker_gating]], deselected
+    offline; EXECUTION needs a stack-up step): 13 real-Weaviate search; 14 query e2e (Temporal);
+    15 ingest→MinIO→Weaviate→retrieve e2e; 17 console e2e (browser+stack). docker-compose.yml exists;
+    bringing the real stack up headless is the open feasibility question — approach fresh, not at
+    the tail of a long context.
 - **Slices 1–8 COMPLETE.** ~233 new tests, ~51 mutations proven. Branch
   `test/coverage-initiative` (off develop @ 9106490). Offline CI gate after slice 8:
   **2511 passed, 4 skipped, 12 deselected**. CI path list now includes tests/platform,
