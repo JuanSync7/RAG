@@ -76,6 +76,15 @@ Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
     regenerated it; I reverted that from this branch to keep it additive/test-only.
     FOLLOW-UP: rebuild + commit the console bundle in a separate chore (CI rebuilds fresh, so
     runtime is unaffected, but the committed artifact is out of sync).
+- **INFRA FEASIBILITY (probed):** docker available; a LIVE shared `rag-weaviate` (1.28.0,
+  healthy) is up on host **:8090 (HTTP→8080)** and **:50051 (gRPC)**; a healthy TEI embeddings
+  container is up too. So real-Weaviate integration is EXECUTABLE NOW. ⚠️ SHARED instance —
+  integration tests MUST use a unique isolated collection name + guaranteed teardown (never
+  touch shared collections). MinIO/Temporal containers were NOT visible in `docker ps` (full
+  ingest→retrieve e2e via Temporal is therefore partial until those are up). add_documents
+  takes pre-computed embeddings, so a real-Weaviate round-trip test can use synthetic 1024-dim
+  vectors (no TEI dependency). Template: existing `tests/vector_db/test_collection_selection.py`
+  (integration-marked) for the live-connect approach.
 - **NEXT CHAPTER = the goal's explicit e2e / real-DB / real-frontend pillars** (best started
   fresh, not at the tail of a long context): stand up the real stack (docker-compose:
   Weaviate+MinIO+Temporal) and write/execute slices 13(real-Weaviate search), 14(query e2e via
