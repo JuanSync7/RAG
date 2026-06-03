@@ -21,7 +21,7 @@ jobs:
       - name: Eval loop offline smoke
         run: uv run --no-sync python -m src.eval.smoke
       - name: Build console TypeScript UI
-        run: npm --prefix server/console/web ci && npm --prefix server/console/web run check && npm --prefix server/console/web run build
+        run: npm --prefix server/console/web ci && npm --prefix server/console/web run check && npm --prefix server/console/web run build && npm --prefix server/console/web test
       - name: Compile checks
         run: uv run --no-sync python -m py_compile server/api.py server/activities.py src/retrieval/pipeline/rag_chain.py
 
