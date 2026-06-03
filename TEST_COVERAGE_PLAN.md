@@ -59,11 +59,36 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 14 | query-e2e-mocked | server query→workflow→activity | mocked-integration | Temporal | L | ⏳ |
 | 15 | ingest-e2e-real-stack | ingest→MinIO→Weaviate→retrieve | real-integration | full stack | L | ⏳ |
 | 13b | llm-concurrency-helpers | src/common/llm/batch.py + parallel.py | unit | none | M | ✅ 7b52c00 (15 tests, 10+1 mutations bit; FOUND latent Runnable bug) |
+| CIG | ci-gate-extended-suites | .github/workflows/ci.yml (separate step) + 3 colang quarantines | ci/infra | none | M | ✅ 2516eaa (gated ~1000 existing tests: retrieval/guardrails/core/contracts/observability) |
+| GG | guardrails-granite-guardian | src/guardrails/models/granite_guardian.py | unit | none (fake httpx) | M | ✅ 1b6ba66 (23 tests, 10+1 mutations bit) |
+| CS | console-services-unit | server/console/services.py [386] | unit | none | M | ✅ d8a4782 (46 tests, 12+1 mutations bit; 3 security guards) |
+| TR | reliability-temporal-retry | src/platform/reliability/temporal_retry.py [134] | unit | none (fake Client) | S | ✅ 39cb336 (12 tests, 8+1 mutations bit) |
 | 9b | server-admin-system-routes | server/routes/admin.py + system.py | contract | none | M | ✅ 4a2b80a (28 tests, 10+1 mutations bit) |
 | 12fe | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ✅ aabaf89 (60 tests, vitest+jsdom stood up, 8 mutations bit) |
 | 17 | console-web-e2e | console against running backend | frontend e2e | browser+stack | L | ⏳ |
 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
+
+## SESSION 2 (2026-06-03) — infra-free pillar driven to close-to-complete
+- **10 work items this session: ~238 new tests + ~1000 existing tests newly GATED.**
+  Slices: documents routes (12, 24t), db facade (7b, 19t), query endpoints (10b, 30t),
+  ingest endpoints (11b, 41t), llm concurrency batch+parallel (13b, 15t), admin+system
+  routes (9b, 28t), **CI-gating fix (CIG)**, granite_guardian (GG, 23t), console services
+  (CS, 46t, 3 security guards), temporal_retry (TR, 12t). Commits 2c79524..39cb336.
+- **Primary CI gate: 2952 passed.** Extended-suites gate: 1023 passed. Frontend: 60.
+- **2 latent product findings (test-pinned, fixes deferred):** parallel.py `_run_langchain`
+  Runnable bug ([[project_parallel_runnable_bug]]); console static-asset guard uses str.startswith
+  not Path.is_relative_to (sharp edge, not exploitable as built — noted in CS commit).
+- **ENTIRE server/routes/ surface now covered** (query/ingest/documents/admin/system).
+- **Remaining infra-FREE leftovers are LOW-VALUE:** gliner_pii.py (needs GLiNER ML model — partial
+  only), scorer_v2/v3/v5.py (appear DEAD — only self-referencing; verify liveness before investing),
+  plus assorted <120-line modules. Diminishing returns.
+- **STILL OPEN = the goal's INFRA-DEPENDENT e2e pillars, BLOCKED in this env:**
+  (1) full ingest→serve e2e via Temporal — MinIO + Temporal containers NOT up here;
+  (2) browser-based console e2e — needs a browser + the running full stack.
+  Real-DB pillar (live Weaviate) is DONE (slice 14rt). These two need the stack stood up
+  (docker-compose: MinIO+Temporal) and a browser; cannot be EXECUTED/validated in this environment.
+  Writing un-runnable e2e here would violate honest-CI-gating (synthetic-green is a yellow flag).
 
 ## CI-gating slice (2026-06-03) — closed a major protective-coverage gap
 - **Finding:** the real `ci.yml` "Run tests" step gated only ~12 test paths; `tests/retrieval`
