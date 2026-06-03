@@ -29,18 +29,22 @@ TDD + ralph (mutation-teeth) loop, and must leave the offline CI command green.
 New test dirs/files added by a slice must also be added to the CI path list (or a
 new scoped job) so they actually gate. `python -m src.eval.smoke` is the eval gate.
 
-**Env:** `python` not on PATH. Use `/home/kok-shew-juan/RagWeave/.venv/bin/python`.
-Do NOT `uv run` in the worktree (spawns a stray empty `.venv`).
+**Env:** Initiative worktree = `/home/kok-shew-juan/RagWeave/.worktrees/test-coverage`
+on branch `test/coverage-initiative` (off develop @ 9106490). `python` not on PATH —
+use `/home/kok-shew-juan/RagWeave/.venv/bin/python`. Do NOT `uv run` in the worktree
+(spawns a stray empty `.venv`). **Git worktrees do NOT share tracked files** — each has
+its own working copy; subagents must edit/mutate the file inside THIS worktree path and
+run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned in slice 1).
 
 ## Slice backlog (ranked; recon slice-1 "platform-validation" DROPPED — already covered by tests/test_validation.py)
 
 | # | slice-id | target | layer | infra | size | status |
 |---|----------|--------|-------|-------|------|--------|
-| 1 | platform-command-runtime-unit | src/platform/command_runtime.py [104] | unit | none | S | 🚧 in progress |
-| 2 | platform-metrics-export | src/platform/metrics.py [80] | unit/contract | none | S | ⏳ |
-| 3 | platform-timing-unit | src/platform/timing.py [221] | unit | none | S | ⏳ |
-| 4 | platform-cli-log-formatting-unit | src/platform/cli_log_formatting.py [240] | unit | none | S | ⏳ |
-| 5 | platform-cli-interactive-unit | src/platform/cli_interactive.py [322] | unit | none | M | ⏳ |
+| 1 | platform-command-runtime-unit | src/platform/command_runtime.py [104] | unit | none | S | ✅ 9f950ad (20 tests, 5 mutations bit) |
+| 2 | platform-metrics-export | src/platform/metrics.py [80] | unit/contract | none | S | ✅ 99a7435 (23 tests, 4 mutations bit) |
+| 3 | platform-timing-unit | src/platform/timing.py [221] | unit | none | S | ✅ 18d4894 (26 tests, 7 mutations bit) |
+| 4 | platform-cli-log-formatting-unit | src/platform/cli_log_formatting.py [240] | unit | none | S | ✅ 77b0ff7 (31 tests, 6 mutations bit) |
+| 5 | platform-cli-interactive-unit | src/platform/cli_interactive.py [322] | unit | none | M | ✅ 3a1ddff (29 tests, 7 mutations bit) |
 | 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ⏳ |
 | 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ⏳ |
 | 8 | vector-db-backend-contract | src/vector_db/backend.py | contract | none | M | ⏳ |
@@ -56,7 +60,28 @@ Do NOT `uv run` in the worktree (spawns a stray empty `.venv`).
 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
+## Progress tally
+- **Platform tier COMPLETE** (slices 1–5): 129 tests added across tests/platform/
+  (command_runtime 20, metrics 23, timing 26, cli_log_formatting 31, cli_interactive 29),
+  30 mutations proven to bite. tests/platform wired into offline CI. Branch
+  `test/coverage-initiative` (off develop @ 9106490): 9f950ad → 99a7435 → 18d4894 →
+  77b0ff7 → 3a1ddff. Offline CI gate after slice 5: **2374 passed, 4 skipped, 10 deselected**.
+  NOT pushed / no PR yet — accumulating on the branch; surface for review at a checkpoint.
+
 ## Lessons / next-moves (append per cycle)
-- (recon) `tests/platform/` does not exist yet; platform module tests currently
-  live at `tests/` root (e.g. test_validation.py). Decision: create `tests/platform/`
-  for the new platform slices and add it to the CI path list.
+- (recon) `tests/platform/` did not exist; platform tests lived at `tests/` root.
+  Created `tests/platform/` and added it to the CI path list (slice 1).
+- **Git worktrees do NOT share tracked files.** Slice-1 mutation spot-check edited the
+  PRIMARY tree's source and saw NO red — because the worktree has its own checkout. Always
+  edit/mutate + run pytest inside the SAME worktree (`.worktrees/test-coverage`).
+- **Verification rhythm that works:** dispatch author (writes tests + internal ralph
+  mutation loop, returns mutation table) → main runs the new file + `git diff --stat`
+  (byte-identical) + ONE fresh independent mutation spot-check in the worktree → revert by
+  inverse-edit → commit → ledger. 5/5 author mutation tables confirmed by spot-check.
+- **Equivalent mutants are real.** Slice 5: the spec'd DOWN-clamp mutation
+  (`min(len-1,sel+1)`→`sel+1`) is unkillable because a downstream re-clamp subsumes it.
+  Author correctly substituted a load-bearing mutation. Don't force teeth on equivalent mutants.
+- Author subagents must be handed the FULL source inline (or told to read the exact worktree
+  path) + env facts + a concrete mutation list. This gives precise, high-teeth tests fast.
+- NEXT: db tier (slices 6–8 — minio store mocked-integration, db backend contract,
+  vector_db backend contract), then server routes (9–12), then real-infra (13–15) + frontend (16–17).
