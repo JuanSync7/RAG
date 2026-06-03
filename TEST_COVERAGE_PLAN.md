@@ -55,7 +55,7 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 11 | server-ingest-jobstore-unit | server/routes/ingest.py [578] JobRegistry+sweeper+builders | unit | none | M | ✅ e90b504 (33 tests, 7 mutations bit) |
 | 11b | server-ingest-endpoints | ingest.py endpoints (upload/check-path/url/dir/jobs/stream/cancel) + _run_workflow via TestClient + Temporal mock | contract | none | L | ⏳ NEW (split from slice 11) |
 | 12 | server-documents-routes-unit | server/routes/documents.py [365] | unit/contract | none | M | ⏳ |
-| 13 | vector-db-weaviate-search-integration | src/vector_db/weaviate/store.py | real-integration | real-Weaviate | M | ⏳ |
+| 14rt | vector-db-weaviate-real-integration | src/vector_db/weaviate/store.py | real-integration | LIVE Weaviate ✅ | M | ✅ f1bdeac (4 live tests PASSED; isolated+clean) |
 | 14 | query-e2e-mocked | server query→workflow→activity | mocked-integration | Temporal | L | ⏳ |
 | 15 | ingest-e2e-real-stack | ingest→MinIO→Weaviate→retrieve | real-integration | full stack | L | ⏳ |
 | 12fe | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ✅ aabaf89 (60 tests, vitest+jsdom stood up, 8 mutations bit) |
@@ -64,6 +64,12 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
 ## Progress tally
+- **14 slices COMPLETE (~434 new tests, all mutation-proven OR live-verified).**
+  PILLAR STATUS vs goal: unit/contract foundation ✅ (platform/db/vector_db/server/common-llm);
+  real frontend ✅ (vitest stood up + 60 component tests); **real DB ✅ (slice 14rt — live
+  Weaviate round-trip executed & verified clean)**. STILL OPEN: full ingest→serve e2e via
+  Temporal (MinIO+Temporal containers not up in this env) and browser-based console e2e
+  (needs browser+stack). Branch commits 9f950ad..f1bdeac.
 - **13 slices COMPLETE (~430 new tests: ~370 Python + 60 TS), all mutation-proven.**
   Latest: slice 13 (src/common/llm: 68 tests across utils/fallback/stream/output/cache/memory).
   Combined offline gate **independently re-run by main: 2737 passed, 4 skipped, 0 failed**
