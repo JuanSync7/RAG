@@ -50,7 +50,8 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 7b | db-facade-factory | src/db/__init__.py (_get_db_backend singleton + DATABASE_BACKEND dispatch + unknown-backend ValueError + facade arg forwarding) | unit/contract | none | S | ⏳ NEW (found in slice 7) |
 | 8 | vector-db-backend-contract | src/vector_db/backend.py + weaviate/backend.py | contract | none | M | ✅ 1908893 (44 tests, 8 mutations bit) |
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ✅ a756a99 (15 tests, 8 mutations bit; wired tests/server→CI, +64 existing) |
-| 10 | server-query-routes-unit | server/routes/query.py [895] | unit/contract | none (mock Temporal) | M | ⏳ |
+| 10 | server-query-helpers-unit | server/routes/query.py [895] pure helpers | unit | none | M | ✅ 2d4ea1a (38 tests, 8 mutations bit) |
+| 10b | server-query-endpoints | server/routes/query.py endpoints (run_query, /query, /query/stream, conv CRUD) via TestClient + fake deps | contract | none (mock Temporal/RAGChain) | L | ⏳ NEW (split from slice 10) |
 | 11 | server-ingest-routes-unit | server/routes/ingest.py [578] | unit/contract | none | M | ⏳ |
 | 12 | server-documents-routes-unit | server/routes/documents.py [365] | unit/contract | none | M | ⏳ |
 | 13 | vector-db-weaviate-search-integration | src/vector_db/weaviate/store.py | real-integration | real-Weaviate | M | ⏳ |
