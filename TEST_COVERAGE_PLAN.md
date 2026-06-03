@@ -52,7 +52,8 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ✅ a756a99 (15 tests, 8 mutations bit; wired tests/server→CI, +64 existing) |
 | 10 | server-query-helpers-unit | server/routes/query.py [895] pure helpers | unit | none | M | ✅ 2d4ea1a (38 tests, 8 mutations bit) |
 | 10b | server-query-endpoints | server/routes/query.py endpoints (run_query, /query, /query/stream, conv CRUD) via TestClient + fake deps | contract | none (mock Temporal/RAGChain) | L | ⏳ NEW (split from slice 10) |
-| 11 | server-ingest-routes-unit | server/routes/ingest.py [578] | unit/contract | none | M | ⏳ |
+| 11 | server-ingest-jobstore-unit | server/routes/ingest.py [578] JobRegistry+sweeper+builders | unit | none | M | ✅ e90b504 (33 tests, 7 mutations bit) |
+| 11b | server-ingest-endpoints | ingest.py endpoints (upload/check-path/url/dir/jobs/stream/cancel) + _run_workflow via TestClient + Temporal mock | contract | none | L | ⏳ NEW (split from slice 11) |
 | 12 | server-documents-routes-unit | server/routes/documents.py [365] | unit/contract | none | M | ⏳ |
 | 13 | vector-db-weaviate-search-integration | src/vector_db/weaviate/store.py | real-integration | real-Weaviate | M | ⏳ |
 | 14 | query-e2e-mocked | server query→workflow→activity | mocked-integration | Temporal | L | ⏳ |
