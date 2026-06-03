@@ -48,7 +48,7 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ✅ cda1912 (36 tests, 8 mutations bit) |
 | 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ✅ 4b2131a (24 tests, 5 mutations bit) |
 | 7b | db-facade-factory | src/db/__init__.py (_get_db_backend singleton + DATABASE_BACKEND dispatch + unknown-backend ValueError + facade arg forwarding) | unit/contract | none | S | ⏳ NEW (found in slice 7) |
-| 8 | vector-db-backend-contract | src/vector_db/backend.py | contract | none | M | ⏳ |
+| 8 | vector-db-backend-contract | src/vector_db/backend.py + weaviate/backend.py | contract | none | M | ✅ 1908893 (44 tests, 8 mutations bit) |
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ⏳ |
 | 10 | server-query-routes-unit | server/routes/query.py [895] | unit/contract | none (mock Temporal) | M | ⏳ |
 | 11 | server-ingest-routes-unit | server/routes/ingest.py [578] | unit/contract | none | M | ⏳ |
@@ -62,7 +62,17 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
 ## Progress tally
-- **Platform tier COMPLETE** (slices 1–5): 129 tests added across tests/platform/
+- **Slices 1–8 COMPLETE.** ~233 new tests, ~51 mutations proven. Branch
+  `test/coverage-initiative` (off develop @ 9106490). Offline CI gate after slice 8:
+  **2511 passed, 4 skipped, 12 deselected**. CI path list now includes tests/platform,
+  tests/db, tests/vector_db. NOT pushed / no PR — accumulating; surface at a checkpoint.
+  - db tier (6–7): minio store 36 + db backend contract 24. vector_db (8): 44.
+  - Weaviate Filter isolation hazard: `tests/conftest.py` installs a stub
+    `weaviate.classes.query.Filter` only when weaviate isn't already in sys.modules; the
+    real Filter's introspection attrs aren't reliable in full-suite runs. Slice 8 used a
+    recording-fake Filter (monkeypatch `sys.modules["weaviate.classes.query"].Filter`) for
+    isolation-stable teeth. Reuse this pattern for any weaviate-Filter-touching test.
+- **Platform tier (slices 1–5): 129 tests added across tests/platform/**
   (command_runtime 20, metrics 23, timing 26, cli_log_formatting 31, cli_interactive 29),
   30 mutations proven to bite. tests/platform wired into offline CI. Branch
   `test/coverage-initiative` (off develop @ 9106490): 9f950ad → 99a7435 → 18d4894 →
