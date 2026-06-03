@@ -46,7 +46,8 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 4 | platform-cli-log-formatting-unit | src/platform/cli_log_formatting.py [240] | unit | none | S | ✅ 77b0ff7 (31 tests, 6 mutations bit) |
 | 5 | platform-cli-interactive-unit | src/platform/cli_interactive.py [322] | unit | none | M | ✅ 3a1ddff (29 tests, 7 mutations bit) |
 | 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ✅ cda1912 (36 tests, 8 mutations bit) |
-| 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ⏳ |
+| 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ✅ 4b2131a (24 tests, 5 mutations bit) |
+| 7b | db-facade-factory | src/db/__init__.py (_get_db_backend singleton + DATABASE_BACKEND dispatch + unknown-backend ValueError + facade arg forwarding) | unit/contract | none | S | ⏳ NEW (found in slice 7) |
 | 8 | vector-db-backend-contract | src/vector_db/backend.py | contract | none | M | ⏳ |
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ⏳ |
 | 10 | server-query-routes-unit | server/routes/query.py [895] | unit/contract | none (mock Temporal) | M | ⏳ |
