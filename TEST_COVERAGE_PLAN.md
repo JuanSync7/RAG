@@ -47,21 +47,41 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | 5 | platform-cli-interactive-unit | src/platform/cli_interactive.py [322] | unit | none | M | ✅ 3a1ddff (29 tests, 7 mutations bit) |
 | 6 | db-minio-store-mocked | src/db/minio/store.py [446] | mocked-integration | none (fake S3) | M | ✅ cda1912 (36 tests, 8 mutations bit) |
 | 7 | db-backend-contract | src/db/backend.py + minio/backend.py | contract | none | M | ✅ 4b2131a (24 tests, 5 mutations bit) |
-| 7b | db-facade-factory | src/db/__init__.py (_get_db_backend singleton + DATABASE_BACKEND dispatch + unknown-backend ValueError + facade arg forwarding) | unit/contract | none | S | ⏳ NEW (found in slice 7) |
+| 7b | db-facade-factory | src/db/__init__.py (_get_db_backend singleton + DATABASE_BACKEND dispatch + unknown-backend ValueError + facade arg forwarding) | unit/contract | none | S | ✅ dfed02b (19 tests, 5+1 mutations bit) |
 | 8 | vector-db-backend-contract | src/vector_db/backend.py + weaviate/backend.py | contract | none | M | ✅ 1908893 (44 tests, 8 mutations bit) |
 | 9 | server-api-bootstrap-unit | server/api.py | unit | none | M | ✅ a756a99 (15 tests, 8 mutations bit; wired tests/server→CI, +64 existing) |
 | 10 | server-query-helpers-unit | server/routes/query.py [895] pure helpers | unit | none | M | ✅ 2d4ea1a (38 tests, 8 mutations bit) |
-| 10b | server-query-endpoints | server/routes/query.py endpoints (run_query, /query, /query/stream, conv CRUD) via TestClient + fake deps | contract | none (mock Temporal/RAGChain) | L | ⏳ NEW (split from slice 10) |
+| 10b | server-query-endpoints | server/routes/query.py endpoints (run_query, /query, /query/stream, conv CRUD) via TestClient + fake deps | contract | none (mock Temporal/RAGChain) | L | ✅ 375f286 (30 tests, 11+1 mutations bit; caught equiv mutant) |
 | 11 | server-ingest-jobstore-unit | server/routes/ingest.py [578] JobRegistry+sweeper+builders | unit | none | M | ✅ e90b504 (33 tests, 7 mutations bit) |
-| 11b | server-ingest-endpoints | ingest.py endpoints (upload/check-path/url/dir/jobs/stream/cancel) + _run_workflow via TestClient + Temporal mock | contract | none | L | ⏳ NEW (split from slice 11) |
-| 12 | server-documents-routes-unit | server/routes/documents.py [365] | unit/contract | none | M | ⏳ |
+| 11b | server-ingest-endpoints | ingest.py endpoints (upload/check-path/url/dir/jobs/stream/cancel) + _run_workflow via TestClient + Temporal mock | contract | none | L | ✅ b741823 (41 tests, 12+1 mutations bit) |
+| 12 | server-documents-routes-unit | server/routes/documents.py [365] | unit/contract | none | M | ✅ 2c79524 (24 tests via TestClient, 9+1 mutations bit) |
 | 14rt | vector-db-weaviate-real-integration | src/vector_db/weaviate/store.py | real-integration | LIVE Weaviate ✅ | M | ✅ f1bdeac (4 live tests PASSED; isolated+clean) |
 | 14 | query-e2e-mocked | server query→workflow→activity | mocked-integration | Temporal | L | ⏳ |
 | 15 | ingest-e2e-real-stack | ingest→MinIO→Weaviate→retrieve | real-integration | full stack | L | ⏳ |
+| 13b | llm-concurrency-helpers | src/common/llm/batch.py + parallel.py | unit | none | M | ✅ 7b52c00 (15 tests, 10+1 mutations bit; FOUND latent Runnable bug) |
+| 9b | server-admin-system-routes | server/routes/admin.py + system.py | contract | none | M | ✅ 4a2b80a (28 tests, 10+1 mutations bit) |
 | 12fe | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ✅ aabaf89 (60 tests, vitest+jsdom stood up, 8 mutations bit) |
 | 17 | console-web-e2e | console against running backend | frontend e2e | browser+stack | L | ⏳ |
 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
+
+## CI-gating slice (2026-06-03) — closed a major protective-coverage gap
+- **Finding:** the real `ci.yml` "Run tests" step gated only ~12 test paths; `tests/retrieval`
+  (568), `tests/core` (6), `tests/contracts` (19), `tests/observability` (315), `tests/guardrails`
+  (92) — **~1000 existing green tests — were NOT gated by CI** (regressions there went uncaught).
+- **Action (user-approved "wire green dirs + keep authoring"):** added a SEPARATE ci.yml step
+  `Run tests (extended suites)` running those 5 dirs in their OWN pytest invocation.
+- **Why a separate step, NOT merged into the primary command:** merging them caused **115 failures**
+  in `tests/ingest/test_visual_embedding_node.py` — a cross-area sys.modules pollution. Those suites
+  stub heavy modules (numpy/PIL/docling/langchain) at COLLECTION time (collection is global per
+  session), so `_extract_page_images` hit `unhandled error: __array_interface__` (a stubbed
+  numpy/PIL leaking into ingest's real-array path). A separate process = isolated sys.modules = clean.
+  THIS is why the dirs were excluded originally; the separate-step design gates them without the clash.
+- **Quarantined (tracked skips):** the 3 `tests/guardrails` Colang tests (`test_colang_syntax.py`
+  both, `test_colang_flows.py::test_all_co_files_parse`) import nemoguardrails which needs REAL
+  `langchain_core`; the suite-wide langchain stub (tests/conftest.py) shadows it. Skip reason points
+  at the stub boundary; re-enable via a real-langchain collection boundary like tests/llm.
+- Extended-suites step verified green: **1000 passed, 6 skipped, 0 failed**. Primary command unchanged.
 
 ## Progress tally
 - **14 slices COMPLETE (~434 new tests, all mutation-proven OR live-verified).**
