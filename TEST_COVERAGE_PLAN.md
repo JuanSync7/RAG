@@ -63,14 +63,30 @@ run pytest from THIS worktree dir, or mutations hit the wrong checkout (learned 
 | GG | guardrails-granite-guardian | src/guardrails/models/granite_guardian.py | unit | none (fake httpx) | M | ✅ 1b6ba66 (23 tests, 10+1 mutations bit) |
 | CS | console-services-unit | server/console/services.py [386] | unit | none | M | ✅ d8a4782 (46 tests, 12+1 mutations bit; 3 security guards) |
 | TR | reliability-temporal-retry | src/platform/reliability/temporal_retry.py [134] | unit | none (fake Client) | S | ✅ 39cb336 (12 tests, 8+1 mutations bit) |
+| GP | guardrails-gliner-pii | src/guardrails/shared/gliner_pii.py [184] | unit | none (fake model) | S | ✅ 084e98f (17 tests, 10+1 mutations bit; gliner not installed → ImportError path) |
+| LR | reliability-local-retry | src/platform/reliability/local_retry.py [68] | unit | none | S | ✅ a348d68 (7 tests, mutations bit; sleep mocked) |
+| MG | guardrails-merge-gate | src/guardrails/common/merge_gate.py [103] | unit | none | S | ✅ a348d68 (8 tests, priority-order teeth) |
+| SC | guardrails-self-check | src/guardrails/models/self_check.py [159] | unit | none (mock call_oneshot) | S | ✅ f100161 (17 tests, 12+1 mutations bit) |
+| — | ingest-scorer-v2/v3/v5 | src/ingest/scorer_v2.py/v3/v5 | — | — | — | ⛔ DEAD CODE — zero repo-wide refs; candidate for DELETION, not testing |
 | 9b | server-admin-system-routes | server/routes/admin.py + system.py | contract | none | M | ✅ 4a2b80a (28 tests, 10+1 mutations bit) |
 | 12fe | console-web-component-unit | server/console/web/src/*.ts | frontend unit | none (vitest) | M | ✅ aabaf89 (60 tests, vitest+jsdom stood up, 8 mutations bit) |
 | 17 | console-web-e2e | console against running backend | frontend e2e | browser+stack | L | ⏳ |
 
 Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 
+## SESSION 2 — INFRA-FREE PILLAR COMPLETE (continued 2026-06-04 while awaiting e2e stack)
+- **While blocked on the e2e stack (user bringing up MinIO+Temporal), squeezed the remaining
+  infra-free surface:** gliner_pii (GP, 17t), local_retry+merge_gate (LR/MG, 15t), self_check
+  (SC, 17t). Verified `scorer_v2/v3/v5` are DEAD (zero repo refs) — NOT tested (deletion candidates).
+- **Infra-free surface is now EXHAUSTED:** the only untested ≥100-line src/server modules left are
+  the dead scorer_v* files. Every live module with non-trivial logic has mutation-proven tests.
+- **Session-2 total: 13 work items, ~287 new tests + ~1000 newly-gated.** Commits 2c79524..f100161.
+  Extended gate: 1066 passed. Primary gate: 2959 passed. Frontend: 60.
+- **REMAINING = ONLY the infra-dependent e2e pillars** (Temporal ingest→serve, browser console),
+  blocked on stack/browser not available in this env. Watcher armed for instant resume on stack-up.
+
 ## SESSION 2 (2026-06-03) — infra-free pillar driven to close-to-complete
-- **10 work items this session: ~238 new tests + ~1000 existing tests newly GATED.**
+- **10 work items: ~238 new tests + ~1000 existing tests newly GATED.**
   Slices: documents routes (12, 24t), db facade (7b, 19t), query endpoints (10b, 30t),
   ingest endpoints (11b, 41t), llm concurrency batch+parallel (13b, 15t), admin+system
   routes (9b, 28t), **CI-gating fix (CIG)**, granite_guardian (GG, 23t), console services
