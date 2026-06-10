@@ -252,3 +252,25 @@ Mocked tests never see it (no Temporal payload boundary). Fix deferred (coerce e
   Bringing up two compose services unblocked weeks of held /loop cycles in seconds.
 - Real-DB ✅, real object-store ✅, real Temporal worker ✅. Only browser/console e2e remains
   (no browser in this env).
+
+### Remaining e2e is ENV-PROVISIONING, not a coding gap (verified 2026-06-10)
+Probed the serve path so the next session need not re-discover this:
+- **`RAGChain` cannot construct in this venv** — `ModuleNotFoundError: sentence_transformers`
+  (the local embedder/reranker provider needs it) AND the reranker model
+  `bge-reranker-v2-m3` is NOT in the HF cache. Probe was offline-pinned
+  (`HF_HUB_OFFLINE=1`) so it failed fast in 3.3s rather than attempting a download.
+- This is almost certainly the SAME root cause as the ingest embedding batch failure
+  (local `embed_documents` raised → batch_embedding_failure dict → the EmbeddingResult
+  decode bug). So the ingest XFAIL has TWO independent blockers: (1) missing
+  sentence_transformers (env), (2) the dict-in-list[str] decode bug (product, pinned).
+- The query HTTP API does NOT call RAGChain in-process — it dispatches to Temporal
+  (`rag-query` queue → query worker → RAGChain → OllamaGenerator). A full HTTP serve e2e
+  therefore additionally needs the query worker + an LLM (rag-ollama, not running).
+
+**Conclusion:** the achievable live-stack coverage in THIS environment is complete —
+real Weaviate ✅, real MinIO ✅, real Temporal worker ✅, ingest→serve repro + bug pinned ✅.
+The outstanding e2e (real RAGChain serve, full HTTP→Temporal→LLM serve, browser console)
+each require provisioning not present here: `pip/uv install sentence_transformers`, the
+reranker model, a running LLM generator, and a browser. Writing those e2e now would be
+unvalidatable scaffolding (explicitly out of scope per user directive). They are unblocked
+by a one-time env setup, not by more test authoring.
