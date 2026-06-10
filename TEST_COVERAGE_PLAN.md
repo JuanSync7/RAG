@@ -217,3 +217,38 @@ Statuses: ⏳ pending · 🚧 in progress · ✅ shipped · ⏸️ deferred
 - db tier: slice 6 done. NEXT: slice 7 (db backend ABC contract), slice 8 (vector_db backend
   contract), then server routes (9–12 — query/ingest/documents, the largest untested product
   surface), then real-infra (13–15) + frontend (16–17). Offline CI after slice 6: 2410 passed.
+
+## Slice — Live-stack e2e (2026-06-10, commit a89972d) — the last open pillar
+**The "blocker" was never code.** `rag-minio` + `temporal` had simply never been started;
+`docker compose up -d rag-minio temporal` (from /home/kok-shew-juan/RagWeave) brought them up
+(Weaviate already live at :8090/:50051, but it runs outside this dir's compose project so
+`docker compose ps` shows empty — use `docker ps`). TEI embed (rag-nginx) is down → run real
+embedding with `RAG_INFERENCE_BACKEND=local` (BGE-M3 + docling models are in the HF cache).
+
+Authored + SELF-VALIDATED LIVE by main (subagent run was truncated — do NOT trust subagent
+self-report for live e2e):
+- `tests/integration/test_minio_storage_e2e.py` — GREEN (4): real MinIO :9000 round-trip via
+  src/db facade (put → exists/stat → byte-identical get → list → delete → absent). ITEST-isolated.
+- `tests/integration/test_temporal_roundtrip_e2e.py` — GREEN (1): client → live Temporal :7233 →
+  in-process Worker → DeleteSourceWorkflow → typed DeleteSourceResult decoded back. No-op delete
+  on a never-seen source_key (weaviate_deleted==0). Hard-bounded (execution_timeout).
+- `tests/ingest/temporal/test_payload_contract.py` — GREEN (3, OFFLINE): deterministic pin of the
+  bug below at the Temporal payload-converter boundary.
+- `tests/integration/test_ingest_serve_e2e.py` — XFAIL (bounded): full real ingest→serve via
+  in-process Temporal Worker; currently xfail on the decode bug; hard-bounded after an UNBOUNDED
+  run spun ~9h46m. Flips to XPASS once bug fixed AND local embedding succeeds.
+
+**Bug found (the whole point of live e2e):** `embedding_storage._embed_batches` records per-batch
+failures as DICTS and merges them into the pipeline `errors` field (typed `list[str]`);
+`embedding_pipeline_activity` forwards them into `EmbeddingResult.errors: list[str]`. Serializes on
+the activity side, but the WORKFLOW can't decode `list[str]` from dicts → `TypeError: Failed
+converting field errors on dataclass EmbeddingResult` → workflow task fails → retries forever.
+Mocked tests never see it (no Temporal payload boundary). Fix deferred (coerce errors to str).
+
+**Lessons:**
+- ALWAYS bound `execute_workflow` in tests with `execution_timeout` + `asyncio.wait_for` —
+  workflow-task failures retry forever; an unbounded decode failure ran ~10h.
+- Diagnose "infra down" before waiting: `docker info` + `docker ps` (not just `compose ps`).
+  Bringing up two compose services unblocked weeks of held /loop cycles in seconds.
+- Real-DB ✅, real object-store ✅, real Temporal worker ✅. Only browser/console e2e remains
+  (no browser in this env).
