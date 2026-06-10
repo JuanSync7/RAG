@@ -295,3 +295,13 @@ held **12G** of leaked KuZu KG databases (`kg_kuzu_*` + `tmp*/kg.kuzu`, ~271M ea
 from ingest/KG test runs (incl. the 10h ingest run) that are never cleaned up. Removed them
 (/tmp back to 2%). The KG/KuZu pipeline leaving per-run temp DBs in /tmp is a real
 test-hygiene issue worth a fixture-level tmp_path + teardown in the KG tests.
+
+### Temporal result-dataclass contract audit — CONCLUSIVE (2026-06-10)
+Audited all ingest activity-result dataclasses for the EmbeddingResult bug class
+(typed list[str] field fed by dict-producing code → undecodable across Temporal).
+Repo-wide scan of src/ingest: `embedding_storage.py` (errors: list[dict], lines 110/144/252)
+is the SOLE violator. DocProcessingResult (errors/processing_log) and DeleteSourceResult
+(errors) are fed only strings by their activities → safe. Bug is ISOLATED, not systemic.
+Added `test_sibling_result_dataclasses_honour_list_str_contract` to the pin file (now 4
+tests) — a preventative guard that turns RED if doc-processing or delete-source ever start
+emitting dict errors. Fix to embedding_storage still deferred (product change, awaits user).

@@ -100,6 +100,46 @@ def test_dict_errors_break_decode() -> None:
         _round_trip(_make([batch_error]))
 
 
+def test_sibling_result_dataclasses_honour_list_str_contract() -> None:
+    """The OTHER ingest activity results round-trip with string errors/logs.
+
+    A repo-wide audit (2026-06-10) found ``embedding_storage`` is the SOLE place
+    that puts dicts into a ``list[str]`` error field — DocProcessingResult and
+    DeleteSourceResult are fed only strings (f-strings) by their activities.
+    This guard pins that: it round-trips both with realistic STRING payloads and
+    asserts they decode. It turns RED if a future change starts feeding either a
+    dict (the same regression class as the EmbeddingResult bug) BEFORE that
+    change can wedge a live workflow.
+    """
+    from src.ingest.temporal.activities import (
+        DeleteSourceResult,
+        DocProcessingResult,
+    )
+
+    conv = _default_converter().payload_converter
+
+    doc = DocProcessingResult(
+        errors=["clean_store_write_failed: boom"],
+        source_hash="abc",
+        clean_hash="def",
+        processing_log=["doc_processing:skipped:unchanged"],
+    )
+    decoded_doc = conv.from_payloads(conv.to_payloads([doc]), [DocProcessingResult])[0]
+    assert decoded_doc.errors == ["clean_store_write_failed: boom"]
+    assert decoded_doc.processing_log == ["doc_processing:skipped:unchanged"]
+
+    dele = DeleteSourceResult(
+        weaviate_deleted=0,
+        minio_deleted=False,
+        errors=["weaviate_delete_failed:boom", "minio_delete_failed:boom"],
+    )
+    decoded_del = conv.from_payloads(conv.to_payloads([dele]), [DeleteSourceResult])[0]
+    assert decoded_del.errors == [
+        "weaviate_delete_failed:boom",
+        "minio_delete_failed:boom",
+    ]
+
+
 def test_embedding_storage_emits_dict_errors() -> None:
     """Source-level proof the producer emits dicts into a ``list[str]`` field.
 
