@@ -34,12 +34,14 @@ Temporal payload boundary) and only surfaces against a real Temporal server —
 the exact gap this initiative exists to close. These tests reproduce it
 offline and deterministically.
 
-NOTE: this test currently asserts the BROKEN behaviour (dict errors fail to
-decode). When the product bug is fixed — by coercing batch errors to ``str``
-before they reach ``EmbeddingResult`` (e.g. ``str(err)`` / ``json.dumps(err)``
-in embedding_storage or the activity) — ``test_dict_errors_break_decode`` will
-start failing and should be flipped to assert a clean round-trip. That flip is
-the intended signal that the fix landed.
+STATUS: the product bug is now FIXED — ``embedding_storage._format_batch_error``
+stringifies batch failures before they enter the ``list[str]`` state field, so
+nothing dict-shaped reaches ``EmbeddingResult`` / the Temporal boundary. The
+node-level end-to-end proof lives in
+tests/ingest/embedding/test_embedding_storage.py. The tests here still pin the
+underlying converter constraint (dict-in-``list[str]`` is undecodable) that
+keeps the fix necessary, and that the low-level helper still emits structured
+dicts which the node boundary renders to strings.
 """
 from __future__ import annotations
 
@@ -84,11 +86,15 @@ def test_string_errors_round_trip() -> None:
 
 
 def test_dict_errors_break_decode() -> None:
-    """The dict shape ``embedding_storage`` actually emits fails to decode.
+    """A dict in a ``list[str]`` field still fails to decode — this is WHY the
+    producer must stringify.
 
-    This is the exact failure the live ingest workflow hit
-    (``Failed converting field errors on dataclass EmbeddingResult``). Pins the
-    bug; flip to assert a clean round-trip once errors are coerced to ``str``.
+    This was the exact failure the live ingest workflow hit
+    (``Failed converting field errors on dataclass EmbeddingResult``). The
+    producer is now fixed (embedding_storage stringifies batch errors via
+    ``_format_batch_error``), so this shape no longer reaches Temporal in
+    practice — but the converter is still strict, so this pins the underlying
+    constraint that keeps the fix necessary.
     """
     batch_error = {
         "type": "batch_embedding_failure",
@@ -140,16 +146,21 @@ def test_sibling_result_dataclasses_honour_list_str_contract() -> None:
     ]
 
 
-def test_embedding_storage_emits_dict_errors() -> None:
-    """Source-level proof the producer emits dicts into a ``list[str]`` field.
+def test_embedding_storage_low_level_emits_dicts_but_node_stringifies() -> None:
+    """``_embed_batches`` emits structured dicts (for logging) — ``_format_batch_error``
+    converts them to strings before they enter the ``list[str]`` state field.
 
-    Drives the real ``_embed_batches`` with an embedder whose ``embed_documents``
-    always raises, so the batch exhausts retries and the function records a
-    failure. The recorded entry MUST be a ``dict`` (not ``str``) — which is what
-    later breaks the Temporal decode pinned above. If a fix coerces these to
-    strings, this assertion flips and flags that the contract was repaired.
+    The low-level ``_embed_batches`` still returns dict entries (useful for the
+    error log), but the node merges them into ``state["errors"]`` via
+    ``_format_batch_error`` so nothing dict-shaped reaches ``EmbeddingResult`` or
+    the Temporal boundary. The end-to-end node-level proof lives in
+    tests/ingest/embedding/test_embedding_storage.py
+    (``test_batch_failure_errors_are_strings_and_temporal_decodable``).
     """
-    from src.ingest.embedding.nodes.embedding_storage import _embed_batches
+    from src.ingest.embedding.nodes.embedding_storage import (
+        _embed_batches,
+        _format_batch_error,
+    )
 
     class _AlwaysFailEmbedder:
         def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -162,6 +173,11 @@ def test_embedding_storage_emits_dict_errors() -> None:
 
     assert success_mask == [False]
     assert len(errors) == 1
-    # The load-bearing assertion: the entry is a dict, violating list[str].
+    # Low level still emits a structured dict...
     assert isinstance(errors[0], dict)
     assert errors[0]["type"] == "batch_embedding_failure"
+    # ...but the node-boundary formatter renders it as a contract-honouring str.
+    rendered = _format_batch_error(errors[0])
+    assert isinstance(rendered, str)
+    assert "batch_embedding_failure" in rendered
+    assert "embed backend down" in rendered

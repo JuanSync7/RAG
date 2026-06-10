@@ -291,15 +291,15 @@ async def _run_ingest_workflow(args: Any, queue: str, wf_id: str) -> Any:
 
 @pytest.mark.xfail(
     reason=(
-        "KNOWN PRODUCT BUG surfaced by this live e2e: embedding_storage emits "
-        "dict error entries (per-batch failures) into EmbeddingResult.errors, "
-        "which is typed list[str]. Temporal serializes them on the activity side "
-        "but CANNOT decode them in the workflow ('Failed converting field errors "
-        "on dataclass EmbeddingResult'), so the workflow task fails and retries "
-        "forever. Pinned offline by "
-        "tests/ingest/temporal/test_payload_contract.py. This live e2e is now "
-        "hard-bounded (execution_timeout=120s) and will flip to XPASS once the "
-        "errors are coerced to str AND local embedding succeeds end-to-end."
+        "The decode bug this e2e originally surfaced (embedding_storage put dict "
+        "errors into EmbeddingResult.errors:list[str], wedging the workflow) is "
+        "now FIXED — embedding_storage stringifies batch errors, so the workflow "
+        "no longer hangs; it completes promptly even when embedding fails. The "
+        "REMAINING blocker is environment-only: this venv lacks the optional ML "
+        "extra (sentence_transformers + reranker model), so local embedding fails "
+        "and the workflow returns a non-empty errors result. Flips to XPASS once "
+        "the ML extra is installed so local embedding succeeds end-to-end. "
+        "Hard-bounded (execution_timeout=120s)."
     ),
     strict=False,
     raises=Exception,

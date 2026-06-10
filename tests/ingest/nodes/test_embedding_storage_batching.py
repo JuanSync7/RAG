@@ -393,11 +393,17 @@ class TestEmbeddingStorageNodeBatching:
         staged = result.get("staged_weaviate_records", [])
         assert len(staged) == 3  # 2 + 0 + 1
 
-        batch_errors = [e for e in result["errors"] if isinstance(e, dict) and e.get("type") == "batch_embedding_failure"]
+        # errors enter state as STRINGS (list[str] contract; must decode across
+        # the Temporal boundary as EmbeddingResult.errors) — the batch index and
+        # chunk range are preserved in the rendered string.
+        batch_errors = [
+            e for e in result["errors"]
+            if isinstance(e, str) and "batch_embedding_failure" in e
+        ]
         assert len(batch_errors) == 1
         err = batch_errors[0]
-        assert err["batch_index"] == 2
-        assert err["chunk_range"] == "2-3"
+        assert "batch=2" in err
+        assert "chunk_range=2-3" in err
 
     def test_all_batches_succeed_no_errors(self):
         chunks = [_make_chunk(f"text {i}") for i in range(4)]
