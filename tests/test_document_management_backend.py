@@ -22,6 +22,31 @@ import pytest
 from minio.error import S3Error
 
 
+def _s3error(code: str) -> S3Error:
+    """Build an S3Error whose ``.code`` is exactly ``code``.
+
+    The REAL ``minio.error.S3Error`` signature is
+    ``(response, code, message, resource, request_id, host_id, ...)`` — ``code``
+    is the SECOND positional arg, not the first. Building it positionally as
+    ``S3Error("NoSuchKey", ...)`` therefore sets ``response="NoSuchKey"`` and
+    leaves ``.code`` as the next arg, so production's
+    ``exc.code in ("NoSuchKey", "NoSuchBucket")`` check (src/db/minio/store.py)
+    would NOT match and the swallow/propagate branch under test would not be the
+    one actually exercised. (It only "worked" offline because the conftest stub
+    happens to take ``code`` first.) Passing ``code=`` by keyword pins ``.code``
+    correctly against BOTH the stub and the real package. Mirrors the helper in
+    tests/db/test_minio_store.py.
+    """
+    return S3Error(
+        response=None,
+        code=code,
+        message="test-message",
+        resource="test-resource",
+        request_id="test-request-id",
+        host_id="test-host-id",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ensure weaviate.classes.aggregate stub exists (conftest does not register it)
 # ---------------------------------------------------------------------------
@@ -95,13 +120,13 @@ def _make_minio_mock(
         if key.endswith(".meta.json"):
             stem = key[: -len(".meta.json")]
             if stem in missing_sidecars:
-                raise S3Error("NoSuchKey", "not found", "", "", "", "")
+                raise _s3error("NoSuchKey")
             if stem in sidecars:
                 resp = MagicMock()
                 resp.read.return_value = json.dumps(sidecars[stem]).encode("utf-8")
                 return resp
-            raise S3Error("NoSuchKey", "not found", "", "", "", "")
-        raise S3Error("NoSuchKey", "not found", "", "", "", "")
+            raise _s3error("NoSuchKey")
+        raise _s3error("NoSuchKey")
 
     client.get_object.side_effect = _get_object
     return client
@@ -307,7 +332,7 @@ class TestListDocuments:
     def test_list_objects_s3error_propagates(self):
         """MT-M-12: S3Error from list_objects propagates to caller."""
         client = _make_minio_mock(
-            [], list_error=S3Error("ServiceUnavailable", "down", "", "", "", "")
+            [], list_error=_s3error("ServiceUnavailable")
         )
         with pytest.raises(S3Error):
             self._call(client)
