@@ -305,3 +305,18 @@ is the SOLE violator. DocProcessingResult (errors/processing_log) and DeleteSour
 Added `test_sibling_result_dataclasses_honour_list_str_contract` to the pin file (now 4
 tests) — a preventative guard that turns RED if doc-processing or delete-source ever start
 emitting dict errors. Fix to embedding_storage still deferred (product change, awaits user).
+
+### EmbeddingResult decode bug — FIXED (commit 676110f, 2026-06-10)
+Took the fix the audit scoped (sole violator = embedding_storage). Added
+`_format_batch_error()` and stringify batch failures where they enter
+`state["errors"]` (preserving batch index / chunk range / cause); `_embed_batches`
+still returns structured dicts for logging — only the state boundary is coerced.
+Validated end to end:
+- node-level + Temporal round-trip: `test_batch_failure_errors_are_strings_and_temporal_decodable`
+- LIVE `test_ingest_serve_e2e` now completes in **9.89s** (was 9h46m wedge → 128s bounded → ~10s);
+  the workflow no longer hangs. Its xfail is now ONLY the env gap (no sentence_transformers).
+- tests/ingest: 2151 passed, no regressions; updated `test_batch_2_fails_chunks_excluded_from_staged_records`
+  which was pinned to the old dict shape; refreshed the payload-contract pins' docstrings.
+This is the one outstanding bug from the live-e2e pillar — now closed. The ONLY remaining gap
+to a green full ingest→serve e2e is environment provisioning (`uv add sentence-transformers`
++ reranker model), which is a user/infra decision, not test or product work.
