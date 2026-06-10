@@ -274,3 +274,24 @@ each require provisioning not present here: `pip/uv install sentence_transformer
 reranker model, a running LLM generator, and a browser. Writing those e2e now would be
 unvalidatable scaffolding (explicitly out of scope per user directive). They are unblocked
 by a one-time env setup, not by more test authoring.
+
+### Follow-up slice — S3Error test-quality audit + /tmp KuZu leak (2026-06-10)
+Closed the long-standing slice-6 follow-up ("audit + fix positional S3Error builds"):
+- `tests/test_document_management_backend.py` (commit 09ed073): 4 sites built
+  `S3Error("NoSuchKey", ...)` positionally. Real signature is
+  `(response, code, message, resource, request_id, host_id)`, so `.code` became the
+  SECOND arg ("not found") not "NoSuchKey" — production swallows only when
+  `exc.code in ("NoSuchKey","NoSuchBucket")` (src/db/minio/store.py), so the tests were
+  NOT exercising the branch they name; they passed offline only because the conftest stub
+  takes `code` first. Added `_s3error(code)` keyword helper. TEETH PROVEN against real
+  minio: old form `.code='not found'`, new form `.code='NoSuchKey'`. 30 passed.
+- `tests/retrieval/test_visual_retrieval.py` (commit 950e85a): 2 sites built S3Error with
+  only 2 positional args → `TypeError` under real minio (6 required). Same `_s3error`
+  helper; dropped a now-unused local import. 116 passed.
+- Sanity gate after edits: tests/db + doc-mgmt 109 passed; tests/retrieval 568 passed.
+
+**Env-hygiene finding:** `/tmp` (16G tmpfs) hit "Disk quota exceeded" — `/tmp/claude-1000`
+held **12G** of leaked KuZu KG databases (`kg_kuzu_*` + `tmp*/kg.kuzu`, ~271M each, 61 dirs)
+from ingest/KG test runs (incl. the 10h ingest run) that are never cleaned up. Removed them
+(/tmp back to 2%). The KG/KuZu pipeline leaving per-run temp DBs in /tmp is a real
+test-hygiene issue worth a fixture-level tmp_path + teardown in the KG tests.
