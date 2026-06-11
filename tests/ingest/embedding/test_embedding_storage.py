@@ -215,3 +215,54 @@ def test_enriched_content_fallback_to_chunk_text():
     embed_call_args = state["runtime"].embedder.embed_documents.call_args
     texts_passed = embed_call_args[0][0]
     assert texts_passed == ["raw chunk text"]
+
+
+# ---------------------------------------------------------------------------
+# Regression: batch failures must enter state["errors"] as STRINGS, not dicts,
+# so EmbeddingResult.errors (list[str]) decodes across the Temporal boundary.
+# (Found by the live ingest->serve e2e; see
+# tests/ingest/temporal/test_payload_contract.py.)
+# ---------------------------------------------------------------------------
+
+def test_batch_failure_errors_are_strings_and_temporal_decodable(monkeypatch):
+    """A failing embedder yields STRING errors that round-trip as EmbeddingResult.
+
+    Before the fix, embedding_storage merged dict batch-failure entries into the
+    list[str] ``errors`` field; Temporal then failed to decode EmbeddingResult in
+    the workflow and the ingest workflow task retried forever. This pins that the
+    node now stringifies them (preserving the batch/range/cause info) AND that the
+    resulting EmbeddingResult decodes cleanly through Temporal's payload converter.
+    """
+    # Make retries instant so the test stays fast.
+    monkeypatch.setattr(
+        "src.ingest.embedding.nodes.embedding_storage.RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S",
+        0.0,
+    )
+    state = _make_state(chunks=[_make_chunk("chunk a"), _make_chunk("chunk b")])
+    state["runtime"].embedder.embed_documents.side_effect = RuntimeError("embed backend down")
+
+    result = embedding_storage_node(state)
+
+    errors = result["errors"]
+    assert errors, "expected at least one batch-failure error"
+    # Load-bearing: every error is a STRING (the contract), not a dict.
+    assert all(isinstance(e, str) for e in errors), f"non-str errors: {errors!r}"
+    # Structured info is preserved in the string form.
+    assert any("batch_embedding_failure" in e for e in errors)
+    assert any("embed backend down" in e for e in errors)
+
+    # End-to-end proof: the EmbeddingResult built from these errors decodes
+    # across the Temporal activity->workflow boundary (the original failure mode).
+    from temporalio.converter import default as _default_converter
+    from src.ingest.temporal.activities import EmbeddingResult
+
+    conv = _default_converter().payload_converter
+    res = EmbeddingResult(
+        errors=errors,
+        stored_count=0,
+        metadata_summary="",
+        metadata_keywords=[],
+        processing_log=["embedding_storage:staged"],
+    )
+    decoded = conv.from_payloads(conv.to_payloads([res]), [EmbeddingResult])[0]
+    assert decoded.errors == errors

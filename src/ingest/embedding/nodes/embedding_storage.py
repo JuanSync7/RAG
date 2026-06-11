@@ -157,6 +157,23 @@ def _embed_batches(
     return all_vectors, errors, success_mask
 
 
+def _format_batch_error(err: dict[str, Any]) -> str:
+    """Render a batch-failure dict as a single string.
+
+    The pipeline state ``errors`` field is ``list[str]`` and is forwarded
+    verbatim into ``EmbeddingResult.errors`` (also ``list[str]``), which crosses
+    the Temporal activity->workflow boundary. Temporal decodes that result
+    against the dataclass type hint, so a ``dict`` element raises
+    ``TypeError: Failed converting field errors`` and fails the workflow task
+    (which then retries forever). Stringifying here keeps the structured
+    information (batch index, chunk range, cause) while honouring the contract.
+    """
+    return (
+        f"batch_embedding_failure:batch={err.get('batch_index')}"
+        f" chunk_range={err.get('chunk_range')}: {err.get('error')}"
+    )
+
+
 @node_span("embedding_storage")
 def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:  # noqa: D401
     from src.platform.observability import get_tracer
@@ -249,7 +266,10 @@ def _embedding_storage_node_impl(state: EmbeddingPipelineState) -> dict[str, Any
     logger.debug("embedding_storage_node staged %d records in %.3fs", len(records), time.monotonic() - t0)
     return {
         "stored_count": 0,  # not stored yet — commit_node sets the real count
-        "errors": existing_errors + batch_errors,
+        # Stringify batch failures: state["errors"] is list[str] and is forwarded
+        # into EmbeddingResult.errors (list[str]) which must decode across the
+        # Temporal activity->workflow boundary (dict elements would not).
+        "errors": existing_errors + [_format_batch_error(e) for e in batch_errors],
         "staged_weaviate_records": records,
         "staged_weaviate_delete_old": bool(runtime.config.update_mode),
         "processing_log": append_processing_log(state, "embedding_storage:staged"),
