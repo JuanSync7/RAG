@@ -353,10 +353,25 @@ services:
       DEFAULT_VECTORIZER_MODULE: "none"
       ENABLE_MODULES: ""
       CLUSTER_HOSTNAME: "node1"
+      # Memory policy (durable, box-agnostic): the single knob is a PERCENT of the
+      # memory this container can see (cgroup limit if enforced, else host RAM).
+      # The memwrap.sh entrypoint turns it into a GOMEMLIMIT soft cap at startup so
+      # the heap can't balloon and OOM the host. Self-adapts to any box / cgroup
+      # version (incl. cgroup v1 rootless, where mem_limit is silently ignored).
+      # NOTE: GOMEMLIMIT is SOFT — it bounds spikes/transients, it cannot shrink a
+      # working set larger than the cap (that needs vector quantization or a bigger
+      # box). See docs/ops/MEMORY_TUNING.md for tuning + the structural fix.
+      RAG_WEAVIATE_MEM_FRACTION: "${RAG_WEAVIATE_MEM_FRACTION:-50}"
+      RAG_WEAVIATE_GOGC: "${RAG_WEAVIATE_GOGC:-75}"
+    # Self-computing memory bound (see env above). String entrypoint + explicit
+    # command so it works under both docker compose and podman-compose.
+    entrypoint: /memwrap.sh
+    command: ["--host", "0.0.0.0", "--port", "8080", "--scheme", "http"]
     volumes:
       # Existing on-disk data from the previous embedded setup is mounted directly
       # so no re-ingest is needed on first boot.
       - ./.weaviate_data:/var/lib/weaviate
+      - ./ops/weaviate/memwrap.sh:/memwrap.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/.well-known/ready || exit 1"]
       interval: 10s
