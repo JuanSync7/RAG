@@ -1,7 +1,8 @@
 <!-- @summary
 Public API and backend abstraction layer for vector store operations. Exposes a
 config-driven facade for client lifecycle, collection management, document CRUD,
-hybrid search, multi-collection fan-out, aggregation, and visual page operations.
+hybrid search, multi-collection fan-out, aggregation, visual page operations, and
+document-card routing-collection operations.
 @end-summary -->
 
 # vector_db
@@ -14,7 +15,9 @@ making it straightforward to swap implementations without touching call sites.
 Multi-collection search is available via `multi_search()`, which fans out across
 named collections in parallel, deduplicates results by object identity, and
 returns a single ranked list. Visual page operations (used by the visual
-embedding pipeline) are also re-exported here.
+embedding pipeline) and document-card routing operations
+(`ensure_card_collection`, `add_document_cards`, backing the RAPTOR-lite
+document router) are also re-exported here.
 
 ## Contents
 
