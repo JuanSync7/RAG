@@ -18,6 +18,16 @@
 # RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, unioned (flat→descent→lift→routed) and
 # bounded to RAG_DOCUMENT_ROUTING_MAX_CANDIDATES. routed_doc_ids None/empty →
 # byte-identical to pre-routing (soft routing, never a hard filter; design §6.2/§7).
+# run() wires Stage-1 routing (B3) via _route_documents_stage1, gated on
+# RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research: it runs AFTER the
+# query embedding (Stage 3) and BEFORE Stage 4, decomposing the query (C3),
+# routing EACH sub-query over the card index (B1), and unioning the routed
+# doc_ids (reusing the cached query embedding for the identity sub-query). The
+# union feeds _collect_candidates as routed_doc_ids; the single rerank stays the
+# final authority. Disabled / low-confidence / any-failure → routed_doc_ids=None
+# (today's flat path exactly). RAG_DOCUMENT_ROUTING_BOOST (default 0.0) is a
+# reserved tiny tie-break only — pool composition is the mechanism (no
+# post-rerank override).
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -142,9 +152,15 @@ from config.settings import (
     RAG_STAGE_BUDGET_TREE_LIFT_MS,
 )
 from config.settings import (
+    RAG_DOCUMENT_ROUTING_ENABLED,
     RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
     RAG_DOCUMENT_ROUTING_MAX_CANDIDATES,
 )
+# RAPTOR-lite Stage-1 document routing (B3 wiring). Imported into the module
+# namespace so run() can call them directly (and tests can patch them here).
+# Both are SOFT and never raise; the Stage-1 block below is additionally wrapped
+# so any failure degrades to routed_doc_ids=None (pure flat retrieval).
+from src.retrieval.routing import decompose_query, route_documents
 from config.settings import (
     RAG_RERANK_FUSION_ENABLED,
     RAG_RERANK_RRF_K,
@@ -794,6 +810,117 @@ class RAGChain:
                     meta["_anchor_rank"] = ar
             _span.set_attribute("sibling_count", len(siblings))
             return siblings
+
+    def _route_documents_stage1(
+        self,
+        *,
+        processed_query: str,
+        query_embedding,
+        span=None,
+    ) -> Optional[list[str]]:
+        """RAPTOR-lite Stage-1: decompose → route each sub-query → union doc_ids.
+
+        This is the "where do I look?" step (design §3). It runs only when
+        ``RAG_DOCUMENT_ROUTING_ENABLED`` (the caller gates it) and never for
+        deep_research. It is intentionally **soft**:
+
+        * :func:`decompose_query` (C3) is identity unless decomposition is
+          enabled AND the query is a comparison — so ordinary single-doc queries
+          route a single sub-query equal to ``processed_query``;
+        * each sub-query is routed independently via :func:`route_documents`
+          (B1) over the card index, and the routed ``document_id`` values are
+          unioned (de-duped, first-seen order) across sub-queries (design §6.3);
+        * only :class:`RoutingResult` with ``used=True`` contribute — a
+          low-confidence / empty result adds nothing, and if *no* sub-query
+          routed, the result is ``None`` (→ pure flat retrieval).
+
+        The whole body is wrapped in a broad ``try/except`` so Stage-1 can never
+        break ``run()``: any failure degrades to ``None`` (flat path). The
+        returned doc_ids only shape the Stage-4 candidate **pool**
+        (``_collect_candidates``); the reranker stays the final authority and
+        ``RAG_DOCUMENT_ROUTING_BOOST`` (default 0.0) is a reserved tiny tie-break
+        — candidate-pool composition is the mechanism for this slice (no
+        post-rerank score override; design §6.2/§7).
+
+        Args:
+            processed_query: The (sanitised) query whose embedding is already
+                computed and cached.
+            query_embedding: The dense vector for ``processed_query`` — reused
+                verbatim for the identity sub-query so it is **never re-embedded**.
+            span: Optional tracing span for lightweight observability.
+
+        Returns:
+            The unioned routed ``document_id`` list (truthy) when at least one
+            sub-query routed with confidence, otherwise ``None`` (flat fallback).
+        """
+        try:
+            decomp = decompose_query(processed_query)
+            subqueries = [
+                s for s in (decomp.subqueries or []) if isinstance(s, str) and s.strip()
+            ]
+            if not subqueries:
+                # decompose_query is identity-safe, but be defensive.
+                subqueries = [processed_query]
+
+            routed: list[str] = []
+            seen: set[str] = set()
+            routing_used = False
+            for sub in subqueries:
+                # Reuse the already-computed embedding for the identity sub-query
+                # (equal to processed_query) — do NOT re-embed it. Other
+                # sub-queries (from decomposition) are embedded once via the
+                # shared LRU cache helper.
+                if sub == processed_query:
+                    sub_embedding = query_embedding
+                else:
+                    sub_embedding = self._embed_query_cached(sub)
+
+                result = route_documents(sub_embedding, query_text=sub)
+                if not result.used:
+                    continue
+                routing_used = True
+                for doc_id in result.doc_ids:
+                    if doc_id and doc_id not in seen:
+                        seen.add(doc_id)
+                        routed.append(doc_id)
+
+            if span is not None:
+                span.set_attribute("routing_decomposed", bool(decomp.decomposed))
+                span.set_attribute("routing_subquery_count", len(subqueries))
+                span.set_attribute("routing_used", bool(routing_used))
+                span.set_attribute("routed_doc_count", len(routed))
+
+            # Empty union → None so Stage 4 runs the byte-identical flat path.
+            return routed or None
+        except Exception as exc:  # noqa: BLE001 — Stage-1 must never break run().
+            logger.debug(
+                "Stage-1 document routing failed (%s) — falling back to pure "
+                "flat retrieval.",
+                exc,
+            )
+            if span is not None:
+                try:
+                    span.set_attribute("routing_error", str(exc))
+                except Exception:  # pragma: no cover — tracing best-effort.
+                    pass
+            return None
+
+    def _embed_query_cached(self, text: str):
+        """Embed ``text`` via the shared LRU embedding cache (Stage-3 pattern).
+
+        Mirrors the Stage-3 / fallback cache logic so sub-query embeddings
+        (Stage-1 routing) reuse already-computed vectors and respect the same
+        cache bound. Side-effect-light: a cache hit moves the entry to the MRU
+        end; a miss embeds once, stores, and evicts the LRU entry past the cap.
+        """
+        if text in self._embedding_cache:
+            self._embedding_cache.move_to_end(text)
+            return self._embedding_cache[text]
+        embedding = self.embeddings.embed_query(text)
+        self._embedding_cache[text] = embedding
+        if len(self._embedding_cache) > self._embedding_cache_max:
+            self._embedding_cache.popitem(last=False)
+        return embedding
 
     def _collect_candidates(
         self,
@@ -1782,6 +1909,28 @@ class RAGChain:
                         **_decision_to_action_fields(decision),
                     )
 
+            # Stage 3.5: Document routing (RAPTOR-lite Stage-1, B3).
+            # Gated on RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research
+            # (which has its own recursive path and bypasses Stage 4 entirely).
+            # Decompose the query (identity unless decomposition is enabled AND
+            # the query is a comparison), route EACH sub-query over the card index
+            # independently, and union the routed doc_ids into a soft candidate
+            # hint for Stage 4. This NEVER hard-filters: routed_doc_ids only shapes
+            # the candidate pool in _collect_candidates (B2); the single rerank
+            # below stays the final authority (design §6.2/§7). Soft + degrade-to-
+            # flat: when disabled, low-confidence, or on ANY failure here,
+            # routed_doc_ids stays None and Stage 4 runs the byte-identical flat path.
+            routed_doc_ids: Optional[list[str]] = None
+            if RAG_DOCUMENT_ROUTING_ENABLED and not _dr_active:
+                with self.tracer.span(
+                    "retrieval.route_documents", parent=root_span
+                ) as route_span:
+                    routed_doc_ids = self._route_documents_stage1(
+                        processed_query=processed_query,
+                        query_embedding=query_embedding,
+                        span=route_span,
+                    )
+
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
             filters = []
@@ -1824,6 +1973,11 @@ class RAGChain:
                             lift_seed_k=RAG_TREE_LIFT_SEED_K,
                             siblings_per_group=RAG_TREE_LIFT_SIBLINGS,
                             doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+                            # Stage-1 routed-doc hint (B2/B3). None on the
+                            # disabled / low-confidence / failure path → Stage 4
+                            # is byte-identical to pre-routing (soft, never a
+                            # hard filter; design §6.2/§7).
+                            routed_doc_ids=routed_doc_ids,
                         ),
                         policy=self.retry_policy,
                         idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={tree_enabled_effective}",
