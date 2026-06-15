@@ -1,6 +1,6 @@
 # @summary
 # Weaviate document-card collection store for RAPTOR-lite document routing.
-# Exports: ensure_card_collection, add_document_cards
+# Exports: ensure_card_collection, add_document_cards, delete_document_cards
 # Deps: weaviate-client, src.platform.observability
 # @end-summary
 """Weaviate document-card collection store.
@@ -163,3 +163,66 @@ def add_document_cards(
     span.set_attribute("inserted_count", inserted)
     span.end(status="ok")
     return inserted
+
+
+def delete_document_cards(
+    client: weaviate.WeaviateClient,
+    document_ids: list[str],
+    collection: str = "RAGDocumentCards",
+) -> int:
+    """Delete document cards for the given ``document_id`` values (rollback).
+
+    Used by ``commit_node`` rollback when a per-document commit fails after the
+    card write was attempted: it removes the just-written card(s) so a rolled
+    back commit does not leave an orphan card behind.
+
+    Deletion targets each card by its deterministic object UUID
+    (:func:`generate_uuid5` of the ``document_id``) — the same UUID the card was
+    inserted under by :func:`add_document_cards`. This mirrors the card store's
+    own insert-or-replace-by-document_id model exactly (no heavier
+    filter/batch-delete machinery than the node already relies on), and is
+    best-effort per id: a missing card (already gone) is not an error.
+
+    Args:
+        client: Weaviate client handle.
+        document_ids: Document UUIDs whose cards should be removed.
+        collection: Target collection name. Default: ``"RAGDocumentCards"``.
+
+    Returns:
+        Number of cards successfully deleted.
+    """
+    # De-duplicate while preserving order; ignore empty ids.
+    seen: set[str] = set()
+    ids: list[str] = []
+    for raw in document_ids or []:
+        doc_id = str(raw or "")
+        if not doc_id or doc_id in seen:
+            continue
+        seen.add(doc_id)
+        ids.append(doc_id)
+
+    if not ids:
+        return 0
+
+    span = tracer.span(
+        "vector_store.delete_document_cards",
+        {"count": len(ids), "collection": collection},
+    )
+    col = client.collections.get(collection)
+
+    deleted = 0
+    for doc_id in ids:
+        card_uuid = generate_uuid5(doc_id)
+        try:
+            col.data.delete_by_id(card_uuid)
+            deleted += 1
+        except Exception:
+            logger.warning(
+                "Card delete failed for document_id=%r (uuid=%s) in %r.",
+                doc_id, card_uuid, collection, exc_info=True,
+            )
+
+    logger.info("Deleted %d/%d document cards from %r.", deleted, len(ids), collection)
+    span.set_attribute("deleted_count", deleted)
+    span.end(status="ok")
+    return deleted

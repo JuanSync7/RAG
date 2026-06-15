@@ -7,7 +7,7 @@
 #          delete_by_source, delete_by_source_key,
 #          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
 #          ensure_visual_collection, add_visual_documents, delete_visual_by_source_key,
-#          search_visual, ensure_card_collection, add_document_cards,
+#          search_visual, ensure_card_collection, add_document_cards, delete_document_cards,
 #          DocumentRecord, SearchResult, SearchFilter, build_chunk_id
 # Deps: config.settings, src.vector_db.backend, src.vector_db.common.schemas,
 #       src.vector_db.weaviate.store, src.vector_db.weaviate.visual_store,
@@ -46,6 +46,7 @@ from src.vector_db.weaviate import (
 )
 from src.vector_db.weaviate import (
     add_document_cards,
+    delete_document_cards,
     ensure_card_collection,
 )
 
@@ -494,6 +495,7 @@ __all__ = [
     # Document-card collection operations (RAPTOR-lite routing)
     "ensure_card_collection",
     "add_document_cards",
+    "delete_document_cards",
     # Re-exported schemas
     "DocumentRecord",
     "SearchResult",

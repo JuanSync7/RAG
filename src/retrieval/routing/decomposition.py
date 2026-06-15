@@ -4,12 +4,15 @@
 # (DESIGN §6.3/§6.5). Tier-1 (C1) ``regex_decompose`` is the deterministic
 # *fallback*; Tier-2 (C2) ``llm_decompose`` is the glossary-grounded LLM
 # *primary* path (raises ``DecompositionError`` on any failure so the orchestrator
-# can fall back). A later slice (C3) appends ``decompose_query`` (gated
-# orchestrator) to this same module.
-# Exports: regex_decompose, llm_decompose, DecompositionError
+# can fall back). The C3 gated orchestrator ``decompose_query`` lives here too:
+# it gates on RAG_DECOMPOSITION_ENABLED + comparison-intent, runs LLM-primary
+# (regex fallback) per RAG_DECOMPOSITION_LLM_PRIMARY, and NEVER raises —
+# degrading to the identity single-query baseline on any miss/failure.
+# Exports: regex_decompose, llm_decompose, decompose_query, DecompositionError
 # Deps: re (stdlib), src.retrieval.routing.glossary (PROTOCOL_GLOSSARY,
-#   canonicalize_terms — grounding), src.platform.llm (get_llm_provider),
-#   src.common (parse_json_object), config.settings
+#   canonicalize_terms, detect_comparison_intent — gate/grounding),
+#   src.retrieval.routing.schemas (DecompositionResult), src.platform.llm
+#   (get_llm_provider), src.common (parse_json_object), config.settings
 # @end-summary
 """Tier-1 regex comparison-decomposition (fallback only).
 
@@ -76,7 +79,12 @@ from typing import List
 from config import settings
 from src.common import parse_json_object
 from src.platform.llm import get_llm_provider
-from src.retrieval.routing.glossary import PROTOCOL_GLOSSARY, canonicalize_terms
+from src.retrieval.routing.glossary import (
+    PROTOCOL_GLOSSARY,
+    canonicalize_terms,
+    detect_comparison_intent,
+)
+from src.retrieval.routing.schemas import DecompositionResult
 
 logger = logging.getLogger("rag.retrieval.routing.decomposition")
 
@@ -452,3 +460,101 @@ def llm_decompose(query: str, *, timeout: int | None = None) -> List[str]:
 
     raw = _extract_subqueries(payload)
     return _validate_subqueries(raw)
+
+
+# ─── C3 — gated decomposition orchestrator (safe entry point) ───────────────
+
+
+def _tier_succeeded(subqueries: List[str]) -> List[str]:
+    """Return the non-empty sub-queries iff a tier *succeeded* (>= 2 of them).
+
+    A decomposition tier "succeeds" only when it yields at least two non-empty
+    sub-queries. Empty / whitespace-only items are dropped first, so a tier that
+    returned two blank strings is correctly treated as a failure. On failure the
+    list is empty, signalling the orchestrator to fall through.
+    """
+    cleaned = [s for s in subqueries if isinstance(s, str) and s.strip()]
+    return cleaned if len(cleaned) >= 2 else []
+
+
+def decompose_query(query: str) -> DecompositionResult:
+    """Gated decomposition orchestrator — the safe entry point (DESIGN §6.5).
+
+    Ties together the comparison-intent gate and the two decomposition tiers,
+    degrading to the identity baseline on any miss or failure. Precedence:
+
+    1. **Gate (read at call time so config can be monkeypatched):**
+
+       * if ``settings.RAG_DECOMPOSITION_ENABLED`` is False → identity
+         ``DecompositionResult([query])`` (no tier is invoked);
+       * else if :func:`detect_comparison_intent` is False → identity (no tier).
+
+    2. **Tiers (enabled AND comparison-intent only):**
+
+       * if ``settings.RAG_DECOMPOSITION_LLM_PRIMARY`` (default): try
+         :func:`llm_decompose` first; on :class:`DecompositionError` (or any
+         unexpected error) try :func:`regex_decompose`;
+       * else (regex-primary): try :func:`regex_decompose` first; if it does not
+         succeed, try :func:`llm_decompose`.
+
+    3. **Success rule:** a tier succeeds only when it yields **>= 2 non-empty**
+       sub-queries. LLM success → ``method="llm"``; regex success →
+       ``method="regex"``; both with ``decomposed=True``.
+
+    4. **Safe baseline:** if neither tier succeeds → identity
+       ``DecompositionResult([query], method="identity", decomposed=False)``
+       (today's single-query retrieval behaviour).
+
+    This function is the safe entry point and **never raises** — every failure
+    mode (provider error/timeout, unexpected tier exception, bad shape) degrades
+    to a valid :class:`DecompositionResult`.
+
+    Args:
+        query: The raw user query.
+
+    Returns:
+        A :class:`DecompositionResult`. ``method`` is one of ``"identity"``,
+        ``"llm"``, or ``"regex"``; ``decomposed`` is ``True`` only when the query
+        was actually split into >= 2 sub-queries.
+    """
+    identity = DecompositionResult([query], method="identity", decomposed=False)
+
+    # Gate (call-time reads so tests can monkeypatch config.settings).
+    if not settings.RAG_DECOMPOSITION_ENABLED:
+        return identity
+    if not detect_comparison_intent(query):
+        return identity
+
+    def _try_llm() -> List[str]:
+        try:
+            return _tier_succeeded(llm_decompose(query))
+        except DecompositionError as exc:
+            logger.debug("LLM decomposition failed; falling back: %s", exc)
+        except Exception as exc:  # defensive: never let a tier escape
+            logger.debug("LLM decomposition raised unexpectedly: %s", exc)
+        return []
+
+    def _try_regex() -> List[str]:
+        try:
+            return _tier_succeeded(regex_decompose(query))
+        except Exception as exc:  # defensive: regex is pure but never trust it
+            logger.debug("Regex decomposition raised unexpectedly: %s", exc)
+        return []
+
+    if settings.RAG_DECOMPOSITION_LLM_PRIMARY:
+        subs = _try_llm()
+        if subs:
+            return DecompositionResult(subs, method="llm", decomposed=True)
+        subs = _try_regex()
+        if subs:
+            return DecompositionResult(subs, method="regex", decomposed=True)
+    else:
+        subs = _try_regex()
+        if subs:
+            return DecompositionResult(subs, method="regex", decomposed=True)
+        subs = _try_llm()
+        if subs:
+            return DecompositionResult(subs, method="llm", decomposed=True)
+
+    # Neither tier yielded >= 2 sub-queries → safe single-query baseline.
+    return identity
