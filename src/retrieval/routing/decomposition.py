@@ -1,12 +1,15 @@
 # @summary
 # Query decomposition for document routing. Splits a CLEAR comparison query
 # into standalone single-entity sub-queries so each can be routed independently
-# (DESIGN §6.3/§6.5). This slice (C1) implements ONLY the Tier-1 regex
-# *fallback* — a deterministic, pure-function heuristic. Later slices (C2/C3)
-# append ``llm_decompose`` (Tier-2 primary) and ``decompose_query`` (gated
+# (DESIGN §6.3/§6.5). Tier-1 (C1) ``regex_decompose`` is the deterministic
+# *fallback*; Tier-2 (C2) ``llm_decompose`` is the glossary-grounded LLM
+# *primary* path (raises ``DecompositionError`` on any failure so the orchestrator
+# can fall back). A later slice (C3) appends ``decompose_query`` (gated
 # orchestrator) to this same module.
-# Exports: regex_decompose
-# Deps: re (stdlib), src.retrieval.routing.glossary (canonicalize_terms — grounding)
+# Exports: regex_decompose, llm_decompose, DecompositionError
+# Deps: re (stdlib), src.retrieval.routing.glossary (PROTOCOL_GLOSSARY,
+#   canonicalize_terms — grounding), src.platform.llm (get_llm_provider),
+#   src.common (parse_json_object), config.settings
 # @end-summary
 """Tier-1 regex comparison-decomposition (fallback only).
 
@@ -66,10 +69,16 @@ Determinism: pure function, no I/O, no randomness, no global state.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import List
 
-from src.retrieval.routing.glossary import canonicalize_terms
+from config import settings
+from src.common import parse_json_object
+from src.platform.llm import get_llm_provider
+from src.retrieval.routing.glossary import PROTOCOL_GLOSSARY, canonicalize_terms
+
+logger = logging.getLogger("rag.retrieval.routing.decomposition")
 
 
 # ─── Tuning heuristics ──────────────────────────────────────────────────────
@@ -276,3 +285,170 @@ def regex_decompose(query: str) -> List[str]:
 
     # No recognised comparison structure → safe miss.
     return []
+
+
+# ─── Tier-2 — glossary-grounded LLM decomposition (primary) ─────────────────
+
+
+class DecompositionError(Exception):
+    """Signals that LLM (Tier-2) decomposition failed and the caller must fall back.
+
+    Raised by :func:`llm_decompose` on ANY failure mode — provider error,
+    timeout, unparseable response, wrong JSON shape, an out-of-range sub-query
+    count, or a malformed individual sub-query. C2 itself never falls back; the
+    C3 orchestrator catches this and degrades to the regex tier / original query.
+    """
+
+
+# Max characters / words for a single sub-query. The LLM is asked for *short*
+# standalone retrieval queries (one per compared entity), so anything longer is
+# treated as a malformed item (probable prose leakage) → failure.
+_MAX_SUBQUERY_CHARS = 120
+_MAX_SUBQUERY_WORDS = 12
+
+# Small, capped output budget — the response is just a short JSON list. Keep
+# this tight: the decomposer runs on a reasoning model and latency matters.
+_LLM_MAX_TOKENS = 256
+
+# Low temperature for a deterministic, structured extraction task.
+_LLM_TEMPERATURE = 0.0
+
+
+def _render_glossary() -> str:
+    """Render a COMPACT glossary block (canonical name + a couple of aliases).
+
+    Keeps the prompt short (latency-sensitive reasoning model): one line per
+    canonical entity with at most two informal aliases, no descriptions.
+    """
+    lines: list[str] = []
+    for canonical, entry in PROTOCOL_GLOSSARY.items():
+        aliases = entry.get("aliases", [])  # type: ignore[union-attr]
+        alias_hint = ", ".join(str(a) for a in list(aliases)[:2])
+        if alias_hint:
+            lines.append(f"- {canonical} (aka {alias_hint})")
+        else:
+            lines.append(f"- {canonical}")
+    return "\n".join(lines)
+
+
+_SYSTEM_PROMPT = (
+    "You decompose a comparison query into one standalone retrieval sub-query "
+    "per compared entity. Use the provided glossary to map informal terms to "
+    "canonical entities. Return ONLY JSON: {\"subqueries\": [\"...\"]}. "
+    f"{settings.RAG_DECOMPOSITION_MIN_SUBQUERIES}-"
+    f"{settings.RAG_DECOMPOSITION_MAX_SUBQUERIES} items, each a short standalone "
+    "query.\n\nGlossary (canonical entity, informal aliases):\n" + _render_glossary()
+)
+
+
+def _extract_subqueries(payload: dict[str, object]) -> list[object]:
+    """Pull the sub-query list out of the parsed JSON object.
+
+    Accepts ``{"subqueries": [...]}``. Raises :class:`DecompositionError` when
+    the key is missing or its value is not a list. (Bare top-level JSON lists
+    never reach here: ``parse_json_object`` yields ``{}`` for a JSON array, so
+    they are rejected upstream as an empty/missing object.)
+    """
+    if "subqueries" not in payload:
+        raise DecompositionError(
+            "LLM decomposition response missing 'subqueries' key"
+        )
+    raw = payload["subqueries"]
+    if not isinstance(raw, list):
+        raise DecompositionError(
+            f"LLM decomposition 'subqueries' is not a list: {type(raw).__name__}"
+        )
+    return raw
+
+
+def _validate_subqueries(raw: list[object]) -> list[str]:
+    """Validate + clean the sub-query list, or raise :class:`DecompositionError`.
+
+    Enforces: count within ``[RAG_DECOMPOSITION_MIN_SUBQUERIES,
+    RAG_DECOMPOSITION_MAX_SUBQUERIES]``; every item a non-empty string after
+    strip that is "short" (``<= _MAX_SUBQUERY_WORDS`` words and
+    ``<= _MAX_SUBQUERY_CHARS`` chars).
+    """
+    lo = settings.RAG_DECOMPOSITION_MIN_SUBQUERIES
+    hi = settings.RAG_DECOMPOSITION_MAX_SUBQUERIES
+    if not (lo <= len(raw) <= hi):
+        raise DecompositionError(
+            f"LLM decomposition returned {len(raw)} sub-queries; "
+            f"expected {lo}-{hi}"
+        )
+
+    cleaned: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise DecompositionError(
+                f"LLM decomposition sub-query is not a string: {item!r}"
+            )
+        text = item.strip()
+        if not text:
+            raise DecompositionError(
+                "LLM decomposition produced an empty/whitespace sub-query"
+            )
+        if len(text) > _MAX_SUBQUERY_CHARS or len(text.split()) > _MAX_SUBQUERY_WORDS:
+            raise DecompositionError(
+                f"LLM decomposition sub-query too long (not a short query): {text!r}"
+            )
+        cleaned.append(text)
+    return cleaned
+
+
+def llm_decompose(query: str, *, timeout: int | None = None) -> List[str]:
+    """Tier-2 primary: glossary-grounded LLM comparison decomposition.
+
+    Asks the LLM (grounded in :data:`PROTOCOL_GLOSSARY`) to split a comparison
+    query into one *standalone* retrieval sub-query per compared entity, mapping
+    informal terms (e.g. ``"hub-based"`` → CHI) to canonical entities. The
+    prompt is tight and the output capped (the decomposer runs on a reasoning
+    model, so latency is controlled via a short prompt + small ``max_tokens``).
+
+    The response must be a JSON object ``{"subqueries": [...]}`` with
+    ``RAG_DECOMPOSITION_MIN_SUBQUERIES``-``RAG_DECOMPOSITION_MAX_SUBQUERIES``
+    short, non-empty string items. A **bare top-level JSON list is NOT
+    tolerated** (the canonical parser yields ``{}`` for an array, so it is
+    rejected as a missing object).
+
+    On ANY failure — provider error/timeout, unparseable content, wrong shape,
+    out-of-range count, or a malformed item — this raises
+    :class:`DecompositionError` (chaining the provider cause when relevant) so
+    the C3 orchestrator can fall back to the regex tier / original query. C2
+    does NOT implement that fallback itself.
+
+    Args:
+        query: The raw user comparison query.
+        timeout: Optional per-call timeout (seconds). Defaults to
+            ``settings.RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS``.
+
+    Returns:
+        Ordered list of 2-5 cleaned (whitespace-trimmed) standalone sub-queries.
+
+    Raises:
+        DecompositionError: On any provider, parse, shape, or validation failure.
+    """
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": query},
+    ]
+
+    try:
+        response = get_llm_provider().json_completion(
+            messages,
+            temperature=_LLM_TEMPERATURE,
+            max_tokens=_LLM_MAX_TOKENS,
+            timeout=timeout or settings.RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # provider error / timeout
+        logger.debug("LLM decomposition provider call failed: %s", exc)
+        raise DecompositionError("LLM decomposition provider call failed") from exc
+
+    payload = parse_json_object(response.content)
+    if not payload:
+        raise DecompositionError(
+            "LLM decomposition response was empty or unparseable JSON"
+        )
+
+    raw = _extract_subqueries(payload)
+    return _validate_subqueries(raw)

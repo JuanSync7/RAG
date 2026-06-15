@@ -3,9 +3,9 @@
 # Exports: build_embedding_graph
 # Deps: langgraph.graph, src.ingest.embedding.nodes.*, src.ingest.embedding.state
 # Node order: document_storage → chunking → vlm_enrichment → chunk_enrichment →
-#   tree_node_synthesis → metadata_generation → [cross_reference_extraction →]
-#   quality_validation → [cross_document_dedup →] embedding_storage →
-#   visual_embedding → commit → END
+#   tree_node_synthesis → document_card_emission → metadata_generation →
+#   [cross_reference_extraction →] quality_validation →
+#   [cross_document_dedup →] embedding_storage → visual_embedding → commit → END
 # KG ingest is owned by KGWeave: RagWeave dispatches Phase 2b on KG_TASK_QUEUE
 # from the per-document Temporal workflow (see src/ingest/temporal/workflows.py).
 # In-process KG nodes were removed when KGWeave became the canonical KG owner.
@@ -24,6 +24,7 @@ from src.ingest.embedding.nodes import vlm_enrichment_node
 from src.ingest.embedding.nodes import document_storage_node
 from src.ingest.embedding.nodes import cross_reference_extraction_node
 from src.ingest.embedding.nodes import embedding_storage_node
+from src.ingest.embedding.nodes.document_card import document_card_emission_node
 from src.ingest.embedding.nodes import metadata_generation_node
 from src.ingest.embedding.nodes import quality_validation_node
 from src.ingest.embedding.nodes import tree_node_synthesis_node
@@ -37,11 +38,14 @@ def build_embedding_graph(config=None):
 
     Node order:
         document_storage → chunking → vlm_enrichment → chunk_enrichment
-        → metadata_generation → [cross_reference_extraction →]
-        quality_validation → [cross_document_dedup →] embedding_storage
-        → visual_embedding → commit → END
+        → tree_node_synthesis → document_card_emission → metadata_generation
+        → [cross_reference_extraction →] quality_validation
+        → [cross_document_dedup →] embedding_storage → visual_embedding
+        → commit → END
 
     Routing:
+    - document_card_emission: always in graph; short-circuits internally
+      (strict no-op) when ``config.build_document_cards`` is False (default).
     - vlm_enrichment: always in graph; short-circuits internally when
       ``config.vlm_mode != "external"``.
     - cross_reference_extraction: conditional on ``config.enable_cross_reference_extraction``.
@@ -62,6 +66,7 @@ def build_embedding_graph(config=None):
     graph.add_node("vlm_enrichment", vlm_enrichment_node)
     graph.add_node("chunk_enrichment", chunk_enrichment_node)
     graph.add_node("tree_node_synthesis", tree_node_synthesis_node)
+    graph.add_node("document_card_emission", document_card_emission_node)
     graph.add_node("metadata_generation", metadata_generation_node)
     graph.add_node("cross_reference_extraction", cross_reference_extraction_node)
     graph.add_node("quality_validation", quality_validation_node)
@@ -78,7 +83,11 @@ def build_embedding_graph(config=None):
     # short-circuits when config.enable_tree_retrieval_ingest is False, so
     # the disabled-path produces byte-identical chunks to pre-1.2.0 behaviour.
     graph.add_edge("chunk_enrichment", "tree_node_synthesis")
-    graph.add_edge("tree_node_synthesis", "metadata_generation")
+    # document_card_emission is unconditional in the graph; the node itself
+    # short-circuits (strict no-op) when config.build_document_cards is False,
+    # so the disabled-path is byte-identical to pre-feature behaviour.
+    graph.add_edge("tree_node_synthesis", "document_card_emission")
+    graph.add_edge("document_card_emission", "metadata_generation")
     graph.add_conditional_edges(
         "metadata_generation",
         lambda state: (

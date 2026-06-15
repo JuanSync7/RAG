@@ -138,3 +138,11 @@ class EmbeddingPipelineState(TypedDict, total=False):
     """List of DocumentRecord objects staged for Weaviate flush at commit_node."""
     staged_weaviate_delete_old: bool
     """Whether to delete-by-source_key before flushing (update_mode path)."""
+
+    # -- Document-card staging (RAPTOR-lite routing, A3/A4) --
+    staged_card_records: list[Any]
+    """List of routing-only document-card dicts staged by
+    ``document_card_emission_node`` for the card collection. Each carries the
+    card-record contract keys plus a pre-computed ``vector`` (the embedding of
+    ``card_text``). Empty/absent when ``config.build_document_cards`` is False.
+    Flushed to ``config.card_collection`` by ``commit_node`` (A4)."""
