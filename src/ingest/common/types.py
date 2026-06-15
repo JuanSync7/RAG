@@ -10,6 +10,8 @@
 # IngestionConfig new fields (Parser Abstraction Phase 2.2): parser_strategy (str), chunker (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
 # KG ingest is owned by KGWeave; in-pipeline KG extraction/storage nodes were removed.
+# IngestionConfig new fields (Document Routing S0b): build_document_cards (bool), card_llm_summary (bool),
+#   card_max_headings (int), card_collection (str) — mirror config.settings RAG_INGESTION_* / RAG_DOCUMENT_CARD_COLLECTION
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
 # IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
 # IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
@@ -84,6 +86,10 @@ from config.settings import (
     RAG_INGEST_MIN_CHUNK_CHARS,
     RAG_INGEST_MIN_QUALITY_SCORE,
     RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD,
+    RAG_INGESTION_BUILD_DOCUMENT_CARDS,
+    RAG_INGESTION_CARD_LLM_SUMMARY,
+    RAG_INGESTION_CARD_MAX_HEADINGS,
+    RAG_DOCUMENT_CARD_COLLECTION,
 )
 from src.core.embeddings import LocalBGEEmbeddings
 from src.ingest.common.schemas import ProcessedChunk
@@ -287,6 +293,23 @@ class IngestionConfig:
     tree_section_child_snippet_chars: int = 200
     """Per-child snippet size when assembling section text. Truncated head of
     each direct child (or caption + first row for `chunk_type="table"`)."""
+
+    # -- Document cards (RAPTOR-lite routing, DOCUMENT_ROUTING_DESIGN.md §11) --
+    build_document_cards: bool = RAG_INGESTION_BUILD_DOCUMENT_CARDS
+    """When True, ingest emits one routing-only document card per document into
+    `card_collection`. When False (default), card emission is a no-op. Mirrors
+    RAG_INGESTION_BUILD_DOCUMENT_CARDS."""
+    card_llm_summary: bool = RAG_INGESTION_CARD_LLM_SUMMARY
+    """When True, the card text includes an LLM-generated summary. When False
+    (default), card text is title + section headings only (no LLM call).
+    Mirrors RAG_INGESTION_CARD_LLM_SUMMARY."""
+    card_max_headings: int = RAG_INGESTION_CARD_MAX_HEADINGS
+    """Cap on the number of section headings included in a card; guards against
+    xlsx-style documents with hundreds of header rows (§11). Default: 60.
+    Mirrors RAG_INGESTION_CARD_MAX_HEADINGS."""
+    card_collection: str = RAG_DOCUMENT_CARD_COLLECTION
+    """Vector collection for routing-only document cards (NEVER sent to the
+    LLM). Default: "RAGDocumentCards". Mirrors RAG_DOCUMENT_CARD_COLLECTION."""
 
     @property
     def generate_page_images(self) -> bool:

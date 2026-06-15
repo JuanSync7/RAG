@@ -266,6 +266,14 @@ class WeaviateBackend(VectorBackend):
             for v in values[1:]:
                 chain = chain & WeaviateFilter.by_property(f.property).not_equal(v)
             return chain
+        if op == "in":
+            values = list(f.value or [])
+            if not values:
+                return None
+            # `prop is any of [...]` — a single contains_any clause. Mirrors the
+            # empty-set handling of `not_in` (empty → no-op None). Used to
+            # restrict one hybrid search to a SET of document_ids in one query.
+            return WeaviateFilter.by_property(f.property).contains_any(values)
 
         prop = WeaviateFilter.by_property(f.property)
         ops = {
@@ -281,6 +289,6 @@ class WeaviateBackend(VectorBackend):
         if fn is None:
             raise ValueError(
                 f"Unsupported filter operator: {f.operator!r}. "
-                f"Valid operators: {sorted([*ops, 'not_in'])}"
+                f"Valid operators: {sorted([*ops, 'not_in', 'in'])}"
             )
         return fn(f.value)
