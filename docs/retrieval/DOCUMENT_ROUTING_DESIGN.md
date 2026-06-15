@@ -1,6 +1,12 @@
 # Document-Level Routing for RagWeave Retrieval (RAPTOR-lite)
 
-> Status: **Design proposal** (not yet implemented). Target: dev stack first.
+> Status: **Implemented** on branch `feat/raptor-lite-doc-routing` — **gated OFF
+> by default** (all `RAG_DOCUMENT_ROUTING_*`, `RAG_DECOMPOSITION_*`, and
+> `RAG_INGESTION_*_CARD*` flags default to a no-op; with them unset, retrieval is
+> byte-identical to pre-feature behaviour). This document remains the **rationale
+> and design intent**; for the as-built architecture, module layout, config knobs,
+> how-to-enable, extension, and troubleshooting see the engineering guide:
+> [`DOCUMENT_ROUTING_ENGINEERING_GUIDE.md`](DOCUMENT_ROUTING_ENGINEERING_GUIDE.md).
 > Author: drafted with Claude during the 2026-06 dev retrieval-quality investigation.
 
 ## 1. Problem
