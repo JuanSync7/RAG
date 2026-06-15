@@ -12,6 +12,12 @@
 # Weaviate collection without env-var manipulation; resolved value lives on
 # ``self._collection_name`` and is threaded through every internal call site
 # via ``self._resolve_collection()`` (defends against __new__-bypassed init).
+# _collect_candidates optionally accepts routed_doc_ids (RAPTOR-lite document
+# routing, B2): when truthy it adds a 4th candidate source = a hybrid search
+# restricted to the routed docs via the `in` filter, doc-diversity capped to
+# RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, unioned (flat→descent→lift→routed) and
+# bounded to RAG_DOCUMENT_ROUTING_MAX_CANDIDATES. routed_doc_ids None/empty →
+# byte-identical to pre-routing (soft routing, never a hard filter; design §6.2/§7).
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -134,6 +140,10 @@ from config.settings import (
     RAG_TREE_LIFT_SIBLINGS,
     RAG_STAGE_BUDGET_TREE_DESCENT_MS,
     RAG_STAGE_BUDGET_TREE_LIFT_MS,
+)
+from config.settings import (
+    RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
+    RAG_DOCUMENT_ROUTING_MAX_CANDIDATES,
 )
 from config.settings import (
     RAG_RERANK_FUSION_ENABLED,
@@ -800,6 +810,9 @@ class RAGChain:
         lift_seed_k: int,
         siblings_per_group: int,
         doc_diversity_top_per_doc: int,
+        routed_doc_ids: Optional[list[str]] = None,
+        per_doc_leaves: Optional[int] = None,
+        max_candidates: Optional[int] = None,
     ) -> list:
         """Run Stage 4 + (optionally) 4b descent + 4c lift; return merged list.
 
@@ -807,11 +820,42 @@ class RAGChain:
         Tree sub-stages run only when ``tree_enabled`` is True. Descent results
         are doc-diversity capped before merge so one verbose document cannot
         dominate the final candidate pool.
+
+        Document routing (DOCUMENT_ROUTING_DESIGN.md §6.2, §7) — when
+        ``routed_doc_ids`` is a non-empty list, a 4th candidate source is added:
+        a hybrid search restricted to those documents via the ``in`` filter
+        (``SearchFilter("document_id", "in", routed_doc_ids)``), doc-diversity
+        capped to ``per_doc_leaves`` so one routed doc cannot dominate. It is
+        unioned into the SAME dedup loop *after* the existing sources so that:
+
+          - flat results keep first priority, then descent, then lift, then
+            routed (a chunk found by both flat and routed dedupes to the flat
+            entry — first occurrence wins, matching the existing rule);
+          - the routed search NEVER hard-filters the pool — a strong chunk from
+            a non-routed doc still survives via the flat path (design §7).
+
+        After merging, the union is bounded to ``max_candidates`` (truncated,
+        order-preserving; design §6.2 — keep the reranker the final authority).
+        This bound is applied ONLY when routing is active, so the
+        ``routed_doc_ids`` None/empty path is byte-identical to pre-routing.
+
+        ``per_doc_leaves`` / ``max_candidates`` default (when None) to
+        ``RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES`` /
+        ``RAG_DOCUMENT_ROUTING_MAX_CANDIDATES``.
         """
+        routing_active = bool(routed_doc_ids)
+        if per_doc_leaves is None:
+            per_doc_leaves = RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES
+        if max_candidates is None:
+            max_candidates = RAG_DOCUMENT_ROUTING_MAX_CANDIDATES
+
         with self.tracer.span(
             "retrieval.collect_candidates",
             {"tree_enabled": bool(tree_enabled), "search_limit": int(search_limit)},
         ) as _span:
+            _span.set_attribute(
+                "routed_doc_count", len(routed_doc_ids) if routing_active else 0
+            )
             leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
                 schema_present=schema_present
             )
@@ -819,33 +863,65 @@ class RAGChain:
                 bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
             )
 
-            if not tree_enabled:
+            if not tree_enabled and not routing_active:
                 _span.set_attribute("candidate_count", len(leaf_results))
                 return list(leaf_results)
 
-            descent = self._run_tree_descent(
-                bm25_query=bm25_query,
-                query_embedding=query_embedding,
-                alpha=alpha,
-                descent_top_k=descent_top_k,
-                leaves_per_section=leaves_per_section,
-                base_filters=base_filters,
-            )
-            descent_capped = self._apply_doc_diversity_cap(
-                descent, top_per_doc=doc_diversity_top_per_doc
-            )
+            if tree_enabled:
+                descent = self._run_tree_descent(
+                    bm25_query=bm25_query,
+                    query_embedding=query_embedding,
+                    alpha=alpha,
+                    descent_top_k=descent_top_k,
+                    leaves_per_section=leaves_per_section,
+                    base_filters=base_filters,
+                )
+                descent_capped = self._apply_doc_diversity_cap(
+                    descent, top_per_doc=doc_diversity_top_per_doc
+                )
 
-            lift = self._run_tree_lift(
-                seed_results=list(leaf_results),
-                seed_top_k=lift_seed_k,
-                siblings_per_group=siblings_per_group,
-                base_filters=base_filters,
-            )
+                lift = self._run_tree_lift(
+                    seed_results=list(leaf_results),
+                    seed_top_k=lift_seed_k,
+                    siblings_per_group=siblings_per_group,
+                    base_filters=base_filters,
+                )
+            else:
+                descent_capped = []
+                lift = []
 
-            # Merge with uuid (preferred) / text fallback dedup.
+            routed_capped: list = []
+            if routing_active:
+                # Reuse the leaf-only filters and add the routed-doc `in` clause.
+                # The routed limit must cover every routed doc's per-doc share
+                # while staying within the union bound.
+                routed_filters = list(leaf_filters) + [
+                    SearchFilter(
+                        property="document_id",
+                        operator="in",
+                        value=list(routed_doc_ids),
+                    )
+                ]
+                routed_limit = min(
+                    per_doc_leaves * len(routed_doc_ids), max_candidates
+                )
+                routed_results = self._do_search(
+                    bm25_query,
+                    query_embedding,
+                    alpha,
+                    routed_limit,
+                    routed_filters or None,
+                )
+                routed_capped = self._apply_doc_diversity_cap(
+                    routed_results, top_per_doc=per_doc_leaves
+                )
+
+            # Merge with uuid (preferred) / chunk_id / text fallback dedup.
+            # Order: flat → descent → lift → routed (flat keeps priority; a
+            # chunk found by multiple sources dedupes to its first occurrence).
             merged: list = []
             seen: set[str] = set()
-            for src in (leaf_results, descent_capped, lift):
+            for src in (leaf_results, descent_capped, lift, routed_capped):
                 for item in src:
                     meta = getattr(item, "metadata", None) or {}
                     key = (
@@ -858,6 +934,12 @@ class RAGChain:
                         continue
                     seen.add(key)
                     merged.append(item)
+
+            # Bound the union ONLY when routing is active (design §6.2). The
+            # None/empty-routing path is left untouched for byte-identity.
+            if routing_active and len(merged) > max_candidates:
+                merged = merged[:max_candidates]
+
             _span.set_attribute("candidate_count", len(merged))
             return merged
 
