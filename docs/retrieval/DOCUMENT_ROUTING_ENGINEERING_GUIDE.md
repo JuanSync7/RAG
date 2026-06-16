@@ -279,6 +279,35 @@ on but cards absent, retrieval falls back to flat (no error). Enabling
 decomposition without routing simply affects nothing downstream (the routed
 union is what consumes the sub-queries).
 
+### 3.6 Populate cards WITHOUT re-ingest (design §9 step 1)
+
+When the corpus is already in `RAGDocuments` but the source files are **not** on
+the box (so a re-ingest is impossible), build the card index directly from the
+existing title + heading chunks — design §9 rollout step 1 ("build doc cards
+from existing title+heading nodes — no re-ingest").
+
+```bash
+# Inside rag-ingest-worker-dev (picks up RAG_TEI_EMBED_URL,
+# RAG_DOCUMENT_CARD_COLLECTION, RAG_WEAVIATE_* from the container env):
+uv run python scripts/backfill_document_cards.py            # all documents
+uv run python scripts/backfill_document_cards.py --dry-run  # build + count, no write
+uv run python scripts/backfill_document_cards.py --document-ids docA,docB
+```
+
+The tool (`backfill_cards_from_corpus` in
+`src/ingest/embedding/common/card_backfill.py`) enumerates documents via a
+server-side group-by on `document_id` (`iter_document_ids` — no full-object
+scan), fetches each document's chunks cursor-paginated
+(`fetch_chunks_by_document_id` — memory bounded at one page, safe for a
+~475k-object collection), builds the **same** baseline card as the ingest node
+(`build_document_card`, no LLM), embeds `card_text` with the **same** embedder as
+the corpus (`get_embedding_provider(tier="ingest")` → TEI qwen3-embed), and
+upserts via `ensure_card_collection` + `add_document_cards`. It is idempotent
+(deterministic `uuid5(document_id)` upsert) and resumable: a single bad document
+is recorded in the returned `errors` list and skipped, never fatal. This is the
+preferred way to populate cards on the live dev box; re-ingest (§3.5 step 1) is
+only needed when you also want fresh chunks (or the LLM-summary upgrade).
+
 ---
 
 ## 4. Extension steps
@@ -326,7 +355,7 @@ prompt's rendered glossary all derive from this single source of truth.
 
 | Symptom | Likely cause | Resolution |
 | --- | --- | --- |
-| Routing seems to do nothing (results identical to flat) | Card collection empty/absent → `route_documents` returns `used=False`; `routed_doc_ids=None` | Re-ingest with `RAG_INGESTION_BUILD_DOCUMENT_CARDS=true` to populate `RAGDocumentCards`. Confirm the collection has objects. |
+| Routing seems to do nothing (results identical to flat) | Card collection empty/absent → `route_documents` returns `used=False`; `routed_doc_ids=None` | Re-ingest with `RAG_INGESTION_BUILD_DOCUMENT_CARDS=true`, or (when source files are off-box) run `scripts/backfill_document_cards.py` to populate `RAGDocumentCards` from the existing chunks (§3.6). Confirm the collection has objects. |
 | Routing engages but adds the wrong docs | Card text too thin (some docs have few headings) | Consider the LLM-summary upgrade (§4.1); raise `RAG_DOCUMENT_ROUTING_MIN_SCORE` so weak matches fall back to flat. |
 | Routing never engages on strong queries | `RAG_DOCUMENT_ROUTING_MIN_SCORE` too high for the embedding model's score scale | Lower `MIN_SCORE` (default `0.0` accepts any hit). |
 | Comparison query not split | `RAG_DECOMPOSITION_ENABLED=false`, or intent not detected, or both tiers failed | Enable decomposition; check phrasing against `detect_comparison_intent` cues; regex guards intentionally refuse ambiguous splits (a miss is safe). |

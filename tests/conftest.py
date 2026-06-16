@@ -532,6 +532,7 @@ def _install_stub_modules() -> None:
 
         config_mod = types.ModuleType("weaviate.classes.config")
         query_mod = types.ModuleType("weaviate.classes.query")
+        aggregate_mod = types.ModuleType("weaviate.classes.aggregate")
 
         class Configure:
             class Vectorizer:
@@ -574,14 +575,31 @@ def _install_stub_modules() -> None:
             def __init__(self, **kwargs):
                 pass
 
+        class GroupByAggregate:
+            def __init__(self, prop=None, **kwargs):
+                self.prop = prop
+
         config_mod.Configure = Configure
         config_mod.Property = Property
         config_mod.DataType = DataType
         query_mod.Filter = Filter
         query_mod.HybridFusion = HybridFusion
         query_mod.MetadataQuery = MetadataQuery
+        aggregate_mod.GroupByAggregate = GroupByAggregate
         sys.modules["weaviate.classes.config"] = config_mod
         sys.modules["weaviate.classes.query"] = query_mod
+        sys.modules["weaviate.classes.aggregate"] = aggregate_mod
+
+        # Expose ``weaviate.classes`` as a real attribute so call-time access
+        # like ``weaviate.classes.aggregate.GroupByAggregate`` resolves under the
+        # stub (registering the submodules in sys.modules alone does not attach
+        # the ``classes`` attribute to the parent module object).
+        classes_mod = types.ModuleType("weaviate.classes")
+        classes_mod.config = config_mod
+        classes_mod.query = query_mod
+        classes_mod.aggregate = aggregate_mod
+        weaviate.classes = classes_mod
+        sys.modules["weaviate.classes"] = classes_mod
 
     if "colpali_engine" not in sys.modules:
         colpali = types.ModuleType("colpali_engine")
