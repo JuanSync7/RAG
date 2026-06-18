@@ -39,13 +39,14 @@ def _obj(uuid: str, **props):
 
 
 class _FakeQuery:
-    """Records ``fetch_objects`` calls and returns canned, cursor-paginated rows.
+    """Records ``fetch_objects`` calls and returns canned, offset-paginated rows.
 
     ``rows_by_doc`` maps a document_id to the ordered list of fake objects that
     a filter on that document_id should return. ``fetch_objects`` honours the
-    weaviate v4 cursor contract: ``limit`` caps the page and ``after`` resumes
-    from the last returned uuid, so a per-document fetch terminates when a short
-    page comes back.
+    weaviate v4 offset contract: ``limit`` caps the page and ``offset`` skips
+    prior pages, so a per-document fetch terminates when a short page comes back.
+    (Weaviate forbids the cursor ``after`` together with a ``where`` filter, so
+    the read helper paginates by offset.)
     """
 
     def __init__(self, rows_by_doc: dict[str, list], page_size_seen: list[int]):
@@ -53,19 +54,14 @@ class _FakeQuery:
         self._page_size_seen = page_size_seen
         self.calls: list[dict] = []
 
-    def fetch_objects(self, *, filters=None, limit=None, after=None, return_properties=None):
+    def fetch_objects(self, *, filters=None, limit=None, offset=0, return_properties=None):
         # The fake filter carries the document_id it was built for.
         doc_id = getattr(filters, "_doc_id", None)
         rows = list(self._rows_by_doc.get(doc_id, []))
-        self.calls.append({"doc_id": doc_id, "limit": limit, "after": after})
+        self.calls.append({"doc_id": doc_id, "limit": limit, "offset": offset})
         if limit is not None:
             self._page_size_seen.append(limit)
-        start = 0
-        if after is not None:
-            for i, o in enumerate(rows):
-                if o.uuid == after:
-                    start = i + 1
-                    break
+        start = offset or 0
         page = rows[start: start + limit] if limit is not None else rows[start:]
         return SimpleNamespace(objects=page)
 
@@ -387,7 +383,7 @@ class TestBackfillCore:
         # All 5 headings must reach the card despite page size 2.
         written = add.call_args[0][1] if len(add.call_args[0]) > 1 else add.call_args.kwargs["cards"]
         assert len(written[0]["section_headings"]) == 5
-        # Cursor pagination issued > 1 fetch_objects call for the document.
+        # Offset pagination issued > 1 fetch_objects call for the document.
         assert len(client._col.query.calls) >= 3
         assert all(c == 2 for c in client.page_size_seen)
 

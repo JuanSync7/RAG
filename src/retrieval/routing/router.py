@@ -33,7 +33,7 @@ by ``RAGChain._do_search``.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.retrieval.routing.schemas import RoutingResult
 from src.vector_db import search
@@ -49,6 +49,7 @@ _ROUTING_ALPHA = 1.0
 def route_documents(
     query_embedding: list[float],
     *,
+    client: Optional[Any] = None,
     top_n: Optional[int] = None,
     min_score: Optional[float] = None,
     collection: Optional[str] = None,
@@ -98,18 +99,33 @@ def route_documents(
     _unused = RoutingResult(doc_ids=[], scores={}, used=False)
 
     try:
-        # Vector-first search over the card collection. Call shape mirrors
-        # RAGChain._do_search (query, query_embedding, alpha, limit, collection)
-        # but with no client handle — the facade resolves the backend singleton.
-        hits = search(
-            client=None,
-            query=query_text,
-            query_embedding=query_embedding,
-            alpha=_ROUTING_ALPHA,
-            limit=top_n,
-            filters=None,
-            collection=collection,
-        )
+        # Vector-first search over the card collection. A LIVE client is
+        # required — the backend does not self-connect from ``None``. Prefer the
+        # caller's client (e.g. RAGChain's persistent ``_weaviate_client``) so we
+        # reuse its connection; otherwise open a short-lived one via the facade.
+        if client is not None:
+            hits = search(
+                client=client,
+                query=query_text,
+                query_embedding=query_embedding,
+                alpha=_ROUTING_ALPHA,
+                limit=top_n,
+                filters=None,
+                collection=collection,
+            )
+        else:
+            from src.vector_db import get_client
+
+            with get_client() as _ephemeral:
+                hits = search(
+                    client=_ephemeral,
+                    query=query_text,
+                    query_embedding=query_embedding,
+                    alpha=_ROUTING_ALPHA,
+                    limit=top_n,
+                    filters=None,
+                    collection=collection,
+                )
     except Exception as exc:  # noqa: BLE001 — degrade to flat on ANY failure.
         logger.debug(
             "route_documents: card search over %r failed (%s) — "

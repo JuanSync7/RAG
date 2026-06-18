@@ -875,7 +875,9 @@ class RAGChain:
                 else:
                     sub_embedding = self._embed_query_cached(sub)
 
-                result = route_documents(sub_embedding, query_text=sub)
+                result = route_documents(
+                    sub_embedding, client=self._weaviate_client, query_text=sub
+                )
                 if not result.used:
                     continue
                 routing_used = True

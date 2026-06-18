@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import uuid
 from contextlib import contextmanager
 from typing import Optional
@@ -203,6 +204,12 @@ def _connect() -> weaviate.WeaviateClient:
                 host=RAG_WEAVIATE_HOST,
                 port=RAG_WEAVIATE_HTTP_PORT,
                 grpc_port=RAG_WEAVIATE_GRPC_PORT,
+                # Opt-in skip of startup health-checks: needed when reaching a
+                # remote Weaviate over an SSH tunnel / LB where the gRPC readiness
+                # probe can't complete. Default off → unchanged local behavior.
+                skip_init_checks=os.environ.get(
+                    "RAG_WEAVIATE_SKIP_INIT_CHECKS", "false"
+                ).lower() in ("true", "1", "yes"),
             )
         return weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
 
@@ -935,15 +942,27 @@ def fetch_chunks_by_document_id(
     )
     col = client.collections.get(collection)
     flt = Filter.by_property("document_id").equal(document_id)
+    # Only the fields a routing card needs — NOT the (large) chunk `text`. Keeps
+    # the payload tiny so big docs page quickly even over a slow/tunneled link.
+    card_props = [
+        "document_id", "title", "source", "source_key",
+        "heading_path", "heading", "section_path", "node_kind",
+    ]
     documents: list[dict] = []
-    after: Optional[str] = None
+    # Offset pagination (NOT the cursor `after`): Weaviate forbids combining the
+    # cursor with a `where` filter ("cursor api: where cannot be set with after").
+    # offset+limit IS allowed with a filter; per-document chunk counts sit well
+    # under the QUERY_MAXIMUM_RESULTS offset ceiling.
+    offset = 0
     while True:
-        response = col.query.fetch_objects(filters=flt, limit=page_size, after=after)
+        response = col.query.fetch_objects(
+            filters=flt, limit=page_size, offset=offset, return_properties=card_props
+        )
         objects = list(getattr(response, "objects", []) or [])
         for obj in objects:
             props = obj.properties or {}
             documents.append({
-                "text": props.get("text", ""),
+                "text": "",
                 "metadata": {
                     "document_id": props.get("document_id", ""),
                     "title": props.get("title", ""),
@@ -958,10 +977,7 @@ def fetch_chunks_by_document_id(
             })
         if len(objects) < page_size:
             break
-        last_uuid = str(objects[-1].uuid) if getattr(objects[-1], "uuid", None) else None
-        if not last_uuid:
-            break  # cannot advance the cursor — stop rather than loop forever.
-        after = last_uuid
+        offset += page_size
     span.set_attribute("result_count", len(documents))
     span.end(status="ok")
     return documents
