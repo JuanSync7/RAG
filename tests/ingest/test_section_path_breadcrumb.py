@@ -112,6 +112,25 @@ def test_same_level_back_to_back_headings_nest_when_no_intervening_content() -> 
     assert paths["#/tables/0"] == "Bit Field Details > CTRL Register Bits"
 
 
+def test_three_same_level_siblings_no_fabricated_ancestor() -> None:
+    """Three same-level headings with no intervening content (a doc too small to
+    trip the flat-outline gate, which needs >=4) must NOT leave the first sibling
+    as a fabricated ancestor of the third. Pre-fix the breadcrumb was 'H1 > H3'
+    (H2 dropped, H1 invented); it must be just 'H3'.
+
+    Regression for audit F2-walker-samelevel-2to3-heading-wrong-path. The
+    2-heading implicit-nest (mis-leveled parent/child, prior test) is preserved.
+    """
+    doc = _Doc([
+        _h("Section 1", 2),
+        _h("Section 2", 2),
+        _h("Section 3", 2),
+        _table("#/tables/0"),
+    ])
+    paths = _resolve_table_section_paths(doc)
+    assert paths["#/tables/0"] == "Section 3"
+
+
 def test_flat_outline_many_same_level_headings_do_not_stack() -> None:
     """Real datasheets emit dozens of consecutive same-level headings with no
     body items between them (page breaks, captions, etc. don't register as

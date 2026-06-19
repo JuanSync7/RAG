@@ -1035,7 +1035,16 @@ def _resolve_table_section_paths(docling_document: Any) -> dict[str, str]:
                     # have already implicitly nested once at this level
                     # (cap implicit nesting at one frame).
                     if flat_outline or top_had_content or same_level_run >= 2:
-                        stack.pop()
+                        # Collapse the ENTIRE same-level run, not just the top
+                        # frame. Popping only one would leave the FIRST sibling as
+                        # a fabricated ancestor of the new heading: three same-level
+                        # siblings H1,H2,H3 would yield "H1 > H3" (H2 dropped, H1
+                        # invented) instead of "H3" (audit
+                        # F2-walker-samelevel-2to3-heading-wrong-path). The 2-heading
+                        # implicit-nest (mis-leveled parent/child) never reaches here
+                        # (same_level_run==1 and no content), so it is preserved.
+                        while stack and stack[-1][0] == level:
+                            stack.pop()
                 stack.append([level, text, False])
                 # Belt-and-suspenders sanity cap: keep the deepest frames
                 # (most specific context wins). Catches pathological inputs
