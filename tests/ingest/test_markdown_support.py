@@ -92,7 +92,9 @@ def test_semantic_split_falls_back_when_embedder_returns_none_rows():
     """Live-blocker regression: TEI bge-m3 ONNX null vectors must NOT crash
     the chunker. Expected behaviour: graceful fallback to plain sentences."""
     text = "Hello world. This is a test. Final sentence."
-    result = _semantic_split(text, _AllNoneEmbedder())
+    # min_chars=0 disables the small-segment coalescing pass so we test the raw
+    # fallback (coalescing is covered by tests/ingest/test_chunk_coalesce.py).
+    result = _semantic_split(text, _AllNoneEmbedder(), min_chars=0)
     # Falls back to plain sentence list, not a TypeError.
     assert isinstance(result, list)
     assert len(result) >= 2
@@ -101,14 +103,14 @@ def test_semantic_split_falls_back_when_embedder_returns_none_rows():
 
 def test_semantic_split_falls_back_when_embedder_returns_nan_rows():
     text = "Hello world. This is a test. Final sentence."
-    result = _semantic_split(text, _AllNaNEmbedder())
+    result = _semantic_split(text, _AllNaNEmbedder(), min_chars=0)
     assert isinstance(result, list)
     assert len(result) >= 2
 
 
 def test_semantic_split_still_splits_on_healthy_embedder():
     text = "Alpha sentence. Beta sentence. Gamma sentence. Delta sentence."
-    result = _semantic_split(text, _HealthyEmbedder(), threshold=0.5)
+    result = _semantic_split(text, _HealthyEmbedder(), threshold=0.5, min_chars=0)
     # Healthy path: anti-parallel rows force at least one split.
     assert isinstance(result, list)
     assert len(result) >= 2
@@ -295,7 +297,7 @@ def test_mock_semantic_split_groups_similar_sentences():
     v3 = np.array([0.0, 0.0, 1.0])    # very different from v2
     mock_embedder.encode_sentences.return_value = np.array([v1, v2, v3])
 
-    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5)
+    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5, min_chars=0)
     # sim(v1, v2) ≈ 0.99 (above threshold) → group
     # sim(v2, v3) ≈ 0.0 (below threshold) → split
     assert len(result) == 2
@@ -311,7 +313,7 @@ def test_mock_semantic_split_splits_all_dissimilar():
     v3 = np.array([0.0, 0.0, 1.0])
     mock_embedder.encode_sentences.return_value = np.array([v1, v2, v3])
 
-    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5)
+    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5, min_chars=0)
     assert len(result) == 3
 
 

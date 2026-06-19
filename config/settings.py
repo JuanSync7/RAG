@@ -112,6 +112,15 @@ RETRIEVAL_ENFORCE_CONFIG_FLOOR = os.environ.get(
 # matters for the char-window fallback path.
 CHUNK_SIZE = 3500
 CHUNK_OVERLAP = 350
+# Minimum chunk size (chars) for the markdown/semantic chunker's coalescing
+# pass. Semantic chunking splits a section wherever consecutive-sentence cosine
+# drops below RAG_SEMANTIC_THRESHOLD; on heterogeneous, table-dense content
+# (e.g. ARM spec coherency tables) nearly every adjacent pair is dissimilar, so
+# without a floor it emits one tiny chunk per sentence — one CHI spec section
+# exploded to 13,758 ~90-char fragments vs 1,488 clean chunks non-semantic.
+# Adjacent sub-min segments are merged (up to CHUNK_SIZE) so no sub-min chunk is
+# emitted unless it is the only content of its section.
+MIN_CHUNK_CHARS = int(os.environ.get("RAG_MIN_CHUNK_CHARS", "512"))
 
 # --- Query Processing (LangGraph) ---
 QUERY_CONFIDENCE_THRESHOLD = float(

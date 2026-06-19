@@ -27,6 +27,7 @@ from langchain_text_splitters import (
 from config.settings import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
+    MIN_CHUNK_CHARS,
     SEMANTIC_CHUNKING_ENABLED,
     SEMANTIC_SIMILARITY_THRESHOLD,
 )
@@ -48,8 +49,13 @@ _WIKI_HEADING_RE = re.compile(
     r"^\s*(\={2,})\s*(.*?)\s*\={2,}\s*$",
     re.MULTILINE,
 )
+# NOTE: the title group must NOT include a literal space inside its character
+# class — a space matchable by both the class AND the inter-word ``\s+`` makes
+# the pattern ambiguous and triggers catastrophic backtracking on long
+# non-matching lines (a 1.2MB ARM CHI spec hung heading normalization for
+# minutes). Word separation is handled solely by the ``(?:\s+...)*`` group.
 _NUMBERED_HEADING_RE = re.compile(
-    r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z &/()\-]+(?:\s+[A-Za-z][A-Za-z &/()\-]*)*)$",
+    r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z&/()\-]*(?:\s+[A-Za-z][A-Za-z&/()\-]*)*)$",
     re.MULTILINE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+|\n\n+')
@@ -157,15 +163,57 @@ def _embeddings_are_unusable(embeddings: object) -> bool:
     return False
 
 
+def _coalesce_segments(
+    segments: list[str],
+    min_chars: int = MIN_CHUNK_CHARS,
+    max_chars: int = CHUNK_SIZE,
+) -> list[str]:
+    """Merge adjacent segments so no emitted segment is smaller than
+    ``min_chars`` unless it cannot be merged without exceeding ``max_chars``.
+
+    Order-preserving. This is the floor that prevents semantic/sentence
+    splitting from emitting a flood of tiny fragments: a sub-``min_chars``
+    buffer keeps absorbing following segments until it reaches ``min_chars`` or
+    the next segment would push it past ``max_chars``. A trailing sub-min
+    buffer is folded back into the previous segment when there is room.
+    """
+    if min_chars <= 0:
+        return [s for s in segments if s.strip()]
+    out: list[str] = []
+    buf = ""
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if not buf:
+            buf = seg
+        elif len(buf) < min_chars and len(buf) + 1 + len(seg) <= max_chars:
+            buf = f"{buf} {seg}"
+        else:
+            out.append(buf)
+            buf = seg
+    if buf:
+        if out and len(buf) < min_chars and len(out[-1]) + 1 + len(buf) <= max_chars:
+            out[-1] = f"{out[-1]} {buf}"
+        else:
+            out.append(buf)
+    return out
+
+
 def _semantic_split(
     text: str,
     embedder,
     threshold: float = SEMANTIC_SIMILARITY_THRESHOLD,
+    min_chars: int = MIN_CHUNK_CHARS,
+    max_chars: int = CHUNK_SIZE,
 ) -> list[str]:
     """Split text into semantically coherent chunks.
 
     Embeds each sentence, computes cosine similarity between consecutive
-    sentences, and splits where similarity drops below threshold.
+    sentences, and splits where similarity drops below threshold. A final
+    coalescing pass (``_coalesce_segments``) merges undersized adjacent
+    segments so heterogeneous, table-dense content cannot fragment into a
+    flood of single-sentence chunks.
     """
     if embedder is None:
         return [text]
@@ -179,7 +227,7 @@ def _semantic_split(
         embeddings = embedder.encode_sentences(sentences)
     except Exception:
         logger.debug("Semantic sentence embedding failed; falling back to plain sentences", exc_info=True)
-        return sentences
+        return _coalesce_segments(sentences, min_chars, max_chars)
 
     # Defensive: an embedder may return an array of ``None`` (or NaN-only) rows
     # when the upstream service is misconfigured (e.g. TEI bge-m3 ONNX yielding
@@ -194,7 +242,7 @@ def _semantic_split(
             "Semantic chunking embedder returned unusable vectors "
             "(None/NaN rows or shape mismatch); falling back to plain sentences."
         )
-        return sentences
+        return _coalesce_segments(sentences, min_chars, max_chars)
 
     # Cosine similarity between consecutive sentences (dot product on normalized vectors)
     try:
@@ -210,7 +258,7 @@ def _semantic_split(
             "embedding rows; falling back to plain sentences.",
             exc_info=True,
         )
-        return sentences
+        return _coalesce_segments(sentences, min_chars, max_chars)
 
     # Split at points where similarity drops below threshold
     chunks = []
@@ -226,7 +274,7 @@ def _semantic_split(
     if current_group:
         chunks.append(" ".join(current_group))
 
-    return chunks
+    return _coalesce_segments(chunks, min_chars, max_chars)
 
 
 def chunk_markdown(
