@@ -12,6 +12,22 @@
 # Weaviate collection without env-var manipulation; resolved value lives on
 # ``self._collection_name`` and is threaded through every internal call site
 # via ``self._resolve_collection()`` (defends against __new__-bypassed init).
+# _collect_candidates optionally accepts routed_doc_ids (RAPTOR-lite document
+# routing, B2): when truthy it adds a 4th candidate source = a hybrid search
+# restricted to the routed docs via the `in` filter, doc-diversity capped to
+# RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, unioned (flat→descent→lift→routed) and
+# bounded to RAG_DOCUMENT_ROUTING_MAX_CANDIDATES. routed_doc_ids None/empty →
+# byte-identical to pre-routing (soft routing, never a hard filter; design §6.2/§7).
+# run() wires Stage-1 routing (B3) via _route_documents_stage1, gated on
+# RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research: it runs AFTER the
+# query embedding (Stage 3) and BEFORE Stage 4, decomposing the query (C3),
+# routing EACH sub-query over the card index (B1), and unioning the routed
+# doc_ids (reusing the cached query embedding for the identity sub-query). The
+# union feeds _collect_candidates as routed_doc_ids; the single rerank stays the
+# final authority. Disabled / low-confidence / any-failure → routed_doc_ids=None
+# (today's flat path exactly). RAG_DOCUMENT_ROUTING_BOOST (default 0.0) is a
+# reserved tiny tie-break only — pool composition is the mechanism (no
+# post-rerank override).
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -139,6 +155,16 @@ from config.settings import (
 from config.settings import (
     RERANK_MIN_CHARS,
     RETRIEVAL_ENFORCE_CONFIG_FLOOR,
+    RAG_DOCUMENT_ROUTING_ENABLED,
+    RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
+    RAG_DOCUMENT_ROUTING_MAX_CANDIDATES,
+)
+# RAPTOR-lite Stage-1 document routing (B3 wiring). Imported into the module
+# namespace so run() can call them directly (and tests can patch them here).
+# Both are SOFT and never raise; the Stage-1 block below is additionally wrapped
+# so any failure degrades to routed_doc_ids=None (pure flat retrieval).
+from src.retrieval.routing import decompose_query, route_documents
+from config.settings import (
     RAG_RERANK_FUSION_ENABLED,
     RAG_RERANK_RRF_K,
     RAG_RERANK_RRF_LAMBDA,
@@ -823,6 +849,119 @@ class RAGChain:
             _span.set_attribute("sibling_count", len(siblings))
             return siblings
 
+    def _route_documents_stage1(
+        self,
+        *,
+        processed_query: str,
+        query_embedding,
+        span=None,
+    ) -> Optional[list[str]]:
+        """RAPTOR-lite Stage-1: decompose → route each sub-query → union doc_ids.
+
+        This is the "where do I look?" step (design §3). It runs only when
+        ``RAG_DOCUMENT_ROUTING_ENABLED`` (the caller gates it) and never for
+        deep_research. It is intentionally **soft**:
+
+        * :func:`decompose_query` (C3) is identity unless decomposition is
+          enabled AND the query is a comparison — so ordinary single-doc queries
+          route a single sub-query equal to ``processed_query``;
+        * each sub-query is routed independently via :func:`route_documents`
+          (B1) over the card index, and the routed ``document_id`` values are
+          unioned (de-duped, first-seen order) across sub-queries (design §6.3);
+        * only :class:`RoutingResult` with ``used=True`` contribute — a
+          low-confidence / empty result adds nothing, and if *no* sub-query
+          routed, the result is ``None`` (→ pure flat retrieval).
+
+        The whole body is wrapped in a broad ``try/except`` so Stage-1 can never
+        break ``run()``: any failure degrades to ``None`` (flat path). The
+        returned doc_ids only shape the Stage-4 candidate **pool**
+        (``_collect_candidates``); the reranker stays the final authority and
+        ``RAG_DOCUMENT_ROUTING_BOOST`` (default 0.0) is a reserved tiny tie-break
+        — candidate-pool composition is the mechanism for this slice (no
+        post-rerank score override; design §6.2/§7).
+
+        Args:
+            processed_query: The (sanitised) query whose embedding is already
+                computed and cached.
+            query_embedding: The dense vector for ``processed_query`` — reused
+                verbatim for the identity sub-query so it is **never re-embedded**.
+            span: Optional tracing span for lightweight observability.
+
+        Returns:
+            The unioned routed ``document_id`` list (truthy) when at least one
+            sub-query routed with confidence, otherwise ``None`` (flat fallback).
+        """
+        try:
+            decomp = decompose_query(processed_query)
+            subqueries = [
+                s for s in (decomp.subqueries or []) if isinstance(s, str) and s.strip()
+            ]
+            if not subqueries:
+                # decompose_query is identity-safe, but be defensive.
+                subqueries = [processed_query]
+
+            routed: list[str] = []
+            seen: set[str] = set()
+            routing_used = False
+            for sub in subqueries:
+                # Reuse the already-computed embedding for the identity sub-query
+                # (equal to processed_query) — do NOT re-embed it. Other
+                # sub-queries (from decomposition) are embedded once via the
+                # shared LRU cache helper.
+                if sub == processed_query:
+                    sub_embedding = query_embedding
+                else:
+                    sub_embedding = self._embed_query_cached(sub)
+
+                result = route_documents(
+                    sub_embedding, client=self._weaviate_client, query_text=sub
+                )
+                if not result.used:
+                    continue
+                routing_used = True
+                for doc_id in result.doc_ids:
+                    if doc_id and doc_id not in seen:
+                        seen.add(doc_id)
+                        routed.append(doc_id)
+
+            if span is not None:
+                span.set_attribute("routing_decomposed", bool(decomp.decomposed))
+                span.set_attribute("routing_subquery_count", len(subqueries))
+                span.set_attribute("routing_used", bool(routing_used))
+                span.set_attribute("routed_doc_count", len(routed))
+
+            # Empty union → None so Stage 4 runs the byte-identical flat path.
+            return routed or None
+        except Exception as exc:  # noqa: BLE001 — Stage-1 must never break run().
+            logger.debug(
+                "Stage-1 document routing failed (%s) — falling back to pure "
+                "flat retrieval.",
+                exc,
+            )
+            if span is not None:
+                try:
+                    span.set_attribute("routing_error", str(exc))
+                except Exception:  # pragma: no cover — tracing best-effort.
+                    pass
+            return None
+
+    def _embed_query_cached(self, text: str):
+        """Embed ``text`` via the shared LRU embedding cache (Stage-3 pattern).
+
+        Mirrors the Stage-3 / fallback cache logic so sub-query embeddings
+        (Stage-1 routing) reuse already-computed vectors and respect the same
+        cache bound. Side-effect-light: a cache hit moves the entry to the MRU
+        end; a miss embeds once, stores, and evicts the LRU entry past the cap.
+        """
+        if text in self._embedding_cache:
+            self._embedding_cache.move_to_end(text)
+            return self._embedding_cache[text]
+        embedding = self.embeddings.embed_query(text)
+        self._embedding_cache[text] = embedding
+        if len(self._embedding_cache) > self._embedding_cache_max:
+            self._embedding_cache.popitem(last=False)
+        return embedding
+
     def _collect_candidates(
         self,
         *,
@@ -838,6 +977,9 @@ class RAGChain:
         lift_seed_k: int,
         siblings_per_group: int,
         doc_diversity_top_per_doc: int,
+        routed_doc_ids: Optional[list[str]] = None,
+        per_doc_leaves: Optional[int] = None,
+        max_candidates: Optional[int] = None,
     ) -> list:
         """Run Stage 4 + (optionally) 4b descent + 4c lift; return merged list.
 
@@ -845,11 +987,42 @@ class RAGChain:
         Tree sub-stages run only when ``tree_enabled`` is True. Descent results
         are doc-diversity capped before merge so one verbose document cannot
         dominate the final candidate pool.
+
+        Document routing (DOCUMENT_ROUTING_DESIGN.md §6.2, §7) — when
+        ``routed_doc_ids`` is a non-empty list, a 4th candidate source is added:
+        a hybrid search restricted to those documents via the ``in`` filter
+        (``SearchFilter("document_id", "in", routed_doc_ids)``), doc-diversity
+        capped to ``per_doc_leaves`` so one routed doc cannot dominate. It is
+        unioned into the SAME dedup loop *after* the existing sources so that:
+
+          - flat results keep first priority, then descent, then lift, then
+            routed (a chunk found by both flat and routed dedupes to the flat
+            entry — first occurrence wins, matching the existing rule);
+          - the routed search NEVER hard-filters the pool — a strong chunk from
+            a non-routed doc still survives via the flat path (design §7).
+
+        After merging, the union is bounded to ``max_candidates`` (truncated,
+        order-preserving; design §6.2 — keep the reranker the final authority).
+        This bound is applied ONLY when routing is active, so the
+        ``routed_doc_ids`` None/empty path is byte-identical to pre-routing.
+
+        ``per_doc_leaves`` / ``max_candidates`` default (when None) to
+        ``RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES`` /
+        ``RAG_DOCUMENT_ROUTING_MAX_CANDIDATES``.
         """
+        routing_active = bool(routed_doc_ids)
+        if per_doc_leaves is None:
+            per_doc_leaves = RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES
+        if max_candidates is None:
+            max_candidates = RAG_DOCUMENT_ROUTING_MAX_CANDIDATES
+
         with self.tracer.span(
             "retrieval.collect_candidates",
             {"tree_enabled": bool(tree_enabled), "search_limit": int(search_limit)},
         ) as _span:
+            _span.set_attribute(
+                "routed_doc_count", len(routed_doc_ids) if routing_active else 0
+            )
             leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
                 schema_present=schema_present
             )
@@ -857,33 +1030,65 @@ class RAGChain:
                 bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
             )
 
-            if not tree_enabled:
+            if not tree_enabled and not routing_active:
                 _span.set_attribute("candidate_count", len(leaf_results))
                 return list(leaf_results)
 
-            descent = self._run_tree_descent(
-                bm25_query=bm25_query,
-                query_embedding=query_embedding,
-                alpha=alpha,
-                descent_top_k=descent_top_k,
-                leaves_per_section=leaves_per_section,
-                base_filters=base_filters,
-            )
-            descent_capped = self._apply_doc_diversity_cap(
-                descent, top_per_doc=doc_diversity_top_per_doc
-            )
+            if tree_enabled:
+                descent = self._run_tree_descent(
+                    bm25_query=bm25_query,
+                    query_embedding=query_embedding,
+                    alpha=alpha,
+                    descent_top_k=descent_top_k,
+                    leaves_per_section=leaves_per_section,
+                    base_filters=base_filters,
+                )
+                descent_capped = self._apply_doc_diversity_cap(
+                    descent, top_per_doc=doc_diversity_top_per_doc
+                )
 
-            lift = self._run_tree_lift(
-                seed_results=list(leaf_results),
-                seed_top_k=lift_seed_k,
-                siblings_per_group=siblings_per_group,
-                base_filters=base_filters,
-            )
+                lift = self._run_tree_lift(
+                    seed_results=list(leaf_results),
+                    seed_top_k=lift_seed_k,
+                    siblings_per_group=siblings_per_group,
+                    base_filters=base_filters,
+                )
+            else:
+                descent_capped = []
+                lift = []
 
-            # Merge with uuid (preferred) / text fallback dedup.
+            routed_capped: list = []
+            if routing_active:
+                # Reuse the leaf-only filters and add the routed-doc `in` clause.
+                # The routed limit must cover every routed doc's per-doc share
+                # while staying within the union bound.
+                routed_filters = list(leaf_filters) + [
+                    SearchFilter(
+                        property="document_id",
+                        operator="in",
+                        value=list(routed_doc_ids),
+                    )
+                ]
+                routed_limit = min(
+                    per_doc_leaves * len(routed_doc_ids), max_candidates
+                )
+                routed_results = self._do_search(
+                    bm25_query,
+                    query_embedding,
+                    alpha,
+                    routed_limit,
+                    routed_filters or None,
+                )
+                routed_capped = self._apply_doc_diversity_cap(
+                    routed_results, top_per_doc=per_doc_leaves
+                )
+
+            # Merge with uuid (preferred) / chunk_id / text fallback dedup.
+            # Order: flat → descent → lift → routed (flat keeps priority; a
+            # chunk found by multiple sources dedupes to its first occurrence).
             merged: list = []
             seen: set[str] = set()
-            for src in (leaf_results, descent_capped, lift):
+            for src in (leaf_results, descent_capped, lift, routed_capped):
                 for item in src:
                     meta = getattr(item, "metadata", None) or {}
                     key = (
@@ -896,6 +1101,12 @@ class RAGChain:
                         continue
                     seen.add(key)
                     merged.append(item)
+
+            # Bound the union ONLY when routing is active (design §6.2). The
+            # None/empty-routing path is left untouched for byte-identity.
+            if routing_active and len(merged) > max_candidates:
+                merged = merged[:max_candidates]
+
             _span.set_attribute("candidate_count", len(merged))
             return merged
 
@@ -1746,6 +1957,28 @@ class RAGChain:
                         **_decision_to_action_fields(decision),
                     )
 
+            # Stage 3.5: Document routing (RAPTOR-lite Stage-1, B3).
+            # Gated on RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research
+            # (which has its own recursive path and bypasses Stage 4 entirely).
+            # Decompose the query (identity unless decomposition is enabled AND
+            # the query is a comparison), route EACH sub-query over the card index
+            # independently, and union the routed doc_ids into a soft candidate
+            # hint for Stage 4. This NEVER hard-filters: routed_doc_ids only shapes
+            # the candidate pool in _collect_candidates (B2); the single rerank
+            # below stays the final authority (design §6.2/§7). Soft + degrade-to-
+            # flat: when disabled, low-confidence, or on ANY failure here,
+            # routed_doc_ids stays None and Stage 4 runs the byte-identical flat path.
+            routed_doc_ids: Optional[list[str]] = None
+            if RAG_DOCUMENT_ROUTING_ENABLED and not _dr_active:
+                with self.tracer.span(
+                    "retrieval.route_documents", parent=root_span
+                ) as route_span:
+                    routed_doc_ids = self._route_documents_stage1(
+                        processed_query=processed_query,
+                        query_embedding=query_embedding,
+                        span=route_span,
+                    )
+
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
             filters = []
@@ -1788,6 +2021,11 @@ class RAGChain:
                             lift_seed_k=RAG_TREE_LIFT_SEED_K,
                             siblings_per_group=RAG_TREE_LIFT_SIBLINGS,
                             doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+                            # Stage-1 routed-doc hint (B2/B3). None on the
+                            # disabled / low-confidence / failure path → Stage 4
+                            # is byte-identical to pre-routing (soft, never a
+                            # hard filter; design §6.2/§7).
+                            routed_doc_ids=routed_doc_ids,
                         ),
                         policy=self.retry_policy,
                         idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={tree_enabled_effective}",

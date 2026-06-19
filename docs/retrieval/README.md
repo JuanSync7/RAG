@@ -21,6 +21,9 @@ Engineering documentation for the AION RAG retrieval pipeline. The pipeline is s
 | --- | --- |
 | `RETRIEVAL_SPEC_SUMMARY.md` | Concise summary spanning both query and generation specs |
 | `RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md` | One-page onboarding checklist for new engineers |
+| `DOCUMENT_ROUTING_DESIGN.md` | RAPTOR-lite document-routing design / rationale (implemented, gated OFF by default) |
+| `DOCUMENT_ROUTING_ENGINEERING_GUIDE.md` | As-built document-routing guide: architecture, flow, config keys, how-to-enable, extension, troubleshooting |
+| `DOCUMENT_ROUTING_IMPLEMENTATION_PLAN.md` | The slice plan the routing feature was built from |
 
 ## Key Starting Points
 

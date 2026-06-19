@@ -8,6 +8,7 @@
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
 #          delete_documents_by_staging_batch, get_source_hash,
+#          iter_document_ids, fetch_chunks_by_document_id,
 #          aggregate_by_source, get_collection_stats, list_collections,
 #          update_chunk_content, TABLE_AWARE_PROPERTIES
 # Deps: weaviate, config.settings, src.platform.observability
@@ -25,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import uuid
 from contextlib import contextmanager
 from typing import Optional
@@ -202,6 +204,12 @@ def _connect() -> weaviate.WeaviateClient:
                 host=RAG_WEAVIATE_HOST,
                 port=RAG_WEAVIATE_HTTP_PORT,
                 grpc_port=RAG_WEAVIATE_GRPC_PORT,
+                # Opt-in skip of startup health-checks: needed when reaching a
+                # remote Weaviate over an SSH tunnel / LB where the gRPC readiness
+                # probe can't complete. Default off → unchanged local behavior.
+                skip_init_checks=os.environ.get(
+                    "RAG_WEAVIATE_SKIP_INIT_CHECKS", "false"
+                ).lower() in ("true", "1", "yes"),
             )
         return weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
 
@@ -859,6 +867,120 @@ def fetch_chunks_by_parent_section(
     except Exception:
         span.end(status="error")
         raise
+
+
+def iter_document_ids(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+):
+    """Yield each distinct ``document_id`` present in ``collection``.
+
+    Uses the same server-side group-by aggregation idiom as
+    :func:`aggregate_by_source` (which groups on ``source_key``) but groups on
+    ``document_id`` instead. The grouping happens entirely on the Weaviate
+    server — there is no client-side full-object scan — so this is the
+    lightest correct way to enumerate documents in a large (e.g. 475k-object)
+    chunk collection. Empty document_ids are skipped.
+
+    Args:
+        client: Live Weaviate client.
+        collection: Source chunk collection.
+
+    Yields:
+        Each non-empty distinct ``document_id`` (order is the aggregation's).
+    """
+    span = tracer.span("vector_store.iter_document_ids", {"collection": collection})
+    col = client.collections.get(collection)
+    response = col.aggregate.over_all(
+        group_by=weaviate.classes.aggregate.GroupByAggregate(prop="document_id"),
+        total_count=True,
+    )
+    seen = 0
+    for group in response.groups:
+        value = str(getattr(group.grouped_by, "value", "") or "")
+        if not value:
+            continue
+        seen += 1
+        yield value
+    span.set_attribute("document_count", seen)
+    span.end(status="ok")
+
+
+def fetch_chunks_by_document_id(
+    client: weaviate.WeaviateClient,
+    document_id: str,
+    page_size: int = 500,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> list[dict]:
+    """Fetch ALL chunks for one ``document_id`` (cursor-paginated).
+
+    Reuses the canonical ``col.query.fetch_objects(filters=..., limit=...)``
+    read idiom (see :func:`fetch_chunks_by_parent_section` /
+    :func:`get_source_hash`) but pages with the v4 cursor (``after=`` the last
+    returned object's UUID) so a document with more chunks than ``page_size``
+    is fully read without loading the whole collection into memory. Memory stays
+    bounded at one page regardless of collection size (safe for 475k objects).
+
+    Returns the same ``{"text", "metadata", "uuid"}`` dict shape as
+    :func:`hybrid_search`, carrying the fields a routing card needs
+    (``document_id``, ``title``, ``source``, ``heading_path``, ``heading``,
+    ``section_path``, ``node_kind``). ``metadata`` is what ``build_document_card``
+    consumes via its dict accessor.
+
+    Args:
+        client: Live Weaviate client.
+        document_id: The document whose chunks to fetch.
+        page_size: Max objects per cursor page.
+        collection: Source chunk collection.
+
+    Returns:
+        All chunk dicts for the document (possibly empty).
+    """
+    span = tracer.span(
+        "vector_store.fetch_chunks_by_document_id",
+        {"document_id": document_id, "page_size": page_size, "collection": collection},
+    )
+    col = client.collections.get(collection)
+    flt = Filter.by_property("document_id").equal(document_id)
+    # Only the fields a routing card needs — NOT the (large) chunk `text`. Keeps
+    # the payload tiny so big docs page quickly even over a slow/tunneled link.
+    card_props = [
+        "document_id", "title", "source", "source_key",
+        "heading_path", "heading", "section_path", "node_kind",
+    ]
+    documents: list[dict] = []
+    # Offset pagination (NOT the cursor `after`): Weaviate forbids combining the
+    # cursor with a `where` filter ("cursor api: where cannot be set with after").
+    # offset+limit IS allowed with a filter; per-document chunk counts sit well
+    # under the QUERY_MAXIMUM_RESULTS offset ceiling.
+    offset = 0
+    while True:
+        response = col.query.fetch_objects(
+            filters=flt, limit=page_size, offset=offset, return_properties=card_props
+        )
+        objects = list(getattr(response, "objects", []) or [])
+        for obj in objects:
+            props = obj.properties or {}
+            documents.append({
+                "text": "",
+                "metadata": {
+                    "document_id": props.get("document_id", ""),
+                    "title": props.get("title", ""),
+                    "source": props.get("source", ""),
+                    "source_key": props.get("source_key", ""),
+                    "heading_path": props.get("heading_path", []) or [],
+                    "heading": props.get("heading", ""),
+                    "section_path": props.get("section_path", ""),
+                    "node_kind": props.get("node_kind", "chunk"),
+                },
+                "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",
+            })
+        if len(objects) < page_size:
+            break
+        offset += page_size
+    span.set_attribute("result_count", len(documents))
+    span.end(status="ok")
+    return documents
 
 
 def delete_documents_by_source_key(

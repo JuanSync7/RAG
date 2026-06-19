@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -1356,6 +1356,149 @@ RAG_RERANK_ANCHOR_K: int = max(1, int(
     os.environ.get("RAG_RERANK_ANCHOR_K", "10")
 ))
 """Anchor-confidence dampening constant: ``confidence = 1 / (k + rank)``."""
+
+
+# ─── Document Routing (RAPTOR-lite) — DOCUMENT_ROUTING_DESIGN.md §6, §7 ───
+# Stage-1 card-index routing. All OFF / no-op by default: when
+# RAG_DOCUMENT_ROUTING_ENABLED is False, retrieval behaviour is byte-identical
+# to pre-routing. Routing is SOFT (top-N, never top-1; never a hard filter) and
+# falls back to pure flat retrieval on low confidence (design §6.2, §7).
+
+RAG_DOCUMENT_ROUTING_ENABLED: bool = os.environ.get(
+    "RAG_DOCUMENT_ROUTING_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master switch for Stage-1 document routing. When False (default), the router
+is never invoked and retrieval is unchanged."""
+
+RAG_DOCUMENT_ROUTING_TOP_N: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_TOP_N", "6")
+)
+"""Number of routed documents per query (design §7: never top-1).
+Validated >= 2 by ``validate_document_routing_config``."""
+
+RAG_DOCUMENT_ROUTING_MIN_SCORE: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_MIN_SCORE", "0.0")
+)
+"""Card-similarity floor below which routing yields an empty set (→ pure flat
+retrieval). Default 0.0 = accept any card hit."""
+
+RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES", "5")
+)
+"""Chunks fetched per routed document during the routed-doc candidate union."""
+
+RAG_DOCUMENT_ROUTING_MAX_CANDIDATES: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_MAX_CANDIDATES", "60")
+)
+"""Upper bound on the unioned candidate set (design §6.2). Validated
+>= RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES by ``validate_document_routing_config``."""
+
+RAG_DOCUMENT_ROUTING_BOOST: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_BOOST", "0.0")
+)
+"""Tiny optional tie-break boost for routed-doc candidates. Default 0.0 = no
+score influence (rerank decides). Soft only — never a hard filter."""
+
+RAG_DOCUMENT_CARD_COLLECTION: str = os.environ.get(
+    "RAG_DOCUMENT_CARD_COLLECTION", "RAGDocumentCards"
+)
+"""Vector collection holding routing-only document cards (NEVER sent to the
+LLM). Shared between ingest (card emission) and retrieval (the router)."""
+
+# ─── Comparison Decomposition — DOCUMENT_ROUTING_DESIGN.md §8 ─────────────
+# Tier-1 regex + Tier-2 glossary-LLM query decomposition for comparison
+# queries. OFF by default; identity transform (query unchanged) when disabled.
+
+RAG_DECOMPOSITION_ENABLED: bool = os.environ.get(
+    "RAG_DECOMPOSITION_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master switch for comparison-query decomposition. When False (default),
+``decompose_query`` is an identity transform (returns ``[query]``)."""
+
+RAG_DECOMPOSITION_LLM_PRIMARY: bool = os.environ.get(
+    "RAG_DECOMPOSITION_LLM_PRIMARY", "true"
+).lower() in ("true", "1", "yes")
+"""When True (default) and decomposition is enabled, Tier-2 glossary-LLM
+decomposition is the primary path, with Tier-1 regex as fallback."""
+
+RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS", "8")
+)
+"""Per-call timeout for the Tier-2 decomposition LLM call."""
+
+RAG_DECOMPOSITION_MIN_SUBQUERIES: int = int(
+    os.environ.get("RAG_DECOMPOSITION_MIN_SUBQUERIES", "2")
+)
+"""Minimum sub-queries a valid decomposition must yield. Validated >= 2 and
+<= RAG_DECOMPOSITION_MAX_SUBQUERIES by ``validate_document_routing_config``."""
+
+RAG_DECOMPOSITION_MAX_SUBQUERIES: int = int(
+    os.environ.get("RAG_DECOMPOSITION_MAX_SUBQUERIES", "5")
+)
+"""Maximum sub-queries a valid decomposition may yield."""
+
+# ─── Document Cards (ingest) — DOCUMENT_ROUTING_DESIGN.md §11 ─────────────
+# Ingest-side card emission. Mirrored onto IngestionConfig fields in
+# src/ingest/common/types.py. OFF by default (no card collection written).
+
+RAG_INGESTION_BUILD_DOCUMENT_CARDS: bool = os.environ.get(
+    "RAG_INGESTION_BUILD_DOCUMENT_CARDS", "false"
+).lower() in ("true", "1", "yes")
+"""When True, ingest emits one routing-only document card per document into
+RAG_DOCUMENT_CARD_COLLECTION. Default False = no card collection written."""
+
+RAG_INGESTION_CARD_LLM_SUMMARY: bool = os.environ.get(
+    "RAG_INGESTION_CARD_LLM_SUMMARY", "false"
+).lower() in ("true", "1", "yes")
+"""When True, card text includes an LLM-generated summary. Default False =
+baseline card text is title + section headings only (no LLM call)."""
+
+RAG_INGESTION_CARD_MAX_HEADINGS: int = int(
+    os.environ.get("RAG_INGESTION_CARD_MAX_HEADINGS", "60")
+)
+"""Cap on the number of section headings included in a card. Guards against
+xlsx-style documents with hundreds of header rows (design §11)."""
+
+
+def validate_document_routing_config() -> None:
+    """Validate document-routing / decomposition / card configuration.
+
+    Checks for contradictory or unsafe settings and raises ``ValueError`` with
+    a descriptive message naming the offending key(s). Invoked lazily by
+    callers (the router / decomposition orchestrator) rather than at import,
+    matching ``validate_visual_retrieval_config``'s fail-fast-at-use pattern —
+    importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If ``RAG_DOCUMENT_ROUTING_TOP_N < 2`` (design §7: never
+            top-1); if ``RAG_DECOMPOSITION_MIN_SUBQUERIES`` is < 2 or exceeds
+            ``RAG_DECOMPOSITION_MAX_SUBQUERIES``; or if
+            ``RAG_DOCUMENT_ROUTING_MAX_CANDIDATES`` is below
+            ``RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES``.
+    """
+    if RAG_DOCUMENT_ROUTING_TOP_N < 2:
+        raise ValueError(
+            f"RAG_DOCUMENT_ROUTING_TOP_N={RAG_DOCUMENT_ROUTING_TOP_N} must be "
+            ">= 2 (design §7: route to top-N documents, never top-1)"
+        )
+    if RAG_DECOMPOSITION_MIN_SUBQUERIES < 2:
+        raise ValueError(
+            f"RAG_DECOMPOSITION_MIN_SUBQUERIES={RAG_DECOMPOSITION_MIN_SUBQUERIES} "
+            "must be >= 2 (a decomposition needs at least two sub-queries)"
+        )
+    if RAG_DECOMPOSITION_MIN_SUBQUERIES > RAG_DECOMPOSITION_MAX_SUBQUERIES:
+        raise ValueError(
+            f"RAG_DECOMPOSITION_MIN_SUBQUERIES={RAG_DECOMPOSITION_MIN_SUBQUERIES} "
+            "must be <= RAG_DECOMPOSITION_MAX_SUBQUERIES="
+            f"{RAG_DECOMPOSITION_MAX_SUBQUERIES}"
+        )
+    if RAG_DOCUMENT_ROUTING_MAX_CANDIDATES < RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES:
+        raise ValueError(
+            f"RAG_DOCUMENT_ROUTING_MAX_CANDIDATES={RAG_DOCUMENT_ROUTING_MAX_CANDIDATES} "
+            "must be >= RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES="
+            f"{RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES} (the union bound cannot be "
+            "smaller than the per-document leaf fetch)"
+        )
 
 
 def validate_visual_retrieval_config() -> None:

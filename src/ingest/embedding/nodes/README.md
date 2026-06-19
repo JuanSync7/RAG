@@ -19,6 +19,8 @@ the stage logic, not the wiring.
 | `chunk_enrichment.py` | Chunk ID assignment and enriched content projection |
 | `quality_validation.py` | Optional chunk quality gating and intra-document deduplication |
 | `cross_document_dedup.py` | Cross-document deduplication using Tier 1 (SHA-256) and optional Tier 2 (MinHash) matching |
+| `tree_node_synthesis.py` | Optional tree retrieval: emits one section node per unique `heading_path` prefix; no-op when `config.enable_tree_retrieval_ingest` is False |
+| `document_card.py` | Optional RAPTOR-lite routing: builds one card per document (title + headings), embeds `card_text`, stages `staged_card_records`; strict no-op when `config.build_document_cards` is False (default) |
 | `embedding_storage.py` | Embedding generation (batched) and vector store persistence |
 | `document_storage_node.py` | Persists the clean markdown document to MinIO before chunking |
 | `metadata_generation.py` | Document-level summary and keyword generation with fallback extraction |
