@@ -102,12 +102,18 @@ class RAGQueryWorkflow:
         )
 
         # Surface DR observability via Temporal custom search attributes.
-        # Best-effort: a misconfigured cluster (attributes not registered)
-        # must not break the query response.
-        try:
-            attrs = _build_dr_search_attributes(request, result)
-            workflow.upsert_search_attributes(attrs)
-        except Exception:  # noqa: BLE001
-            workflow.logger.exception("Failed to upsert DR search attributes")
+        # DISABLED: workflow.upsert_search_attributes() with the deprecated dict
+        # API raises a TypeError *inside* the Temporal SDK that leaves a malformed
+        # ("empty variant") command in the workflow completion. The try/except
+        # below caught the Python exception but could NOT un-queue the bad command,
+        # so the completion failed and the (already-computed) query result never
+        # returned to the client (every query 500s/times out). Cosmetic
+        # observability only — re-enable once migrated to the typed
+        # SearchAttribute API (workflow.upsert_search_attributes([SearchAttributePair(...)])).
+        #   try:
+        #       attrs = _build_dr_search_attributes(request, result)
+        #       workflow.upsert_search_attributes(attrs)
+        #   except Exception:  # noqa: BLE001
+        #       workflow.logger.exception("Failed to upsert DR search attributes")
 
         return result
