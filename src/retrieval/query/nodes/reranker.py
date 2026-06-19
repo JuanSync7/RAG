@@ -280,21 +280,24 @@ class TEIReranker:
             resp = self._client.post(
                 f"{self.base_url}/rerank",
                 json={
+                    "model": self.model,
                     "query": query,
-                    "texts": [d.text for d in documents],
-                    "truncate": True,
+                    "documents": [d.text for d in documents],
                 },
             )
             resp.raise_for_status()
             raw = resp.json()
-            # TEI returns a top-level list, sorted desc by score.
+            # Tolerate both rerank API shapes, both sorted desc by score:
+            #   vLLM / Jina / Cohere: {"results": [{"index", "relevance_score"}]}
+            #   TEI native:           [{"index", "score"}]  (top-level list)
+            items = raw.get("results", []) if isinstance(raw, dict) else raw
             results = [
                 RankedResult(
                     text=documents[item["index"]].text,
-                    score=float(item["score"]),
+                    score=float(item.get("relevance_score", item.get("score", 0.0))),
                     metadata=documents[item["index"]].metadata,
                 )
-                for item in raw[:top_k]
+                for item in items[:top_k]
             ]
             if results:
                 values = [r.score for r in results]
