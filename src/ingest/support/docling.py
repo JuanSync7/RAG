@@ -182,14 +182,38 @@ def _resolve_tokenizer_model_id(config: Any) -> str:
     Resolution order:
       1. ``config.hybrid_chunker_tokenizer_model`` if non-empty.
       2. ``EMBEDDING_MODEL_PATH`` (the embedder repo / local path) if non-empty,
-         so token counts match the embedding model.
-      3. Hardcoded final fallback ``"BAAI/bge-m3"``.
+         so token counts match the embedding model — but ONLY when it is a bare
+         HF repo id or a local path that actually exists.
+      3. Hardcoded final fallback ``"BAAI/bge-m3"`` (downloaded on demand).
+
+    The existence guard matters: deployments that embed remotely via TEI/vLLM set
+    ``EMBEDDING_MODEL_PATH`` to a local dir (e.g. ``/root/models/baai/bge-m3``)
+    that is never materialised in the ingest container. Passing that missing path
+    to ``AutoTokenizer.from_pretrained`` makes it treat the path as a repo id and
+    raise ``HFValidationError``, which breaks native HybridChunker chunking. When
+    the path is absent we fall through to the downloadable HF default instead.
     """
     cfg_model = getattr(config, "hybrid_chunker_tokenizer_model", None) if config is not None else None
     if cfg_model:
         return cfg_model
     if EMBEDDING_MODEL_PATH:
-        return EMBEDDING_MODEL_PATH
+        _looks_local = EMBEDDING_MODEL_PATH.startswith(("/", "./", "../", "~"))
+        if not _looks_local:
+            return EMBEDDING_MODEL_PATH  # bare HF repo id — use as-is
+        try:
+            _exists = Path(EMBEDDING_MODEL_PATH).expanduser().exists()
+        except OSError:
+            # An unreadable parent (e.g. /root for a non-root process) raises
+            # PermissionError rather than returning False — treat as absent.
+            _exists = False
+        if _exists:
+            return EMBEDDING_MODEL_PATH
+        logger.warning(
+            "EMBEDDING_MODEL_PATH=%s does not exist locally; falling back to "
+            "'BAAI/bge-m3' for the HybridChunker tokenizer (set "
+            "config.hybrid_chunker_tokenizer_model to override).",
+            EMBEDDING_MODEL_PATH,
+        )
     return "BAAI/bge-m3"
 
 

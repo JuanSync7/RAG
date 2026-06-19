@@ -180,3 +180,30 @@ def test_final_fallback_to_bge_m3(monkeypatch):
     config = _FakeIngestionConfig(hybrid_chunker_tokenizer_model=None)
     resolved = docling_mod._resolve_tokenizer_model_id(config)
     assert resolved == "BAAI/bge-m3"
+
+
+def test_missing_local_embedding_path_falls_back(monkeypatch):
+    """A local EMBEDDING_MODEL_PATH that does not exist must NOT be passed to
+    AutoTokenizer (it would raise HFValidationError, breaking native chunking on
+    TEI/remote-embedding deployments). Falls back to the downloadable default."""
+    from src.ingest.support import docling as docling_mod
+
+    monkeypatch.setattr(
+        docling_mod, "EMBEDDING_MODEL_PATH", "/root/models/baai/bge-m3", raising=False
+    )
+    config = _FakeIngestionConfig(hybrid_chunker_tokenizer_model=None)
+    resolved = docling_mod._resolve_tokenizer_model_id(config)
+    assert resolved == "BAAI/bge-m3"
+
+
+def test_existing_local_embedding_path_is_used(monkeypatch, tmp_path):
+    """A local EMBEDDING_MODEL_PATH that DOES exist is used as-is (prod with a
+    materialised local model)."""
+    from src.ingest.support import docling as docling_mod
+
+    monkeypatch.setattr(
+        docling_mod, "EMBEDDING_MODEL_PATH", str(tmp_path), raising=False
+    )
+    config = _FakeIngestionConfig(hybrid_chunker_tokenizer_model=None)
+    resolved = docling_mod._resolve_tokenizer_model_id(config)
+    assert resolved == str(tmp_path)
