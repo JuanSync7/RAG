@@ -14,6 +14,12 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.chunk_enrichment")
 
+# Above this raw-text size (chars) the per-document EditLog.from_diff
+# (difflib.SequenceMatcher over the full text, quadratic worst case) is skipped —
+# provenance falls back to fast exact-find on the original text. ~256 KB keeps it
+# for ordinary docs while sparing multi-MB specs (AXI/CHI ~1.2 MB) the diff cost.
+_EDIT_LOG_MAX_CHARS = 262_144
+
 from src.vector_db import build_chunk_id
 from src.ingest.common import (
     EditLog,
@@ -46,7 +52,15 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     # Build the edit log once per document so each chunk's offsets can be
     # projected back to the raw_text coordinate system. After refactoring was
     # removed (PR1), this maps cleaned_text positions → raw_text positions.
-    edit_log = EditLog.from_diff(original_text, refactored_text)
+    # EditLog.from_diff runs difflib.SequenceMatcher(autojunk=False) over the FULL
+    # text — quadratic worst case, pathological on multi-MB specs. Skip it when the
+    # two texts are identical (mapping is then identity → plain exact-find suffices)
+    # or when the document is large; provenance falls back to exact-find on
+    # original_text, which is fast and adequate (best-effort char offsets).
+    if original_text == refactored_text or len(original_text) > _EDIT_LOG_MAX_CHARS:
+        edit_log = None
+    else:
+        edit_log = EditLog.from_diff(original_text, refactored_text)
     original_cursor = 0
     refactored_cursor = 0
     for index, chunk in enumerate(state["chunks"]):
@@ -61,6 +75,12 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         body_for_provenance = chunk_body_text(
             chunk.text, chunk.metadata.get("heading_path")
         )
+        # fuzzy_fallback=False: never run the O(doc) per-chunk difflib paragraph
+        # match. HybridChunker chunk bodies are re-serialized (tables→triplets,
+        # whitespace reflowed) and rarely match the source verbatim, so the fuzzy
+        # step both (a) almost always failed to find a good match and (b) cost
+        # O(paragraphs) difflib per chunk — the dominant term in the ~22-min stall.
+        # Exact-find still maps prose chunks; the rest stay unmapped (best-effort).
         provenance, original_cursor, refactored_cursor = map_chunk_provenance(
             body_for_provenance,
             original_text=original_text,
@@ -68,6 +88,7 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             original_cursor=original_cursor,
             refactored_cursor=refactored_cursor,
             edit_log=edit_log,
+            fuzzy_fallback=False,
         )
         # Keep source display/filter field explicit even if upstream metadata changes.
         chunk.metadata["source"] = state["source_name"]

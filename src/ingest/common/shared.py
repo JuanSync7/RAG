@@ -207,11 +207,24 @@ def map_chunk_provenance(
     original_cursor: int,
     refactored_cursor: int,
     edit_log: Optional[EditLog] = None,
+    fuzzy_fallback: bool = True,
 ) -> tuple[dict[str, object], int, int]:
     """Map a chunk to refactored and original text spans with confidence.
 
     This function attempts exact matching first and falls back to weaker
     heuristics (e.g., paragraph similarity) when exact mapping fails.
+
+    ``fuzzy_fallback`` controls the last-resort ``_best_paragraph_span`` step,
+    which runs ``difflib.SequenceMatcher`` against EVERY paragraph of
+    ``original_text``. That is O(doc) per chunk — pathological when called once
+    per chunk over thousands of chunks (a 1,600-chunk spec stalled
+    ``chunk_enrichment`` for ~22 min). It is also low-value for HybridChunker
+    output, whose chunk text is re-serialized (tables→triplets, whitespace
+    reflowed) and so rarely matches the source verbatim anyway. Callers that map
+    many chunks should pass ``fuzzy_fallback=False``: exact-find still maps prose
+    chunks (high confidence); non-matching chunks are left ``unmapped`` rather
+    than fuzzily approximated. Page-level citation is unaffected (it comes from
+    ``page_ref``, not these char offsets).
 
     When ``edit_log`` is supplied and the chunk is exactly located in the
     refactored text, the original-side offsets are projected via the edit log
@@ -264,7 +277,7 @@ def map_chunk_provenance(
         if orig_start >= 0:
             confidence = 0.85
 
-    if orig_start < 0:
+    if orig_start < 0 and fuzzy_fallback:
         para_start, para_end, ratio = _best_paragraph_span(original_text, chunk_text)
         if para_start >= 0 and ratio >= RAG_INGEST_MIN_PARA_SIMILARITY:
             orig_start, orig_end = para_start, para_end

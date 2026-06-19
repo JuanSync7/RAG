@@ -280,3 +280,37 @@ class TestBodyAwareProvenance:
         prov, _, _ = map_chunk_provenance(contextualized, source, source, 0, 0)
         # Breadcrumb is not contiguous in source -> not found in refactored text.
         assert prov["refactored_char_start"] < 0
+
+    def test_fuzzy_fallback_disabled_never_returns_paragraph_fuzzy(self):
+        """With fuzzy_fallback=False a non-verbatim body is left unmapped rather than
+        approximated by the O(doc) difflib paragraph match — the perf guarantee that
+        keeps chunk_enrichment from stalling on big, table-heavy specs."""
+        from src.ingest.common.shared import map_chunk_provenance
+
+        source = "Para one.\n\n" + ("x" * 400) + "\n\nPara three."
+        reformatted = "Field: AWVALID, Value = 1. Field: AWREADY, Value = 0."  # not in source
+        prov, _, _ = map_chunk_provenance(
+            reformatted, source, source, 0, 0, fuzzy_fallback=False
+        )
+        assert "paragraph_fuzzy" not in prov["provenance_method"]
+        assert prov["original_char_start"] == -1
+
+    def test_node_skips_edit_log_and_fuzzy_on_large_doc(self):
+        """A large raw_text must not trigger the per-document SequenceMatcher diff
+        nor the per-chunk fuzzy match; verbatim prose chunks still map by exact-find."""
+        from src.ingest.embedding.nodes import chunk_enrichment as ce
+
+        body = "The reset value of the STATUS register is 0x00 in this block."
+        big = ("filler paragraph. " * 50)  # padding
+        source = big + "\n\n" + body + "\n\n" + big
+        # Force the large-doc path.
+        source = source + ("z" * (ce._EDIT_LOG_MAX_CHARS + 10))
+        chunk = ProcessedChunk(text=body, metadata={"heading_path": []})
+        state = _make_state(chunks=[chunk])
+        state["raw_text"] = source
+        state["cleaned_text"] = source  # identical -> edit_log skipped regardless
+
+        result = ce.chunk_enrichment_node(state)
+        meta = _get_chunks(result, state)[0].metadata
+        assert "paragraph_fuzzy" not in meta["provenance_method"]
+        assert meta["original_char_start"] >= 0  # exact-find still maps the verbatim body
