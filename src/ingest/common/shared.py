@@ -315,6 +315,68 @@ def chunk_body_text(text: str, heading_path: Optional[list] = None) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Navigational / front-matter chunk detection (shared by ingest-time drop and
+# query-time rerank filtering, so emission and filtering stay symmetric). Hoisted
+# here from retrieval.rag_chain — both sides import from this neutral module so
+# ingest never depends on retrieval (the dependency only ever runs the other way).
+# ---------------------------------------------------------------------------
+
+# Dotted-leader runs (>=4 dots) — the fingerprint of a table-of-contents / index
+# entry ("A1.3 AXI Architecture ............ A1-22"). Scored by density, not length.
+_TOC_LEADER_RE = re.compile(r"\.{4,}")
+# Front-matter / navigation pointer idioms used by spec chapter & part intros
+# ("Read this chapter for a description of ...", "This specification describes ...").
+# High precision: these phrases point AT content elsewhere, never state content.
+# Only applied to short chunks (see ``is_navigational`` length cap). Widened beyond
+# the original chapter|section|part|preface|book set to also catch
+# specification|document|appendix|manual ("This specification describes the AMBA
+# AXI protocol" was a known false-negative).
+_NAV_PHRASE_RE = re.compile(
+    r"(?:read\s+this\s+(?:chapter|section|part|book|specification|manual)?\s*for\b"
+    r"|for\s+(?:a\s+)?(?:full\s+)?descriptions?\s+of\b"
+    r"|(?:about\s+)?this\s+(?:chapter|section|part|preface|book|specification|document|appendix|manual)\s+(?:describes|introduces|contains|provides)\b"
+    r"|see\s+(?:chapter|section|page)\s+[\w.\-]+\s+on\s+page\b)",
+    re.IGNORECASE,
+)
+
+
+def toc_leader_ratio(text: str) -> float:
+    """Fraction of characters that belong to dotted-leader runs (>=4 dots)."""
+    if not text:
+        return 0.0
+    leader_chars = sum(len(m.group(0)) for m in _TOC_LEADER_RE.finditer(text))
+    return leader_chars / max(1, len(text))
+
+
+def is_navigational(text: str, max_chars: int = 320) -> bool:
+    """True if a chunk is *navigational* — a table-of-contents / index entry or a
+    chapter/part front-matter pointer stub — rather than answer content.
+
+    Navigational chunks have real-word bodies (so they pass a thin/heading test)
+    but only *point at* content ("Read this chapter for a description of the basic
+    AXI transactions") or list it ("A1.3 AXI Architecture ......... A1-22"). They
+    reliably beat real body chunks on both dense similarity and the cross-encoder
+    reranker, so they are dropped at ingest (index hygiene for ALL consumers) and
+    again before rerank (defense-in-depth). Measure on the same (contextualized)
+    text both sides see, so the leader-ratio denominator stays calibrated.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    # (A) ToC / index page: dense dotted leaders, or a majority of leader lines.
+    if toc_leader_ratio(t) >= 0.08:
+        return True
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if lines and sum(1 for ln in lines if _TOC_LEADER_RE.search(ln)) / len(lines) >= 0.4:
+        return True
+    # (B) Short front-matter pointer stub. Length cap keeps real body chunks that
+    #     merely cross-reference another section (those are much longer).
+    if len(t) <= max_chars and _NAV_PHRASE_RE.search(t):
+        return True
+    return False
+
+
 __all__ = [
     "extract_keywords_fallback",
     "cross_refs",
@@ -322,4 +384,6 @@ __all__ = [
     "append_processing_log",
     "map_chunk_provenance",
     "chunk_body_text",
+    "toc_leader_ratio",
+    "is_navigational",
 ]

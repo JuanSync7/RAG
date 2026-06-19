@@ -35,7 +35,7 @@ from src.ingest.support import (
     chunk_markdown,
     normalize_headings_to_markdown,
 )
-from src.ingest.common import append_processing_log
+from src.ingest.common import append_processing_log, is_navigational
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
 
@@ -75,6 +75,30 @@ def _match_table_artifact(chunk_text: str, tables: list[Any]) -> Any:
         if signature and signature in chunk_text:
             return tbl
     return None
+
+
+def _drop_navigational_chunks(
+    chunks: list[Any], nav_max_chars: int, source_name: str = ""
+) -> tuple[list[Any], int]:
+    """Drop ToC/index/front-matter pointer chunks at ingest (single source of truth).
+
+    Uses the shared ``is_navigational`` predicate on each chunk's embedded text (the
+    same text the query-time rerank filter sees, so the two gates stay symmetric).
+    A per-document over-prune guard never removes a document's ENTIRE chunk set: if
+    every chunk looks navigational (e.g. a pure ToC document), the originals are kept
+    so the document is not silently dropped from the index.
+
+    Returns ``(kept_chunks, num_dropped)``.
+    """
+    kept = [c for c in chunks if not is_navigational(c.text, nav_max_chars)]
+    n_dropped = len(chunks) - len(kept)
+    if kept and n_dropped:
+        logger.info(
+            "dropped %d navigational chunk(s) at ingest: source=%s",
+            n_dropped, source_name,
+        )
+        return kept, n_dropped
+    return chunks, 0
 
 
 def _normalize_chunk_text(text: str) -> str:
@@ -228,6 +252,21 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             # Preserves pre-Phase 3.2 behaviour exactly.
             chunks = _chunk_with_markdown_legacy(state, config, base_metadata)
             processing_log = append_processing_log(state, "chunking:legacy_markdown")
+
+        # Strip navigational ToC/front-matter chunks at ingest (both paths). The
+        # query-time rerank filter stays as defense-in-depth; doing it here is the
+        # single-source-of-truth fix that shrinks the index and protects consumers
+        # that bypass the query filter. Per-document over-prune guard inside.
+        if getattr(config, "drop_navigational", True):
+            chunks, n_nav = _drop_navigational_chunks(
+                chunks,
+                int(getattr(config, "nav_max_chars", 320)),
+                source_name=state.get("source_name", ""),
+            )
+            if n_nav:
+                processing_log = append_processing_log(
+                    state, f"chunking:dropped_navigational:{n_nav}"
+                )
 
     except Exception as exc:
         logger.error("chunking failed source=%s: %s", state.get("source_name", ""), exc, exc_info=True)

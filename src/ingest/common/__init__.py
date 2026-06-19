@@ -37,6 +37,8 @@ from src.ingest.common.shared import (
     cross_refs,
     quality_score,
     chunk_body_text,
+    toc_leader_ratio,
+    is_navigational,
 )
 from src.ingest.common.edit_log import EditLog
 from src.ingest.common.clean_store import CleanDocumentStore
@@ -64,6 +66,8 @@ __all__ = [
     "cross_refs",
     "quality_score",
     "chunk_body_text",
+    "toc_leader_ratio",
+    "is_navigational",
     "EditLog",
     "CleanDocumentStore",
     "MinioCleanStore",

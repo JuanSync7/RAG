@@ -194,55 +194,15 @@ _TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
 # A run of 4+ dots is the classic table-of-contents / index dotted leader
 # ("A1.3 AXI Architecture ............ A1-22"). Length-independent: ToC pages
 # are often long lists, so we score by leader *density*, not chunk length.
-_TOC_LEADER_RE = re.compile(r"\.{4,}")
-# Front-matter / navigation pointer idioms used by spec chapter & part intros
-# ("Read this chapter for a description of ...", "This part describes the ...").
-# High precision: these phrases are how a document points at content elsewhere,
-# never how it states content. Only applied to short chunks (see callers).
-_NAV_PHRASE_RE = re.compile(
-    r"(?:read\s+this\s+(?:chapter|section|part|book|specification|manual)?\s*for\b"
-    r"|for\s+(?:a\s+)?(?:full\s+)?descriptions?\s+of\b"
-    r"|this\s+(?:chapter|section|part|preface|book)\s+(?:describes|introduces|contains|provides)\b"
-    r"|see\s+(?:chapter|section|page)\s+[\w.\-]+\s+on\s+page\b)",
-    re.IGNORECASE,
+# Navigational/front-matter detection now lives in the neutral shared module so
+# the ingest-time drop and this query-time rerank filter use one predicate (kept
+# symmetric). Imported under the existing private names so call sites are unchanged.
+from src.ingest.common.shared import (  # noqa: E402
+    _TOC_LEADER_RE,
+    _NAV_PHRASE_RE,
+    toc_leader_ratio as _toc_leader_ratio,
+    is_navigational as _is_navigational,
 )
-
-
-def _toc_leader_ratio(text: str) -> float:
-    """Fraction of characters that belong to dotted-leader runs (>=4 dots)."""
-    if not text:
-        return 0.0
-    leader_chars = sum(len(m.group(0)) for m in _TOC_LEADER_RE.finditer(text))
-    return leader_chars / max(1, len(text))
-
-
-def _is_navigational(text: str, max_chars: int) -> bool:
-    """True if a chunk is *navigational* — a table-of-contents/index entry or a
-    chapter/part front-matter pointer stub — rather than answer content.
-
-    Distinct from :func:`_is_thin_or_heading`: navigational chunks have
-    real-word bodies (so they pass the thin/heading test) but only *point at*
-    content ("Read this chapter for a description of the basic AXI transactions")
-    or list it ("A1.3 AXI Architecture ......... A1-22"). They reliably beat real
-    body chunks on both dense similarity and the cross-encoder reranker, so they
-    must be dropped from the candidate pool before rerank.
-    """
-    t = (text or "").strip()
-    if not t:
-        return False
-    # (A) ToC / index page: dense dotted leaders, or a majority of lines are
-    #     leader lines. Length-independent (ToC chunks can be long).
-    if _toc_leader_ratio(t) >= 0.08:
-        return True
-    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
-    if lines and sum(1 for ln in lines if _TOC_LEADER_RE.search(ln)) / len(lines) >= 0.4:
-        return True
-    # (B) Short front-matter pointer stub: a heading + a "read this for ..." style
-    #     pointer, with no substantive body. Length cap keeps real chunks that
-    #     merely cross-reference another section (those are much longer).
-    if len(t) <= max_chars and _NAV_PHRASE_RE.search(t):
-        return True
-    return False
 
 
 def _is_low_value_chunk(

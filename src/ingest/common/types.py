@@ -77,6 +77,8 @@ from config.settings import (
     RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
     RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH,
     RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY,
+    RAG_INGESTION_DROP_NAVIGATIONAL,
+    RAG_INGESTION_NAV_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
     RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
@@ -237,6 +239,15 @@ class IngestionConfig:
     cell values like a register's reset value are actually retrievable. Tables that
     emit per-row chunks already carry cells and are left compact. Env:
     RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY."""
+    drop_navigational: bool = RAG_INGESTION_DROP_NAVIGATIONAL
+    """If True (default), drop ToC/index/front-matter pointer chunks at ingest using
+    the shared ``is_navigational`` predicate, with a per-document over-prune guard.
+    Env: RAG_INGESTION_DROP_NAVIGATIONAL. Query-time rerank filter stays as
+    defense-in-depth."""
+    nav_max_chars: int = RAG_INGESTION_NAV_MAX_CHARS
+    """Length cap for the front-matter pointer-phrase branch of the ingest-time
+    navigational test (mirrors query-side RERANK_NAV_MAX_CHARS). Env:
+    RAG_INGESTION_NAV_MAX_CHARS."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN

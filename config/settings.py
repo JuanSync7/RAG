@@ -586,6 +586,28 @@ emit per-row chunks already carry cell values, so the body is not duplicated int
 their summary. Capped by ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``. Changes
 embedded text -> chunk_id; requires re-ingest."""
 
+RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
+    "RAG_INGESTION_DROP_NAVIGATIONAL", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), drop table-of-contents / index / front-matter pointer chunks
+at INGEST time (not just at query time). ~17% of the spec corpus is navigational
+ToC/front-matter that out-scores real answer chunks on both dense cosine and the
+reranker (a ToC stub scored 0.95 vs the answer's 0.51), causing "I cannot answer"
+refusals. The query-time rerank filter (RAG_RERANK_DROP_NAVIGATIONAL) is kept as
+defense-in-depth, but stripping at ingest is the single-source-of-truth fix: it
+shrinks the index, cuts embedding cost, and protects consumers that bypass the
+query filter (deep-research path, eval harnesses, alternate rerankers). Uses the
+shared ``is_navigational`` predicate so emission and filtering stay symmetric. A
+per-document over-prune guard never removes a document's entire chunk set."""
+
+RAG_INGESTION_NAV_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGESTION_NAV_MAX_CHARS", "320")
+)
+"""Length cap (chars) below which the front-matter pointer-phrase branch of the
+navigational test fires at ingest. Mirrors the query-side RERANK_NAV_MAX_CHARS so
+both gates treat the same chunks as navigational. The dotted-leader (ToC) branch is
+length-independent and unaffected by this cap."""
+
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
 ).lower() in ("true", "1", "yes")
