@@ -77,6 +77,21 @@ RERANK_TOP_K = int(os.environ.get("RAG_RERANK_TOP_K", "5"))
 # many chars before rerank. 0 = disabled. These chunks win dense cosine on
 # topical queries but carry no answer content; see rag_chain thin-chunk filter.
 RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
+# Drop *navigational* candidates before rerank even when they exceed
+# RERANK_MIN_CHARS: table-of-contents / index lines (dotted ".... page" leaders)
+# and chapter/part front-matter stubs ("Read this chapter for a description
+# of ..."). These carry no answer content but win both dense similarity and the
+# cross-encoder reranker on topical queries (observed: an ARM spec ToC stub
+# scored 0.95 while the actual answer chunk scored 0.51), starving the LLM of
+# real body chunks. The candidate floor still guarantees >= rerank_top_k items.
+RERANK_DROP_NAVIGATIONAL = os.environ.get(
+    "RAG_RERANK_DROP_NAVIGATIONAL", "true"
+).lower() in ("true", "1", "yes")
+# A front-matter pointer stub is only treated as navigational when its total
+# length is <= this many chars (real body chunks that merely *mention* "see
+# chapter X" are far longer and are kept). ToC dotted-leader detection is
+# length-independent.
+RERANK_NAV_MAX_CHARS = int(os.environ.get("RAG_RERANK_NAV_MAX_CHARS", "320"))
 # Floor client-supplied search_limit/rerank_top_k up to the configured
 # SEARCH_LIMIT/RERANK_TOP_K so UI clients that hardcode small values (e.g. the
 # console presets 10/5) still retrieve enough candidates for the reranker to

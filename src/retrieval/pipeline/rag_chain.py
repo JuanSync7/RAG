@@ -154,6 +154,8 @@ from config.settings import (
 )
 from config.settings import (
     RERANK_MIN_CHARS,
+    RERANK_DROP_NAVIGATIONAL,
+    RERANK_NAV_MAX_CHARS,
     RETRIEVAL_ENFORCE_CONFIG_FLOOR,
     RAG_DOCUMENT_ROUTING_ENABLED,
     RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
@@ -189,6 +191,69 @@ logger = logging.getLogger("rag.rag_chain")
 
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
 _TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
+# A run of 4+ dots is the classic table-of-contents / index dotted leader
+# ("A1.3 AXI Architecture ............ A1-22"). Length-independent: ToC pages
+# are often long lists, so we score by leader *density*, not chunk length.
+_TOC_LEADER_RE = re.compile(r"\.{4,}")
+# Front-matter / navigation pointer idioms used by spec chapter & part intros
+# ("Read this chapter for a description of ...", "This part describes the ...").
+# High precision: these phrases are how a document points at content elsewhere,
+# never how it states content. Only applied to short chunks (see callers).
+_NAV_PHRASE_RE = re.compile(
+    r"(?:read\s+this\s+(?:chapter|section|part|book|specification|manual)?\s*for\b"
+    r"|for\s+(?:a\s+)?(?:full\s+)?descriptions?\s+of\b"
+    r"|this\s+(?:chapter|section|part|preface|book)\s+(?:describes|introduces|contains|provides)\b"
+    r"|see\s+(?:chapter|section|page)\s+[\w.\-]+\s+on\s+page\b)",
+    re.IGNORECASE,
+)
+
+
+def _toc_leader_ratio(text: str) -> float:
+    """Fraction of characters that belong to dotted-leader runs (>=4 dots)."""
+    if not text:
+        return 0.0
+    leader_chars = sum(len(m.group(0)) for m in _TOC_LEADER_RE.finditer(text))
+    return leader_chars / max(1, len(text))
+
+
+def _is_navigational(text: str, max_chars: int) -> bool:
+    """True if a chunk is *navigational* — a table-of-contents/index entry or a
+    chapter/part front-matter pointer stub — rather than answer content.
+
+    Distinct from :func:`_is_thin_or_heading`: navigational chunks have
+    real-word bodies (so they pass the thin/heading test) but only *point at*
+    content ("Read this chapter for a description of the basic AXI transactions")
+    or list it ("A1.3 AXI Architecture ......... A1-22"). They reliably beat real
+    body chunks on both dense similarity and the cross-encoder reranker, so they
+    must be dropped from the candidate pool before rerank.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    # (A) ToC / index page: dense dotted leaders, or a majority of lines are
+    #     leader lines. Length-independent (ToC chunks can be long).
+    if _toc_leader_ratio(t) >= 0.08:
+        return True
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if lines and sum(1 for ln in lines if _TOC_LEADER_RE.search(ln)) / len(lines) >= 0.4:
+        return True
+    # (B) Short front-matter pointer stub: a heading + a "read this for ..." style
+    #     pointer, with no substantive body. Length cap keeps real chunks that
+    #     merely cross-reference another section (those are much longer).
+    if len(t) <= max_chars and _NAV_PHRASE_RE.search(t):
+        return True
+    return False
+
+
+def _is_low_value_chunk(
+    text: str, min_chars: int, drop_nav: bool, nav_max_chars: int
+) -> bool:
+    """Combined predicate: thin/heading-only OR (optionally) navigational."""
+    if _is_thin_or_heading(text, min_chars):
+        return True
+    if drop_nav and _is_navigational(text, nav_max_chars):
+        return True
+    return False
 
 
 def _is_thin_or_heading(text: str, min_chars: int) -> bool:
@@ -205,15 +270,25 @@ def _is_thin_or_heading(text: str, min_chars: int) -> bool:
     return all(_HEADING_LINE_RE.match(ln) or _TOC_NOISE_RE.match(ln) for ln in lines)
 
 
-def _filter_thin_candidates(items: list, min_chars: int, floor: int) -> list:
-    """Drop thin/heading-only candidates before rerank, keeping at least
-    ``floor`` items (topping up from dropped ones, original order, if needed)."""
-    if min_chars <= 0 or not items:
+def _filter_thin_candidates(
+    items: list,
+    min_chars: int,
+    floor: int,
+    drop_nav: bool = False,
+    nav_max_chars: int = 320,
+) -> list:
+    """Drop thin/heading-only (and optionally navigational) candidates before
+    rerank, keeping at least ``floor`` items (topping up from dropped ones,
+    original order, if needed)."""
+    # When only the navigational pass is active (min_chars<=0) we must still run.
+    if (min_chars <= 0 and not drop_nav) or not items:
         return items
     kept: list = []
     dropped: list = []
     for it in items:
-        if _is_thin_or_heading(getattr(it, "text", "") or "", min_chars):
+        if _is_low_value_chunk(
+            getattr(it, "text", "") or "", min_chars, drop_nav, nav_max_chars
+        ):
             dropped.append(it)
         else:
             kept.append(it)
@@ -2126,18 +2201,26 @@ class RAGChain:
                     **_decision_to_action_fields(decision),
                 )
 
-            # Drop thin / heading-only chunks (titles, ToC leaders) that win
-            # dense similarity but carry no answer content, before they consume
-            # rerank slots. Floor keeps the candidate pool from collapsing.
+            # Drop thin/heading-only chunks (titles, ToC leaders) AND navigational
+            # stubs (ToC dotted-leader entries, chapter/part "read this for a
+            # description of ..." front-matter) that win dense similarity *and*
+            # the cross-encoder reranker but carry no answer content, before they
+            # consume rerank slots. Floor keeps the candidate pool from collapsing.
             if not _dr_active and search_results:
                 _n_before = len(search_results)
                 search_results = _filter_thin_candidates(
-                    search_results, min_chars=RERANK_MIN_CHARS, floor=rerank_top_k
+                    search_results,
+                    min_chars=RERANK_MIN_CHARS,
+                    floor=rerank_top_k,
+                    drop_nav=RERANK_DROP_NAVIGATIONAL,
+                    nav_max_chars=RERANK_NAV_MAX_CHARS,
                 )
                 if len(search_results) != _n_before:
                     logger.info(
-                        "thin-chunk filter: %d -> %d candidates (min_chars=%d)",
-                        _n_before, len(search_results), RERANK_MIN_CHARS,
+                        "thin/nav-chunk filter: %d -> %d candidates "
+                        "(min_chars=%d, drop_nav=%s)",
+                        _n_before, len(search_results),
+                        RERANK_MIN_CHARS, RERANK_DROP_NAVIGATIONAL,
                     )
 
             # Stage 5: Reranking (cross-encoder + fusion R1)
