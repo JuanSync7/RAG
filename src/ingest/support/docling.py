@@ -654,6 +654,24 @@ def parse_with_docling(
         )
 
 
+def _contextualized_text(chunker: Any, raw: Any) -> str:
+    """Embedded text for a HybridChunker chunk WITH its heading breadcrumb.
+
+    Docling's ``HybridChunker.contextualize()`` prepends the section heading
+    path to the chunk body, so the EMBEDDED text carries its context. Without
+    it (``text=raw.text``) body chunks embed heading-less and lose dense
+    retrieval to short title/heading-only chunks on topical queries. Falls back
+    to the raw text if contextualize is unavailable or yields nothing.
+    """
+    try:
+        ctx = chunker.contextualize(chunk=raw)
+        if isinstance(ctx, str) and ctx.strip():
+            return ctx
+    except Exception:  # noqa: BLE001 — never fail ingest over contextualization
+        pass
+    return raw.text
+
+
 def chunk_markdown_via_docling(
     markdown_text: str,
     *,
@@ -763,7 +781,7 @@ def chunk_markdown_via_docling(
               extra["figures"] = chunk_figures
           chunks.append(
               Chunk(
-                  text=raw.text,
+                  text=_contextualized_text(chunker, raw),
                   section_path=" > ".join(headings),
                   heading=headings[-1] if headings else "",
                   heading_level=len(headings),
@@ -1803,7 +1821,7 @@ class DoclingParser:
 
             chunks.append(
                 Chunk(
-                    text=raw.text,
+                    text=_contextualized_text(chunker, raw),
                     section_path=section_path,
                     heading=heading,
                     heading_level=heading_level,
