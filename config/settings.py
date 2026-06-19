@@ -68,12 +68,23 @@ if RAG_WEAVIATE_MODE not in ("embedded", "networked"):
 # --- Hybrid Search ---
 # Alpha: 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
 HYBRID_SEARCH_ALPHA = 0.5
-SEARCH_LIMIT = 10
-RERANK_TOP_K = 5
+# Single source of truth for retrieval sizing. Env-driven so a deployment can
+# raise them; server request schemas (server/schemas.py) derive their defaults
+# from these, and rag_chain floors client-supplied values up to them.
+SEARCH_LIMIT = int(os.environ.get("RAG_SEARCH_LIMIT", "10"))
+RERANK_TOP_K = int(os.environ.get("RAG_RERANK_TOP_K", "5"))
 # Drop thin / heading-only candidates (titles, ToC leaders) shorter than this
 # many chars before rerank. 0 = disabled. These chunks win dense cosine on
 # topical queries but carry no answer content; see rag_chain thin-chunk filter.
 RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
+# Floor client-supplied search_limit/rerank_top_k up to the configured
+# SEARCH_LIMIT/RERANK_TOP_K so UI clients that hardcode small values (e.g. the
+# console presets 10/5) still retrieve enough candidates for the reranker to
+# surface body chunks that rank beyond a small top-K. No-op at repo defaults
+# (10/5); active when a deployment sets SEARCH_LIMIT/RERANK_TOP_K higher.
+RETRIEVAL_ENFORCE_CONFIG_FLOOR = os.environ.get(
+    "RAG_RETRIEVAL_ENFORCE_CONFIG_FLOOR", "true"
+).lower() in ("true", "1", "yes")
 
 # --- Document Processing ---
 # CHUNK_SIZE / CHUNK_OVERLAP apply to the **LangChain fallback** chunker

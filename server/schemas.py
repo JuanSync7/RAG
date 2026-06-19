@@ -22,6 +22,10 @@ from server.common import (
     ConsoleEnvelope,
 )
 
+# Single source of truth for retrieval sizing (env-driven). Request schema
+# defaults derive from these so there is ONE place to change them.
+from config.settings import RERANK_TOP_K, SEARCH_LIMIT
+
 
 class QueryRequest(BaseModel):
     """Incoming query from a user."""
@@ -31,8 +35,8 @@ class QueryRequest(BaseModel):
     source_filter: Optional[str] = Field(None, description="Filter by source document filename")
     heading_filter: Optional[str] = Field(None, description="Filter by section heading")
     alpha: float = Field(0.5, ge=0.0, le=1.0, description="Hybrid search balance (0=BM25, 1=vector)")
-    search_limit: int = Field(10, ge=1, le=100, description="Max results from hybrid search")
-    rerank_top_k: int = Field(5, ge=1, le=50, description="Top-K results after reranking")
+    search_limit: int = Field(SEARCH_LIMIT, ge=1, le=100, description="Max results from hybrid search")
+    rerank_top_k: int = Field(RERANK_TOP_K, ge=1, le=50, description="Top-K results after reranking")
     tenant_id: Optional[str] = Field(None, description="Optional tenant override for admins")
     max_query_iterations: Optional[int] = Field(
         None,
@@ -335,8 +339,8 @@ class ConsoleQueryRequest(BaseModel):
     source_filter: Optional[str] = None
     heading_filter: Optional[str] = None
     alpha: float = Field(default=0.5, ge=0.0, le=1.0)
-    search_limit: int = Field(default=10, ge=1, le=100)
-    rerank_top_k: int = Field(default=5, ge=1, le=50)
+    search_limit: int = Field(default=SEARCH_LIMIT, ge=1, le=100)
+    rerank_top_k: int = Field(default=RERANK_TOP_K, ge=1, le=50)
     tenant_id: Optional[str] = None
     max_query_iterations: Optional[int] = Field(default=None, ge=1, le=8)
     fast_path: Optional[bool] = None

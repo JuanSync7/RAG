@@ -138,6 +138,7 @@ from config.settings import (
 )
 from config.settings import (
     RERANK_MIN_CHARS,
+    RETRIEVAL_ENFORCE_CONFIG_FLOOR,
     RAG_RERANK_FUSION_ENABLED,
     RAG_RERANK_RRF_K,
     RAG_RERANK_RRF_LAMBDA,
@@ -1347,6 +1348,14 @@ class RAGChain:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
             rerank_top_k = validate_positive_int("rerank_top_k", rerank_top_k)
+            # Floor client search_limit/rerank_top_k to the configured retrieval
+            # sizes (RAG_SEARCH_LIMIT/RAG_RERANK_TOP_K). UI clients hardcode small
+            # presets (e.g. 10/5) which truncate the candidate pool and cut body
+            # chunks that rank beyond a small top-K (e.g. an answer chunk at rank
+            # ~10). settings.py is the single source; this enforces it.
+            if RETRIEVAL_ENFORCE_CONFIG_FLOOR:
+                search_limit = max(search_limit, SEARCH_LIMIT)
+                rerank_top_k = max(rerank_top_k, RERANK_TOP_K)
             source_filter = validate_filter_value("source_filter", source_filter)
             heading_filter = validate_filter_value("heading_filter", heading_filter)
             # Retrieval mode never generates an answer regardless of caller intent.
