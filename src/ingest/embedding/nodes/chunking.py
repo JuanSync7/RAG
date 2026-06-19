@@ -131,7 +131,14 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         parse_result = state.get("parse_result")
         parser_instance = state.get("parser_instance")
 
-        if parse_result is not None and parser_instance is not None:
+        # config.chunker == "legacy" forces the pre-parser-abstraction markdown
+        # chunker even when parse_result is available (explicit opt-out / escape
+        # hatch); "native"/"markdown" use the parser-abstraction path.
+        if (
+            config.chunker != "legacy"
+            and parse_result is not None
+            and parser_instance is not None
+        ):
             # ── Parser-abstraction path (Phase 3.2) ───────────────────────
             if config.chunker == "markdown":
                 from src.ingest.support.parser_base import chunk_with_markdown

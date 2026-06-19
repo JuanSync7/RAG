@@ -430,10 +430,10 @@ def _check_parser_abstraction_config(
         )
 
     # Rule 2: chunker must be a recognised value.
-    _VALID_CHUNKERS = {"native", "markdown"}
+    _VALID_CHUNKERS = {"native", "markdown", "legacy"}
     if config.chunker not in _VALID_CHUNKERS:
         errors.append(
-            f"chunker must be 'native' or 'markdown', got '{config.chunker}'."
+            f"chunker must be 'native', 'markdown', or 'legacy', got '{config.chunker}'."
         )
 
     # Rule 3: chunker override warning.
@@ -645,11 +645,21 @@ def ingest_file(
           }
           _write_refactor_mirror_artifacts(source_identity, phase1, config)
 
-      # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
+      # ── Phase 2 (parse_result + parser_instance passed in-memory from Phase 1) ──
       # Propagate trace_id from Phase 1 state to Phase 2 (FR-3052).
       # phase1.get("trace_id") will be the same value we injected above, but we
       # read it from the state to stay consistent with the contract that Phase 2
       # receives trace_id via state, not as a free variable.
+      #
+      # CRITICAL (chunker wiring): structure_detection_node (Phase 1) produces
+      # `parse_result` + `parser_instance` via the ParserRegistry, but these live
+      # objects must be forwarded here for chunking_node (Phase 2) to use the
+      # native HybridChunker / adaptive-table / contextualize path. Before this
+      # was wired, only the legacy `docling_document` crossed the boundary, so
+      # chunking_node always fell back to the legacy markdown chunker regardless
+      # of config.chunker. They are forwarded for chunker="native"/"markdown";
+      # chunker="legacy" intentionally withholds them to force the legacy path.
+      _use_parser_path = config.chunker != "legacy"
       phase2 = run_embedding_pipeline(
           runtime=runtime,
           source_key=source_key,
@@ -661,6 +671,8 @@ def ingest_file(
           clean_text=clean_text,
           clean_hash=clean_hash,
           docling_document=phase1.get("docling_document"),
+          parse_result=phase1.get("parse_result") if _use_parser_path else None,
+          parser_instance=phase1.get("parser_instance") if _use_parser_path else None,
           trace_id=phase1.get("trace_id", trace_id),
           batch_id=batch_id,
       )

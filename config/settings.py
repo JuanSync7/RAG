@@ -524,6 +524,25 @@ single-sentence chunks (under ~50 tokens) lack contextual grounding.
 1024 keeps natural section units whole while staying comfortably below
 the dilution threshold."""
 
+RAG_INGESTION_CHUNKER: str = os.environ.get("RAG_INGESTION_CHUNKER", "native").lower()
+"""Selects the chunking backend used by the embedding pipeline (chunking_node).
+
+- ``"native"`` (default): each parser's own structure-aware chunker — for
+  documents this is Docling's HybridChunker (``merge_peers=True``, token-bounded)
+  plus adaptive table chunking (``table_summary``/``table_row`` with captions)
+  and heading-breadcrumb ``contextualize()``. Requires ``parse_result`` +
+  ``parser_instance`` to be threaded from Phase 1 into Phase 2.
+- ``"markdown"``: parser-abstraction markdown chunker over ``parse_result``.
+- ``"legacy"``: the pre-parser-abstraction MarkdownHeaderTextSplitter +
+  semantic/character fallback on ``cleaned_text`` (no table awareness, no
+  contextualize). The historical default-by-accident — used whenever
+  ``parse_result`` was absent.
+
+NOTE: until the Phase-1->Phase-2 handoff was fixed to forward
+``parse_result``/``parser_instance``, ``"native"``/``"markdown"`` were
+unreachable and every document silently fell back to ``"legacy"``. Set this to
+``"legacy"`` to restore the old behavior."""
+
 RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS: int = int(
     os.environ.get("RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS", "4000")
 )

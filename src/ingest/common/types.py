@@ -72,6 +72,7 @@ from config.settings import (
     SEMANTIC_CHUNKING_ENABLED,
     RAG_INGESTION_VLM_MODE,
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
+    RAG_INGESTION_CHUNKER,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
     RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
@@ -276,11 +277,12 @@ class IngestionConfig:
     """Parser selection: "auto" (extension-based routing), "document" (Docling),
     "code" (tree-sitter), "text" (PlainTextParser). Default: "auto". FR-3301.
     Env var: RAG_INGESTION_PARSER_STRATEGY"""
-    chunker: str = "native"
-    """Chunker selection: "native" (each parser's internal chunker) or
-    "markdown" (force heading-aware markdown splitting for all parsers).
-    Default: "native". FR-3320.
-    Env var: RAG_INGESTION_CHUNKER"""
+    chunker: str = RAG_INGESTION_CHUNKER
+    """Chunker selection: "native" (each parser's internal chunker), "markdown"
+    (force heading-aware markdown splitting for all parsers), or "legacy"
+    (pre-parser-abstraction MarkdownHeaderTextSplitter + semantic/char fallback
+    on cleaned_text — no table awareness or contextualize).
+    Default: from RAG_INGESTION_CHUNKER env (``"native"``). FR-3320."""
 
     # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3, §5) --
     enable_tree_retrieval_ingest: bool = False
