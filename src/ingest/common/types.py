@@ -77,6 +77,9 @@ from config.settings import (
     RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
     RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH,
     RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY,
+    RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING,
+    RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS,
+    RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS,
     RAG_INGESTION_DROP_NAVIGATIONAL,
     RAG_INGESTION_NAV_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
@@ -212,15 +215,18 @@ class IngestionConfig:
     actually consume. Final fallback is ``BAAI/bge-m3``. Env-driven override
     is intentionally not wired — set this on IngestionConfig directly when a
     different tokenizer is desired."""
-    enable_adaptive_table_chunking: bool = True
+    enable_adaptive_table_chunking: bool = RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING
     """If True, ``DoclingParser.chunk()`` post-processes HybridChunker output:
     drops table-dominant chunks and emits a per-table summary chunk plus
-    per-row chunks for small/uniform tables. Default: True."""
-    max_table_rows_for_row_chunks: int = 32
+    per-row chunks for small/uniform tables. Env:
+    RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING (default True)."""
+    max_table_rows_for_row_chunks: int = RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS
     """Maximum body-row count (excluding header) for which per-row chunks are
-    emitted. Larger tables emit only the summary chunk."""
-    max_table_cols_for_row_chunks: int = 12
-    """Maximum column count for which per-row chunks are emitted."""
+    emitted. Larger tables emit only the (cell-folded) summary chunk. Env:
+    RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS (default 32)."""
+    max_table_cols_for_row_chunks: int = RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS
+    """Maximum column count for which per-row chunks are emitted. Env:
+    RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS (default 12)."""
     table_summary_max_chars: int = RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS
     """Maximum character length of the embedded ``table_summary`` chunk text.
     Caps the text that the embedder sees on wide-header or 200+ row tables so a

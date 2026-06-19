@@ -608,6 +608,26 @@ navigational test fires at ingest. Mirrors the query-side RERANK_NAV_MAX_CHARS s
 both gates treat the same chunks as navigational. The dotted-leader (ToC) branch is
 length-independent and unaffected by this cap."""
 
+# Adaptive table-chunking knobs (env-wired so they can be tuned on the live
+# Temporal worker; previously hardcoded dataclass defaults — audit
+# F6-adaptive-table-knobs-no-env-wiring).
+RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING: bool = os.environ.get(
+    "RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), DoclingParser.chunk() drops table-dominant chunks and emits a
+per-table summary chunk plus per-row chunks for small/uniform tables."""
+
+RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS: int = int(
+    os.environ.get("RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS", "32")
+)
+"""Max body-row count (excluding header) for which per-row chunks are emitted;
+larger tables emit only the (cell-folded) summary chunk."""
+
+RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS: int = int(
+    os.environ.get("RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS", "12")
+)
+"""Max column count for which per-row chunks are emitted."""
+
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
 ).lower() in ("true", "1", "yes")
@@ -641,13 +661,11 @@ RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
 """Parser selection strategy: "auto" | "document" | "code" | "text".
 "auto" routes by file extension via ParserRegistry. FR-3301."""
 
-RAG_INGESTION_CHUNKER: str = os.environ.get(
-    "RAG_INGESTION_CHUNKER", "native"
-)
-"""Chunker override: "native" | "markdown".
-"native" uses each parser's own chunker (DoclingParser HybridChunker,
-CodeParser tree-sitter, PlainTextParser markdown). "markdown" forces
-the shared chunk_with_markdown() fallback for all parsers. FR-3320."""
+# NOTE: RAG_INGESTION_CHUNKER is defined once, above (with ``.lower()`` so an
+# uppercase env value like "Native" normalizes instead of failing
+# verify_core_design's value check). A second, lower-casing-less definition used
+# to live here and silently won by being later in the module — removed (audit
+# F3-chunker-double-def-no-lower).
 
 # --- Ingestion Hardening: Data Lifecycle — MinIO Clean Store + GC ---
 RAG_INGESTION_CLEAN_STORE_BUCKET: str = os.environ.get(
