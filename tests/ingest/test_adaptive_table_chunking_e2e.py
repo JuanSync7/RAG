@@ -362,6 +362,11 @@ class TestAdaptiveTableChunkingE2E:
         config = IngestionConfig(
             enable_docling_parser=True,
             enable_adaptive_table_chunking=False,
+            # Isolate the table-flag behaviour from the native min-body coalesce
+            # floor: these raw chunks are deliberately sub-floor and share one
+            # heading, so the default coalesce would merge them and change the
+            # count this test asserts. 0 disables coalescing.
+            native_min_chunk_chars=0,
         )
         processed, table_md, parse_result = _run_e2e(
             table_cells=cells,

@@ -815,6 +815,17 @@ def chunk_markdown_via_docling(
                   page_ref=_page_ref_from_chunk_meta(meta),
               )
           )
+      # Apply the native min-body coalesce floor (HybridChunker's merge_peers
+      # has none) so sub-floor prose stubs are folded into a same-ancestor
+      # neighbour rather than emitted as heading-dominated tiny chunks. Re-index
+      # afterwards since merging removes chunks.
+      chunks = _coalesce_native_chunks(
+          chunks,
+          min_chars=int(getattr(config, "native_min_chunk_chars", 512) or 0),
+          max_chars=int(getattr(config, "chunk_size", 3500) or 3500),
+      )
+      for _i, _c in enumerate(chunks):
+          _c.chunk_index = _i
       _span.set_attribute("chunk_count", len(chunks))
       _span.set_attribute("figure_count", len(figures))
       return chunks
@@ -1708,6 +1719,109 @@ def _apply_adaptive_table_chunking(
     return result
 
 
+def _shared_heading_prefix(a: list, b: list) -> list:
+    """Return the longest common leading run of two heading paths.
+
+    ``["Ch3","3.1"]`` & ``["Ch3","3.2"]`` -> ``["Ch3"]`` (sibling sections share
+    their chapter); ``["Ch3"]`` & ``["Ch4"]`` -> ``[]`` (different chapters).
+    Identical paths return the full path (no specificity lost on intra-section
+    merges).
+    """
+    out: list = []
+    for x, y in zip(a or [], b or []):
+        if x == y:
+            out.append(x)
+        else:
+            break
+    return out
+
+
+def _coalesce_native_chunks(chunks: list, min_chars: int, max_chars: int) -> list:
+    """Merge sub-floor HybridChunker chunks into a same-ancestor neighbour.
+
+    HybridChunker's ``merge_peers`` only merges chunks sharing the SAME heading
+    path and only up to the token budget — it has no minimum-size floor. So a
+    leaf section with a tiny body (a one-line cross-pointer, a stub paragraph)
+    is emitted as its own heading-dominated chunk that pollutes retrieval (the
+    "title-only chunk" pathology). The chunks that survive small are precisely
+    those whose neighbour has a DIFFERENT heading (merge_peers stops at heading
+    boundaries), so coalescing here must merge ACROSS heading boundaries.
+
+    Rule: walk in document order; when the current chunk OR the last emitted
+    chunk has a sub-``min_chars`` BODY (breadcrumb stripped via
+    :func:`chunk_body_text`), and the two share a non-empty heading-path prefix,
+    and the merged body stays within ``max_chars``, fold the current chunk into
+    the previous one. The merged chunk is re-attributed to the shared ancestor
+    breadcrumb (honest when content spans sections; a no-op when the paths are
+    identical), keeps the earlier chunk's page provenance, and its xref edges
+    are re-stamped from the merged body. Chunks with no shared ancestor (a stub
+    under a different chapter) are left intact for the body-aware DROP backstop
+    in ``quality_validation``.
+
+    Merges PROSE chunks only — call AFTER :func:`_apply_adaptive_table_chunking`
+    and figure-chunk emission. table_summary/table_row/figure chunks carry
+    structured metadata that string concatenation would destroy, so they are
+    skipped (neither merged nor merged-into); a table/figure chunk sitting
+    between two prose chunks therefore also blocks them from merging across it,
+    preserving document structure. Running after table chunking is essential —
+    coalescing before it could fold a small table-dominant chunk (or its
+    adjacent prose) into a neighbour and break or drop the table emission.
+    ``min_chars <= 0`` disables.
+    """
+    from src.ingest.common.shared import chunk_body_text
+
+    if min_chars <= 0 or len(chunks) < 2:
+        return chunks
+
+    def _body(c: Any) -> str:
+        return chunk_body_text(c.text, list(getattr(c, "heading_path", []) or []))
+
+    def _is_prose(c: Any) -> bool:
+        # Prose chunks carry no chunk_type yet (it is set later in chunking_node)
+        # or an explicit "text"; table_summary/table_row/figure chunks must not
+        # be merged or merged-into.
+        ct = (getattr(c, "extra_metadata", None) or {}).get("chunk_type", "text")
+        return ct in ("text", "", None)
+
+    out: list = []
+    for ch in chunks:
+        if out and _is_prose(ch) and _is_prose(out[-1]):
+            prev = out[-1]
+            prev_body = _body(prev)
+            cur_body = _body(ch)
+            if (
+                len(prev_body.strip()) < min_chars
+                or len(cur_body.strip()) < min_chars
+            ):
+                shared = _shared_heading_prefix(
+                    list(getattr(prev, "heading_path", []) or []),
+                    list(getattr(ch, "heading_path", []) or []),
+                )
+                merged_body = (
+                    f"{prev_body}\n{cur_body}"
+                    if prev_body and cur_body
+                    else (prev_body or cur_body)
+                )
+                if shared and len(merged_body) <= max_chars:
+                    prefix = "\n".join(shared) + "\n" if shared else ""
+                    prev.text = prefix + merged_body
+                    prev.section_path = " > ".join(shared)
+                    prev.heading = shared[-1] if shared else ""
+                    prev.heading_level = len(shared)
+                    prev.heading_path = list(shared)
+                    extra: dict = {}
+                    _stamp_xref_targets(extra, merged_body)
+                    figs = list(prev.extra_metadata.get("figures", [])) + list(
+                        ch.extra_metadata.get("figures", [])
+                    )
+                    if figs:
+                        extra["figures"] = figs
+                    prev.extra_metadata = extra
+                    continue
+        out.append(ch)
+    return out
+
+
 class DoclingParser:
     """Docling-based document parser implementing DocumentParser protocol.
 
@@ -1856,8 +1970,8 @@ class DoclingParser:
                 )
             )
 
-        tables = list(getattr(parse_result, "tables", []) or [])
         cfg = getattr(self, "_config", None)
+        tables = list(getattr(parse_result, "tables", []) or [])
         if (
             tables
             and getattr(cfg, "enable_adaptive_table_chunking", True)
@@ -1872,6 +1986,18 @@ class DoclingParser:
         figures = list(getattr(parse_result, "figures", []) or [])
         if figures:
             chunks = list(chunks) + _figure_artifacts_to_chunks(figures)
+
+        # Coalesce sub-floor PROSE chunks AFTER table/figure emission. The pass
+        # skips table_summary/table_row/figure chunks (so a small table-dominant
+        # chunk can never be folded into a neighbour and lost), and merges only
+        # adjacent prose stubs that HybridChunker's merge_peers left undersized
+        # at heading boundaries — the "title-only chunk" floor that merge_peers
+        # lacks. ``native_min_chunk_chars`` (default 512) gates it; 0 disables.
+        chunks = _coalesce_native_chunks(
+            chunks,
+            min_chars=int(getattr(cfg, "native_min_chunk_chars", 512) or 0),
+            max_chars=int(getattr(cfg, "chunk_size", 3500) or 3500),
+        )
 
         for i, c in enumerate(chunks):
             c.chunk_index = i

@@ -149,3 +149,64 @@ def test_all_whitespace_chunk_rejected():
     with patch(PATCH_TARGET, return_value=1.0):
         result = quality_validation_node(state)
     assert chunk not in result["chunks"]
+
+
+# ---------------------------------------------------------------------------
+# Body-aware gate: the floor must measure the BODY, not the heading breadcrumb
+# that HybridChunker's contextualize() prepends to the embedded text.
+# ---------------------------------------------------------------------------
+
+def test_breadcrumb_padded_stub_dropped_on_body_length():
+    """A tiny body padded over the floor by its heading breadcrumb is dropped.
+
+    Regression for the 'title-only chunk' pathology: the embedded text clears
+    the length floor only because the breadcrumb inflates it; the body alone is
+    far below the floor and must be filtered.
+    """
+    hp = ["Chapter 5 Transactions", "5.2 Address Channel", "5.2.1 Signal Descriptions"]
+    prefix = "\n".join(hp) + "\n"
+    body = "See 5.3."  # 8-char body
+    chunk = _make_chunk(prefix + body, {"heading_path": hp})
+    assert len(prefix + body) > 50  # full embedded text would clear the old floor
+    state = _make_state([chunk], enabled=True, min_chars=50)
+    with patch(PATCH_TARGET, return_value=1.0):
+        result = quality_validation_node(state)
+    assert chunk not in result["chunks"]  # dropped: BODY (8) < 50
+
+
+def test_quality_score_measured_on_body_not_breadcrumb():
+    """quality_score() receives the BODY, not the breadcrumb-padded embedded text."""
+    hp = ["Chapter 5", "5.2 Foo"]
+    prefix = "\n".join(hp) + "\n"
+    body = "x" * 100
+    chunk = _make_chunk(prefix + body, {"heading_path": hp})
+    captured = {}
+
+    def fake_score(t):
+        captured["arg"] = t
+        return 1.0
+
+    state = _make_state([chunk], enabled=True, min_chars=10, min_quality=0.3)
+    with patch(PATCH_TARGET, side_effect=fake_score):
+        quality_validation_node(state)
+    assert captured["arg"] == body  # scored on body only
+
+
+def test_no_heading_path_measures_full_text():
+    """Chunks without heading_path (legacy/table/figure) gate on full text — unchanged."""
+    chunk = _make_chunk("a" * 60, {})  # no heading_path -> body == full text
+    state = _make_state([chunk], enabled=True, min_chars=50)
+    with patch(PATCH_TARGET, return_value=1.0):
+        result = quality_validation_node(state)
+    assert chunk in result["chunks"]
+
+
+def test_same_body_different_section_both_kept():
+    """Identical bodies under DIFFERENT headings are kept (dedup is on full text)."""
+    body = "Reset value is 0x00 for this register field. " * 2
+    a = _make_chunk("Ch1\n1.1 A\n" + body, {"heading_path": ["Ch1", "1.1 A"]})
+    b = _make_chunk("Ch2\n2.1 B\n" + body, {"heading_path": ["Ch2", "2.1 B"]})
+    state = _make_state([a, b], enabled=True, min_chars=10)
+    with patch(PATCH_TARGET, return_value=1.0):
+        result = quality_validation_node(state)
+    assert len(result["chunks"]) == 2  # distinct embedded text -> not deduped

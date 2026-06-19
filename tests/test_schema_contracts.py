@@ -57,6 +57,7 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "enable_kg_phase2b",
     # Quality thresholds
     "min_chunk_chars",
+    "native_min_chunk_chars",
     "min_quality_score",
     # Storage / infra paths
     "clean_store_dir",

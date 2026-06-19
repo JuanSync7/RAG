@@ -235,3 +235,48 @@ class TestPartialStateResilience:
         chunk = _get_chunks(result, state)[0]
         # document_id must be present in metadata and be an empty string (not raise)
         assert chunk.metadata.get("document_id") == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: body-aware provenance (perf fix — map the BODY, not the breadcrumb)
+# ---------------------------------------------------------------------------
+
+class TestBodyAwareProvenance:
+    """Provenance maps the breadcrumb-stripped BODY so exact str.find() hits.
+
+    Regression for the O(n_chunks x doc_len) ingest stall: HybridChunker text is
+    contextualized (breadcrumb prepended), which is NOT contiguous in source, so
+    mapping chunk.text directly forces the difflib fuzzy fallback for every
+    chunk. Mapping the body restores the exact-find fast path.
+    """
+
+    def test_body_located_exactly_when_breadcrumb_stripped(self):
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        body = "The AWVALID signal indicates a valid write address phase here."
+        source = f"Some preamble paragraph.\n\n{body}\n\nTrailing paragraph text."
+        hp = ["Chapter 5 Transactions", "5.1 Write Address Channel"]
+        chunk = ProcessedChunk(
+            text="\n".join(hp) + "\n" + body,
+            metadata={"heading_path": hp, "source_name": "doc.txt"},
+        )
+        state = _make_state(chunks=[chunk])
+        state["raw_text"] = source
+        state["cleaned_text"] = source
+
+        result = chunk_enrichment_node(state)
+        meta = _get_chunks(result, state)[0].metadata
+        # Body found contiguously in source -> exact match, not the fuzzy fallback.
+        assert meta["refactored_char_start"] >= 0
+        assert "exact" in meta["provenance_method"]
+
+    def test_contextualized_text_without_stripping_misses_exact_find(self):
+        """Control: mapping the breadcrumb-prefixed text directly fails exact find."""
+        from src.ingest.common.shared import map_chunk_provenance
+
+        body = "The AWVALID signal indicates a valid write address phase here."
+        source = f"Some preamble.\n\n{body}\n\nTrailing."
+        contextualized = "Chapter 5 Transactions\n5.1 Write Address Channel\n" + body
+        prov, _, _ = map_chunk_provenance(contextualized, source, source, 0, 0)
+        # Breadcrumb is not contiguous in source -> not found in refactored text.
+        assert prov["refactored_char_start"] < 0

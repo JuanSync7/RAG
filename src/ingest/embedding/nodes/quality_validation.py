@@ -16,6 +16,7 @@ from typing import Any
 from src.ingest.common import (
     append_processing_log,
     quality_score,
+    chunk_body_text,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
@@ -46,14 +47,23 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     filtered_chunks = []
     seen_normalized = set()
     for chunk in state["chunks"]:
-        text = chunk.text.strip()
-        normalized = _WHITESPACE_RE.sub(" ", text).lower()
-        if len(text) < config.min_chunk_chars:
+        # Gate on the BODY, not the embedded text. HybridChunker output is
+        # contextualized (heading breadcrumb prepended via contextualize()), so
+        # measuring chunk.text would let a 9-char body under a 3-level heading
+        # read as ~60 chars and survive the floor — the "title-only chunk"
+        # pathology. chunk_body_text() strips the breadcrumb deterministically
+        # and is a no-op on non-contextualized chunks (tables/figures/legacy).
+        body = chunk_body_text(chunk.text, chunk.metadata.get("heading_path"))
+        body_text = body.strip()
+        if len(body_text) < config.min_chunk_chars:
             continue
+        # De-duplicate on the FULL embedded text so identical bodies under
+        # DIFFERENT section headings are correctly retained as distinct chunks.
+        normalized = _WHITESPACE_RE.sub(" ", chunk.text.strip()).lower()
         if normalized in seen_normalized:
             continue
         try:
-            score = quality_score(text)
+            score = quality_score(body_text)
         except Exception:
             logger.warning("Quality score computation failed; defaulting to 0.0", exc_info=True)
             score = 0.0  # fail safe: low quality

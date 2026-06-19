@@ -36,6 +36,7 @@ from src.ingest.common.shared import (
     extract_keywords_fallback,
     cross_refs,
     quality_score,
+    chunk_body_text,
 )
 from src.ingest.common.edit_log import EditLog
 from src.ingest.common.clean_store import CleanDocumentStore
@@ -62,6 +63,7 @@ __all__ = [
     "extract_keywords_fallback",
     "cross_refs",
     "quality_score",
+    "chunk_body_text",
     "EditLog",
     "CleanDocumentStore",
     "MinioCleanStore",

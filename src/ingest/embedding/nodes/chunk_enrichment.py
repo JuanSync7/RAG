@@ -19,6 +19,7 @@ from src.ingest.common import (
     EditLog,
     append_processing_log,
     map_chunk_provenance,
+    chunk_body_text,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
@@ -49,8 +50,19 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     original_cursor = 0
     refactored_cursor = 0
     for index, chunk in enumerate(state["chunks"]):
+        # Map provenance against the BODY, not the contextualized embedded text.
+        # HybridChunker output has the heading breadcrumb prepended (contextualize()),
+        # and that breadcrumb is NOT contiguous in the source — so passing chunk.text
+        # makes every _locate_span().find() miss and falls through to the O(doc)
+        # _best_paragraph_span difflib fuzzy match for EVERY chunk (observed ~22 min
+        # for a 1,690-chunk spec; ~75 min projected for a 5,582-chunk one). The raw
+        # body IS contiguous in source, so exact find hits and the fuzzy path is
+        # avoided. No-op for non-contextualized chunks (tables/figures/legacy path).
+        body_for_provenance = chunk_body_text(
+            chunk.text, chunk.metadata.get("heading_path")
+        )
         provenance, original_cursor, refactored_cursor = map_chunk_provenance(
-            chunk.text,
+            body_for_provenance,
             original_text=original_text,
             refactored_text=refactored_text,
             original_cursor=original_cursor,

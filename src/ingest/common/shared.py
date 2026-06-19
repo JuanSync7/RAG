@@ -1,6 +1,6 @@
 # @summary
 # Ingestion pipeline shared helpers for keyword fallback, stage logging, and provenance mapping.
-# Exports: extract_keywords_fallback, cross_refs, quality_score, append_processing_log, map_chunk_provenance
+# Exports: extract_keywords_fallback, cross_refs, quality_score, append_processing_log, map_chunk_provenance, chunk_body_text
 # Deps: difflib, logging, re, src.ingest.common.types, src.ingest.common.edit_log
 # @end-summary
 
@@ -285,10 +285,41 @@ def map_chunk_provenance(
     return provenance, next_orig_cursor, next_ref_cursor
 
 
+def chunk_body_text(text: str, heading_path: Optional[list] = None) -> str:
+    """Recover a chunk's raw BODY from HybridChunker-contextualized text.
+
+    docling_core's ``BaseChunker.contextualize()`` prepends the section heading
+    breadcrumb to the embedded text as ``"\\n".join(headings) + "\\n" + body``
+    (see ``docling_core/transforms/chunker/base.py``; only ``headings`` is
+    embedded — ``doc_items``/``origin``/``schema_name``/``version`` are excluded).
+    Length/quality gates and source-provenance mapping must measure the BODY,
+    not the heading-padded embedded text — otherwise:
+
+    * a 9-char body under a 3-level heading reads as ~60 chars and a near-empty
+      stub survives the min-length floor (the "title-only chunk" pathology), and
+    * provenance ``str.find()`` never matches (the breadcrumb is not contiguous
+      with the body in the source), forcing the O(doc) ``_best_paragraph_span``
+      fuzzy fallback for *every* chunk — a quadratic ingest-time cost.
+
+    This reverses the contextualization deterministically. It returns ``text``
+    unchanged when ``heading_path`` is empty or the breadcrumb prefix is absent
+    (table/figure chunks built without contextualize, the legacy markdown path,
+    or text that was never contextualized), so callers may always substitute the
+    result for ``text`` with no behavioural change on non-contextualized chunks.
+    """
+    if not heading_path:
+        return text
+    prefix = "\n".join(heading_path) + "\n"
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+
+
 __all__ = [
     "extract_keywords_fallback",
     "cross_refs",
     "quality_score",
     "append_processing_log",
     "map_chunk_provenance",
+    "chunk_body_text",
 ]

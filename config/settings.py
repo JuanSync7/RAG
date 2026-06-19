@@ -1124,6 +1124,20 @@ RAG_INGEST_MIN_CHUNK_CHARS: int = int(
 RAG_INGEST_MIN_QUALITY_SCORE: float = float(
     os.environ.get("RAG_INGEST_MIN_QUALITY_SCORE", "0.45")
 )
+# Native (Docling HybridChunker) min-chunk COALESCE floor (chars). HybridChunker's
+# merge_peers pass only merges chunks that share the SAME heading path and only up
+# to the token budget — it has no minimum-size floor, so a leaf section with a tiny
+# body (a one-line cross-pointer, a stub paragraph, an isolated sentence) is emitted
+# as its own heading-dominated chunk that pollutes retrieval (the "title-only chunk"
+# pathology). After chunking, DoclingParser merges adjacent sub-floor BODIES into the
+# neighbour sharing the longest heading-path prefix (same chapter/parent), capped at
+# CHUNK_SIZE chars, preserving the host chunk's breadcrumb/page/xref provenance.
+# 0 disables the pass. Distinct from RAG_INGEST_MIN_CHUNK_CHARS (a post-coalesce DROP
+# backstop for truly-orphan stubs, measured on the body) and RAG_MIN_CHUNK_CHARS
+# (the legacy markdown/semantic-path coalesce floor).
+RAG_INGEST_NATIVE_MIN_CHUNK_CHARS: int = int(
+    os.environ.get("RAG_INGEST_NATIVE_MIN_CHUNK_CHARS", "512")
+)
 
 # --- Ingest: Temporal workflow (KG phase 2b) ---
 RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN: int = int(
