@@ -70,6 +70,10 @@ if RAG_WEAVIATE_MODE not in ("embedded", "networked"):
 HYBRID_SEARCH_ALPHA = 0.5
 SEARCH_LIMIT = 10
 RERANK_TOP_K = 5
+# Drop thin / heading-only candidates (titles, ToC leaders) shorter than this
+# many chars before rerank. 0 = disabled. These chunks win dense cosine on
+# topical queries but carry no answer content; see rag_chain thin-chunk filter.
+RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
 
 # --- Document Processing ---
 # CHUNK_SIZE / CHUNK_OVERLAP apply to the **LangChain fallback** chunker
@@ -140,6 +144,12 @@ OLLAMA_BASE_URL = os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_OLLAMA_P
 OLLAMA_MODEL = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
 GENERATION_MAX_TOKENS = int(os.environ.get("RAG_GENERATION_MAX_TOKENS", "1024"))
 GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3"))
+# When false, do NOT send a JSON response_format to the LLM. Reasoning models
+# (e.g. qwopus) emit a degenerate "{}" under guided-JSON decoding; free-text
+# generation + free-text answer parsing is the reliable path.
+GENERATION_STRUCTURED_OUTPUT = os.environ.get(
+    "RAG_GENERATION_STRUCTURED_OUTPUT", "true"
+).lower() in ("true", "1", "yes")
 
 # --- LLM Provider (LiteLLM) ─────────────────────────────────────────
 # Unified config. Falls back to legacy Ollama vars for backward compat.

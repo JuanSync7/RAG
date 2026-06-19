@@ -16,6 +16,7 @@ from typing import Any, List, Optional, Tuple, Union
 
 from config.settings import (
     GENERATION_MAX_TOKENS,
+    GENERATION_STRUCTURED_OUTPUT,
     GENERATION_TEMPERATURE,
     PROMPTS_DIR,
 )
@@ -326,16 +327,23 @@ class OllamaGenerator:
         self.temperature = temperature
         self._provider = get_llm_provider()
         self.model = self._provider.config.model
-        try:
-            import litellm
-            if litellm.supports_response_schema(self.model):
-                self._response_format = _RAG_RESPONSE_FORMAT_STRICT
-                logger.info("Model %s supports json_schema — using strict response format", self.model)
-            else:
+        if not GENERATION_STRUCTURED_OUTPUT:
+            # Free-text generation: reasoning models (qwopus) return "{}" under
+            # guided-JSON decoding. Skip response_format and let
+            # _parse_structured_response() fall back to free-text extraction.
+            self._response_format = None
+            logger.info("Structured output disabled — using free-text generation for %s", self.model)
+        else:
+            try:
+                import litellm
+                if litellm.supports_response_schema(self.model):
+                    self._response_format = _RAG_RESPONSE_FORMAT_STRICT
+                    logger.info("Model %s supports json_schema — using strict response format", self.model)
+                else:
+                    self._response_format = _RAG_RESPONSE_FORMAT_BASIC
+                    logger.info("Model %s uses json_object — using basic response format", self.model)
+            except Exception:
                 self._response_format = _RAG_RESPONSE_FORMAT_BASIC
-                logger.info("Model %s uses json_object — using basic response format", self.model)
-        except Exception:
-            self._response_format = _RAG_RESPONSE_FORMAT_BASIC
 
     @property
     def system_prompt(self) -> str:
@@ -373,20 +381,22 @@ class OllamaGenerator:
         else:
             context = doc_context
         user_message = _build_user_prompt(context, query)
-        messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
+        # qwopus/vLLM chat template allows exactly ONE system message and it must
+        # be the first message. Merge memory context into that single leading
+        # system message instead of appending a SECOND system message (which made
+        # vLLM reject the request with "System message must be at the beginning.").
+        system_content = get_system_prompt()
         if memory_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Use the conversation context below only as supporting context for follow-up intent.\n"
-                        + memory_context
-                    ),
-                }
+            system_content = (
+                system_content
+                + "\n\n--- Conversation context (supporting context for follow-up intent only) ---\n"
+                + memory_context
             )
+        messages: list[dict] = [{"role": "system", "content": system_content}]
         for turn in recent_turns or []:
             role = str(turn.get("role", "user"))
-            if role not in {"user", "assistant", "system"}:
+            # Exclude 'system' so the single leading system message stays first.
+            if role not in {"user", "assistant"}:
                 continue
             content = str(turn.get("content", "")).strip()
             if not content:

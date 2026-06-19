@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 import logging
+import re
 import statistics
 import time
 
@@ -136,6 +137,7 @@ from config.settings import (
     RAG_STAGE_BUDGET_TREE_LIFT_MS,
 )
 from config.settings import (
+    RERANK_MIN_CHARS,
     RAG_RERANK_FUSION_ENABLED,
     RAG_RERANK_RRF_K,
     RAG_RERANK_RRF_LAMBDA,
@@ -156,6 +158,41 @@ RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
 ).lower() in ("true", "1", "yes")
 
 logger = logging.getLogger("rag.rag_chain")
+
+
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
+_TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
+
+
+def _is_thin_or_heading(text: str, min_chars: int) -> bool:
+    """True if a chunk is a thin title / heading-only / ToC-noise chunk that
+    carries no answer content (e.g. '## AMBA CHI Architecture Specification' or
+    dotted ToC leader lines). Such chunks win dense cosine similarity on topical
+    queries but should not consume rerank slots ahead of real body chunks."""
+    t = (text or "").strip()
+    if len(t) < min_chars:
+        return True
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    return all(_HEADING_LINE_RE.match(ln) or _TOC_NOISE_RE.match(ln) for ln in lines)
+
+
+def _filter_thin_candidates(items: list, min_chars: int, floor: int) -> list:
+    """Drop thin/heading-only candidates before rerank, keeping at least
+    ``floor`` items (topping up from dropped ones, original order, if needed)."""
+    if min_chars <= 0 or not items:
+        return items
+    kept: list = []
+    dropped: list = []
+    for it in items:
+        if _is_thin_or_heading(getattr(it, "text", "") or "", min_chars):
+            dropped.append(it)
+        else:
+            kept.append(it)
+    if len(kept) < floor:
+        kept.extend(dropped[: max(0, floor - len(kept))])
+    return kept
 
 
 class RAGChain:
@@ -1841,6 +1878,20 @@ class RAGChain:
                     conversation_id=conversation_id,
                     **_decision_to_action_fields(decision),
                 )
+
+            # Drop thin / heading-only chunks (titles, ToC leaders) that win
+            # dense similarity but carry no answer content, before they consume
+            # rerank slots. Floor keeps the candidate pool from collapsing.
+            if not _dr_active and search_results:
+                _n_before = len(search_results)
+                search_results = _filter_thin_candidates(
+                    search_results, min_chars=RERANK_MIN_CHARS, floor=rerank_top_k
+                )
+                if len(search_results) != _n_before:
+                    logger.info(
+                        "thin-chunk filter: %d -> %d candidates (min_chars=%d)",
+                        _n_before, len(search_results), RERANK_MIN_CHARS,
+                    )
 
             # Stage 5: Reranking (cross-encoder + fusion R1)
             t0 = time.perf_counter()
