@@ -309,8 +309,10 @@ class TestAdaptiveTableChunking:
         )
         # No truncation marker.
         assert "[truncated" not in summary.text
-        # Exact byte-for-byte composition.
-        expected = "Table: Tiny\nColumns: Col A | Col B\nRows: 1"
+        # Exact byte-for-byte composition. The heading breadcrumb ("Top\nSub")
+        # is prepended to the embedded text (parity with prose contextualize);
+        # this is a small, header-bearing table so its body is NOT folded in.
+        expected = "Top\nSub\nTable: Tiny\nColumns: Col A | Col B\nRows: 1"
         assert summary.text == expected
 
     def test_summary_truncation_disabled_when_cap_zero(self):

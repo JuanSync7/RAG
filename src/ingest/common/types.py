@@ -75,6 +75,8 @@ from config.settings import (
     RAG_INGESTION_CHUNKER,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
     RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
+    RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH,
+    RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
     RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
@@ -224,6 +226,17 @@ class IngestionConfig:
     ``table_markdown`` stays on ``extra_metadata`` unchanged for downstream
     expansion. Default sourced from ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``
     (4000 chars ≈ 1000 tokens). Set to 0 to disable truncation."""
+    table_embed_prepend_section_path: bool = RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH
+    """If True (default), prepend the heading breadcrumb to the EMBEDDED text of
+    table_summary/table_row/figure chunks (mirrors prose contextualize()), so
+    structured chunks are not heading-blind at dense + rerank time. table_markdown
+    metadata is untouched. Env: RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH."""
+    table_summary_include_body: bool = RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY
+    """If True (default), fold the (truncated) table_markdown cell values into the
+    embedded text of SUMMARY-ONLY tables (those that fail the row-chunk gates), so
+    cell values like a register's reset value are actually retrievable. Tables that
+    emit per-row chunks already carry cells and are left compact. Env:
+    RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN

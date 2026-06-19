@@ -1330,7 +1330,7 @@ def _extract_figure_artifacts(doc: Any, document_id: str = "") -> list:
     return artifacts
 
 
-def _figure_artifacts_to_chunks(figures: list) -> list:
+def _figure_artifacts_to_chunks(figures: list, prepend_section_path: bool = True) -> list:
     """Turn :class:`FigureArtifact` rows into ``chunk_type="figure"`` chunks.
 
     Mirrors :func:`_apply_adaptive_table_chunking`'s table-side transformer:
@@ -1399,8 +1399,14 @@ def _figure_artifacts_to_chunks(figures: list) -> list:
         if chunk_id:
             meta["chunk_id"] = chunk_id
         # Stamp cross-refs detected in the figure caption text (rare but
-        # possible: "Figure 4-1: see Section 3.2 for the matrix").
+        # possible: "Figure 4-1: see Section 3.2 for the matrix"). Stamp on the
+        # body (pre-breadcrumb) so breadcrumb headings don't seed false edges.
         _stamp_xref_targets(meta, text)
+
+        # Prepend the heading breadcrumb to the embedded text (parity with prose
+        # contextualize) so a caption-only figure chunk is not heading-blind.
+        if prepend_section_path and heading_path:
+            text = "\n".join(heading_path) + "\n" + text
 
         out.append(
             Chunk(
@@ -1584,6 +1590,10 @@ def _apply_adaptive_table_chunking(
     max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
     # Per-summary-text cap (chars). 0 / unset disables truncation.
     summary_max_chars = int(getattr(cfg, "table_summary_max_chars", 0) or 0)
+    # Prepend the heading breadcrumb to embedded table text (parity with prose
+    # contextualize); fold real cell values into summary-only tables.
+    prepend_breadcrumb = bool(getattr(cfg, "table_embed_prepend_section_path", True))
+    include_body = bool(getattr(cfg, "table_summary_include_body", True))
 
     # Compute table signatures once.
     table_meta: list[tuple[Any, str]] = []
@@ -1609,10 +1619,18 @@ def _apply_adaptive_table_chunking(
                 # so chained tables on a page still get their own anchors.
                 break
 
+    def _breadcrumb_prefix(heading_path: list) -> str:
+        # Mirror docling contextualize(): "\n".join(headings) + "\n". Kept
+        # byte-compatible so chunk_body_text() strips it for the body-aware gate.
+        if prepend_breadcrumb and heading_path:
+            return "\n".join(heading_path) + "\n"
+        return ""
+
     def _make_table_chunks(tbl: Any) -> list:
         out: list = []
         heading_path = [h for h in (tbl.section_path or "").split(" > ") if h]
         heading = heading_path[-1] if heading_path else ""
+        crumb = _breadcrumb_prefix(heading_path)
         # Stable within-document group key so retrieval can join a winning row
         # chunk back to its summary (and vice versa) without fuzzy-matching on
         # heading_path + page. Prefer parser self_ref; fall back to table_id.
@@ -1632,13 +1650,32 @@ def _apply_adaptive_table_chunking(
         }
         if tbl.caption:
             common_meta_summary["table_caption"] = tbl.caption
+
+        gate = _classify_table_for_row_chunks(tbl, max_rows, max_cols)
+        if gate == "small_gate":
+            increment_summary_only_small()
+        elif gate == "uniform_gate":
+            increment_summary_only_uniform()
+        else:
+            increment_row_chunks_emitted()
+
         raw_summary = _build_table_summary_text(tbl)
-        truncated_summary = _truncate_table_summary_text(raw_summary, summary_max_chars)
-        if truncated_summary != raw_summary:
+        # Summary-only tables (no per-row chunks) otherwise embed ZERO cell
+        # values — fold the table markdown in so values are retrievable. Tables
+        # that emit row chunks already carry cells, so keep their summary compact.
+        if include_body and gate != "row_chunks":
+            md = (getattr(tbl, "markdown", "") or "").strip()
+            if md:
+                raw_summary = f"{raw_summary}\n{md}"
+        # Stamp cross-refs on the BODY (pre-breadcrumb) so breadcrumb headings
+        # don't seed false xref edges.
+        _stamp_xref_targets(common_meta_summary, raw_summary)
+        # Prepend the heading breadcrumb to the EMBEDDED text (parity with prose
+        # contextualize), then cap — so the breadcrumb survives truncation.
+        summary_text = crumb + raw_summary
+        truncated_summary = _truncate_table_summary_text(summary_text, summary_max_chars)
+        if truncated_summary != summary_text:
             increment_summary_text_truncated()
-        # Stamp cross-refs detected in the table summary text (e.g. a
-        # caption like "Table 5-2 (see §3.1)" carries a §-section ref).
-        _stamp_xref_targets(common_meta_summary, truncated_summary)
         out.append(
             Chunk(
                 text=truncated_summary,
@@ -1651,14 +1688,6 @@ def _apply_adaptive_table_chunking(
                 page_ref=tbl.page_ref,
             )
         )
-
-        gate = _classify_table_for_row_chunks(tbl, max_rows, max_cols)
-        if gate == "small_gate":
-            increment_summary_only_small()
-        elif gate == "uniform_gate":
-            increment_summary_only_uniform()
-        else:
-            increment_row_chunks_emitted()
 
         if gate == "row_chunks":
             headers = tbl.cells[0]
@@ -1678,7 +1707,11 @@ def _apply_adaptive_table_chunking(
                 }
                 # Row-level xref edges: most row bodies have none, but the
                 # caption-prefixed text occasionally references a section.
+                # Stamp on the body (pre-breadcrumb) to avoid false edges.
                 _stamp_xref_targets(row_meta, text)
+                # Prepend the heading breadcrumb to the embedded row text so the
+                # row is not heading-blind at dense + rerank time (parity with prose).
+                text = crumb + text
                 out.append(
                     Chunk(
                         text=text,
@@ -1985,7 +2018,12 @@ class DoclingParser:
         # don't trip us (memory ``project_rag_chain_defensive_init``).
         figures = list(getattr(parse_result, "figures", []) or [])
         if figures:
-            chunks = list(chunks) + _figure_artifacts_to_chunks(figures)
+            chunks = list(chunks) + _figure_artifacts_to_chunks(
+                figures,
+                prepend_section_path=bool(
+                    getattr(cfg, "table_embed_prepend_section_path", True)
+                ),
+            )
 
         # Coalesce sub-floor PROSE chunks AFTER table/figure emission. The pass
         # skips table_summary/table_row/figure chunks (so a small table-dominant

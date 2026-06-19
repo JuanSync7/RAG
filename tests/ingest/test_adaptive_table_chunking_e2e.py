@@ -299,8 +299,9 @@ class TestAdaptiveTableChunkingE2E:
         assert types.count("table_row") == body_rows
 
         summary = next(c for c in processed if c.metadata.get("chunk_type") == "table_summary")
-        # Caption non-empty → summary text starts with "Table: "
-        assert summary.text.startswith("Table: Register Map"), summary.text
+        # The heading breadcrumb is prepended to the embedded text (parity with
+        # prose contextualize), so the structured summary follows the breadcrumb.
+        assert "Table: Register Map" in summary.text, summary.text
         # All header names present, separated by " | "
         assert f"Columns: {' | '.join(headers)}" in summary.text
         assert f"Rows: {body_rows}" in summary.text

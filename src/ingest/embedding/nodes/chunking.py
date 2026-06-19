@@ -194,23 +194,32 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                         meta["page_label"] = page_ref.page_label
                     if page_ref.bbox is not None:
                         meta["page_bbox"] = list(page_ref.bbox)
-                # Adaptive ``chunk_type`` ("table_summary"/"table_row") set upstream
-                # by docling._apply_adaptive_table_chunking falls through to ``setdefault``
-                # below — its chunk text never matches a pipe-table signature.
-                table_match = _match_table_artifact(norm_text, tables)
-                if table_match is not None:
-                    meta["chunk_type"] = "table"
-                    meta["table_id"] = table_match.table_id
-                    meta["table_cells"] = table_match.cells
-                    meta["table_num_rows"] = table_match.num_rows
-                    meta["table_num_cols"] = table_match.num_cols
-                    meta["table_has_header"] = table_match.has_header
-                    if table_match.caption:
-                        meta["table_caption"] = table_match.caption
-                    if table_match.page_ref is not None and "page_no" not in meta:
-                        meta["page_no"] = table_match.page_ref.page_no
+                # Chunks that already carry an adaptive structured chunk_type
+                # ("table_summary"/"table_row"/"figure") from
+                # docling._apply_adaptive_table_chunking must NOT be re-tagged.
+                # The signature-match below is only a fallback for PROSE chunks
+                # that happen to embed a raw pipe-table. (Pre-fix, a summary
+                # chunk whose text now folds in the table markdown matched its
+                # own signature and got mis-tagged "table" — see audit
+                # F5-adaptive-vs-retag-duplicate-tablechunks.)
+                existing_ct = meta.get("chunk_type")
+                if existing_ct in ("table_summary", "table_row", "figure"):
+                    pass  # keep the adaptive type set upstream
                 else:
-                    meta.setdefault("chunk_type", "text")
+                    table_match = _match_table_artifact(norm_text, tables)
+                    if table_match is not None:
+                        meta["chunk_type"] = "table"
+                        meta["table_id"] = table_match.table_id
+                        meta["table_cells"] = table_match.cells
+                        meta["table_num_rows"] = table_match.num_rows
+                        meta["table_num_cols"] = table_match.num_cols
+                        meta["table_has_header"] = table_match.has_header
+                        if table_match.caption:
+                            meta["table_caption"] = table_match.caption
+                        if table_match.page_ref is not None and "page_no" not in meta:
+                            meta["page_no"] = table_match.page_ref.page_no
+                    else:
+                        meta.setdefault("chunk_type", "text")
                 chunks.append(ProcessedChunk(text=norm_text, metadata=meta))
 
         else:

@@ -59,6 +59,8 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "min_chunk_chars",
     "native_min_chunk_chars",
     "min_quality_score",
+    "table_embed_prepend_section_path",
+    "table_summary_include_body",
     # Storage / infra paths
     "clean_store_dir",
     "store_documents",

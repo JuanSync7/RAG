@@ -560,6 +560,32 @@ The full ``table_markdown`` remains stored on the summary chunk's
 ``extra_metadata`` unchanged — only the embedded summary text is capped, so
 downstream table-expansion retrieval keeps the complete payload."""
 
+RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH: bool = os.environ.get(
+    "RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), prepend the section-heading breadcrumb to the EMBEDDED text
+of table_summary / table_row / figure chunks, mirroring what HybridChunker's
+contextualize() already does for prose chunks. Without it these structured chunks
+embed heading-blind (only ``Columns:.../Rows:N`` or a bare caption), so on
+topical/heading queries (e.g. "GPIO pin multiplexing") the prose paragraph — which
+carries its embedded breadcrumb — outranks the table that actually holds the
+answer, at BOTH the dense and reranker stages. ``table_markdown`` metadata is left
+unchanged. Changes embedded text -> chunk_id, so flipping this requires a
+re-ingest / collection recreate."""
+
+RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY: bool = os.environ.get(
+    "RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), fold the (truncated) ``table_markdown`` cell values into the
+embedded text of a SUMMARY-ONLY table chunk (a table that failed the row-chunk
+gates: >max_rows, >max_cols, or no header — the register/datasheet-map majority).
+Without it those tables embed only ``Columns:.../Rows:N`` with ZERO cell values, so
+a query like "reset value of REG37" can never match (the answer token is in no
+chunk's text) — the strongest datasheet "I cannot answer" driver. Tables that DO
+emit per-row chunks already carry cell values, so the body is not duplicated into
+their summary. Capped by ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``. Changes
+embedded text -> chunk_id; requires re-ingest."""
+
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
 ).lower() in ("true", "1", "yes")
