@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 import logging
+import math
 import re
 import statistics
 import time
@@ -173,6 +174,8 @@ from config.settings import (
     RAG_RERANK_HEADING_LAMBDA,
     RAG_RERANK_ANCHOR_LAMBDA,
     RAG_RERANK_ANCHOR_K,
+    RAG_RERANK_DIVERSITY_ENABLED,
+    RAG_RERANK_MAX_DOC_FRACTION,
 )
 from src.retrieval.query.nodes.rerank_fusion import (
     anchor_confidence,
@@ -1301,7 +1304,49 @@ class RAGChain:
             for i, r in enumerate(reranked)
         ]
         rescored.sort(key=lambda r: r.score, reverse=True)
-        return rescored[:rerank_top_k]
+        # Diversity cap: stop one document from monopolising the top-K (e.g. a
+        # spreadsheet split into many near-duplicate rows). ``rescored`` is the
+        # FULL candidate pool here, so capping then slicing promotes the next-best
+        # chunks from other documents into the freed slots.
+        return self._apply_doc_diversity(rescored, rerank_top_k)
+
+    @staticmethod
+    def _apply_doc_diversity(ranked: list, top_k: int) -> list:
+        """Cap how many chunks one ``document_id`` may occupy in the top ``top_k``.
+
+        Greedy by score with backfill: walk the score-sorted candidates keeping
+        at most ``ceil(top_k * RAG_RERANK_MAX_DOC_FRACTION)`` per document; if
+        diversity runs out before ``top_k`` is filled, re-add the highest-scored
+        over-cap chunks so a genuinely single-source answer is never starved and
+        recall is preserved. No-op when disabled, when the pool already fits in
+        ``top_k``, or when the fraction is >= 1.0.
+        """
+        if (
+            not RAG_RERANK_DIVERSITY_ENABLED
+            or top_k <= 0
+            or len(ranked) <= top_k
+            or RAG_RERANK_MAX_DOC_FRACTION >= 1.0
+        ):
+            return ranked[:top_k]
+        max_per_doc = max(1, math.ceil(top_k * RAG_RERANK_MAX_DOC_FRACTION))
+        selected: list = []
+        deferred: list = []
+        per_doc: dict[str, int] = {}
+        for r in ranked:
+            if len(selected) >= top_k:
+                break
+            doc = str((getattr(r, "metadata", None) or {}).get("document_id") or "")
+            if per_doc.get(doc, 0) < max_per_doc:
+                per_doc[doc] = per_doc.get(doc, 0) + 1
+                selected.append(r)
+            else:
+                deferred.append(r)
+        if len(selected) < top_k:
+            selected.extend(deferred[: top_k - len(selected)])
+        # Re-sort by score so the most relevant chunk still leads the context,
+        # regardless of the diversity-driven selection order.
+        selected.sort(key=lambda r: r.score, reverse=True)
+        return selected[:top_k]
     # ------------------------------------------------------------------
     # Deep-research branch helpers
     # ------------------------------------------------------------------

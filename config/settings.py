@@ -628,6 +628,20 @@ RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS: int = int(
 )
 """Max column count for which per-row chunks are emitted."""
 
+RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE: int = max(
+    1, int(os.environ.get("RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE", "32"))
+)
+"""Number of body rows folded into ONE table_row chunk (a bounded multi-row
+block, header re-stated per block) instead of one chunk per row.
+
+Spreadsheets (.xlsx) routinely contain many small uniform sheets; emitting one
+chunk per row exploded a single status workbook into ~1000 near-duplicate
+chunks that monopolised the reranked top-K (one document crowding out every
+other source). Grouping rows into blocks keeps each table to a handful of
+coherent, retrievable chunks. Default 32 == MAX_TABLE_ROWS_FOR_ROW_CHUNKS, so a
+row-chunk-eligible table emits a single summary + single row block; set to 1 to
+restore the legacy one-chunk-per-row behaviour."""
+
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
 ).lower() in ("true", "1", "yes")
@@ -1453,6 +1467,33 @@ RAG_RERANK_FUSION_ENABLED: bool = os.environ.get(
 ).lower() in ("true", "1", "yes")
 """Master switch for rerank-time fusion. When False, the rerank stage uses
 pure cross-encoder scores (legacy behavior). Defaults True."""
+
+RAG_RERANK_DIVERSITY_ENABLED: bool = os.environ.get(
+    "RAG_RERANK_DIVERSITY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for the per-document diversity cap applied to the final
+reranked top-K. When True (default), no single ``document_id`` may occupy more
+than ``ceil(rerank_top_k * RAG_RERANK_MAX_DOC_FRACTION)`` of the returned
+chunks; the freed slots go to the next-best chunks from OTHER documents.
+Greedy-by-score with backfill, so a genuinely single-source answer is never
+starved (over-cap chunks are re-added when no diverse candidates remain).
+
+Motivation: a single multi-sheet spreadsheet chunked into many near-duplicate
+rows could win every reranked slot for a topical query, evicting the prose
+chunk that actually answered it (one document crowding out all others). The
+ingest-side bounded-block table chunking is the primary cure; this cap is the
+query-side safety net so no document can ever monopolise retrieval again."""
+
+RAG_RERANK_MAX_DOC_FRACTION: float = float(
+    os.environ.get("RAG_RERANK_MAX_DOC_FRACTION", "0.75")
+)
+"""Maximum fraction of the reranked top-K that one ``document_id`` may occupy
+when ``RAG_RERANK_DIVERSITY_ENABLED`` is True. 0.75 → at most 9 of 12 (or 3 of
+5) from a single document: enough cross-document diversity to surface a second
+source (validated to recover questions whose answer lived in a non-dominant
+doc) while still letting a strongly-relevant document supply most of the
+context (a tighter 0.6 starved depth-heavy comparison answers). Set to 1.0 to
+disable the cap without touching the master switch."""
 
 RAG_RERANK_RRF_K: int = max(1, int(
     os.environ.get("RAG_RERANK_RRF_K", "60")

@@ -80,6 +80,7 @@ from config.settings import (
     RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING,
     RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS,
     RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS,
+    RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE,
     RAG_INGESTION_DROP_NAVIGATIONAL,
     RAG_INGESTION_NAV_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
@@ -227,6 +228,14 @@ class IngestionConfig:
     max_table_cols_for_row_chunks: int = RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS
     """Maximum column count for which per-row chunks are emitted. Env:
     RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS (default 12)."""
+    table_row_chunk_group_size: int = RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE
+    """Number of body rows folded into ONE ``table_row`` chunk (a bounded
+    multi-row block; header re-stated per block) instead of one chunk per row.
+    Stops large/multi-sheet spreadsheets from exploding into hundreds of
+    near-duplicate single-row chunks that monopolise the reranked top-K. Default
+    32 (== max_table_rows_for_row_chunks → one block per eligible table); set to
+    1 to restore legacy one-chunk-per-row. Env:
+    RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE."""
     table_summary_max_chars: int = RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS
     """Maximum character length of the embedded ``table_summary`` chunk text.
     Caps the text that the embedder sees on wide-header or 200+ row tables so a

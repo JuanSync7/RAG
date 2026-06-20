@@ -114,8 +114,8 @@ def _run_chunk(
 class TestAdaptiveTableChunking:
     """Behavior of DoclingParser.chunk() table post-processing."""
 
-    def test_small_table_emits_summary_and_row_chunks(self):
-        """A small table with header yields 1 summary + N row chunks; original dropped."""
+    def test_small_table_emits_summary_and_one_row_block(self):
+        """A small table → 1 summary + 1 bounded row-block (default group=32); original dropped."""
         cells = [["Col A", "Col B"], ["x1", "y1"], ["x2", "y2"], ["x3", "y3"]]
         tbl = _make_table_artifact(cells=cells)
         prose = _make_raw_chunk("Some intro prose.", headings=["Top", "Sub"])
@@ -124,22 +124,45 @@ class TestAdaptiveTableChunking:
         out = _run_chunk([prose, table_chunk], [tbl])
         types = [c.extra_metadata.get("chunk_type") for c in out]
         assert types.count("table_summary") == 1
-        assert types.count("table_row") == 3
-        # original table-dominant chunk dropped → prose + summary + 3 rows = 5
-        assert len(out) == 5
+        # Default group size (32) folds all 3 body rows into ONE block chunk.
+        assert types.count("table_row") == 1
+        # original table-dominant chunk dropped → prose + summary + 1 block = 3
+        assert len(out) == 3
         # summary text composition
         summary = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_summary")
         assert "Table: Demo Caption" in summary.text
         assert "Columns: Col A | Col B" in summary.text
         assert "Rows: 3" in summary.text
-        # row chunk shape
-        row0 = next(
-            c for c in out
-            if c.extra_metadata.get("chunk_type") == "table_row"
-            and c.extra_metadata.get("table_row_index") == 0
-        )
-        assert "Col A: x1" in row0.text
-        assert "Col B: y1" in row0.text
+        # the single block carries EVERY row's cells (header re-stated per row)
+        block = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_row")
+        assert block.extra_metadata.get("table_row_block_start") == 0
+        assert block.extra_metadata.get("table_row_block_count") == 3
+        for cell in ("Col A: x1", "Col B: y1", "Col A: x2", "Col A: x3", "Col B: y3"):
+            assert cell in block.text
+
+    def test_row_group_size_one_restores_per_row(self):
+        """group_size=1 reproduces the legacy one-chunk-per-row behaviour."""
+        cells = [["Col A", "Col B"], ["x1", "y1"], ["x2", "y2"], ["x3", "y3"]]
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        cfg = IngestionConfig(table_row_chunk_group_size=1)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        rows = [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
+        assert len(rows) == 3
+        assert sorted(c.extra_metadata.get("table_row_index") for c in rows) == [0, 1, 2]
+        assert all(c.extra_metadata.get("table_row_block_count") == 1 for c in rows)
+
+    def test_row_group_size_splits_into_bounded_blocks(self):
+        """A 5-row table with group_size=2 → ceil(5/2)=3 bounded blocks (2+2+1)."""
+        cells = [["Col A", "Col B"]] + [[f"x{i}", f"y{i}"] for i in range(5)]
+        tbl = _make_table_artifact(cells=cells)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        cfg = IngestionConfig(table_row_chunk_group_size=2)
+        out = _run_chunk([table_chunk], [tbl], config=cfg)
+        rows = [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
+        assert len(rows) == 3
+        assert sorted(c.extra_metadata.get("table_row_block_start") for c in rows) == [0, 2, 4]
+        assert sorted(c.extra_metadata.get("table_row_block_count") for c in rows) == [1, 2, 2]
 
     def test_large_table_emits_only_summary(self):
         """Tables exceeding max_table_rows_for_row_chunks emit only the summary."""

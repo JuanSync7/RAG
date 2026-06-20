@@ -64,6 +64,7 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "enable_adaptive_table_chunking",
     "max_table_rows_for_row_chunks",
     "max_table_cols_for_row_chunks",
+    "table_row_chunk_group_size",
     "drop_navigational",
     "nav_max_chars",
     # Storage / infra paths

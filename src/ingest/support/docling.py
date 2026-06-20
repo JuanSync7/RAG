@@ -1603,6 +1603,10 @@ def _apply_adaptive_table_chunking(
     # contextualize); fold real cell values into summary-only tables.
     prepend_breadcrumb = bool(getattr(cfg, "table_embed_prepend_section_path", True))
     include_body = bool(getattr(cfg, "table_summary_include_body", True))
+    # Fold N body rows into one chunk (bounded multi-row block) rather than one
+    # chunk per row, so a multi-sheet spreadsheet cannot explode into hundreds of
+    # near-duplicate row chunks that monopolise the reranked top-K.
+    row_group_size = max(1, int(getattr(cfg, "table_row_chunk_group_size", 32)))
 
     # Compute table signatures once.
     table_meta: list[tuple[Any, str]] = []
@@ -1701,25 +1705,42 @@ def _apply_adaptive_table_chunking(
         if gate == "row_chunks":
             headers = tbl.cells[0]
             caption_prefix = (tbl.caption or "").strip()
-            for body_idx, row in enumerate(tbl.cells[1:]):
-                pairs = " | ".join(f"{h}: {v}" for h, v in zip(headers, row))
-                text = f"{caption_prefix}\n{pairs}" if caption_prefix else pairs
+            body = tbl.cells[1:]
+            # Emit bounded multi-row blocks: each chunk holds up to
+            # ``row_group_size`` rows (one "h: v | h: v" line per row). One chunk
+            # per row blew a single multi-sheet workbook up to ~1000 chunks that
+            # crowded out every other source at rerank time.
+            for block_idx, start in enumerate(range(0, len(body), row_group_size)):
+                block = body[start:start + row_group_size]
+                row_lines = [
+                    " | ".join(f"{h}: {v}" for h, v in zip(headers, row))
+                    for row in block
+                ]
+                body_text = "\n".join(row_lines)
+                text = (
+                    f"{caption_prefix}\n{body_text}" if caption_prefix else body_text
+                )
                 row_meta = {
                     "chunk_type": "table_row",
                     "table_id": tbl.table_id,
                     "table_group_id": group_id,
                     "document_id": getattr(tbl, "document_id", "") or "",
                     "caption_label": getattr(tbl, "caption_label", "") or "",
-                    "table_row_index": body_idx,
+                    # First body-row index in the block (legacy field name kept so
+                    # downstream joins still resolve); plus explicit block bounds.
+                    "table_row_index": start,
+                    "table_row_block_index": block_idx,
+                    "table_row_block_start": start,
+                    "table_row_block_count": len(block),
                     "table_num_rows": tbl.num_rows,
                     "table_num_cols": tbl.num_cols,
                 }
-                # Row-level xref edges: most row bodies have none, but the
+                # Block-level xref edges: most row bodies have none, but the
                 # caption-prefixed text occasionally references a section.
                 # Stamp on the body (pre-breadcrumb) to avoid false edges.
                 _stamp_xref_targets(row_meta, text)
-                # Prepend the heading breadcrumb to the embedded row text so the
-                # row is not heading-blind at dense + rerank time (parity with prose).
+                # Prepend the heading breadcrumb to the embedded text so the block
+                # is not heading-blind at dense + rerank time (parity with prose).
                 text = crumb + text
                 out.append(
                     Chunk(

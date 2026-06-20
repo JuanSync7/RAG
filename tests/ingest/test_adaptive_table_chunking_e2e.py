@@ -275,9 +275,13 @@ class TestAdaptiveTableChunkingE2E:
                 _make_raw_chunk("Closing prose paragraph.", headings=["Spec"]),
             ]
 
+        # Pin group size to 1 so this end-to-end test still exercises the
+        # per-row metadata-propagation path (the row-grouping behaviour itself is
+        # covered by the unit tests in test_docling_adaptive_table_chunking.py).
         config = IngestionConfig(
             enable_docling_parser=True,
             enable_adaptive_table_chunking=True,
+            table_row_chunk_group_size=1,
         )
         processed, table_md, parse_result = _run_e2e(
             table_cells=cells,
