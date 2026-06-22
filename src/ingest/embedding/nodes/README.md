@@ -18,6 +18,7 @@ the stage logic, not the wiring.
 | `chunking.py` | Chunk generation via parser abstraction, with legacy markdown fallback |
 | `chunk_enrichment.py` | Chunk ID assignment and enriched content projection |
 | `quality_validation.py` | Optional chunk quality gating and intra-document deduplication |
+| `lossless_verification.py` | Verifies the emitted chunks losslessly cover the golden source (parsed Docling markdown) via content word-coverage; warn-by-default, `RAG_INGESTION_LOSSLESS_STRICT` escalates a shortfall to a hard failure |
 | `cross_document_dedup.py` | Cross-document deduplication using Tier 1 (SHA-256) and optional Tier 2 (MinHash) matching |
 | `tree_node_synthesis.py` | Optional tree retrieval: emits one section node per unique `heading_path` prefix; no-op when `config.enable_tree_retrieval_ingest` is False |
 | `document_card.py` | Optional RAPTOR-lite routing: builds one card per document (title + headings), embeds `card_text`, stages `staged_card_records`; strict no-op when `config.build_document_cards` is False (default) |

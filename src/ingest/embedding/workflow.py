@@ -4,7 +4,7 @@
 # Deps: langgraph.graph, src.ingest.embedding.nodes.*, src.ingest.embedding.state
 # Node order: document_storage → chunking → vlm_enrichment → chunk_enrichment →
 #   tree_node_synthesis → document_card_emission → metadata_generation →
-#   [cross_reference_extraction →] quality_validation →
+#   [cross_reference_extraction →] quality_validation → lossless_verification →
 #   [cross_document_dedup →] embedding_storage → visual_embedding → commit → END
 # KG ingest is owned by KGWeave: RagWeave dispatches Phase 2b on KG_TASK_QUEUE
 # from the per-document Temporal workflow (see src/ingest/temporal/workflows.py).
@@ -27,6 +27,7 @@ from src.ingest.embedding.nodes import embedding_storage_node
 from src.ingest.embedding.nodes.document_card import document_card_emission_node
 from src.ingest.embedding.nodes import metadata_generation_node
 from src.ingest.embedding.nodes import quality_validation_node
+from src.ingest.embedding.nodes import lossless_verification_node
 from src.ingest.embedding.nodes import tree_node_synthesis_node
 from src.ingest.embedding.nodes import visual_embedding_node
 from src.ingest.embedding.nodes.cross_document_dedup import cross_document_dedup_node
@@ -39,7 +40,7 @@ def build_embedding_graph(config=None):
     Node order:
         document_storage → chunking → vlm_enrichment → chunk_enrichment
         → tree_node_synthesis → document_card_emission → metadata_generation
-        → [cross_reference_extraction →] quality_validation
+        → [cross_reference_extraction →] quality_validation → lossless_verification
         → [cross_document_dedup →] embedding_storage → visual_embedding
         → commit → END
 
@@ -70,6 +71,7 @@ def build_embedding_graph(config=None):
     graph.add_node("metadata_generation", metadata_generation_node)
     graph.add_node("cross_reference_extraction", cross_reference_extraction_node)
     graph.add_node("quality_validation", quality_validation_node)
+    graph.add_node("lossless_verification", lossless_verification_node)
     graph.add_node("cross_document_dedup", cross_document_dedup_node)
     graph.add_node("embedding_storage", embedding_storage_node)
     graph.add_node("visual_embedding", visual_embedding_node)
@@ -101,8 +103,11 @@ def build_embedding_graph(config=None):
         },
     )
     graph.add_edge("cross_reference_extraction", "quality_validation")
+    # Lossless verification runs on the finalized chunk set (post quality gate)
+    # before storage; it is itself config-gated (no-op when verify_lossless off).
+    graph.add_edge("quality_validation", "lossless_verification")
     graph.add_conditional_edges(
-        "quality_validation",
+        "lossless_verification",
         lambda state: (
             "cross_document_dedup"
             if getattr(state["runtime"].config, "enable_cross_document_dedup", True)
