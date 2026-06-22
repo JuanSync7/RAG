@@ -396,10 +396,22 @@ def test_sanitize_preserve_newlines_keeps_structure():
     assert sanitize_memory_text(md, preserve_newlines=True) == "Intro:\n\n- a\n- b\n\nOutro."
 
 
-def test_sanitize_preserve_newlines_collapses_horizontal_ws_and_caps_blanklines():
+def test_sanitize_preserve_newlines_collapses_midline_ws_caps_blanklines_keeps_indent():
     from src.platform.memory.utils import sanitize_memory_text
+    # mid-line runs collapse, blank-line runs cap at one, trailing ws trimmed,
+    # but LEADING indentation (nested list / code) is preserved.
     md = "a   b\t c\n\n\n\nd  \n  e"
-    assert sanitize_memory_text(md, preserve_newlines=True) == "a b c\n\nd\ne"
+    assert sanitize_memory_text(md, preserve_newlines=True) == "a b c\n\nd\n  e"
+
+
+def test_sanitize_preserve_newlines_keeps_indented_code():
+    from src.platform.memory.utils import sanitize_memory_text
+    md = "Run:\n\n```bash\n    ./build.sh --opt\n```\n"
+    # the 4-space code indentation survives (no leading-space stripping)
+    assert (
+        sanitize_memory_text(md, preserve_newlines=True)
+        == "Run:\n\n```bash\n    ./build.sh --opt\n```"
+    )
 
 
 def test_append_turn_preserves_markdown_newlines(monkeypatch):

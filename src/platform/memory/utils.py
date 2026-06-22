@@ -52,9 +52,12 @@ def sanitize_memory_text(
 
     raw = text or ""
     if preserve_newlines:
-        clean = re.sub(r"[^\S\n]+", " ", raw)      # collapse spaces/tabs, keep newlines
-        clean = re.sub(r" *\n *", "\n", clean)      # trim whitespace around newlines
-        clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+        clean = raw.replace("\r\n", "\n").replace("\r", "\n")  # normalize line endings
+        clean = re.sub(r"(?<=\S)[ \t]{2,}", " ", clean)         # collapse MID-line runs only
+        clean = re.sub(r"[ \t]+\n", "\n", clean)                # trim trailing line whitespace
+        clean = re.sub(r"\n{3,}", "\n\n", clean).strip()        # cap blank-line runs
+        # Leading indentation is preserved on purpose: nested lists and
+        # indented / fenced code blocks rely on it to render correctly.
     else:
         clean = re.sub(r"\s+", " ", raw).strip()
     if len(clean) <= max_chars:
