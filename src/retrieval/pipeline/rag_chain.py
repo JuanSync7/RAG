@@ -1343,6 +1343,22 @@ class RAGChain:
         # regardless of the diversity-driven selection order.
         selected.sort(key=lambda r: r.score, reverse=True)
         return selected[:top_k]
+
+    @staticmethod
+    def _stamp_citation_indices(results: list) -> None:
+        """Stamp ``metadata["citation_index"]`` = 1-based position on each result.
+
+        The generator numbers context chunks ``[1..N]`` in this exact order
+        (``build_messages``) and the chain returns this exact list as ``results``,
+        so the index the model cites (``[N]``) maps unambiguously to the Nth
+        returned source. Mutates each result's metadata dict in place; results
+        whose ``metadata`` is not a dict are skipped.
+        """
+        for i, r in enumerate(results):
+            meta = getattr(r, "metadata", None)
+            if isinstance(meta, dict):
+                meta["citation_index"] = i + 1
+
     # ------------------------------------------------------------------
     # Deep-research branch helpers
     # ------------------------------------------------------------------
@@ -2450,6 +2466,15 @@ class RAGChain:
                         visual_results = []  # enabled-but-failed semantics
                         vr_span.set_attribute("visual_error", str(exc))
                 tp.record("visual_retrieval", "retrieval", started_at=t0)
+
+            # Stamp the 1-based citation index onto each reranked result, in the
+            # exact order the generator numbers chunks ([N] in build_messages) and
+            # the order they are returned as ``results`` — so the API response
+            # exposes the SAME N the model cites. Unconditional and authoritative:
+            # the document-formatting stage below also stamps, but it is optional
+            # (RAG_DOCUMENT_FORMATTING_ENABLED defaults off), so the response would
+            # otherwise carry no citation_index at all.
+            self._stamp_citation_indices(reranked)
 
             # Stage 5.5: Document formatting (REQ-501–REQ-503)
             version_conflicts = []

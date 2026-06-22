@@ -105,3 +105,31 @@ def test_do_search_passes_alpha_to_search(monkeypatch, alpha, label):
     chain._do_search("test query", [0.1, 0.2, 0.3], alpha=alpha, search_limit=5, filters=None)
 
     assert abs(captured.get("alpha") - alpha) < 1e-9, f"{label}: expected alpha={alpha}"
+
+
+# ---------------------------------------------------------------------------
+# Citation indexing — the returned results expose the SAME 1-based number the
+# generator cites ([N] in build_messages), in post-rerank order.
+# ---------------------------------------------------------------------------
+
+def test_stamp_citation_indices_marks_1based_position_in_order():
+    from src.retrieval.common.schemas import RankedResult
+
+    results = [
+        RankedResult(text="a", score=0.9, metadata={"source": "x.pdf"}),
+        RankedResult(text="b", score=0.8, metadata={"source": "y.pdf"}),
+        RankedResult(text="c", score=0.7, metadata={"source": "z.pdf"}),
+    ]
+    RAGChain._stamp_citation_indices(results)
+    assert [r.metadata["citation_index"] for r in results] == [1, 2, 3]
+
+
+def test_stamp_citation_indices_skips_non_dict_metadata():
+    """A result whose metadata isn't a dict must not raise — it's just skipped."""
+    class _Weird:
+        metadata = None  # not a dict
+
+    from src.retrieval.common.schemas import RankedResult
+    ok = RankedResult(text="a", score=0.5, metadata={"source": "x.pdf"})
+    RAGChain._stamp_citation_indices([_Weird(), ok])
+    assert ok.metadata["citation_index"] == 2  # position preserved, weird one skipped
