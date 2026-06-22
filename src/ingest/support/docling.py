@@ -256,6 +256,35 @@ def _get_or_build_tokenizer(model_id: str, *, max_tokens: int) -> Any:
     return tokenizer
 
 
+def _make_token_counter(config: Any, max_tokens: int):
+    """Return ``callable(text) -> int`` token counter for table row-packing.
+
+    Reuses the HybridChunker's HF tokenizer (cached) so table chunks are bounded
+    by the SAME token budget as prose. Falls back to a ~3.5 chars/token estimate
+    (the BGE-M3 English ratio noted in settings) if the tokenizer can't load, so
+    chunking never hard-depends on the tokenizer just to pack rows.
+    """
+    try:
+        model_id = _resolve_tokenizer_model_id(config)
+        tok = _get_or_build_tokenizer(model_id, max_tokens=max_tokens)
+        hf = getattr(tok, "tokenizer", None)
+        if hf is not None and hasattr(hf, "encode"):
+            def _count(text: str) -> int:
+                return len(hf.encode(text or "", add_special_tokens=False))
+            # Smoke it once so a broken encode falls back instead of raising later.
+            _count("probe")
+            return _count
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(
+            "table token-counter: tokenizer unavailable (%s); using char estimate", exc
+        )
+
+    def _approx(text: str) -> int:
+        return max(1, int(len(text or "") / 3.5))
+
+    return _approx
+
+
 @dataclass
 class DoclingParseResult:
     """Docling parsing output normalized for ingestion nodes.
@@ -1499,85 +1528,6 @@ def _is_table_dominant(chunk_text: str, table_md: str, signature: str) -> bool:
     return (len(table_md) / text_len) >= 0.6
 
 
-def _truncate_table_summary_text(text: str, max_chars: int) -> str:
-    """Cap embedded ``table_summary`` text at ``max_chars``, appending a marker.
-
-    Guards the embedder against pathologically wide table summaries (200+ row
-    datasheets, hundreds of column headers) without altering the full
-    ``table_markdown`` stored on metadata. Deterministic: same input ⇒ same
-    output, so re-ingest stays idempotent and chunk-id formulas relying on text
-    hashes do not drift.
-
-    A non-positive ``max_chars`` disables truncation. When the input already
-    fits, it is returned unchanged byte-for-byte (no marker appended).
-    """
-    if max_chars is None or max_chars <= 0:
-        return text
-    if len(text) <= max_chars:
-        return text
-    # Marker template is fixed-length once the dropped-char count is known.
-    # Reserve room so the final string length is exactly <= max_chars.
-    marker_template = " … [truncated {n} chars]"
-    # Iterate at most twice: marker length depends on the digit count of n.
-    keep = max_chars - len(marker_template.format(n=len(text)))
-    if keep < 0:
-        # Cap so tiny it cannot fit even the marker — return marker-only,
-        # truncated to max_chars. Edge case; preserves the contract.
-        return marker_template.format(n=len(text))[:max_chars].rstrip()
-    dropped = len(text) - keep
-    marker = marker_template.format(n=dropped)
-    return text[:keep] + marker
-
-
-def _build_table_summary_text(tbl: Any) -> str:
-    headers = tbl.cells[0] if tbl.has_header and tbl.cells else []
-    body_rows = max(0, tbl.num_rows - (1 if tbl.has_header else 0))
-    lines: list[str] = []
-    caption = (tbl.caption or "").strip()
-    if caption:
-        lines.append(f"Table: {caption}")
-    lines.append(f"Columns: {' | '.join(headers)}")
-    lines.append(f"Rows: {body_rows}")
-    return "\n".join(lines)
-
-
-def _classify_table_for_row_chunks(
-    tbl: Any, max_rows: int, max_cols: int
-) -> str:
-    """Classify a table's eligibility for row-chunk emission.
-
-    Returns one of:
-        ``"row_chunks"``  — table passes both gates; row chunks should be emitted.
-        ``"small_gate"``  — table failed the small/shape gate (no header, empty,
-                            too many rows/cols, or out-of-range col count).
-        ``"uniform_gate"`` — table cleared the small gate but failed the uniform
-                            gate (body rows do not match header width).
-
-    The two gates are kept independent on purpose (see
-    ``feedback_heuristic_gates_independent.md``) so observability can attribute
-    summary-only outcomes to the correct failure mode.
-    """
-    if not tbl.has_header or not tbl.cells:
-        return "small_gate"
-    body = tbl.cells[1:]
-    body_rows = len(body)
-    if body_rows == 0:
-        return "small_gate"
-    if body_rows > max_rows:
-        return "small_gate"
-    if tbl.num_cols < 2 or tbl.num_cols > max_cols:
-        return "small_gate"
-    header_len = len(tbl.cells[0])
-    if not all(len(r) == header_len for r in body):
-        return "uniform_gate"
-    return "row_chunks"
-
-
-def _table_is_small_uniform(tbl: Any, max_rows: int, max_cols: int) -> bool:
-    """Backward-compatible bool wrapper around :func:`_classify_table_for_row_chunks`."""
-    return _classify_table_for_row_chunks(tbl, max_rows, max_cols) == "row_chunks"
-
-
 def _apply_adaptive_table_chunking(
     chunks: list, tables: list, cfg: Any
 ) -> list:
@@ -1588,25 +1538,18 @@ def _apply_adaptive_table_chunking(
     table-dominant chunk is absent (e.g., HybridChunker did not surface it).
     """
     from src.ingest.support.parser_base import Chunk
-    from src.ingest.support.table_metrics import (
-        increment_row_chunks_emitted,
-        increment_summary_only_small,
-        increment_summary_only_uniform,
-        increment_summary_text_truncated,
-    )
 
-    max_rows = int(getattr(cfg, "max_table_rows_for_row_chunks", 32))
-    max_cols = int(getattr(cfg, "max_table_cols_for_row_chunks", 12))
-    # Per-summary-text cap (chars). 0 / unset disables truncation.
-    summary_max_chars = int(getattr(cfg, "table_summary_max_chars", 0) or 0)
-    # Prepend the heading breadcrumb to embedded table text (parity with prose
-    # contextualize); fold real cell values into summary-only tables.
     prepend_breadcrumb = bool(getattr(cfg, "table_embed_prepend_section_path", True))
-    include_body = bool(getattr(cfg, "table_summary_include_body", True))
-    # Fold N body rows into one chunk (bounded multi-row block) rather than one
-    # chunk per row, so a multi-sheet spreadsheet cannot explode into hundreds of
-    # near-duplicate row chunks that monopolise the reranked top-K.
-    row_group_size = max(1, int(getattr(cfg, "table_row_chunk_group_size", 32)))
+    # ONE knob, shared with the prose chunker: the token budget. A table is split
+    # into chunks that each restate the header and pack as many WHOLE rows as fit
+    # under ``max_tokens``. No row/col gate, no summary-only path, no char cap —
+    # every row is captured in some chunk (lossless). A single row that alone
+    # exceeds the budget becomes its own atomic chunk (never split, never dropped).
+    max_tokens = int(
+        getattr(cfg, "hybrid_chunker_max_tokens", 0)
+        or RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+    )
+    _count_tokens = _make_token_counter(cfg, max_tokens)
 
     # Compute table signatures once.
     table_meta: list[tuple[Any, str]] = []
@@ -1639,121 +1582,109 @@ def _apply_adaptive_table_chunking(
             return "\n".join(heading_path) + "\n"
         return ""
 
+    def _row_md(row: Any) -> str:
+        # Lossless: emit EVERY cell of the row, no zip against header width, so a
+        # ragged row never silently drops its extra cells.
+        return "| " + " | ".join("" if c is None else str(c) for c in row) + " |"
+
     def _make_table_chunks(tbl: Any) -> list:
         out: list = []
         heading_path = [h for h in (tbl.section_path or "").split(" > ") if h]
         heading = heading_path[-1] if heading_path else ""
         crumb = _breadcrumb_prefix(heading_path)
-        # Stable within-document group key so retrieval can join a winning row
-        # chunk back to its summary (and vice versa) without fuzzy-matching on
-        # heading_path + page. Prefer parser self_ref; fall back to table_id.
+        # Stable within-document group key so retrieval can join a table's row
+        # blocks back together. Prefer parser self_ref; fall back to table_id.
         group_id = tbl.self_ref or tbl.table_id
-        common_meta_summary = {
-            "chunk_type": "table_summary",
-            "table_id": tbl.table_id,
-            "table_group_id": group_id,
-            "document_id": getattr(tbl, "document_id", "") or "",
-            "caption_label": getattr(tbl, "caption_label", "") or "",
-            "table_num_rows": tbl.num_rows,
-            "table_num_cols": tbl.num_cols,
-            "table_has_header": tbl.has_header,
-            # Stash full markdown on the summary chunk so retrieval can
-            # reconstruct the table without re-parsing the source PDF.
-            "table_markdown": getattr(tbl, "markdown", "") or "",
-        }
-        if tbl.caption:
-            common_meta_summary["table_caption"] = tbl.caption
+        cells = list(getattr(tbl, "cells", None) or [])
+        if not cells:
+            return out
+        headers = cells[0]
+        body = cells[1:]
+        caption_prefix = (tbl.caption or "").strip()
+        header_md = "| " + " | ".join("" if h is None else str(h) for h in headers) + " |"
+        sep_md = "| " + " | ".join("---" for _ in headers) + " |"
 
-        gate = _classify_table_for_row_chunks(tbl, max_rows, max_cols)
-        if gate == "small_gate":
-            increment_summary_only_small()
-        elif gate == "uniform_gate":
-            increment_summary_only_uniform()
-        else:
-            increment_row_chunks_emitted()
+        def _chunk_text(rows: list) -> str:
+            # crumb is "\n".join(heading_path)+"\n" (kept byte-compatible so
+            # chunk_body_text() can strip it). Header + separator are restated in
+            # every chunk so a row block is never header-blind.
+            parts: list[str] = []
+            cr = crumb.rstrip("\n")
+            if cr:
+                parts.append(cr)
+            if caption_prefix:
+                parts.append(caption_prefix)
+            parts.append(header_md)
+            parts.append(sep_md)
+            parts.extend(_row_md(r) for r in rows)
+            return "\n".join(parts)
 
-        raw_summary = _build_table_summary_text(tbl)
-        # Summary-only tables (no per-row chunks) otherwise embed ZERO cell
-        # values — fold the table markdown in so values are retrievable. Tables
-        # that emit row chunks already carry cells, so keep their summary compact.
-        if include_body and gate != "row_chunks":
-            md = (getattr(tbl, "markdown", "") or "").strip()
-            if md:
-                raw_summary = f"{raw_summary}\n{md}"
-        # Stamp cross-refs on the BODY (pre-breadcrumb) so breadcrumb headings
-        # don't seed false xref edges.
-        _stamp_xref_targets(common_meta_summary, raw_summary)
-        # Prepend the heading breadcrumb to the EMBEDDED text (parity with prose
-        # contextualize), then cap — so the breadcrumb survives truncation.
-        summary_text = crumb + raw_summary
-        truncated_summary = _truncate_table_summary_text(summary_text, summary_max_chars)
-        if truncated_summary != summary_text:
-            increment_summary_text_truncated()
-        out.append(
-            Chunk(
-                text=truncated_summary,
-                section_path=tbl.section_path or "",
-                heading=heading,
-                heading_level=len(heading_path),
-                chunk_index=0,
-                extra_metadata=common_meta_summary,
-                heading_path=heading_path,
-                page_ref=tbl.page_ref,
+        # Greedy-pack whole rows under the shared token budget. The header/caption/
+        # breadcrumb prefix is counted once per chunk; each candidate row is added
+        # until the next would overflow, then we flush and restate the prefix. A
+        # single row larger than the budget still goes in alone (atomic, never cut).
+        prefix_tokens = _count_tokens(_chunk_text([]))
+        blocks: list[list] = []
+        cur: list = []
+        cur_tokens = prefix_tokens
+        for row in body:
+            rt = _count_tokens(_row_md(row)) + 1  # +1 ≈ joining newline
+            if cur and (cur_tokens + rt) > max_tokens:
+                blocks.append(cur)
+                cur = []
+                cur_tokens = prefix_tokens
+            cur.append(row)
+            cur_tokens += rt
+        if cur:
+            blocks.append(cur)
+        if not blocks:
+            blocks = [[]]  # header-only table → one chunk carrying just the header
+
+        total_blocks = len(blocks)
+        row_start = 0
+        for block_idx, blk in enumerate(blocks):
+            text = _chunk_text(blk)
+            meta = {
+                "chunk_type": "table_row",
+                "table_id": tbl.table_id,
+                "table_group_id": group_id,
+                "document_id": getattr(tbl, "document_id", "") or "",
+                "caption_label": getattr(tbl, "caption_label", "") or "",
+                "table_row_index": row_start,
+                "table_row_block_index": block_idx,
+                "table_row_block_start": row_start,
+                "table_row_block_count": len(blk),
+                "table_block_total": total_blocks,
+                "table_num_rows": tbl.num_rows,
+                "table_num_cols": tbl.num_cols,
+                "table_has_header": tbl.has_header,
+            }
+            if tbl.caption:
+                meta["table_caption"] = tbl.caption
+            # Stash the full markdown once (first block) for retrieval-time
+            # reconstruction; it is metadata, never truncated.
+            if block_idx == 0:
+                meta["table_markdown"] = getattr(tbl, "markdown", "") or ""
+            # Stamp xref edges on the body (header + rows), excluding the
+            # breadcrumb, so heading words don't seed false edges.
+            body_only = "\n".join(
+                [p for p in (caption_prefix, header_md, sep_md) if p]
+                + [_row_md(r) for r in blk]
             )
-        )
-
-        if gate == "row_chunks":
-            headers = tbl.cells[0]
-            caption_prefix = (tbl.caption or "").strip()
-            body = tbl.cells[1:]
-            # Emit bounded multi-row blocks: each chunk holds up to
-            # ``row_group_size`` rows (one "h: v | h: v" line per row). One chunk
-            # per row blew a single multi-sheet workbook up to ~1000 chunks that
-            # crowded out every other source at rerank time.
-            for block_idx, start in enumerate(range(0, len(body), row_group_size)):
-                block = body[start:start + row_group_size]
-                row_lines = [
-                    " | ".join(f"{h}: {v}" for h, v in zip(headers, row))
-                    for row in block
-                ]
-                body_text = "\n".join(row_lines)
-                text = (
-                    f"{caption_prefix}\n{body_text}" if caption_prefix else body_text
+            _stamp_xref_targets(meta, body_only)
+            out.append(
+                Chunk(
+                    text=text,
+                    section_path=tbl.section_path or "",
+                    heading=heading,
+                    heading_level=len(heading_path),
+                    chunk_index=0,
+                    extra_metadata=meta,
+                    heading_path=list(heading_path),
+                    page_ref=tbl.page_ref,
                 )
-                row_meta = {
-                    "chunk_type": "table_row",
-                    "table_id": tbl.table_id,
-                    "table_group_id": group_id,
-                    "document_id": getattr(tbl, "document_id", "") or "",
-                    "caption_label": getattr(tbl, "caption_label", "") or "",
-                    # First body-row index in the block (legacy field name kept so
-                    # downstream joins still resolve); plus explicit block bounds.
-                    "table_row_index": start,
-                    "table_row_block_index": block_idx,
-                    "table_row_block_start": start,
-                    "table_row_block_count": len(block),
-                    "table_num_rows": tbl.num_rows,
-                    "table_num_cols": tbl.num_cols,
-                }
-                # Block-level xref edges: most row bodies have none, but the
-                # caption-prefixed text occasionally references a section.
-                # Stamp on the body (pre-breadcrumb) to avoid false edges.
-                _stamp_xref_targets(row_meta, text)
-                # Prepend the heading breadcrumb to the embedded text so the block
-                # is not heading-blind at dense + rerank time (parity with prose).
-                text = crumb + text
-                out.append(
-                    Chunk(
-                        text=text,
-                        section_path=tbl.section_path or "",
-                        heading=heading,
-                        heading_level=len(heading_path),
-                        chunk_index=0,
-                        extra_metadata=row_meta,
-                        heading_path=list(heading_path),
-                        page_ref=tbl.page_ref,
-                    )
-                )
+            )
+            row_start += len(blk)
         return out
 
     # Assemble result preserving order: walk original chunks, drop marked ones,

@@ -1,25 +1,38 @@
 # @summary
 # Tests that _extract_table_artifacts populates TableArtifact.section_path
-# from the table's enclosing heading chain by walking docling_document.iterate_items().
-# Covers single-heading, nested, no-heading, whitespace preservation, and an
-# end-to-end DoclingParser.parse() -> chunk() pass-through to table chunks'
-# heading_path metadata.
-# Exports: TestTableSectionPathResolution, TestTableSectionPathEndToEnd
+# from the table's enclosing heading chain by walking docling_document.iterate_items(),
+# and that DoclingParser.parse() -> chunk() stamps that heading/section_path onto
+# the emitted table_row block chunks. Also exercises the token-budget row-block
+# chunking contract of _apply_adaptive_table_chunking directly: greedy lossless
+# row packing, header/separator/breadcrumb/caption restated per block, atomic
+# over-budget rows, header-only tables, ragged rows, and per-chunk metadata.
+# Exports: TestTableSectionPathResolution, TestTableSectionPathEndToEnd, TestTableRowBlockChunking
 # Deps: src.ingest.support.docling, src.ingest.support.parser_base, pytest, unittest.mock
 # @end-summary
 
-"""Unit + e2e tests for table section_path resolution.
+"""Unit + e2e tests for table section_path resolution and row-block chunking.
 
 The production bug: ``_extract_table_artifacts`` previously hardcoded
 ``section_path=""`` and never walked the table's ancestor heading chain.
-These tests pin the new contract: the heading stack at the time the table
-appears in ``docling_document.iterate_items()`` becomes the table's
+The section-path tests below pin that contract: the heading stack at the time
+the table appears in ``docling_document.iterate_items()`` becomes the table's
 ``section_path`` (joined with ``" > "``).
+
+The chunking tests pin the *current* table-chunking contract (after the
+token-budget refactor): ``_apply_adaptive_table_chunking`` emits ONLY
+``chunk_type="table_row"`` blocks — there is no longer any ``table_summary``
+chunk. Each table is split into one or more row blocks that each restate the
+breadcrumb + caption + markdown header + separator and greedily pack as many
+whole body rows as fit under the single token budget
+(``hybrid_chunker_max_tokens``). The split is lossless: every body row appears
+in exactly one block, a single over-budget row gets its own atomic block, and a
+header-only table emits exactly one chunk.
 """
 
 from __future__ import annotations
 
 import sys
+import types
 from contextlib import contextmanager
 from typing import Any, Generator, Iterable
 from unittest.mock import MagicMock, patch
@@ -30,8 +43,10 @@ from src.ingest.common.types import IngestionConfig, Runtime
 from src.ingest.support import docling as _docling_mod
 from src.ingest.support.docling import (
     DoclingParser,
+    _apply_adaptive_table_chunking,
     _extract_table_artifacts,
 )
+from src.ingest.support.parser_base import TableArtifact
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +219,7 @@ class TestTableSectionPathResolution:
 
 # ---------------------------------------------------------------------------
 # End-to-end: DoclingParser.parse() -> chunk() carries heading_path through
-# to table_summary and table_row chunks.
+# to the emitted table_row block chunks.
 # ---------------------------------------------------------------------------
 
 
@@ -252,11 +267,13 @@ def _docling_sys_modules(mock_doc) -> Generator[MagicMock, None, None]:
 
 
 class TestTableSectionPathEndToEnd:
-    """Parse -> chunk surfaces heading_path on table_summary chunks."""
+    """Parse -> chunk surfaces heading_path on the emitted table_row block chunks."""
 
-    def test_parse_then_chunk_emits_heading_path_on_table_summary(self, tmp_path):
-        """DoclingParser.parse() -> chunk() propagates section_path to the
-        first table_summary chunk as a non-empty heading_path list."""
+    def test_parse_then_chunk_emits_heading_path_on_table_row_block(self, tmp_path):
+        """DoclingParser.parse() -> chunk() propagates section_path through to the
+        table_row block chunk(s) as a non-empty heading_path list — and emits NO
+        table_summary chunk (that chunk_type was removed in the token-budget
+        refactor)."""
         h1 = _make_heading("Chapter Title", level=1)
         h2 = _make_heading("Section", level=2)
         cells = [
@@ -302,12 +319,315 @@ class TestTableSectionPathEndToEnd:
 
             chunks = parser.chunk(parse_result)
 
-        table_summaries = [
+        # The refactor removed the table_summary chunk_type entirely — nothing
+        # may emit one anymore.
+        chunk_types = {
+            getattr(c, "extra_metadata", {}).get("chunk_type") for c in chunks
+        }
+        assert "table_summary" not in chunk_types
+
+        table_rows = [
             c
             for c in chunks
-            if getattr(c, "extra_metadata", {}).get("chunk_type") == "table_summary"
+            if getattr(c, "extra_metadata", {}).get("chunk_type") == "table_row"
         ]
-        assert table_summaries, "expected at least one table_summary chunk"
-        summary = table_summaries[0]
-        assert summary.heading_path == ["Chapter Title", "Section"]
-        assert summary.section_path == "Chapter Title > Section"
+        assert table_rows, "expected at least one table_row chunk"
+        # The heading/section breadcrumb resolved on the TableArtifact must be
+        # stamped onto the emitted row block chunk(s).
+        for row_chunk in table_rows:
+            assert row_chunk.heading_path == ["Chapter Title", "Section"]
+            assert row_chunk.section_path == "Chapter Title > Section"
+            # And the breadcrumb is prepended into the embedded text itself
+            # (table_embed_prepend_section_path defaults True).
+            assert row_chunk.text.startswith("Chapter Title\nSection\n")
+
+        # The small table fits one block; its body rows are all present.
+        joined = "\n".join(c.text for c in table_rows)
+        assert "| CTRL | 0x00 |" in joined
+        assert "| STAT | 0x04 |" in joined
+
+
+# ---------------------------------------------------------------------------
+# Token-budget row-block chunking contract for _apply_adaptive_table_chunking.
+#
+# These tests replace the deleted summary-emission / summary-truncation /
+# row+col-gate / group-size tests: that behavior no longer exists. The new
+# contract is a single token budget (hybrid_chunker_max_tokens) that greedily
+# packs whole body rows into one or more lossless table_row blocks, restating
+# the breadcrumb + caption + header + separator in each block.
+# ---------------------------------------------------------------------------
+
+
+def _make_table_artifact(
+    *,
+    cells: list[list[str]],
+    section_path: str = "",
+    caption: str = "",
+    self_ref: str = "#/tables/0",
+    table_id: str = "table-1",
+    document_id: str = "doc-1",
+    caption_label: str = "",
+) -> TableArtifact:
+    """Build a TableArtifact directly (the row-block packer reads .cells,
+    .section_path, .caption, .num_rows/.num_cols/.has_header, .self_ref,
+    .table_id, .markdown — not a Docling object)."""
+    num_rows = len(cells)
+    num_cols = max((len(r) for r in cells), default=0)
+    md_lines = ["| " + " | ".join(cells[0]) + " |", "| " + " | ".join("---" for _ in cells[0]) + " |"]
+    md_lines += ["| " + " | ".join(r) + " |" for r in cells[1:]]
+    return TableArtifact(
+        table_id=table_id,
+        markdown="\n".join(md_lines),
+        cells=cells,
+        num_rows=num_rows,
+        num_cols=num_cols,
+        has_header=True,
+        section_path=section_path,
+        caption=caption,
+        caption_label=caption_label,
+        self_ref=self_ref,
+        document_id=document_id,
+    )
+
+
+def _cfg(**overrides: Any) -> Any:
+    """Lightweight cfg stub. NOTE: SimpleNamespace silently ignores unknown
+    attrs, so the chunker only reads the two surviving knobs plus the token
+    budget — there are no row/col gates, group-size, summary-char-cap, or
+    summary-include-body fields anymore (those IngestionConfig fields were
+    deleted)."""
+    base = dict(
+        hybrid_chunker_max_tokens=1024,
+        table_embed_prepend_section_path=True,
+        enable_adaptive_table_chunking=True,
+    )
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def _row_chunks(out: list) -> list:
+    return [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
+
+
+class TestTableRowBlockChunking:
+    """_apply_adaptive_table_chunking emits only lossless table_row blocks."""
+
+    def test_only_table_row_chunks_are_emitted_never_a_summary(self):
+        """The chunker must emit chunk_type='table_row' exclusively — the
+        'table_summary' chunk_type was removed entirely."""
+        tbl = _make_table_artifact(
+            cells=[["A", "B"], ["1", "2"], ["3", "4"]],
+            section_path="Top",
+        )
+        out = _apply_adaptive_table_chunking([], [tbl], _cfg())
+
+        types_seen = {c.extra_metadata.get("chunk_type") for c in out}
+        assert types_seen == {"table_row"}
+        assert "table_summary" not in types_seen
+
+    def test_small_table_fits_one_block_with_all_metadata(self):
+        """A table whose rows fit the budget yields exactly one block carrying
+        the full per-chunk metadata contract."""
+        cells = [["Field", "Offset"], ["CTRL", "0x00"], ["STAT", "0x04"]]
+        tbl = _make_table_artifact(
+            cells=cells,
+            section_path="Chapter > Section",
+            caption="Reg",
+            self_ref="#/tables/7",
+            document_id="spec.pdf",
+        )
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+
+        assert len(out) == 1
+        c = out[0]
+        m = c.extra_metadata
+        assert m["chunk_type"] == "table_row"
+        assert m["table_id"] == "table-1"
+        # group_id = self_ref when present.
+        assert m["table_group_id"] == "#/tables/7"
+        assert m["document_id"] == "spec.pdf"
+        assert m["table_row_index"] == 0
+        assert m["table_row_block_index"] == 0
+        assert m["table_row_block_start"] == 0
+        assert m["table_row_block_count"] == 2  # two body rows
+        assert m["table_block_total"] == 1
+        assert m["table_num_rows"] == 3
+        assert m["table_num_cols"] == 2
+        assert m["table_has_header"] is True
+        assert m["table_caption"] == "Reg"
+        # table_markdown stashed on the first (only) block.
+        assert m["table_markdown"] == tbl.markdown
+        # breadcrumb + caption + header + separator + both body rows.
+        assert c.text == (
+            "Chapter\nSection\nReg\n"
+            "| Field | Offset |\n| --- | --- |\n"
+            "| CTRL | 0x00 |\n| STAT | 0x04 |"
+        )
+
+    def test_group_id_falls_back_to_table_id_when_self_ref_empty(self):
+        """table_group_id = self_ref or table_id."""
+        tbl = _make_table_artifact(
+            cells=[["A", "B"], ["1", "2"]],
+            self_ref="",
+            table_id="table-9",
+        )
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+        assert out[0].extra_metadata["table_group_id"] == "table-9"
+
+    def test_large_table_splits_into_multiple_token_bounded_blocks(self):
+        """A table far larger than the budget splits into multiple blocks, each
+        within the token budget, and each restating the header/separator."""
+        body = [[f"REG{i}", f"0x{i:04X}", f"desc number {i} of register"] for i in range(40)]
+        cells = [["Name", "Addr", "Desc"]] + body
+        tbl = _make_table_artifact(cells=cells, section_path="Registers")
+        budget = 40
+        out = _row_chunks(
+            _apply_adaptive_table_chunking([], [tbl], _cfg(hybrid_chunker_max_tokens=budget))
+        )
+
+        assert len(out) > 1, "large table must split into multiple blocks"
+        total = out[0].extra_metadata["table_block_total"]
+        assert total == len(out)
+        for idx, c in enumerate(out):
+            m = c.extra_metadata
+            assert m["table_row_block_index"] == idx
+            # Header + separator restated in EVERY block.
+            assert "| Name | Addr | Desc |" in c.text
+            assert "| --- | --- | --- |" in c.text
+            # Breadcrumb restated in every block.
+            assert c.text.startswith("Registers\n")
+
+    def test_every_body_row_covered_exactly_once_in_order(self):
+        """LOSSLESS: concatenating the blocks' body rows in order reproduces the
+        original body rows, once each."""
+        body = [[f"R{i:03d}", f"v{i}"] for i in range(31)]
+        cells = [["Key", "Val"]] + body
+        tbl = _make_table_artifact(cells=cells, section_path="S")
+        out = _row_chunks(
+            _apply_adaptive_table_chunking([], [tbl], _cfg(hybrid_chunker_max_tokens=30))
+        )
+
+        expected_rows = ["| " + " | ".join(r) + " |" for r in body]
+        recovered: list[str] = []
+        running_start = 0
+        for c in out:
+            m = c.extra_metadata
+            # block_start aligns with how many rows preceded this block.
+            assert m["table_row_block_start"] == running_start
+            assert m["table_row_index"] == m["table_row_block_start"]
+            block_rows = [
+                ln for ln in c.text.splitlines() if ln.startswith("| R")
+            ]
+            assert len(block_rows) == m["table_row_block_count"]
+            recovered.extend(block_rows)
+            running_start += m["table_row_block_count"]
+
+        # Order-preserving, complete, no duplicates, no drops.
+        assert recovered == expected_rows
+        # Sum of block counts equals total body rows.
+        assert sum(c.extra_metadata["table_row_block_count"] for c in out) == len(body)
+
+    def test_table_markdown_only_on_first_block(self):
+        """table_markdown metadata is stashed ONLY on block_index == 0."""
+        body = [[f"R{i}", f"{i}"] for i in range(20)]
+        cells = [["K", "V"]] + body
+        tbl = _make_table_artifact(cells=cells, section_path="S")
+        out = _row_chunks(
+            _apply_adaptive_table_chunking([], [tbl], _cfg(hybrid_chunker_max_tokens=30))
+        )
+
+        assert len(out) > 1
+        assert "table_markdown" in out[0].extra_metadata
+        assert all("table_markdown" not in c.extra_metadata for c in out[1:])
+
+    def test_oversized_row_becomes_its_own_atomic_block(self):
+        """A single row whose markdown alone exceeds the budget is never split
+        or dropped — it occupies its own block."""
+        huge = "X" * 600
+        cells = [
+            ["A", "B"],
+            ["small", "row"],
+            [huge, "tail"],
+            ["after", "row2"],
+        ]
+        tbl = _make_table_artifact(cells=cells)
+        out = _row_chunks(
+            _apply_adaptive_table_chunking([], [tbl], _cfg(hybrid_chunker_max_tokens=30))
+        )
+
+        # The huge row must appear in exactly one block, alone.
+        owning = [c for c in out if huge in c.text]
+        assert len(owning) == 1
+        assert owning[0].extra_metadata["table_row_block_count"] == 1
+        # And it is still present (never dropped) and lossless overall.
+        all_body = [
+            ln
+            for c in out
+            for ln in c.text.splitlines()
+            if ln.startswith("| ") and not ln.startswith("| A | B |") and "---" not in ln
+        ]
+        assert any(huge in ln for ln in all_body)
+        assert sum(c.extra_metadata["table_row_block_count"] for c in out) == 3
+
+    def test_header_only_table_emits_exactly_one_chunk(self):
+        """A table with zero body rows emits exactly ONE chunk carrying just the
+        header + separator (count 0, total 1)."""
+        cells = [["H1", "H2"]]
+        tbl = _make_table_artifact(cells=cells, section_path="Sec")
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+
+        assert len(out) == 1
+        m = out[0].extra_metadata
+        assert m["table_row_block_count"] == 0
+        assert m["table_block_total"] == 1
+        assert out[0].text == "Sec\n| H1 | H2 |\n| --- | --- |"
+
+    def test_breadcrumb_omitted_when_prepend_disabled(self):
+        """When table_embed_prepend_section_path is False, no breadcrumb is
+        prepended even if a section_path exists."""
+        cells = [["A", "B"], ["1", "2"]]
+        tbl = _make_table_artifact(cells=cells, section_path="Top > Sub")
+        out = _row_chunks(
+            _apply_adaptive_table_chunking(
+                [], [tbl], _cfg(table_embed_prepend_section_path=False)
+            )
+        )
+        assert len(out) == 1
+        assert out[0].text.startswith("| A | B |")
+        assert "Top" not in out[0].text
+
+    def test_breadcrumb_omitted_when_no_section_path(self):
+        """No section_path -> no breadcrumb prefix, even with prepend enabled."""
+        cells = [["A", "B"], ["1", "2"]]
+        tbl = _make_table_artifact(cells=cells, section_path="")
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+        assert out[0].text.startswith("| A | B |")
+
+    def test_ragged_row_keeps_all_cells_no_zip_to_header_width(self):
+        """A body row wider than the header keeps ALL its cells (no truncation
+        to header width)."""
+        cells = [["A", "B"], ["x", "y", "z"]]
+        tbl = _make_table_artifact(cells=cells)
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+        assert len(out) == 1
+        assert "| x | y | z |" in out[0].text
+
+    def test_no_table_caption_metadata_when_caption_absent(self):
+        """table_caption is stamped only when the artifact has a caption."""
+        cells = [["A", "B"], ["1", "2"]]
+        tbl = _make_table_artifact(cells=cells, caption="")
+        out = _row_chunks(_apply_adaptive_table_chunking([], [tbl], _cfg()))
+        assert "table_caption" not in out[0].extra_metadata
+
+    def test_constructing_ingestion_config_with_deleted_table_fields_raises(self):
+        """The summary/gate/group-size knobs were removed from IngestionConfig;
+        passing them must now raise TypeError (guards against silent re-add)."""
+        for deleted in (
+            "max_table_rows_for_row_chunks",
+            "max_table_cols_for_row_chunks",
+            "table_row_chunk_group_size",
+            "table_summary_max_chars",
+            "table_summary_include_body",
+        ):
+            with pytest.raises(TypeError):
+                IngestionConfig(**{deleted: 1})

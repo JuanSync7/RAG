@@ -1,45 +1,47 @@
 # @summary
-# Query-time helper that expands table-aware retrieval hits by attaching the
-# sibling chunks (summary <-> rows) from the same ``table_group_id``. Opt-in,
-# deduped, budget-bounded; preserves the original ranking by inserting each
-# expansion immediately adjacent to its source hit.
+# Query-time helper that expands a table-aware retrieval hit by attaching the
+# sibling row-block chunks from the same ``table_group_id``. Opt-in, deduped,
+# budget-bounded; preserves the original ranking by inserting each fetched
+# sibling immediately after its source hit (ordered by block index).
 # Exports: expand_table_group_hits
 # Deps: weaviate (Filter), src.vector_db.weaviate.store (filter pattern)
 # @end-summary
 """Table-aware retrieval expansion.
 
-The chunker writes two flavours of table chunk: a ``table_summary`` (one per
-table, holds the caption + full markdown reconstruction) and many
-``table_row`` chunks (one per body row). Both share a stable
-``table_group_id``. By default, retrieval only returns whatever the query
-ranked highest — which is often a single row in isolation, missing the
-column headers and caption that make it interpretable.
+The chunker splits each table into one or more ``table_row`` chunks ("row
+blocks"). Every block restates the caption + column headers and packs as many
+whole body rows as fit the token budget, so a single retrieved block is
+already self-interpretable (it is never header-blind). All blocks of one table
+share a stable ``table_group_id`` and are ordered by ``table_row_block_index``.
 
-``expand_table_group_hits`` is the query-time consumer that fixes this:
-given a list of retrieval hits, it fetches the matching sibling(s) for any
-table hit and inserts them adjacent to the source hit.
+What a lone hit still misses is the *rest of the table*: a query may rank one
+block of a large multi-block table highest, leaving the other blocks (and their
+rows) out of context. ``expand_table_group_hits`` is the query-time consumer
+that fixes this: given a list of retrieval hits, for any ``table_row`` hit it
+fetches the sibling blocks of the same ``table_group_id`` and inserts them
+immediately after the source hit, in block order.
 
 Design contract:
 
-1. **Opt-in** — caller decides via the keyword args; nothing fires unless
-   the caller explicitly asks for it (callers wire this into their post-rank
-   stage).
-2. **Deduped** — never attach a chunk that's already in the result list.
+1. **Opt-in** — nothing fires unless the caller passes ``max_rows_per_group >
+   0`` (the cap on sibling blocks attached per group). At ``0`` the helper is a
+   pure no-op and issues no Weaviate reads.
+2. **Deduped** — never attach a chunk that is already in the result list.
    Dedup keys on ``chunk_id`` (preferred) and falls back to ``uuid``.
 3. **Budget-bounded** — ``max_groups_to_expand`` caps how many distinct
-   ``table_group_id``s trigger a Weaviate read; ``max_rows_per_group`` caps
-   the per-group row fan-out on summary hits.
-4. **Ranking-preserving** — expansions are inserted immediately adjacent to
-   their source hit (summary before row; rows after summary). Hits not part
-   of an expansion keep their original positions.
+   ``table_group_id``s trigger a Weaviate read; ``max_rows_per_group`` caps the
+   per-group sibling-block fan-out.
+4. **Ranking-preserving** — fetched siblings are inserted immediately after
+   their source hit, ordered by ``table_row_block_index``. Hits not part of an
+   expansion keep their original positions.
 
 The helper expects each hit to be a ``dict`` of the shape returned by
 ``src.vector_db.weaviate.store.hybrid_search``: ``{"text", "score", "uuid",
 "metadata": {...}}``. ``chunk_type`` / ``table_group_id`` / ``chunk_id`` are
 read from ``metadata``. Inserted (expanded) hits are tagged with
 ``metadata["expanded_from"] = <table_group_id>`` so consumers (the document
-formatter, the LLM-prompt builder) can render them as context-attached
-rather than as primary retrieval results.
+formatter, the LLM-prompt builder) can render them as context-attached rather
+than as primary retrieval results.
 """
 from __future__ import annotations
 
@@ -76,7 +78,6 @@ def _filter_for_group(table_group_id: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-_TABLE_SUMMARY = "table_summary"
 _TABLE_ROW = "table_row"
 
 # Properties we read off Weaviate objects when building expansion hits.
@@ -86,6 +87,8 @@ _RETURN_PROPS = [
     "chunk_id",
     "table_group_id",
     "table_row_index",
+    "table_row_block_index",
+    "table_block_total",
     "table_id",
     "table_caption",
     "table_markdown",
@@ -103,6 +106,23 @@ def _hit_key(hit: dict) -> str:
     return str(meta.get("chunk_id") or hit.get("uuid") or "")
 
 
+def _block_order(obj_or_props: Any) -> int:
+    """Sort key for a sibling block: prefer block index, fall back to row index."""
+    props = (
+        obj_or_props
+        if isinstance(obj_or_props, dict)
+        else (getattr(obj_or_props, "properties", {}) or {})
+    )
+    for key in ("table_row_block_index", "table_row_index"):
+        val = props.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
 def _obj_to_hit(obj: Any, *, expanded_from: str) -> dict:
     """Convert a Weaviate object to the standard retrieval-hit dict shape."""
     props = dict(getattr(obj, "properties", {}) or {})
@@ -113,6 +133,8 @@ def _obj_to_hit(obj: Any, *, expanded_from: str) -> dict:
         "chunk_type": props.get("chunk_type", ""),
         "table_group_id": props.get("table_group_id", ""),
         "table_row_index": props.get("table_row_index", -1),
+        "table_row_block_index": props.get("table_row_block_index", -1),
+        "table_block_total": props.get("table_block_total", -1),
         "table_id": props.get("table_id", ""),
         "table_caption": props.get("table_caption", ""),
         "table_markdown": props.get("table_markdown", ""),
@@ -172,10 +194,9 @@ def expand_table_group_hits(
     client: Any,
     collection: str,
     max_rows_per_group: int = 0,
-    fetch_summary_for_row_hits: bool = True,
     max_groups_to_expand: int = 8,
 ) -> list[dict]:
-    """Expand table-aware retrieval hits with their adjacent siblings.
+    """Expand each ``table_row`` hit with its sibling row blocks.
 
     Args:
         hits: Ordered list of retrieval-hit dicts. Each must have a
@@ -186,31 +207,29 @@ def expand_table_group_hits(
             used; pass a mock for unit tests.
         collection: Collection name to query (must match the one the hits
             came from).
-        max_rows_per_group: Maximum row chunks to fetch for any
-            ``table_summary`` hit. ``0`` disables summary->row expansion.
-        fetch_summary_for_row_hits: When ``True`` (default), each
-            ``table_row`` hit triggers a fetch of its ``table_summary``
-            sibling. Set ``False`` to disable that side of the expansion.
+        max_rows_per_group: Maximum sibling ``table_row`` block-chunks to
+            attach per ``table_group_id``. ``0`` (default) disables expansion
+            entirely — the helper becomes a pure no-op and issues no reads.
         max_groups_to_expand: Hard cap on the number of distinct
             ``table_group_id``s that may trigger a Weaviate read in this
             call. Groups beyond the cap pass through unexpanded (still
             present, just not enriched).
 
     Returns:
-        A new list. Original hits keep their relative order; each expansion
-        is inserted immediately adjacent to its source hit (summary inserted
-        before its row; rows inserted after their summary). Inserted hits
-        carry ``metadata["expanded_from"] = <table_group_id>``.
+        A new list. Original hits keep their relative order; each fetched
+        sibling block is inserted immediately after its source hit, ordered
+        by ``table_row_block_index``. Inserted hits carry
+        ``metadata["expanded_from"] = <table_group_id>``.
 
     Notes:
-        - If both a row and its summary are already in ``hits``, neither
-          side fetches.
+        - Only the FIRST hit of a given group expands; siblings already
+          present in ``hits`` are deduped and never re-attached.
         - The Weaviate read is at most one ``fetch_objects`` per expanded
           group; budget caps prevent runaway fan-out on long hit lists.
         - On any Weaviate error the affected source hit passes through
           unchanged (we never raise — retrieval results already exist).
     """
-    if not hits:
+    if not hits or max_rows_per_group <= 0:
         return list(hits)
 
     # 1. Build dedup set from the current results so we never re-attach a
@@ -218,111 +237,51 @@ def expand_table_group_hits(
     existing_keys: set[str] = {_hit_key(h) for h in hits}
     existing_keys.discard("")  # empty keys must not collapse multiple hits
 
-    # 2. Plan: for each hit decide whether/how it expands, with a budget on
-    #    distinct groups touched.
+    # 2. Plan: for the first row hit of each group, fetch and attach sibling
+    #    blocks, with a budget on distinct groups touched.
     groups_touched: set[str] = set()
     expansions: dict[int, list[dict]] = {}  # source_index -> inserted hits
-    insert_before: set[int] = set()  # source_index whose expansion goes BEFORE
-
-    # First pass: detect groups present in both row and summary form among
-    # the existing hits. When the summary is already present we don't need
-    # to fetch it for any row hit in the same group; when a row is already
-    # present for a group we still allow summary->rows expansion (the
-    # presence of the row doesn't cover the *other* rows).
-    summary_present_groups: set[str] = set()
-    for h in hits:
-        meta = h.get("metadata") or {}
-        if meta.get("chunk_type") == _TABLE_SUMMARY:
-            gid = str(meta.get("table_group_id") or "")
-            if gid:
-                summary_present_groups.add(gid)
 
     for idx, hit in enumerate(hits):
         meta = hit.get("metadata") or {}
-        ct = meta.get("chunk_type") or ""
-        gid = str(meta.get("table_group_id") or "")
-        if not gid:
+        if meta.get("chunk_type") != _TABLE_ROW:
             continue
-
-        if ct == _TABLE_ROW and fetch_summary_for_row_hits:
-            # Already have the summary? skip - dedup.
-            if gid in summary_present_groups:
-                continue
-            if (gid not in groups_touched
-                    and len(groups_touched) >= max_groups_to_expand):
-                continue
-            objs = _fetch_group(
-                client=client, collection=collection,
-                table_group_id=gid,
-                # Need at most the summary; cap small.
-                limit=max(2, max_rows_per_group + 2),
-            )
-            groups_touched.add(gid)
-            summary = next(
-                (o for o in objs
-                 if (getattr(o, "properties", {}) or {}).get("chunk_type")
-                 == _TABLE_SUMMARY),
-                None,
-            )
-            if summary is None:
-                continue
-            new_hit = _obj_to_hit(summary, expanded_from=gid)
+        gid = str(meta.get("table_group_id") or "")
+        if not gid or gid in groups_touched:
+            continue
+        if len(groups_touched) >= max_groups_to_expand:
+            continue
+        # Fetch enough to cover the cap plus the source block itself.
+        objs = _fetch_group(
+            client=client, collection=collection,
+            table_group_id=gid,
+            limit=max_rows_per_group + 1,
+        )
+        groups_touched.add(gid)
+        siblings = [
+            o for o in objs
+            if (getattr(o, "properties", {}) or {}).get("chunk_type") == _TABLE_ROW
+        ]
+        siblings.sort(key=_block_order)
+        inserted = 0
+        for o in siblings:
+            if inserted >= max_rows_per_group:
+                break
+            new_hit = _obj_to_hit(o, expanded_from=gid)
             key = _hit_key(new_hit)
             if key and key in existing_keys:
                 continue
             existing_keys.add(key)
-            summary_present_groups.add(gid)
             expansions.setdefault(idx, []).append(new_hit)
-            insert_before.add(idx)
-
-        elif ct == _TABLE_SUMMARY and max_rows_per_group > 0:
-            if (gid not in groups_touched
-                    and len(groups_touched) >= max_groups_to_expand):
-                continue
-            # Fetch enough to get the cap + the summary itself.
-            objs = _fetch_group(
-                client=client, collection=collection,
-                table_group_id=gid,
-                limit=max_rows_per_group + 1,
-            )
-            groups_touched.add(gid)
-            rows = [
-                o for o in objs
-                if (getattr(o, "properties", {}) or {}).get("chunk_type")
-                == _TABLE_ROW
-            ]
-            rows.sort(
-                key=lambda o: int(
-                    (getattr(o, "properties", {}) or {}).get(
-                        "table_row_index", 0) or 0
-                )
-            )
-            inserted = 0
-            for o in rows:
-                if inserted >= max_rows_per_group:
-                    break
-                new_hit = _obj_to_hit(o, expanded_from=gid)
-                key = _hit_key(new_hit)
-                if key and key in existing_keys:
-                    continue
-                existing_keys.add(key)
-                expansions.setdefault(idx, []).append(new_hit)
-                inserted += 1
+            inserted += 1
 
     if not expansions:
         return list(hits)
 
-    # 3. Stitch the output: walk original list, splicing expansions adjacent
-    #    to their source hit.
+    # 3. Stitch the output: walk original list, splicing each group's sibling
+    #    blocks immediately after their source hit.
     out: list[dict] = []
     for idx, hit in enumerate(hits):
-        extras = expansions.get(idx, [])
-        if extras and idx in insert_before:
-            out.extend(extras)
-            out.append(hit)
-        elif extras:
-            out.append(hit)
-            out.extend(extras)
-        else:
-            out.append(hit)
+        out.append(hit)
+        out.extend(expansions.get(idx, []))
     return out

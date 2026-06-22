@@ -74,13 +74,11 @@ from config.settings import (
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
     RAG_INGESTION_CHUNKER,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
-    RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS,
     RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH,
-    RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY,
     RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING,
-    RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS,
-    RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS,
-    RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE,
+    RAG_INGESTION_VERIFY_LOSSLESS,
+    RAG_INGESTION_LOSSLESS_MIN_COVERAGE,
+    RAG_INGESTION_LOSSLESS_STRICT,
     RAG_INGESTION_DROP_NAVIGATIONAL,
     RAG_INGESTION_NAV_MAX_CHARS,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
@@ -178,6 +176,17 @@ class IngestionConfig:
         RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION
     )
     enable_quality_validation: bool = RAG_INGESTION_ENABLE_QUALITY_VALIDATION
+    verify_lossless: bool = RAG_INGESTION_VERIFY_LOSSLESS
+    """If True (default), the lossless_verification node checks that the emitted
+    chunks losslessly cover the golden source (parsed Docling markdown) via
+    content word-shingles. Warn-by-default. Env: RAG_INGESTION_VERIFY_LOSSLESS."""
+    lossless_min_coverage: float = RAG_INGESTION_LOSSLESS_MIN_COVERAGE
+    """Coverage floor [0..1] for lossless verification. Below it, the node warns
+    (or fails when strict). Env: RAG_INGESTION_LOSSLESS_MIN_COVERAGE (default 0.98)."""
+    lossless_strict: bool = RAG_INGESTION_LOSSLESS_STRICT
+    """If True, a coverage shortfall below ``lossless_min_coverage`` RAISES and
+    fails the document instead of merely warning. Env:
+    RAG_INGESTION_LOSSLESS_STRICT (default False)."""
     enable_kg_phase2b: bool = RAG_INGESTION_ENABLE_KG_PHASE2B
     """When True (production default), KG ingest is dispatched to the KGWeave
     worker fleet via Temporal (KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE). When
@@ -217,43 +226,16 @@ class IngestionConfig:
     is intentionally not wired — set this on IngestionConfig directly when a
     different tokenizer is desired."""
     enable_adaptive_table_chunking: bool = RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING
-    """If True, ``DoclingParser.chunk()`` post-processes HybridChunker output:
-    drops table-dominant chunks and emits a per-table summary chunk plus
-    per-row chunks for small/uniform tables. Env:
-    RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING (default True)."""
-    max_table_rows_for_row_chunks: int = RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS
-    """Maximum body-row count (excluding header) for which per-row chunks are
-    emitted. Larger tables emit only the (cell-folded) summary chunk. Env:
-    RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS (default 32)."""
-    max_table_cols_for_row_chunks: int = RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS
-    """Maximum column count for which per-row chunks are emitted. Env:
-    RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS (default 12)."""
-    table_row_chunk_group_size: int = RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE
-    """Number of body rows folded into ONE ``table_row`` chunk (a bounded
-    multi-row block; header re-stated per block) instead of one chunk per row.
-    Stops large/multi-sheet spreadsheets from exploding into hundreds of
-    near-duplicate single-row chunks that monopolise the reranked top-K. Default
-    32 (== max_table_rows_for_row_chunks → one block per eligible table); set to
-    1 to restore legacy one-chunk-per-row. Env:
-    RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE."""
-    table_summary_max_chars: int = RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS
-    """Maximum character length of the embedded ``table_summary`` chunk text.
-    Caps the text that the embedder sees on wide-header or 200+ row tables so a
-    single pathological table cannot blow the embedder's input limit. The full
-    ``table_markdown`` stays on ``extra_metadata`` unchanged for downstream
-    expansion. Default sourced from ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``
-    (4000 chars ≈ 1000 tokens). Set to 0 to disable truncation."""
+    """If True, ``DoclingParser.chunk()`` replaces the raw table-dominant chunk with
+    token-budget row-block chunks: each restates the header and packs as many whole
+    rows as fit ``hybrid_chunker_max_tokens`` — every row captured, no row/col gate,
+    no summary cap, no truncation. Env: RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING
+    (default True)."""
     table_embed_prepend_section_path: bool = RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH
     """If True (default), prepend the heading breadcrumb to the EMBEDDED text of
-    table_summary/table_row/figure chunks (mirrors prose contextualize()), so
-    structured chunks are not heading-blind at dense + rerank time. table_markdown
-    metadata is untouched. Env: RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH."""
-    table_summary_include_body: bool = RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY
-    """If True (default), fold the (truncated) table_markdown cell values into the
-    embedded text of SUMMARY-ONLY tables (those that fail the row-chunk gates), so
-    cell values like a register's reset value are actually retrievable. Tables that
-    emit per-row chunks already carry cells and are left compact. Env:
-    RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY."""
+    table_row/figure chunks (mirrors prose contextualize()), so structured chunks
+    are not heading-blind at dense + rerank time. table_markdown metadata is
+    untouched. Env: RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH."""
     drop_navigational: bool = RAG_INGESTION_DROP_NAVIGATIONAL
     """If True (default), drop ToC/index/front-matter pointer chunks at ingest using
     the shared ``is_navigational`` predicate, with a per-document over-prune guard.

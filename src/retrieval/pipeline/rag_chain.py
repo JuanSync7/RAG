@@ -395,6 +395,10 @@ class RAGChain:
         # ``_has_table_chunk`` pre-check inside ``_apply_table_expansion`` so
         # the cost is zero on prose-only corpora.
         # Env: RAG_TABLE_EXPANSION_ENABLED ("false"/"0"/"no" -> off; default on).
+        # Each table_row chunk already restates the caption + column headers, so
+        # a lone hit is self-interpretable; expansion only pulls the SIBLING row
+        # blocks of the same table. It is therefore opt-in via
+        # RAG_TABLE_EXPANSION_MAX_ROWS (max sibling blocks/group; 0 = no-op).
         self.enable_table_group_expansion: bool = _os.environ.get(
             "RAG_TABLE_EXPANSION_ENABLED", "true",
         ).lower() in ("true", "1", "yes")
@@ -404,9 +408,6 @@ class RAGChain:
         self.table_expansion_max_groups: int = int(
             _os.environ.get("RAG_TABLE_EXPANSION_MAX_GROUPS", "8")
         )
-        self.table_expansion_fetch_summary: bool = _os.environ.get(
-            "RAG_TABLE_EXPANSION_FETCH_SUMMARY", "true",
-        ).lower() in ("true", "1", "yes")
 
         # Cross-reference (xref) expansion — MVP, default-off dark launch.
         # Resolves ``section`` / ``section_symbol`` refs only; table/figure/
@@ -606,9 +607,7 @@ class RAGChain:
         """Cheap pre-check: any hit references a table_group_id."""
         for r in results:
             md = r.metadata or {}
-            if md.get("table_group_id") and md.get("chunk_type") in (
-                "table_row", "table_summary",
-            ):
+            if md.get("table_group_id") and md.get("chunk_type") == "table_row":
                 return True
         return False
 
@@ -664,9 +663,6 @@ class RAGChain:
                 client=self._weaviate_client,
                 collection=self._resolve_collection(),
                 max_rows_per_group=getattr(self, "table_expansion_max_rows", 0),
-                fetch_summary_for_row_hits=getattr(
-                    self, "table_expansion_fetch_summary", True,
-                ),
                 max_groups_to_expand=getattr(
                     self, "table_expansion_max_groups", 8,
                 ),

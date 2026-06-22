@@ -1,25 +1,40 @@
 # @summary
-# Tests for adaptive table chunking inside DoclingParser.chunk() — Workstream B.
-# Covers: table-summary chunk emission, row-with-headers chunks for small uniform
-# tables, large/headerless/ragged-table gating, disable flag pass-through,
-# prose-mention false positives, chunk_index re-sequencing, metadata propagation.
+# Tests for the lossless, token-budget table chunking inside DoclingParser.chunk().
+# Covers: table_row block emission (no summary chunk_type), header/separator/caption/
+# breadcrumb restated in every block, greedy whole-row packing under one token budget,
+# large/wide tables splitting into multiple lossless blocks (no truncation), header-only
+# tables, headerless + ragged tables keeping every cell, disable flag pass-through,
+# prose-mention false positives, chunk_index re-sequencing, group-id join, metadata keys.
 # Exports: TestAdaptiveTableChunking
 # Deps: src.ingest.support.docling, src.ingest.support.parser_base,
 #       src.ingest.common.types, unittest.mock, pytest
 # @end-summary
 
-"""Adaptive table chunking tests for ``DoclingParser.chunk()``.
+"""Lossless token-budget table-chunking tests for ``DoclingParser.chunk()``.
 
 HybridChunker and the tokenizer loader are stubbed via ``patch.dict`` on
 ``sys.modules`` and ``patch.object`` on the module-local helper so these tests
 run without docling installed. Inputs are constructed as lightweight doubles
 of ``DoclingDocument`` + ``TableArtifact`` so the post-processing logic is
 exercised in isolation.
+
+New contract (source: ``src/ingest/support/docling.py``
+``_apply_adaptive_table_chunking`` / ``_make_table_chunks`` /
+``_make_token_counter``):
+
+* Each table emits ONLY ``chunk_type="table_row"`` block chunks — there is no
+  ``"table_summary"`` chunk_type anymore.
+* ONE knob: the shared token budget (``hybrid_chunker_max_tokens``). There are
+  no row/col gates, no summary path, no char cap, no group_size.
+* Lossless: every body row appears in exactly one block; concatenating the
+  blocks' rows in order reproduces all body rows. Header + separator + caption +
+  breadcrumb are RESTATED in every block. A single over-budget row is its own
+  atomic block. A header-only table emits exactly one chunk.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,22 +95,49 @@ def _run_chunk(
     tables: list[TableArtifact],
     *,
     config: IngestionConfig | None = None,
+    token_counter: Callable[[str], int] | None = None,
 ) -> list[Any]:
-    """Drive DoclingParser.chunk() with stubbed HybridChunker + tokenizer."""
+    """Drive DoclingParser.chunk() with stubbed HybridChunker + tokenizer.
+
+    By default the tokenizer is a ``MagicMock`` whose ``encode(...)`` yields a
+    zero-length result, so ``_make_token_counter`` reports 0 tokens for every
+    string and the whole table folds into one block (handy for the "single
+    block carries every row" assertions). Pass ``token_counter`` to install a
+    deterministic counter (e.g. character-based) and force multi-block packing.
+    """
     if config is None:
         config = IngestionConfig()
     mock_chunker = MagicMock()
     mock_chunker.chunk = MagicMock(return_value=raw_chunks)
     mock_hc_cls = MagicMock(return_value=mock_chunker)
 
-    with patch.dict(
-        "sys.modules",
-        {
-            "docling_core.transforms.chunker": MagicMock(HybridChunker=mock_hc_cls),
-        },
-    ), patch.object(
-        _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
-    ):
+    ctxs = [
+        patch.dict(
+            "sys.modules",
+            {
+                "docling_core.transforms.chunker": MagicMock(
+                    HybridChunker=mock_hc_cls
+                ),
+            },
+        ),
+        patch.object(
+            _docling_mod, "_get_or_build_tokenizer", return_value=MagicMock()
+        ),
+    ]
+    if token_counter is not None:
+        ctxs.append(
+            patch.object(
+                _docling_mod,
+                "_make_token_counter",
+                return_value=token_counter,
+            )
+        )
+
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        for ctx in ctxs:
+            stack.enter_context(ctx)
         parser = DoclingParser()
         parser._docling_document = MagicMock()
         parser._max_tokens = 512
@@ -111,11 +153,37 @@ def _run_chunk(
         )
 
 
-class TestAdaptiveTableChunking:
-    """Behavior of DoclingParser.chunk() table post-processing."""
+def _char_token_counter(per: float = 1.0) -> Callable[[str], int]:
+    """A deterministic token counter: ``ceil(len(text) / per)`` tokens.
 
-    def test_small_table_emits_summary_and_one_row_block(self):
-        """A small table → 1 summary + 1 bounded row-block (default group=32); original dropped."""
+    ``per=1.0`` makes one character ≈ one token, so byte-length math drives the
+    greedy packer and block boundaries are exactly predictable in tests.
+    """
+    import math
+
+    def _count(text: str) -> int:
+        return int(math.ceil(len(text or "") / per))
+
+    return _count
+
+
+def _table_rows(out: list[Any]) -> list[Any]:
+    return [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
+
+
+def _adaptive_chunks(out: list[Any]) -> list[Any]:
+    return [
+        c
+        for c in out
+        if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row")
+    ]
+
+
+class TestAdaptiveTableChunking:
+    """Behavior of DoclingParser.chunk() lossless token-budget table chunking."""
+
+    def test_no_summary_chunk_type_is_ever_emitted(self):
+        """The summary path is gone: no chunk carries chunk_type='table_summary'."""
         cells = [["Col A", "Col B"], ["x1", "y1"], ["x2", "y2"], ["x3", "y3"]]
         tbl = _make_table_artifact(cells=cells)
         prose = _make_raw_chunk("Some intro prose.", headings=["Top", "Sub"])
@@ -123,83 +191,262 @@ class TestAdaptiveTableChunking:
 
         out = _run_chunk([prose, table_chunk], [tbl])
         types = [c.extra_metadata.get("chunk_type") for c in out]
-        assert types.count("table_summary") == 1
-        # Default group size (32) folds all 3 body rows into ONE block chunk.
-        assert types.count("table_row") == 1
-        # original table-dominant chunk dropped → prose + summary + 1 block = 3
-        assert len(out) == 3
-        # summary text composition
-        summary = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_summary")
-        assert "Table: Demo Caption" in summary.text
-        assert "Columns: Col A | Col B" in summary.text
-        assert "Rows: 3" in summary.text
-        # the single block carries EVERY row's cells (header re-stated per row)
-        block = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_row")
-        assert block.extra_metadata.get("table_row_block_start") == 0
-        assert block.extra_metadata.get("table_row_block_count") == 3
-        for cell in ("Col A: x1", "Col B: y1", "Col A: x2", "Col A: x3", "Col B: y3"):
-            assert cell in block.text
+        assert "table_summary" not in types
+        # Only table_row chunks are emitted for the table.
+        assert types.count("table_row") >= 1
 
-    def test_row_group_size_one_restores_per_row(self):
-        """group_size=1 reproduces the legacy one-chunk-per-row behaviour."""
+    def test_small_table_packs_all_rows_into_one_block(self):
+        """A small table under the budget → ONE table_row block holding every row;
+        original table-dominant chunk dropped (prose + 1 block = 2 chunks)."""
         cells = [["Col A", "Col B"], ["x1", "y1"], ["x2", "y2"], ["x3", "y3"]]
         tbl = _make_table_artifact(cells=cells)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        cfg = IngestionConfig(table_row_chunk_group_size=1)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        rows = [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
-        assert len(rows) == 3
-        assert sorted(c.extra_metadata.get("table_row_index") for c in rows) == [0, 1, 2]
-        assert all(c.extra_metadata.get("table_row_block_count") == 1 for c in rows)
+        prose = _make_raw_chunk("Some intro prose.", headings=["Top", "Sub"])
+        table_chunk = _make_raw_chunk(tbl.markdown, headings=["Top", "Sub"])
 
-    def test_row_group_size_splits_into_bounded_blocks(self):
-        """A 5-row table with group_size=2 → ceil(5/2)=3 bounded blocks (2+2+1)."""
-        cells = [["Col A", "Col B"]] + [[f"x{i}", f"y{i}"] for i in range(5)]
-        tbl = _make_table_artifact(cells=cells)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        cfg = IngestionConfig(table_row_chunk_group_size=2)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        rows = [c for c in out if c.extra_metadata.get("chunk_type") == "table_row"]
-        assert len(rows) == 3
-        assert sorted(c.extra_metadata.get("table_row_block_start") for c in rows) == [0, 2, 4]
-        assert sorted(c.extra_metadata.get("table_row_block_count") for c in rows) == [1, 2, 2]
+        out = _run_chunk([prose, table_chunk], [tbl])
+        rows = _table_rows(out)
+        # Zero-token MagicMock counter ⇒ no overflow ⇒ all 3 body rows in 1 block.
+        assert len(rows) == 1
+        # prose preserved, table-dominant chunk dropped → 2 chunks total.
+        assert len(out) == 2
+        block = rows[0]
+        assert block.extra_metadata.get("table_row_block_index") == 0
+        assert block.extra_metadata.get("table_row_block_start") == 0
+        assert block.extra_metadata.get("table_row_block_count") == 3
+        assert block.extra_metadata.get("table_block_total") == 1
+        # Header restated + every body cell present (markdown row form).
+        assert "| Col A | Col B |" in block.text
+        assert "| --- | --- |" in block.text
+        for cell in ("x1", "y1", "x2", "y2", "x3", "y3"):
+            assert cell in block.text
 
-    def test_large_table_emits_only_summary(self):
-        """Tables exceeding max_table_rows_for_row_chunks emit only the summary."""
+    def test_header_and_breadcrumb_and_caption_restated_in_every_block(self):
+        """Splitting into multiple blocks restates header+sep+caption+breadcrumb
+        in each block (no header-blind continuation block)."""
+        cells = [["Col A", "Col B"]] + [[f"x{i}", f"y{i}"] for i in range(6)]
+        tbl = _make_table_artifact(cells=cells, caption="Pin map")
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        # Tight char-budget counter forces several blocks. Each whole row is
+        # ~13 chars ("| xN | yN |"); with 1 char≈1 token a ~70-token budget fits
+        # the prefix + a couple of rows, guaranteeing >1 block.
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=70)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        assert len(rows) >= 2  # genuinely split
+        for blk in rows:
+            assert "Top\nSub" in blk.text  # breadcrumb restated
+            assert "Pin map" in blk.text  # caption restated
+            assert "| Col A | Col B |" in blk.text  # header restated
+            assert "| --- | --- |" in blk.text  # separator restated
+
+    def test_large_table_splits_into_multiple_lossless_blocks(self):
+        """A tall table over the token budget → multiple table_row blocks; every
+        body row is covered exactly once and the block ordinals are contiguous."""
         header = ["Col A", "Col B"]
-        body = [[f"a{i}", f"b{i}"] for i in range(40)]
+        body = [[f"a{i:02d}", f"b{i:02d}"] for i in range(40)]
         cells = [header] + body
         tbl = _make_table_artifact(cells=cells)
-        cfg = IngestionConfig()  # default max_table_rows_for_row_chunks = 32
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=60)
         table_chunk = _make_raw_chunk(tbl.markdown)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        types = [c.extra_metadata.get("chunk_type") for c in out]
-        assert types.count("table_summary") == 1
-        assert types.count("table_row") == 0
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        # No summary path; only row blocks, and definitely more than one.
+        assert all(
+            c.extra_metadata.get("chunk_type") != "table_summary" for c in out
+        )
+        assert len(rows) > 1
+        # Block ordinals are 0..N-1 contiguous in emission order.
+        ordinals = [r.extra_metadata["table_row_block_index"] for r in rows]
+        assert ordinals == list(range(len(rows)))
+        assert all(
+            r.extra_metadata["table_block_total"] == len(rows) for r in rows
+        )
+        # LOSSLESS: block_start values tile [0..40) with no gaps/overlaps.
+        starts = [r.extra_metadata["table_row_block_start"] for r in rows]
+        counts = [r.extra_metadata["table_row_block_count"] for r in rows]
+        assert starts == sorted(starts)
+        cursor = 0
+        for s, n in zip(starts, counts):
+            assert s == cursor  # contiguous, no gap, no overlap
+            cursor += n
+        assert cursor == len(body)  # every body row covered exactly once
+        # Every body row's markdown appears in exactly one block.
+        for i in range(40):
+            row_md = f"| a{i:02d} | b{i:02d} |"
+            hits = sum(1 for r in rows if row_md in r.text)
+            assert hits == 1, f"row {i} appeared in {hits} blocks"
 
-    def test_headerless_table_emits_only_summary(self):
-        """A table without a header row never emits row chunks."""
-        cells = [["a", "b"], ["c", "d"]]
-        tbl = _make_table_artifact(cells=cells, has_header=False, caption="")
+    def test_blocks_pack_multiple_rows_before_overflowing(self):
+        """The greedy packer accumulates SEVERAL rows per block until the next
+        would overflow — not one-row-per-block. Uses a tiny prefix (no
+        breadcrumb, no caption) so the budget fits ~3 rows, exercising the
+        accumulate-then-flush transition that 1-row-per-block budgets miss.
+
+        header ``| A | B |`` + sep ``| --- | --- |`` → prefix = 23 chars/tokens;
+        each row ``| xN | yN |`` = 11 chars, +1 join = 12 tokens. At budget 60:
+        23 + 12*3 = 59 ≤ 60 (3 rows fit), + a 4th (71) overflows → blocks of
+        [3, 3, 3, 1] for 10 body rows.
+        """
+        header = ["A", "B"]
+        body = [[f"x{i}", f"y{i}"] for i in range(10)]
+        cells = [header] + body
+        tbl = _make_table_artifact(cells=cells, caption="", section_path="")
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=60)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        counts = [r.extra_metadata["table_row_block_count"] for r in rows]
+
+        # THE point of this test: at least one block carries 2+ rows (the multi-
+        # row greedy accumulation, not a degenerate one-row-per-block regime).
+        assert max(counts) >= 2, f"expected multi-row blocks, got counts={counts}"
+        # Exact deterministic packing for this budget/prefix/row geometry.
+        assert counts == [3, 3, 3, 1], f"unexpected packing: {counts}"
+        # Greedy respected the cap: every packed (non-atomic) block stays within
+        # the budget (token count == char length at per=1.0).
+        for r in rows:
+            n = r.extra_metadata["table_row_block_count"]
+            if n >= 2:
+                assert len(r.text) <= 60, (
+                    f"block of {n} rows exceeded budget: {len(r.text)} tokens"
+                )
+        # Still lossless: contiguous tiling of [0..10), every row covered once.
+        starts = [r.extra_metadata["table_row_block_start"] for r in rows]
+        cursor = 0
+        for s, n in zip(starts, counts):
+            assert s == cursor
+            cursor += n
+        assert cursor == len(body)
+        for i in range(10):
+            assert sum(1 for r in rows if f"| x{i} | y{i} |" in r.text) == 1
+        # No summary chunk, ever.
+        assert all(c.extra_metadata.get("chunk_type") != "table_summary" for c in out)
+
+    def test_no_truncation_full_markdown_preserved_on_first_block(self):
+        """A wide+tall table is NOT truncated — it splits into multiple lossless
+        blocks, and the full table markdown is stashed on the first block only."""
+        headers = [f"col_{i:02d}" for i in range(8)]
+        body = [[f"v{r}_{c}" for c in range(8)] for r in range(30)]
+        cells = [headers] + body
+        tbl = _make_table_artifact(cells=cells, caption="Wide datasheet table")
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=120)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        assert len(rows) > 1
+        # No truncation marker anywhere in any block's embedded text.
+        for r in rows:
+            assert "[truncated" not in r.text
+        # All 30 body rows present across the blocks, none dropped.
+        for r_idx in range(30):
+            row_md = "| " + " | ".join(f"v{r_idx}_{c}" for c in range(8)) + " |"
+            assert sum(1 for r in rows if row_md in r.text) == 1
+        # table_markdown stashed on block 0 only, and equals the FULL markdown
+        # (never truncated).
+        first = next(
+            r for r in rows if r.extra_metadata["table_row_block_index"] == 0
+        )
+        assert first.extra_metadata["table_markdown"] == tbl.markdown
+        assert all(
+            "table_markdown" not in r.extra_metadata
+            for r in rows
+            if r.extra_metadata["table_row_block_index"] != 0
+        )
+
+    def test_oversized_single_row_becomes_its_own_atomic_block(self):
+        """A row whose markdown alone exceeds the budget is emitted in its OWN
+        block (never split, never dropped) and short rows still pack together."""
+        header = ["A", "B"]
+        big_cell = "X" * 400  # this single row alone blows past the budget
+        cells = [
+            header,
+            ["s1", "t1"],
+            [big_cell, "huge"],
+            ["s2", "t2"],
+        ]
+        tbl = _make_table_artifact(cells=cells, caption="")
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=80)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        # The oversized row is preserved whole in exactly one block.
+        big_hits = [r for r in rows if big_cell in r.text]
+        assert len(big_hits) == 1
+        # That block contains ONLY the big row (atomic).
+        assert big_hits[0].extra_metadata["table_row_block_count"] == 1
+        # Lossless: all 3 body rows covered exactly once across blocks.
+        counts = sum(r.extra_metadata["table_row_block_count"] for r in rows)
+        assert counts == 3
+        for cell in ("s1", "t1", "s2", "t2"):
+            assert sum(1 for r in rows if cell in r.text) == 1
+
+    def test_header_only_table_emits_exactly_one_block(self):
+        """A header-only table (zero body rows) emits exactly ONE table_row chunk
+        carrying just header + separator, with an empty body."""
+        cells = [["Col A", "Col B"]]
+        tbl = _make_table_artifact(cells=cells, caption="Headers only")
         table_chunk = _make_raw_chunk(tbl.markdown)
         out = _run_chunk([table_chunk], [tbl])
-        types = [c.extra_metadata.get("chunk_type") for c in out]
-        assert types.count("table_summary") == 1
-        assert types.count("table_row") == 0
-        # caption omitted from summary text when empty
-        summary = next(c for c in out if c.extra_metadata.get("chunk_type") == "table_summary")
-        assert not summary.text.startswith("Table:")
-        assert "Columns:" in summary.text
+        rows = _table_rows(out)
+        assert len(rows) == 1
+        block = rows[0]
+        assert block.extra_metadata["table_row_block_count"] == 0
+        assert block.extra_metadata["table_block_total"] == 1
+        assert "| Col A | Col B |" in block.text
+        assert "| --- | --- |" in block.text
 
-    def test_ragged_rows_emit_only_summary(self):
-        """A table whose body rows have unequal length never emits row chunks."""
-        cells = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
+    def test_headerless_table_emits_all_rows_losslessly(self):
+        """A table without a real header still emits row blocks covering every
+        row — no gate drops it. (cells[0] is restated as the markdown header.)"""
+        cells = [["a", "b"], ["c", "d"], ["e", "f"]]
+        tbl = _make_table_artifact(cells=cells, has_header=False, caption="")
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=40)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = _table_rows(out)
+        assert all(
+            c.extra_metadata.get("chunk_type") != "table_summary" for c in out
+        )
+        assert len(rows) >= 1
+        # has_header=False is faithfully recorded.
+        assert all(r.extra_metadata["table_has_header"] is False for r in rows)
+        # Body rows (cells[1:]) are all present exactly once across blocks.
+        for cell_row in (["c", "d"], ["e", "f"]):
+            row_md = "| " + " | ".join(cell_row) + " |"
+            assert sum(1 for r in rows if row_md in r.text) == 1
+
+    def test_ragged_rows_keep_all_cells_no_zip_to_header_width(self):
+        """A ragged-row table keeps ALL cells of each body row (a wider row is
+        NOT zipped down to header width) and emits every row losslessly."""
+        cells = [["H1", "H2"], ["a", "b", "EXTRA"], ["d"]]
         tbl = _make_table_artifact(cells=cells)
         table_chunk = _make_raw_chunk(tbl.markdown)
         out = _run_chunk([table_chunk], [tbl])
-        types = [c.extra_metadata.get("chunk_type") for c in out]
-        assert types.count("table_summary") == 1
-        assert types.count("table_row") == 0
+        rows = _table_rows(out)
+        assert all(
+            c.extra_metadata.get("chunk_type") != "table_summary" for c in out
+        )
+        assert len(rows) >= 1
+        joined = "\n".join(r.text for r in rows)
+        # The extra cell on the wide row is preserved (3 cells, not 2).
+        assert "| a | b | EXTRA |" in joined
+        # The short row keeps its single cell.
+        assert "| d |" in joined
+        # Lossless count: 2 body rows total across all blocks.
+        total = sum(r.extra_metadata["table_row_block_count"] for r in rows)
+        assert total == 2
 
     def test_disabled_flag_preserves_legacy_output(self):
         """enable_adaptive_table_chunking=False leaves HybridChunker output untouched."""
@@ -239,8 +486,9 @@ class TestAdaptiveTableChunking:
         indices = [c.chunk_index for c in out]
         assert indices == list(range(len(out)))
 
-    def test_table_group_id_joins_summary_and_rows(self):
-        """All chunks from one table share table_group_id; distinct tables get distinct ids."""
+    def test_table_group_id_joins_all_blocks_of_one_table(self):
+        """All row blocks from one table share table_group_id; distinct tables
+        get distinct ids (= self_ref when present)."""
         cells_a = [["H1", "H2"], ["a", "b"], ["c", "d"]]
         cells_b = [["X", "Y"], ["1", "2"]]
         tbl_a = _make_table_artifact(
@@ -271,9 +519,8 @@ class TestAdaptiveTableChunking:
         assert groups_a == {"#/tables/0"}
         assert groups_b == {"#/tables/1"}
         # Every adaptive chunk carries the field.
-        for c in out:
-            if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row"):
-                assert c.extra_metadata.get("table_group_id")
+        for c in _adaptive_chunks(out):
+            assert c.extra_metadata.get("table_group_id")
 
     def test_table_group_id_falls_back_to_table_id_when_self_ref_missing(self):
         """When parser has no self_ref, group_id falls back to table_id (still stable within doc)."""
@@ -283,321 +530,77 @@ class TestAdaptiveTableChunking:
         assert tbl.self_ref == ""
         table_chunk = _make_raw_chunk(tbl.markdown)
         out = _run_chunk([table_chunk], [tbl])
-        for c in out:
-            if c.extra_metadata.get("chunk_type") in ("table_summary", "table_row"):
-                assert c.extra_metadata.get("table_group_id") == "table-1"
+        for c in _adaptive_chunks(out):
+            assert c.extra_metadata.get("table_group_id") == "table-1"
 
-    def test_oversized_table_summary_text_is_truncated_under_cap(self):
-        """When summary text would exceed table_summary_max_chars, it is capped
-        with a clear truncation marker; full markdown is preserved on metadata.
+    def test_concatenating_blocks_reproduces_every_body_row_in_order(self):
+        """Lossless ordering invariant: walking blocks by block_index and
+        flattening their rows reproduces the full body row sequence in order."""
+        header = ["Col A", "Col B"]
+        body = [[f"r{i:02d}a", f"r{i:02d}b"] for i in range(25)]
+        cells = [header] + body
+        tbl = _make_table_artifact(cells=cells, caption="")
+        cfg = IngestionConfig(hybrid_chunker_max_tokens=55)
+        table_chunk = _make_raw_chunk(tbl.markdown)
+        out = _run_chunk(
+            [table_chunk], [tbl], config=cfg, token_counter=_char_token_counter(per=1.0)
+        )
+        rows = sorted(
+            _table_rows(out), key=lambda r: r.extra_metadata["table_row_block_index"]
+        )
+        # Reconstruct body-row markdown from each block in order, then check the
+        # flattened sequence equals the original body rows in order.
+        reconstructed: list[str] = []
+        for blk in rows:
+            for line in blk.text.splitlines():
+                # body rows are "| rNNa | rNNb |"; skip header/sep/caption/breadcrumb
+                if line.startswith("| r") and line.endswith(" |"):
+                    reconstructed.append(line)
+        expected = ["| " + " | ".join(r) + " |" for r in body]
+        assert reconstructed == expected
 
-        Guards against 200+ row datasheet tables (or pathologically wide
-        column headers) blowing past the embedder's max-input limit.
-        """
-        # Build many wide headers so the "Columns: ..." line dominates the
-        # summary length and forces truncation under a tight cap.
-        headers = [f"col_{i:03d}_descriptor" for i in range(120)]
-        body = [[f"v{i}" for i in range(120)] for _ in range(250)]
-        cells = [headers] + body
+    def test_metadata_keys_propagate_to_row_chunks(self):
+        """The new metadata contract: table_id, group/document ids, row/block
+        indices, table dims, page_ref, heading_path all present on row chunks."""
+        cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
         tbl = _make_table_artifact(
-            cells=cells, caption="Wide datasheet table"
+            cells=cells, section_path="Alpha > Beta", page_no=7, caption="Cap"
         )
-        cap = 512
-        cfg = IngestionConfig(table_summary_max_chars=cap)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        summary = next(
-            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
-        )
-        # Embedded text capped.
-        assert len(summary.text) <= cap
-        # Clear truncation marker present.
-        assert "[truncated" in summary.text
-        assert summary.text.rstrip().endswith("chars]")
-        # table_markdown on metadata is unchanged (full markdown intact).
-        assert summary.extra_metadata["table_markdown"] == tbl.markdown
-        # Sanity: full markdown is much larger than the cap.
-        assert len(tbl.markdown) > cap
-
-    def test_small_summary_not_truncated_when_under_cap(self):
-        """Summaries that fit under the cap are returned byte-for-byte
-        unchanged — no false truncation, no marker appended."""
-        cells = [["Col A", "Col B"], ["x", "y"]]
-        tbl = _make_table_artifact(cells=cells, caption="Tiny")
-        cfg = IngestionConfig(table_summary_max_chars=4000)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        summary = next(
-            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
-        )
-        # No truncation marker.
-        assert "[truncated" not in summary.text
-        # Exact byte-for-byte composition. The heading breadcrumb ("Top\nSub")
-        # is prepended to the embedded text (parity with prose contextualize);
-        # this is a small, header-bearing table so its body is NOT folded in.
-        expected = "Top\nSub\nTable: Tiny\nColumns: Col A | Col B\nRows: 1"
-        assert summary.text == expected
-
-    def test_summary_truncation_disabled_when_cap_zero(self):
-        """A cap of 0 disables truncation entirely — long summaries pass through."""
-        headers = [f"hdr_{i:03d}" for i in range(200)]
-        cells = [headers, [f"v{i}" for i in range(200)]]
-        tbl = _make_table_artifact(cells=cells, caption="No cap")
-        cfg = IngestionConfig(table_summary_max_chars=0)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        out = _run_chunk([table_chunk], [tbl], config=cfg)
-        summary = next(
-            c for c in out if c.extra_metadata.get("chunk_type") == "table_summary"
-        )
-        assert "[truncated" not in summary.text
-        # The Columns: line alone is well over 1000 chars; verify pass-through.
-        assert len(summary.text) > 1000
-
-    def test_truncation_is_deterministic_for_chunk_id_idempotency(self):
-        """Two runs over the same table produce byte-identical summary text,
-        so build_table_chunk_id (which hashes structural keys, not text) and
-        any text-hashing downstream both stay stable across re-ingest."""
-        headers = [f"col_{i:03d}" for i in range(100)]
-        cells = [headers, [f"v{i}" for i in range(100)]]
-        tbl_a = _make_table_artifact(cells=cells, caption="Det")
-        tbl_b = _make_table_artifact(cells=cells, caption="Det")
-        cfg = IngestionConfig(table_summary_max_chars=256)
-        out_a = _run_chunk([_make_raw_chunk(tbl_a.markdown)], [tbl_a], config=cfg)
-        out_b = _run_chunk([_make_raw_chunk(tbl_b.markdown)], [tbl_b], config=cfg)
-        sum_a = next(
-            c for c in out_a if c.extra_metadata.get("chunk_type") == "table_summary"
-        )
-        sum_b = next(
-            c for c in out_b if c.extra_metadata.get("chunk_type") == "table_summary"
-        )
-        assert sum_a.text == sum_b.text
-        assert "[truncated" in sum_a.text
-
-    def test_metadata_propagates_to_summary_and_row_chunks(self):
-        """table_id, page_ref, heading_path appear on both summary and row chunks."""
-        cells = [["H1", "H2"], ["a", "b"]]
-        tbl = _make_table_artifact(
-            cells=cells, section_path="Alpha > Beta", page_no=7
-        )
+        tbl.self_ref = "#/tables/3"
+        tbl.document_id = "doc-99"
+        tbl.caption_label = "Table 5"
         table_chunk = _make_raw_chunk(tbl.markdown)
         out = _run_chunk([table_chunk], [tbl])
-        target = [c for c in out if c.extra_metadata.get("chunk_type") in
-                  ("table_summary", "table_row")]
-        assert len(target) == 2  # 1 summary + 1 row
-        for c in target:
-            assert c.extra_metadata.get("table_id") == "table-1"
-            assert c.heading_path == ["Alpha", "Beta"]
-            assert c.section_path == "Alpha > Beta"
-            assert c.page_ref is not None
-            assert c.page_ref.page_no == 7
+        rows = _table_rows(out)
+        assert len(rows) == 1  # zero-token counter folds the 2 body rows together
+        block = rows[0]
+        m = block.extra_metadata
+        assert m["chunk_type"] == "table_row"
+        assert m["table_id"] == "table-1"
+        assert m["table_group_id"] == "#/tables/3"
+        assert m["document_id"] == "doc-99"
+        assert m["caption_label"] == "Table 5"
+        assert m["table_caption"] == "Cap"
+        assert m["table_row_index"] == 0
+        assert m["table_row_block_index"] == 0
+        assert m["table_row_block_start"] == 0
+        assert m["table_row_block_count"] == 2
+        assert m["table_block_total"] == 1
+        assert m["table_num_rows"] == tbl.num_rows
+        assert m["table_num_cols"] == tbl.num_cols
+        assert m["table_has_header"] is True
+        assert m["table_markdown"] == tbl.markdown  # block 0 carries full markdown
+        # Chunk-level provenance fields.
+        assert block.heading_path == ["Alpha", "Beta"]
+        assert block.section_path == "Alpha > Beta"
+        assert block.page_ref is not None
+        assert block.page_ref.page_no == 7
 
-
-# ---------------------------------------------------------------------------
-# Observability: OTel counter coverage for the gate decisions
-# ---------------------------------------------------------------------------
-
-
-class _DeltaReader:
-    """Wrap an InMemoryMetricReader to expose post-baseline deltas.
-
-    OTel SDK only allows one global MeterProvider per process, so we install
-    a single module-scoped provider and snapshot a baseline at the start of
-    each test. ``get_metrics_data`` here returns cumulative state; the
-    helper below subtracts the baseline so each test sees only its own
-    contribution.
-    """
-
-    def __init__(self, inner: Any, baseline: dict[str, int]) -> None:
-        self._inner = inner
-        self._baseline = baseline
-
-    def collect(self) -> dict[str, int]:
-        current = _drain_counters(self._inner)
-        return {k: v - self._baseline.get(k, 0) for k, v in current.items()}
-
-
-def _drain_counters(reader: Any) -> dict[str, int]:
-    """Read cumulative ingest.table.* counter totals from an InMemoryMetricReader."""
-    data = reader.get_metrics_data()
-    out: dict[str, int] = {}
-    if data is None:
-        return out
-    for resource_metric in data.resource_metrics:
-        for scope_metric in resource_metric.scope_metrics:
-            for metric in scope_metric.metrics:
-                if not metric.name.startswith("ingest.table."):
-                    continue
-                total = 0
-                metric_data = getattr(metric, "data", None)
-                points = (
-                    getattr(metric_data, "data_points", []) if metric_data else []
-                )
-                for point in points:
-                    total += int(getattr(point, "value", 0))
-                out[metric.name] = out.get(metric.name, 0) + total
-    return out
-
-
-@pytest.fixture(scope="module")
-def _otel_module_reader():
-    """Install a single MeterProvider + InMemoryMetricReader for this module.
-
-    OTel forbids replacing the global MeterProvider, so the provider is
-    installed once per module and shared across tests via the per-test
-    ``otel_metric_reader`` fixture which snapshots a baseline.
-    """
-    from opentelemetry import metrics as otel_metrics
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
-    from src.ingest.support import table_metrics as _tm
-
-    reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader])
-    # ``set_meter_provider`` only honours the first call per process; clear the
-    # internal flag so the SDK provider replaces any proxy already installed.
-    otel_metrics._PROXY_METER_PROVIDER = None  # type: ignore[attr-defined]
-    otel_metrics.set_meter_provider(provider)
-    _tm._reset_for_tests()
-    try:
-        yield reader
-    finally:
-        try:
-            provider.shutdown()
-        except Exception:
-            pass
-        _tm._reset_for_tests()
-
-
-@pytest.fixture
-def otel_metric_reader(_otel_module_reader):
-    """Return a delta-collecting wrapper so each test sees only its own counter activity."""
-    baseline = _drain_counters(_otel_module_reader)
-    return _DeltaReader(_otel_module_reader, baseline)
-
-
-class TestAdaptiveTableChunkingMetrics:
-    """OTel counter coverage for the small / uniform gate decisions."""
-
-    def test_large_varied_table_increments_row_chunks_emitted(self, otel_metric_reader):
-        """A small-enough uniform table fires the row_chunks_emitted counter exactly once."""
-        cells = [["H1", "H2"], ["a", "b"], ["c", "d"], ["e", "f"]]
-        tbl = _make_table_artifact(cells=cells)
+    def test_table_caption_metadata_absent_when_no_caption(self):
+        """table_caption is set ONLY when the table has a caption."""
+        cells = [["H1", "H2"], ["a", "b"]]
+        tbl = _make_table_artifact(cells=cells, caption="")
         table_chunk = _make_raw_chunk(tbl.markdown)
-        _run_chunk([table_chunk], [tbl])
-
-        values = otel_metric_reader.collect()
-        assert values.get("ingest.table.row_chunks_emitted") == 1
-        assert values.get("ingest.table.summary_only_due_to_small", 0) == 0
-        assert values.get("ingest.table.summary_only_due_to_uniform", 0) == 0
-
-    def test_oversized_table_increments_small_gate(self, otel_metric_reader):
-        """A table over max_table_rows_for_row_chunks fires the small-gate counter."""
-        header = ["Col A", "Col B"]
-        body = [[f"a{i}", f"b{i}"] for i in range(40)]
-        cells = [header] + body
-        tbl = _make_table_artifact(cells=cells)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        _run_chunk([table_chunk], [tbl])
-
-        values = otel_metric_reader.collect()
-        assert values.get("ingest.table.summary_only_due_to_small") == 1
-        assert values.get("ingest.table.row_chunks_emitted", 0) == 0
-        assert values.get("ingest.table.summary_only_due_to_uniform", 0) == 0
-
-    def test_ragged_table_increments_uniform_gate(self, otel_metric_reader):
-        """A ragged-row table fires the uniform-gate counter (not the small gate)."""
-        cells = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
-        tbl = _make_table_artifact(cells=cells)
-        table_chunk = _make_raw_chunk(tbl.markdown)
-        _run_chunk([table_chunk], [tbl])
-
-        values = otel_metric_reader.collect()
-        assert values.get("ingest.table.summary_only_due_to_uniform") == 1
-        assert values.get("ingest.table.summary_only_due_to_small", 0) == 0
-        assert values.get("ingest.table.row_chunks_emitted", 0) == 0
-
-    def test_three_synthetic_tables_each_increment_their_own_counter(
-        self, otel_metric_reader
-    ):
-        """One large+varied, one oversized, one ragged → each counter +1 exactly."""
-        # 1) small + uniform → row_chunks_emitted
-        cells_ok = [["H1", "H2"], ["a", "b"], ["c", "d"]]
-        tbl_ok = _make_table_artifact(
-            table_id="ok", cells=cells_ok, section_path="A"
-        )
-        tbl_ok.self_ref = "#/tables/0"
-
-        # 2) too many rows → small_gate
-        header = ["Col A", "Col B"]
-        body = [[f"a{i}", f"b{i}"] for i in range(40)]
-        cells_big = [header] + body
-        tbl_big = _make_table_artifact(
-            table_id="big", cells=cells_big, section_path="B"
-        )
-        tbl_big.self_ref = "#/tables/1"
-
-        # 3) ragged rows → uniform_gate
-        cells_ragged = [["H1", "H2", "H3"], ["a", "b", "c"], ["d", "e"]]
-        tbl_ragged = _make_table_artifact(
-            table_id="ragged", cells=cells_ragged, section_path="C"
-        )
-        tbl_ragged.self_ref = "#/tables/2"
-
-        chunks = [
-            _make_raw_chunk(tbl_ok.markdown),
-            _make_raw_chunk(tbl_big.markdown),
-            _make_raw_chunk(tbl_ragged.markdown),
-        ]
-        _run_chunk(chunks, [tbl_ok, tbl_big, tbl_ragged])
-
-        values = otel_metric_reader.collect()
-        assert values.get("ingest.table.row_chunks_emitted") == 1
-        assert values.get("ingest.table.summary_only_due_to_small") == 1
-        assert values.get("ingest.table.summary_only_due_to_uniform") == 1
-
-    def test_summary_text_truncated_counter_fires_on_truncation(
-        self, otel_metric_reader
-    ):
-        """When a summary is capped, the truncated counter increments; otherwise it stays at 0."""
-        # First: a table whose summary fits comfortably → no truncation.
-        cells_small = [["Col A", "Col B"], ["x", "y"]]
-        tbl_small = _make_table_artifact(cells=cells_small, caption="Tiny")
-        cfg_loose = IngestionConfig(table_summary_max_chars=4000)
-        _run_chunk(
-            [_make_raw_chunk(tbl_small.markdown)], [tbl_small], config=cfg_loose
-        )
-
-        # Second: a wide table under a tight cap → truncation fires.
-        headers = [f"col_{i:03d}_descriptor" for i in range(120)]
-        body = [[f"v{i}" for i in range(120)] for _ in range(5)]
-        cells_wide = [headers] + body
-        tbl_wide = _make_table_artifact(
-            table_id="wide", cells=cells_wide, caption="Wide"
-        )
-        cfg_tight = IngestionConfig(table_summary_max_chars=256)
-        _run_chunk(
-            [_make_raw_chunk(tbl_wide.markdown)], [tbl_wide], config=cfg_tight
-        )
-
-        values = otel_metric_reader.collect()
-        assert values.get("ingest.table.summary_text_truncated") == 1
-
-    def test_counters_are_noop_without_sdk_provider(self):
-        """With no SDK MeterProvider installed (the default), increments must not crash."""
-        from opentelemetry import metrics as otel_metrics
-
-        from src.ingest.support import table_metrics as _tm
-
-        prior_provider = otel_metrics.get_meter_provider()
-        # Force the proxy / default no-op provider by clearing any SDK provider.
-        otel_metrics._METER_PROVIDER = None  # type: ignore[attr-defined]
-        _tm._reset_for_tests()
-        try:
-            cells = [["H1", "H2"], ["a", "b"], ["c", "d"]]
-            tbl = _make_table_artifact(cells=cells)
-            # Should not raise, regardless of routing.
-            _run_chunk([_make_raw_chunk(tbl.markdown)], [tbl])
-        finally:
-            otel_metrics._METER_PROVIDER = prior_provider  # type: ignore[attr-defined]
-            _tm._reset_for_tests()
+        out = _run_chunk([table_chunk], [tbl])
+        for r in _table_rows(out):
+            assert "table_caption" not in r.extra_metadata

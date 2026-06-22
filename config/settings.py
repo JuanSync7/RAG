@@ -487,6 +487,18 @@ RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION = os.environ.get(
 RAG_INGESTION_ENABLE_QUALITY_VALIDATION = os.environ.get(
     "RAG_INGESTION_ENABLE_QUALITY_VALIDATION", "true"
 ).lower() in ("true", "1", "yes")
+# Lossless verification: after chunking, check the emitted chunks losslessly
+# cover the golden source (parsed Docling markdown). Warn-by-default; STRICT
+# escalates a coverage shortfall to a hard failure of the document.
+RAG_INGESTION_VERIFY_LOSSLESS = os.environ.get(
+    "RAG_INGESTION_VERIFY_LOSSLESS", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_LOSSLESS_MIN_COVERAGE = float(
+    os.environ.get("RAG_INGESTION_LOSSLESS_MIN_COVERAGE", "0.98")
+)
+RAG_INGESTION_LOSSLESS_STRICT = os.environ.get(
+    "RAG_INGESTION_LOSSLESS_STRICT", "false"
+).lower() in ("true", "1", "yes")
 # Production default: KG runs via Temporal handoff (KGWeave worker fleet on
 # KG_TASK_QUEUE). Set to false to skip the KG phase entirely — used by the
 # offline CLI ingest and benchmark scripts that don't run a Temporal cluster.
@@ -543,23 +555,6 @@ NOTE: until the Phase-1->Phase-2 handoff was fixed to forward
 unreachable and every document silently fell back to ``"legacy"``. Set this to
 ``"legacy"`` to restore the old behavior."""
 
-RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS: int = int(
-    os.environ.get("RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS", "4000")
-)
-"""Maximum character length of the embedded text on ``table_summary`` chunks.
-
-At ~4 chars/token (BPE rule of thumb) this caps the summary near ~1000 tokens,
-comfortably under bge-m3's 8192-token input limit and aligned with the default
-``RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024`` budget for prose chunks.
-A 200+ row datasheet table with pathologically wide column headers can otherwise
-compose a ``Columns: ...`` line that overflows the embedder. When the cap
-triggers, the text is truncated and a clear marker (``… [truncated N chars]``)
-is appended. Set to 0 to disable truncation entirely.
-
-The full ``table_markdown`` remains stored on the summary chunk's
-``extra_metadata`` unchanged — only the embedded summary text is capped, so
-downstream table-expansion retrieval keeps the complete payload."""
-
 RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH: bool = os.environ.get(
     "RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH", "true"
 ).lower() in ("true", "1", "yes")
@@ -572,19 +567,6 @@ carries its embedded breadcrumb — outranks the table that actually holds the
 answer, at BOTH the dense and reranker stages. ``table_markdown`` metadata is left
 unchanged. Changes embedded text -> chunk_id, so flipping this requires a
 re-ingest / collection recreate."""
-
-RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY: bool = os.environ.get(
-    "RAG_INGESTION_TABLE_SUMMARY_INCLUDE_BODY", "true"
-).lower() in ("true", "1", "yes")
-"""If True (default), fold the (truncated) ``table_markdown`` cell values into the
-embedded text of a SUMMARY-ONLY table chunk (a table that failed the row-chunk
-gates: >max_rows, >max_cols, or no header — the register/datasheet-map majority).
-Without it those tables embed only ``Columns:.../Rows:N`` with ZERO cell values, so
-a query like "reset value of REG37" can never match (the answer token is in no
-chunk's text) — the strongest datasheet "I cannot answer" driver. Tables that DO
-emit per-row chunks already carry cell values, so the body is not duplicated into
-their summary. Capped by ``RAG_INGESTION_TABLE_SUMMARY_MAX_CHARS``. Changes
-embedded text -> chunk_id; requires re-ingest."""
 
 RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
     "RAG_INGESTION_DROP_NAVIGATIONAL", "true"
@@ -614,33 +596,10 @@ length-independent and unaffected by this cap."""
 RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING: bool = os.environ.get(
     "RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING", "true"
 ).lower() in ("true", "1", "yes")
-"""If True (default), DoclingParser.chunk() drops table-dominant chunks and emits a
-per-table summary chunk plus per-row chunks for small/uniform tables."""
-
-RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS: int = int(
-    os.environ.get("RAG_INGESTION_MAX_TABLE_ROWS_FOR_ROW_CHUNKS", "32")
-)
-"""Max body-row count (excluding header) for which per-row chunks are emitted;
-larger tables emit only the (cell-folded) summary chunk."""
-
-RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS: int = int(
-    os.environ.get("RAG_INGESTION_MAX_TABLE_COLS_FOR_ROW_CHUNKS", "12")
-)
-"""Max column count for which per-row chunks are emitted."""
-
-RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE: int = max(
-    1, int(os.environ.get("RAG_INGESTION_TABLE_ROW_CHUNK_GROUP_SIZE", "32"))
-)
-"""Number of body rows folded into ONE table_row chunk (a bounded multi-row
-block, header re-stated per block) instead of one chunk per row.
-
-Spreadsheets (.xlsx) routinely contain many small uniform sheets; emitting one
-chunk per row exploded a single status workbook into ~1000 near-duplicate
-chunks that monopolised the reranked top-K (one document crowding out every
-other source). Grouping rows into blocks keeps each table to a handful of
-coherent, retrievable chunks. Default 32 == MAX_TABLE_ROWS_FOR_ROW_CHUNKS, so a
-row-chunk-eligible table emits a single summary + single row block; set to 1 to
-restore the legacy one-chunk-per-row behaviour."""
+"""If True (default), DoclingParser.chunk() replaces the raw table-dominant chunk
+with token-budget row-block chunks: each chunk restates the header and packs as
+many whole rows as fit ``RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS``, so every row is
+captured (no row/col gate, no summary cap, no truncation)."""
 
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"

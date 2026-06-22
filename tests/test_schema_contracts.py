@@ -54,17 +54,16 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     # Pipeline feature toggles (server-side defaults)
     "enable_cross_reference_extraction",
     "enable_quality_validation",
+    "verify_lossless",
+    "lossless_min_coverage",
+    "lossless_strict",
     "enable_kg_phase2b",
     # Quality thresholds
     "min_chunk_chars",
     "native_min_chunk_chars",
     "min_quality_score",
     "table_embed_prepend_section_path",
-    "table_summary_include_body",
     "enable_adaptive_table_chunking",
-    "max_table_rows_for_row_chunks",
-    "max_table_cols_for_row_chunks",
-    "table_row_chunk_group_size",
     "drop_navigational",
     "nav_max_chars",
     # Storage / infra paths

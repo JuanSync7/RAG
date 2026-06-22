@@ -116,7 +116,7 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
     Property(
         name="table_markdown",
         data_type=DataType.TEXT,
-        description="Full markdown reconstruction; only set on table_summary chunks",
+        description="Full markdown reconstruction; only set on block 0 of a table's table_row chunks",
         index_filterable=False,
         index_searchable=True,
     ),
