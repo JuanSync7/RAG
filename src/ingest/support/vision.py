@@ -198,7 +198,11 @@ def _extract_image_candidates(
 _VISION_PROMPT = (
     "You are an OCR-and-figure-analysis assistant for retrieval indexing. "
     "Return JSON only with keys: caption (string), visible_text (string), tags (array of strings). "
-    "Keep caption under 200 chars, visible_text under 200 chars, and max 8 tags."
+    "caption: a concise one-line description of the figure (aim under 200 chars). "
+    "visible_text: transcribe ALL text visible in the image VERBATIM and in full — "
+    "do NOT summarize, abbreviate, or truncate; this is the figure's searchable content "
+    "(diagrams/tables-as-images can carry a lot of text, capture every word). "
+    "max 8 tags."
 )
 
 
@@ -254,8 +258,13 @@ def _describe_image(
         return VisionDescription(
             figure_label=candidate.figure_label,
             source_ref=candidate.source_ref,
-            caption=caption[:240],
-            visible_text=visible_text[:260],
+            # No content truncation: the figure caption and (especially) the
+            # OCR'd visible_text are the figure's searchable content. The 240/260
+            # caps here used to silently drop most of a text-bearing diagram's
+            # content. The OTel completion attribute above stays capped — that is
+            # telemetry, not stored content.
+            caption=caption,
+            visible_text=visible_text,
             tags=tags,
         )
 

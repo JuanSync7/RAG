@@ -58,10 +58,8 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "lossless_min_coverage",
     "lossless_strict",
     "enable_kg_phase2b",
-    # Quality thresholds
-    "min_chunk_chars",
+    # Chunk floors
     "native_min_chunk_chars",
-    "min_quality_score",
     "table_embed_prepend_section_path",
     "enable_adaptive_table_chunking",
     "drop_navigational",

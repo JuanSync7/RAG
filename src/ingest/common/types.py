@@ -90,8 +90,6 @@ from config.settings import (
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
     RAG_INGESTION_EMBEDDING_BATCH_SIZE,
-    RAG_INGEST_MIN_CHUNK_CHARS,
-    RAG_INGEST_MIN_QUALITY_SCORE,
     RAG_INGEST_NATIVE_MIN_CHUNK_CHARS,
     RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD,
     RAG_INGESTION_BUILD_DOCUMENT_CARDS,
@@ -193,8 +191,6 @@ class IngestionConfig:
     False, KG ingest is skipped entirely — kept as an opt-out for offline
     CLI / bench runs that don't run a Temporal cluster.
     Env var: RAG_INGESTION_ENABLE_KG_PHASE2B."""
-    min_chunk_chars: int = RAG_INGEST_MIN_CHUNK_CHARS
-    min_quality_score: float = RAG_INGEST_MIN_QUALITY_SCORE
     native_min_chunk_chars: int = RAG_INGEST_NATIVE_MIN_CHUNK_CHARS
     """Native (HybridChunker) min-chunk COALESCE floor in chars. After chunking,
     DoclingParser.chunk() merges adjacent sub-floor chunk BODIES into the

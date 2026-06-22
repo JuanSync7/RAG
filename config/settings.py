@@ -1156,13 +1156,7 @@ RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD: float = float(
     os.environ.get("RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD", "0.95")
 )
 
-# --- Ingest: Chunk quality gates ---
-RAG_INGEST_MIN_CHUNK_CHARS: int = int(
-    os.environ.get("RAG_INGEST_MIN_CHUNK_CHARS", "40")
-)
-RAG_INGEST_MIN_QUALITY_SCORE: float = float(
-    os.environ.get("RAG_INGEST_MIN_QUALITY_SCORE", "0.45")
-)
+# --- Ingest: Chunk floors ---
 # Native (Docling HybridChunker) min-chunk COALESCE floor (chars). HybridChunker's
 # merge_peers pass only merges chunks that share the SAME heading path and only up
 # to the token budget — it has no minimum-size floor, so a leaf section with a tiny
