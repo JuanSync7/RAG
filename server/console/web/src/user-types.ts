@@ -60,6 +60,7 @@ export interface LastTurnStats {
 
 export interface StreamEventData {
     token?: string;
+    text?: string;
     message?: string;
     results?: ChunkResult[];
     conversation_id?: string;

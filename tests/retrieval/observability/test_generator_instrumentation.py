@@ -34,8 +34,9 @@ class _FakeProvider:
 
     def generate_stream(self, messages, **kwargs):
         self.calls.append((messages, kwargs))
+        # include_reasoning=True ⇒ (kind, text) tuples; "content" → answer tokens.
         for tok in ["he", "llo", " world"]:
-            yield tok
+            yield ("content", tok)
 
     def is_available(self, **kwargs):
         return True

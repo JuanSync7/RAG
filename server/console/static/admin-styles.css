@@ -72,6 +72,23 @@ label { display: block; margin: 6px 0; color: var(--muted); }
 }
 .markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .muted { color: var(--muted); }
+/* live reasoning ("thinking") block — collapsible, above the answer markdown */
+.reasoning-block {
+  margin: 8px 0; border: 1px dashed var(--border); border-radius: 8px;
+  background: #0d1220; overflow: hidden;
+}
+.reasoning-summary {
+  cursor: pointer; list-style: none; padding: 8px 12px;
+  font-size: 12px; color: var(--muted);
+}
+.reasoning-summary::-webkit-details-marker { display: none; }
+.reasoning-block[open] .reasoning-summary { border-bottom: 1px dashed var(--border); }
+.reasoning-body {
+  padding: 8px 12px; font-size: 12px; line-height: 1.5; color: var(--muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 320px; overflow-y: auto;
+}
 .rerank-table {
   width: 100%;
   border-collapse: collapse;

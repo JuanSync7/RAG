@@ -84,6 +84,8 @@ export function bindQuery(): void {
 
     byId("runStreamBtn").addEventListener("click", async () => {
         byId("rerankDocsOut").innerHTML = "";
+        // Drop any reasoning block left over from a previous run.
+        byId("queryMarkdown").parentElement?.querySelector(".reasoning-block")?.remove();
         renderTiming(null);
         const body = {
             query: byId<HTMLTextAreaElement>("queryText").value,
@@ -105,6 +107,25 @@ export function bindQuery(): void {
         const decoder = new TextDecoder();
         let chunkBuffer = "";
         let answer = "";
+        let reasoningText = "";
+        // Returns the reasoning-body element, lazily creating the collapsible block
+        // above #queryMarkdown. DOM-queried (not a closure-cached var) to avoid a TS
+        // `never`-narrowing pitfall. Static markup only; the model's raw reasoning
+        // text is written via textContent (never innerHTML) so it cannot inject markup.
+        const reasoningBody = (): HTMLElement => {
+            const md = byId("queryMarkdown");
+            let el = md.parentElement?.querySelector<HTMLDetailsElement>(".reasoning-block") ?? null;
+            if (!el) {
+                el = document.createElement("details");
+                el.className = "reasoning-block";
+                el.open = true;
+                el.innerHTML =
+                    `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary>` +
+                    `<div class="reasoning-body"></div>`;
+                md.parentElement?.insertBefore(el, md);
+            }
+            return el.querySelector<HTMLElement>(".reasoning-body")!;
+        };
         while (true) {
             const { done, value } = await reader.read();
             if (done) {
@@ -129,6 +150,9 @@ export function bindQuery(): void {
                 if (eventType === "token") {
                     answer += data.token || "";
                     renderMarkdown("queryMarkdown", answer);
+                } else if (eventType === "reasoning") {
+                    reasoningText += String(data.text ?? "");
+                    reasoningBody().textContent = reasoningText;
                 } else if (eventType === "retrieval") {
                     const cid = typeof data.conversation_id === "string" ? data.conversation_id : "";
                     if (cid) {
@@ -142,6 +166,8 @@ export function bindQuery(): void {
                     if (cid) {
                         setActiveConversation(cid);
                     }
+                    const rb = byId("queryMarkdown").parentElement?.querySelector<HTMLDetailsElement>(".reasoning-block");
+                    if (rb) rb.open = false;
                     renderMarkdown("queryMarkdown", answer);
                     renderTiming({
                         latency_ms: asOptionalNumber(data.latency_ms),

@@ -367,6 +367,26 @@
 
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 
+    /* live reasoning ("thinking") block — dimmed, collapsible, above the answer */
+    .reasoning-block {
+      align-self: stretch; max-width: 680px; margin: 2px 0 8px;
+      border: 1px dashed var(--border); border-radius: 12px;
+      background: var(--bg-card); overflow: hidden;
+    }
+    .reasoning-summary {
+      cursor: pointer; list-style: none; user-select: none;
+      padding: 8px 12px; font-size: 12px; color: var(--text-3); letter-spacing: 0.02em;
+    }
+    .reasoning-summary::-webkit-details-marker { display: none; }
+    .reasoning-block[open] .reasoning-summary { border-bottom: 1px dashed var(--border); }
+    .reasoning-body {
+      padding: 8px 12px; font-size: 12px; line-height: 1.55; color: var(--text-2);
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      max-height: 320px; overflow-y: auto;
+    }
+    @media (max-width: 600px) { .reasoning-block { max-width: calc(100vw - 80px); } }
+
     /* markdown */
     .bubble strong { color: var(--accent-2); }
     .bubble em { color: var(--text-2); font-style: italic; }

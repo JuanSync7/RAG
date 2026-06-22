@@ -193,11 +193,16 @@ def _stream_llm(
     memory_context: str | None = None,
     memory_recent_turns: list[dict] | None = None,
 ):
-    """Stream generation tokens via LLMProvider (provider-agnostic).
+    """Stream generation events via LLMProvider (provider-agnostic).
 
     Delegates prompt assembly to `OllamaGenerator.build_messages` so the
     streaming and non-streaming paths share a single source of truth for
     prompt shape (system prompt, doc-context layout, memory framing).
+
+    Yields ``(kind, text)`` tuples where ``kind`` is ``"reasoning"`` for live
+    chain-of-thought deltas (reasoning models) or ``"content"`` for answer
+    deltas. The endpoint maps these to distinct SSE event types so the UI can
+    show the model "thinking" before the answer streams.
     """
     from src.platform.llm import get_llm_provider
     from src.retrieval.generation.nodes import OllamaGenerator
@@ -221,13 +226,14 @@ def _stream_llm(
 
     stream_start = time.perf_counter()
     provider = get_llm_provider()
-    for token in provider.generate_stream(
+    for kind, text in provider.generate_stream(
         messages,
         model_alias="default",
         temperature=GENERATION_TEMPERATURE,
         max_tokens=GENERATION_MAX_TOKENS,
+        include_reasoning=True,
     ):
-        yield token
+        yield kind, text
     _record_stage("stream_tokens", "generation", stream_start)
 
 
@@ -661,7 +667,7 @@ def create_query_router(
                 token_count = 0
                 generation_stages: list[dict] = []
                 try:
-                    for token in _stream_llm(
+                    for kind, text in _stream_llm(
                         processed_query,
                         context_texts,
                         scores,
@@ -669,9 +675,16 @@ def create_query_router(
                         memory_context=mem_ctx_text,
                         memory_recent_turns=mem_recent_turns,
                     ):
+                        if kind == "reasoning":
+                            # Live chain-of-thought — surfaced as a distinct event so
+                            # the UI shows the model "thinking". NOT counted as an answer
+                            # token and NOT stored in memory (it is not the answer).
+                            yield _sse("reasoning", {"text": text})
+                            await asyncio.sleep(0)
+                            continue
                         token_count += 1
-                        generated_text_parts.append(token)
-                        yield _sse("token", {"token": token})
+                        generated_text_parts.append(text)
+                        yield _sse("token", {"token": text})
                         await asyncio.sleep(0)
                 except Exception as exc:
                     logger.warning("Generation stream error: %s", exc)

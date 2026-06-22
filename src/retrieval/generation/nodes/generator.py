@@ -2,7 +2,7 @@
 # LLM generator for RAG answer synthesis, backed by LiteLLM Router.
 # Main exports: OllamaGenerator, get_system_prompt, reload_system_prompt,
 #   GenerationResult, GenerationError, GenerationErrorKind,
-#   StreamEvent, TokenEvent, ErrorEvent.
+#   StreamEvent, TokenEvent, ReasoningEvent, ErrorEvent.
 # Deps: typing, dataclasses, enum, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
@@ -167,13 +167,24 @@ class TokenEvent:
 
 
 @dataclass(frozen=True)
+class ReasoningEvent:
+    """A streamed chain-of-thought (reasoning) chunk from a reasoning model.
+
+    Surfaced to clients as a live "thinking" indicator. It is never part of the
+    answer text and is never persisted to conversation memory.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ErrorEvent:
     """Terminal error event for streaming."""
 
     error: GenerationError
 
 
-StreamEvent = Union[TokenEvent, ErrorEvent]
+StreamEvent = Union[TokenEvent, ReasoningEvent, ErrorEvent]
 
 
 # ── Default user-facing messages per error kind ───────────────────────────
@@ -601,7 +612,8 @@ class OllamaGenerator:
     ):
         """Stream tokens from LLM as discriminated `StreamEvent` values.
 
-        Yields `TokenEvent(text=...)` for each chunk and, on failure, a final
+        Yields `TokenEvent(text=...)` for each answer chunk, `ReasoningEvent(text=...)`
+        for chain-of-thought chunks (reasoning models), and on failure a final
         `ErrorEvent(error=...)` so callers can surface a typed error to the UI.
         """
         if not context_chunks:
@@ -629,14 +641,18 @@ class OllamaGenerator:
         ) as span:
             chunk_count = 0
             try:
-                for chunk in self._provider.generate_stream(
+                for kind, text in self._provider.generate_stream(
                     messages,
                     model_alias="default",
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    include_reasoning=True,
                 ):
+                    if kind == "reasoning":
+                        yield ReasoningEvent(text=text)
+                        continue
                     chunk_count += 1
-                    yield TokenEvent(text=chunk)
+                    yield TokenEvent(text=text)
                 span.set_attribute("stream_chunk_count", chunk_count)
             except Exception as exc:
                 err = _make_error(exc)
@@ -723,6 +739,7 @@ __all__ = [
     "GenerationErrorKind",
     "StreamEvent",
     "TokenEvent",
+    "ReasoningEvent",
     "ErrorEvent",
     "get_system_prompt",
     "reload_system_prompt",

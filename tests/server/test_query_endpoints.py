@@ -862,7 +862,8 @@ def test_stream_non_search_action_with_chunks_still_early_returns(monkeypatch):
 
     class _Provider:
         def generate_stream(self, messages, **kwargs):
-            yield "LEAK-TOKEN"
+            # (kind, text) tuple — the streaming contract with include_reasoning.
+            yield ("content", "LEAK-TOKEN")
 
     import src.platform.llm as llm_mod
     import src.retrieval.generation.nodes as nodes_mod
@@ -890,3 +891,56 @@ def test_stream_non_search_action_with_chunks_still_early_returns(monkeypatch):
     assert "token" not in events
     done_data = next(d for e, d in frames if e == "done")
     assert done_data["token_count"] == 0
+
+
+def test_stream_emits_reasoning_frames_distinct_from_tokens(monkeypatch):
+    """A reasoning model's chain-of-thought streams as 'reasoning' SSE frames,
+    ahead of and distinct from the 'token' answer frames. Reasoning is not
+    counted as answer tokens and is not persisted as the answer."""
+    fake_mem = FakeMemory()
+    monkeypatch.setattr(query_mod, "get_conversation_memory", lambda: fake_mem)
+
+    class _Provider:
+        def generate_stream(self, messages, *, include_reasoning=False, **kwargs):
+            # The /query/stream path must opt in to reasoning.
+            assert include_reasoning is True
+            yield ("reasoning", "let me ")
+            yield ("reasoning", "think")
+            yield ("content", "final ")
+            yield ("content", "answer")
+
+    import src.platform.llm as llm_mod
+    import src.retrieval.generation.nodes as nodes_mod
+    monkeypatch.setattr(llm_mod, "get_llm_provider", lambda: _Provider())
+    monkeypatch.setattr(
+        nodes_mod.OllamaGenerator, "build_messages",
+        staticmethod(lambda **kwargs: [{"role": "user", "content": "x"}]),
+    )
+
+    temporal = FakeTemporalClient(
+        result=_ok_result(
+            action="search",
+            results=[{"text": "chunk text", "score": 0.9, "metadata": {"document_id": "d1"}}],
+        )
+    )
+    emit = Recorder()
+    client = TestClient(_build_app(temporal_client=temporal, emit=emit))
+
+    resp = client.post("/query/stream", json={"query": "hi"})
+
+    assert resp.status_code == 200
+    frames = _parse_sse(resp.text)
+    events = [e for e, _ in frames]
+    assert "reasoning" in events
+    assert "token" in events
+    # reasoning precedes the answer tokens
+    assert events.index("reasoning") < events.index("token")
+
+    reasoning_text = "".join(d["text"] for e, d in frames if e == "reasoning")
+    answer_text = "".join(d["token"] for e, d in frames if e == "token")
+    assert reasoning_text == "let me think"
+    assert answer_text == "final answer"
+
+    # reasoning chunks are NOT counted as answer tokens (2 content chunks only)
+    done_data = next(d for e, d in frames if e == "done")
+    assert done_data["token_count"] == 2

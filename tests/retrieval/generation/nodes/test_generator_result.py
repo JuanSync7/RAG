@@ -16,6 +16,7 @@ from src.retrieval.generation.nodes.generator import (
     OllamaGenerator,
     StreamEvent,
     TokenEvent,
+    ReasoningEvent,
     ErrorEvent,
     reload_system_prompt,
 )
@@ -165,11 +166,33 @@ def test_generation_error_has_user_and_internal_messages():
 
 
 def test_generate_stream_yields_token_and_error_events(monkeypatch):
-    gen, _ = _make_generator(monkeypatch, stream_chunks=["he", "llo"])
+    # The provider yields (kind, text) tuples when include_reasoning is set,
+    # which the generator passes for streaming. "content" → TokenEvent.
+    gen, _ = _make_generator(
+        monkeypatch, stream_chunks=[("content", "he"), ("content", "llo")]
+    )
     events = list(gen.generate_stream("q", ["ctx"]))
     assert all(isinstance(e, StreamEvent) for e in events)
     tokens = [e for e in events if isinstance(e, TokenEvent)]
     assert [t.text for t in tokens] == ["he", "llo"]
+
+
+def test_generate_stream_routes_reasoning_to_reasoning_events(monkeypatch):
+    """Reasoning deltas surface as ReasoningEvent; content deltas as TokenEvent.
+    Reasoning is kept distinct so the UI can show "thinking" separate from the answer."""
+    gen, _ = _make_generator(
+        monkeypatch,
+        stream_chunks=[
+            ("reasoning", "let me "),
+            ("reasoning", "think"),
+            ("content", "the answer"),
+        ],
+    )
+    events = list(gen.generate_stream("q", ["ctx"]))
+    reasoning = [e for e in events if isinstance(e, ReasoningEvent)]
+    tokens = [e for e in events if isinstance(e, TokenEvent)]
+    assert [r.text for r in reasoning] == ["let me ", "think"]
+    assert [t.text for t in tokens] == ["the answer"]
 
 
 def test_generate_stream_yields_error_event_on_failure(monkeypatch):

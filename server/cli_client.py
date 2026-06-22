@@ -981,6 +981,8 @@ def main() -> None:
             retrieval_data = None
             generated_tokens = []
             done_data = None
+            answer_started = False
+            thinking_started = False
 
             for event_type, data in send_query_stream(_CURRENT_SERVER, query_text, filters):
                 if event_type == "retrieval":
@@ -991,14 +993,28 @@ def main() -> None:
                     elapsed = time.time() - start
                     print(f"\r  {B_GREEN}✓{RESET} Retrieved {DIM}({elapsed:.1f}s){RESET}        ")
                     display_retrieval(retrieval_data)
+                    # The "✦ Answer" header is printed lazily on the first content
+                    # token, so any live reasoning (below) renders between them.
 
-                    if data.get("action") == "search" and data.get("results"):
-                        print(f"\n  {B_GREEN}✦ Answer{RESET}\n")
-                        sys.stdout.write("  ")
-                        sys.stdout.flush()
+                elif event_type == "reasoning":
+                    # Live chain-of-thought from a reasoning model — shown dimmed
+                    # under a "Thinking…" header, before the answer. Not the answer.
+                    text = data.get("text", "")
+                    if not thinking_started:
+                        print(f"\n  {DIM}💭 Thinking…{RESET}\n")
+                        sys.stdout.write(f"  {DIM}")
+                        thinking_started = True
+                    sys.stdout.write(text.replace("\n", "\n  "))
+                    sys.stdout.flush()
 
                 elif event_type == "token":
                     token = data.get("token", "")
+                    if not answer_started:
+                        if thinking_started:
+                            sys.stdout.write(f"{RESET}\n")
+                        print(f"\n  {B_GREEN}✦ Answer{RESET}\n")
+                        sys.stdout.write("  ")
+                        answer_started = True
                     generated_tokens.append(token)
                     if token == "\n":
                         sys.stdout.write(f"\n  ")
@@ -1010,7 +1026,15 @@ def main() -> None:
                     done_data = data
 
                 elif event_type == "error":
+                    if thinking_started and not answer_started:
+                        sys.stdout.write(f"{RESET}\n")
                     print(f"\n  {B_RED}✗{RESET} {data.get('message', 'Unknown error')}")
+
+            # Reasoning streamed but no answer followed (e.g. model spent its whole
+            # budget thinking) — close the dim run so the prompt isn't left dimmed.
+            if thinking_started and not answer_started:
+                sys.stdout.write(f"{RESET}\n")
+                sys.stdout.flush()
 
             if generated_tokens:
                 print()

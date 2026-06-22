@@ -175,6 +175,11 @@ export async function streamQuery(queryText: string): Promise<void> {
     let tokenEventCount = 0;
     let lastBudget: import("./user-types").TokenBudget | null = null;
 
+    // Live reasoning ("thinking") — a collapsible block rendered above the answer
+    // bubble, filled from `reasoning` SSE events emitted by reasoning models.
+    let reasoningText = "";
+    let reasoningStartAt = 0;
+
     clearLastTurnStats();
 
     let renderRaf = 0;
@@ -191,6 +196,41 @@ export async function streamQuery(queryText: string): Promise<void> {
             cancelAnimationFrame(renderRaf);
             renderRaf = 0;
         }
+    };
+
+    // Returns this turn's reasoning-body element, lazily creating the collapsible
+    // block above the answer bubble on first use. Scoped to this bubble-wrap, so
+    // it never collides with reasoning blocks from earlier turns. (Querying the
+    // DOM rather than caching in a closure-mutated var sidesteps a TS narrowing
+    // pitfall where such vars get inferred as `never` at read sites.)
+    const reasoningBody = (): HTMLElement => {
+        const wrap = bubbleEl.parentElement;
+        let el = wrap?.querySelector<HTMLDetailsElement>(".reasoning-block") ?? null;
+        if (!el) {
+            el = document.createElement("details");
+            el.className = "reasoning-block";
+            el.open = true;
+            el.innerHTML =
+                `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary>` +
+                `<div class="reasoning-body"></div>`;
+            wrap?.insertBefore(el, bubbleEl);
+            reasoningStartAt = performance.now();
+        }
+        return el.querySelector<HTMLElement>(".reasoning-body")!;
+    };
+    // Relabel the summary with the elapsed thinking time; collapse once the
+    // answer begins (when there is no answer, leave it open so the user can read
+    // what the model worked through).
+    const finalizeReasoning = (collapse: boolean) => {
+        const el = bubbleEl.parentElement?.querySelector<HTMLDetailsElement>(".reasoning-block");
+        if (!el) return;
+        const summaryEl = el.querySelector(".reasoning-summary");
+        if (summaryEl) {
+            const secs = reasoningStartAt ? (performance.now() - reasoningStartAt) / 1000 : 0;
+            summaryEl.innerHTML =
+                secs > 0 ? `&#128173; Thought for ${secs.toFixed(1)}s` : "&#128173; Thought process";
+        }
+        if (collapse) el.open = false;
     };
 
     try {
@@ -219,11 +259,19 @@ export async function streamQuery(queryText: string): Promise<void> {
                         bubbleEl.classList.add("streaming");
                         started = true;
                         firstTokenAt = performance.now();
+                        finalizeReasoning(true);
                     }
                     lastTokenAt = performance.now();
                     tokenEventCount++;
                     answer += data.token || "";
                     scheduleRender();
+                    scrollToBottom();
+                } else if (evtType === "reasoning") {
+                    // Live chain-of-thought: dimmed, collapsible, above the answer.
+                    // Raw model text → textContent (never innerHTML) so it can't inject markup.
+                    typingEl.style.display = "none";
+                    reasoningText += String(data.text ?? "");
+                    reasoningBody().textContent = reasoningText;
                     scrollToBottom();
                 } else if (evtType === "retrieval") {
                     const cid = String(data.conversation_id ?? "").trim();
@@ -272,6 +320,7 @@ export async function streamQuery(queryText: string): Promise<void> {
                 } else if (evtType === "error") {
                     errorShown = true;
                     cancelRender();
+                    finalizeReasoning(false);
                     bubbleEl.classList.remove("streaming");
                     typingEl.style.display = "none";
                     bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
@@ -281,6 +330,9 @@ export async function streamQuery(queryText: string): Promise<void> {
                 } else if (evtType === "done") {
                     const cid = String(data.conversation_id ?? "").trim();
                     if (cid) setActiveConversation(cid);
+                    // No answer followed the reasoning — leave it expanded so the
+                    // user can still see what the model worked through.
+                    if (!started) finalizeReasoning(false);
 
                     if (data.token_budget) lastBudget = data.token_budget;
                     const completionTokens =

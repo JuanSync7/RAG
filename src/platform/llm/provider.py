@@ -292,6 +292,7 @@ class LLMProvider:
         max_tokens: Optional[int] = None,
         timeout: Optional[int] = None,
         user_id: Optional[str] = None,
+        include_reasoning: bool = False,
     ) -> Any:
         """Run a synchronous streaming completion.
 
@@ -302,9 +303,18 @@ class LLMProvider:
             max_tokens: Optional max completion tokens override.
             timeout: Optional per-call timeout in seconds.
             user_id: Optional end-user identifier for per-user cost attribution.
+            include_reasoning: When True, also surface chain-of-thought deltas.
 
         Yields:
-            Content chunks (strings).
+            By default, content chunks (plain strings) — the backward-compatible
+            contract relied on by the LangChain adapter and other string callers.
+
+            When ``include_reasoning`` is True, yields ``(kind, text)`` tuples
+            where ``kind`` is ``"reasoning"`` for chain-of-thought deltas
+            (``delta.reasoning_content``, emitted by reasoning models such as
+            deepseek-r1 / qwen when vLLM runs with a reasoning parser) and
+            ``"content"`` for final-answer deltas (``delta.content``). This lets
+            a UI show the model "thinking" live, distinctly from the answer.
         """
         kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id, stream=True)
         kwargs["messages"] = messages
@@ -318,7 +328,15 @@ class LLMProvider:
         response = self._router.completion(**kwargs)
         for chunk in response:
             delta = chunk.choices[0].delta
-            if delta and delta.content:
+            if not delta:
+                continue
+            if include_reasoning:
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield ("reasoning", reasoning)
+                if delta.content:
+                    yield ("content", delta.content)
+            elif delta.content:
                 yield delta.content
 
     async def agenerate(

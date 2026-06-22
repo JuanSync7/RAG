@@ -645,6 +645,7 @@ function bindQuery() {
   });
   byId("runStreamBtn").addEventListener("click", async () => {
     byId("rerankDocsOut").innerHTML = "";
+    byId("queryMarkdown").parentElement?.querySelector(".reasoning-block")?.remove();
     renderTiming(null);
     const body = {
       query: byId("queryText").value,
@@ -666,6 +667,19 @@ function bindQuery() {
     const decoder = new TextDecoder();
     let chunkBuffer = "";
     let answer = "";
+    let reasoningText = "";
+    const reasoningBody = () => {
+      const md = byId("queryMarkdown");
+      let el = md.parentElement?.querySelector(".reasoning-block") ?? null;
+      if (!el) {
+        el = document.createElement("details");
+        el.className = "reasoning-block";
+        el.open = true;
+        el.innerHTML = `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary><div class="reasoning-body"></div>`;
+        md.parentElement?.insertBefore(el, md);
+      }
+      return el.querySelector(".reasoning-body");
+    };
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
@@ -689,6 +703,9 @@ function bindQuery() {
         if (eventType === "token") {
           answer += data.token || "";
           renderMarkdown("queryMarkdown", answer);
+        } else if (eventType === "reasoning") {
+          reasoningText += String(data.text ?? "");
+          reasoningBody().textContent = reasoningText;
         } else if (eventType === "retrieval") {
           const cid = typeof data.conversation_id === "string" ? data.conversation_id : "";
           if (cid) {
@@ -702,6 +719,8 @@ function bindQuery() {
           if (cid) {
             setActiveConversation(cid);
           }
+          const rb = byId("queryMarkdown").parentElement?.querySelector(".reasoning-block");
+          if (rb) rb.open = false;
           renderMarkdown("queryMarkdown", answer);
           renderTiming({
             latency_ms: asOptionalNumber(data.latency_ms),

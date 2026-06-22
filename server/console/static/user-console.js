@@ -1798,6 +1798,8 @@ async function streamQuery(queryText) {
   let lastTokenAt = 0;
   let tokenEventCount = 0;
   let lastBudget = null;
+  let reasoningText = "";
+  let reasoningStartAt = 0;
   clearLastTurnStats();
   let renderRaf = 0;
   const flushRender = () => {
@@ -1813,6 +1815,29 @@ async function streamQuery(queryText) {
       cancelAnimationFrame(renderRaf);
       renderRaf = 0;
     }
+  };
+  const reasoningBody = () => {
+    const wrap = bubbleEl.parentElement;
+    let el = wrap?.querySelector(".reasoning-block") ?? null;
+    if (!el) {
+      el = document.createElement("details");
+      el.className = "reasoning-block";
+      el.open = true;
+      el.innerHTML = `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary><div class="reasoning-body"></div>`;
+      wrap?.insertBefore(el, bubbleEl);
+      reasoningStartAt = performance.now();
+    }
+    return el.querySelector(".reasoning-body");
+  };
+  const finalizeReasoning = (collapse) => {
+    const el = bubbleEl.parentElement?.querySelector(".reasoning-block");
+    if (!el) return;
+    const summaryEl = el.querySelector(".reasoning-summary");
+    if (summaryEl) {
+      const secs = reasoningStartAt ? (performance.now() - reasoningStartAt) / 1e3 : 0;
+      summaryEl.innerHTML = secs > 0 ? `&#128173; Thought for ${secs.toFixed(1)}s` : "&#128173; Thought process";
+    }
+    if (collapse) el.open = false;
   };
   try {
     while (true) {
@@ -1838,11 +1863,17 @@ async function streamQuery(queryText) {
             bubbleEl.classList.add("streaming");
             started = true;
             firstTokenAt = performance.now();
+            finalizeReasoning(true);
           }
           lastTokenAt = performance.now();
           tokenEventCount++;
           answer += data.token || "";
           scheduleRender();
+          scrollToBottom();
+        } else if (evtType === "reasoning") {
+          typingEl.style.display = "none";
+          reasoningText += String(data.text ?? "");
+          reasoningBody().textContent = reasoningText;
           scrollToBottom();
         } else if (evtType === "retrieval") {
           const cid = String(data.conversation_id ?? "").trim();
@@ -1850,7 +1881,18 @@ async function streamQuery(queryText) {
           const drSugg = data.dr_suggestion;
           maybeShowDrChip(drSugg, queryText);
           const clar = String(data.clarification_message ?? "").trim();
-          if (clar) pendingClarification = clar;
+          if (clar) {
+            const reason = String(data.ask_user_reason ?? "").trim();
+            const reasonLabels = {
+              sanitizer_reject: "Empty or invalid query",
+              injection_blocked: "Query blocked by safety rails",
+              vague_query: "Query too vague to retrieve",
+              budget_exhausted: "Retrieval timeout",
+              no_results: "No matching documents"
+            };
+            const label = reasonLabels[reason];
+            pendingClarification = label ? `[${label}] ${clar}` : clar;
+          }
           if (data.token_budget) {
             lastBudget = data.token_budget;
             updateContextIndicator(lastBudget);
@@ -1874,6 +1916,7 @@ async function streamQuery(queryText) {
         } else if (evtType === "error") {
           errorShown = true;
           cancelRender();
+          finalizeReasoning(false);
           bubbleEl.classList.remove("streaming");
           typingEl.style.display = "none";
           bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
@@ -1883,6 +1926,7 @@ async function streamQuery(queryText) {
         } else if (evtType === "done") {
           const cid = String(data.conversation_id ?? "").trim();
           if (cid) setActiveConversation(cid);
+          if (!started) finalizeReasoning(false);
           if (data.token_budget) lastBudget = data.token_budget;
           const completionTokens = Number(lastBudget?.actual_completion_tokens) || tokenEventCount;
           const promptTokens = Number(lastBudget?.actual_prompt_tokens) || Number(lastBudget?.input_tokens) || 0;
