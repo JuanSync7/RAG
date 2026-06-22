@@ -248,15 +248,33 @@ def build_source_preview_payload(
 
 
 def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
-    """Read clean markdown + metadata from MinIO clean store by source_key.
+    """Read clean markdown + metadata from MinIO by source_key.
+
+    Two MinIO layouts can hold a document's clean markdown, and they are
+    populated by different paths:
+
+    1. **Document store** (``<document_id>.md`` where
+       ``document_id = build_document_id(source_key)``) — written by the
+       embedding pipeline's ``commit_node`` on every normal ingest when
+       ``store_documents`` is enabled (the default). This is the layout the
+       CLI/Temporal ingest actually fills, for *all* formats (the clean
+       markdown rendering of pdf/docx/pptx/xlsx, not just .md sources).
+    2. **MinioCleanStore** (``clean/{safe_key}.md``) — only populated by the
+       lifecycle tooling (migration/sync). Normal ingest never writes it.
+
+    We therefore try the document store first (so document viewing works on a
+    standard ingest with no backfill), and fall back to ``MinioCleanStore`` for
+    environments where lifecycle migration populated it instead.
 
     Returns:
         (markdown_text, metadata_dict)
 
     Raises:
-        HTTPException(404) if MinIO is unreachable or the document is missing.
+        HTTPException(404) if MinIO is unreachable or the document is missing
+        from both layouts.
     """
     try:
+        from src.db import build_document_id, get_document
         from src.db.minio import create_client
         from src.ingest.common.minio_clean_store import MinioCleanStore
         from config.settings import MINIO_BUCKET
@@ -266,11 +284,26 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
 
     try:
         client = create_client()
+
+        # Primary: the document store written by normal ingest (commit_node).
+        document_id = build_document_id(source_key)
+        doc = get_document(client, document_id, MINIO_BUCKET)
+        if doc is not None and doc.get("content"):
+            return doc["content"], dict(doc.get("metadata") or {})
+
+        # Fallback: lifecycle-populated MinioCleanStore (clean/ prefix).
         store = MinioCleanStore(client, MINIO_BUCKET)
-        if not store.exists(source_key):
-            raise HTTPException(status_code=404, detail="Clean document not found in MinIO")
-        text, meta = store.read(source_key)
-        return text, meta
+        if store.exists(source_key):
+            text, meta = store.read(source_key)
+            return text, meta
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Clean document not found in MinIO "
+                f"(document_id={document_id}, source_key={source_key!r})"
+            ),
+        )
     except HTTPException:
         raise
     except Exception as exc:

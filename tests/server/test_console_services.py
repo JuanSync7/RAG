@@ -545,15 +545,34 @@ class _FakeStore:
         return self._text, self._meta
 
 
-def _install_minio(monkeypatch, store):
+def _install_minio(monkeypatch, store, *, document=None):
+    """Install fakes for both MinIO layouts.
+
+    ``document`` is the value returned by the document-store ``get_document``
+    (the layout normal ingest writes); ``None`` (default) forces the
+    ``MinioCleanStore`` fallback path to be exercised.
+    """
     monkeypatch.setattr("src.db.minio.create_client", lambda *a, **k: object())
+    monkeypatch.setattr("src.db.build_document_id", lambda key: f"docid:{key}")
+    monkeypatch.setattr("src.db.get_document", lambda client, doc_id, bucket: document)
     monkeypatch.setattr(
         "src.ingest.common.minio_clean_store.MinioCleanStore",
         lambda client, bucket: store,
     )
 
 
+def test_read_clean_document_from_document_store_primary(monkeypatch):
+    # commit_node layout (build_document_id) is preferred over MinioCleanStore.
+    fallback = _FakeStore(exists=True, text="# fallback", meta={"source": "fallback"})
+    document = {"document_id": "docid:key1", "content": "# ingested", "metadata": {"source": "real.pdf"}}
+    _install_minio(monkeypatch, fallback, document=document)
+    text, meta = services.read_clean_document_from_minio("key1")
+    assert text == "# ingested"
+    assert meta == {"source": "real.pdf"}
+
+
 def test_read_clean_document_happy(monkeypatch):
+    # No document-store entry -> falls back to MinioCleanStore.
     store = _FakeStore(exists=True, text="# clean", meta={"source": "x"})
     _install_minio(monkeypatch, store)
     text, meta = services.read_clean_document_from_minio("key1")
