@@ -563,8 +563,14 @@ def _install_minio(monkeypatch, store, *, document=None):
 
 def test_read_clean_document_from_document_store_primary(monkeypatch):
     # commit_node layout (build_document_id) is preferred over MinioCleanStore.
+    # get_document returns a StoredDocument dataclass (attribute access), NOT a
+    # dict — the read path must use .content/.metadata, not .get()/[].
+    from src.db.common.schemas import StoredDocument
+
     fallback = _FakeStore(exists=True, text="# fallback", meta={"source": "fallback"})
-    document = {"document_id": "docid:key1", "content": "# ingested", "metadata": {"source": "real.pdf"}}
+    document = StoredDocument(
+        document_id="docid:key1", content="# ingested", metadata={"source": "real.pdf"}
+    )
     _install_minio(monkeypatch, fallback, document=document)
     text, meta = services.read_clean_document_from_minio("key1")
     assert text == "# ingested"

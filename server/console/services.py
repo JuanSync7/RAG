@@ -286,10 +286,12 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
         client = create_client()
 
         # Primary: the document store written by normal ingest (commit_node).
+        # ``get_document`` returns a ``StoredDocument`` dataclass (attribute
+        # access — NOT a dict), or ``None`` when the id is absent.
         document_id = build_document_id(source_key)
         doc = get_document(client, document_id, MINIO_BUCKET)
-        if doc is not None and doc.get("content"):
-            return doc["content"], dict(doc.get("metadata") or {})
+        if doc is not None and getattr(doc, "content", None):
+            return doc.content, dict(getattr(doc, "metadata", None) or {})
 
         # Fallback: lifecycle-populated MinioCleanStore (clean/ prefix).
         store = MinioCleanStore(client, MINIO_BUCKET)
