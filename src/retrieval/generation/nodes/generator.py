@@ -471,10 +471,38 @@ class OllamaGenerator:
 
             raw_content = response.content or None
             if not raw_content:
+                # Empty-after-think: reasoning models (qwopus) can spend the entire
+                # token budget inside the <think> block and emit no final answer,
+                # so the provider returns empty content. Retry ONCE, nudging a
+                # direct answer, before giving up (fixes the silent blank on hard
+                # questions, e.g. the illegal-clock-cell Q08).
+                span.set_attribute("empty_after_think", True)
+                try:
+                    retry_messages = list(messages) + [{
+                        "role": "user",
+                        "content": (
+                            "Provide your final answer now: direct, concise, and "
+                            "grounded in the context above with [n] citations. Do "
+                            "not include extended step-by-step reasoning."
+                        ),
+                    }]
+                    response = self._provider.generate(
+                        retry_messages,
+                        model_alias="default",
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        response_format=self._response_format,
+                    )
+                    raw_content = response.content or None
+                    if raw_content:
+                        span.set_attribute("empty_after_think_recovered", True)
+                except Exception as exc:
+                    logger.warning("empty-after-think retry failed: %s", exc)
+            if not raw_content:
                 err = GenerationError(
                     kind=GenerationErrorKind.MALFORMED_RESPONSE,
                     user_message=_DEFAULT_USER_MESSAGES[GenerationErrorKind.MALFORMED_RESPONSE],
-                    internal_detail="provider returned empty content",
+                    internal_detail="provider returned empty content (incl. empty-after-think retry)",
                 )
                 span.set_attribute("generation_error_kind", err.kind.value)
                 return GenerationResult(

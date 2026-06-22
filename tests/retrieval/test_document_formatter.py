@@ -41,6 +41,19 @@ class TestFormatContext:
         assert "Source: spec.pdf" in result.context_string
         assert "Some document text here." in result.context_string
 
+    def test_stamps_1based_citation_index_on_metadata(self):
+        """Each result's metadata gets citation_index = its 1-based position, so
+        the [N] the model cites maps to the Nth returned source."""
+        results = [
+            MockRankedResult(text="a", score=0.9, metadata={"source": "x.pdf"}),
+            MockRankedResult(text="b", score=0.8, metadata={"source": "y.pdf"}),
+            MockRankedResult(text="c", score=0.7, metadata={"source": "z.pdf"}),
+        ]
+        format_context(results)
+        assert [r.metadata["citation_index"] for r in results] == [1, 2, 3]
+        # the stamped index matches the [N] header in the formatted context
+        assert "[2]" in format_context(results).context_string
+
     def test_multiple_chunks(self):
         results = [
             MockRankedResult(text="Chunk one.", score=0.9, metadata={}),
