@@ -375,3 +375,46 @@ def test_noop_provider_doc_state_methods(monkeypatch):
     assert provider.get_seen_doc_ids(
         tenant_id="t", subject="s", project_id=None, conversation_id="conv_noop",
     ) == []
+
+
+# ---------------------------------------------------------------------------
+# Newline preservation — stored turn content must keep its markdown structure
+# (lists/paragraphs) so a reloaded conversation doesn't render as a wall of
+# text. Regression for the chat-switch \n-collapse bug.
+# ---------------------------------------------------------------------------
+
+def test_sanitize_default_collapses_all_whitespace():
+    from src.platform.memory.utils import sanitize_memory_text
+    out = sanitize_memory_text("a:\n\n- x\n- y\n\nend")
+    assert "\n" not in out
+    assert out == "a: - x - y end"
+
+
+def test_sanitize_preserve_newlines_keeps_structure():
+    from src.platform.memory.utils import sanitize_memory_text
+    md = "Intro:\n\n- a\n- b\n\nOutro."
+    assert sanitize_memory_text(md, preserve_newlines=True) == "Intro:\n\n- a\n- b\n\nOutro."
+
+
+def test_sanitize_preserve_newlines_collapses_horizontal_ws_and_caps_blanklines():
+    from src.platform.memory.utils import sanitize_memory_text
+    md = "a   b\t c\n\n\n\nd  \n  e"
+    assert sanitize_memory_text(md, preserve_newlines=True) == "a b c\n\nd\ne"
+
+
+def test_append_turn_preserves_markdown_newlines(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    meta = provider.ensure_conversation(
+        tenant_id="t", subject="u", project_id="p", title="c",
+    )
+    md = "Steps:\n\n- one\n- two\n\nAll done."
+    provider.append_turn(
+        tenant_id="t", subject="u", project_id="p",
+        conversation_id=meta.conversation_id, role="assistant",
+        content=md, query_id="wf1",
+    )
+    turns = provider.get_turns(
+        tenant_id="t", subject="u", project_id="p",
+        conversation_id=meta.conversation_id,
+    )
+    assert turns and turns[-1].content == md  # newlines survive the round-trip

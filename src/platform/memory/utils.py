@@ -26,18 +26,37 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def sanitize_memory_text(text: str, max_chars: int = RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS) -> str:
+def sanitize_memory_text(
+    text: str,
+    max_chars: int = RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS,
+    *,
+    preserve_newlines: bool = False,
+) -> str:
     """Normalize whitespace and cap text length for prompt safety.
 
     Args:
         text: Input text.
         max_chars: Max characters to retain (ellipsis may be added).
+        preserve_newlines: When True, keep line structure — collapse only
+            *horizontal* whitespace, trim spaces around newlines, and cap
+            blank-line runs at one. This is essential for STORED turn content:
+            collapsing every ``\\n`` to a space (the default) destroys the
+            assistant answer's markdown (lists/paragraphs) so it renders as a
+            wall of text when a conversation is reloaded from history. The
+            default (False) keeps the legacy single-line behavior for
+            prompt-context/summary text where structure is not needed.
 
     Returns:
         Cleaned, bounded text.
     """
 
-    clean = re.sub(r"\s+", " ", (text or "")).strip()
+    raw = text or ""
+    if preserve_newlines:
+        clean = re.sub(r"[^\S\n]+", " ", raw)      # collapse spaces/tabs, keep newlines
+        clean = re.sub(r" *\n *", "\n", clean)      # trim whitespace around newlines
+        clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    else:
+        clean = re.sub(r"\s+", " ", raw).strip()
     if len(clean) <= max_chars:
         return clean
     return clean[: max_chars - 3] + "..."

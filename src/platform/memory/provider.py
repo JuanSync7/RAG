@@ -681,7 +681,11 @@ class RedisConversationMemory(ConversationMemoryProvider):
         now = self._now()
         row = {
             "role": role,
-            "content": sanitize_memory_text(content, max_chars=RAG_MEMORY_CONTEXT_MAX_CHARS),
+            # preserve_newlines: keep the answer's markdown structure so a
+            # reloaded conversation renders lists/paragraphs, not a wall of text.
+            "content": sanitize_memory_text(
+                content, max_chars=RAG_MEMORY_CONTEXT_MAX_CHARS, preserve_newlines=True
+            ),
             "timestamp_ms": now,
             "query_id": query_id,
             "sources": sources or [],
