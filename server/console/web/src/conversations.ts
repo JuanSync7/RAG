@@ -118,7 +118,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
                 const sources = turn.sources ?? [];
                 if (sources.length) cacheDocsFromSources(sources);
                 const citationsHtml = sources.length
-                    ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>`
+                    ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult), turn.content)}</div>`
                     : "";
                 group.innerHTML = `
                     <div class="msg-row assistant">

@@ -481,6 +481,10 @@
     .citation-card:hover { border-color: var(--border-hi); }
     .citation-card.expanded { border-color: var(--border-hi); }
     .citation-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+    .citation-num {
+      font-size: 11px; font-weight: 700; color: var(--accent);
+      flex-shrink: 0; font-variant-numeric: tabular-nums; opacity: 0.9;
+    }
     .citation-icon { font-size: 14px; flex-shrink: 0; }
     .citation-info { flex: 1; min-width: 0; }
     .citation-filename { font-size: 12px; font-weight: 600; color: var(--accent-2); display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -522,6 +526,19 @@
     .citation-card-action:hover { color: var(--text); border-color: var(--text-2); }
     .citation-card-action[disabled] { opacity: 0.4; cursor: not-allowed; }
     .citation-chunk li::marker { color: var(--text-2); }
+
+    /* ── "Show more retrieved (not cited)" expander ── */
+    .citations-more { margin-top: 2px; }
+    .citations-more-summary {
+      list-style: none; cursor: pointer; user-select: none;
+      font-size: 11px; color: var(--text-3); padding: 4px 2px;
+      transition: color 0.15s;
+    }
+    .citations-more-summary::-webkit-details-marker { display: none; }
+    .citations-more-summary::before { content: "▸ "; color: var(--text-3); }
+    .citations-more[open] .citations-more-summary::before { content: "▾ "; }
+    .citations-more-summary:hover { color: var(--text-2); }
+    .citations-more-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 
     /* ── Markdown tables (in bubbles and citation chunks) ── */
     .bubble table, .citation-chunk table {

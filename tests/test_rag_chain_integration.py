@@ -133,3 +133,35 @@ def test_stamp_citation_indices_skips_non_dict_metadata():
     ok = RankedResult(text="a", score=0.5, metadata={"source": "x.pdf"})
     RAGChain._stamp_citation_indices([_Weird(), ok])
     assert ok.metadata["citation_index"] == 2  # position preserved, weird one skipped
+
+
+def test_stamp_citation_indices_restamps_replacement_retry_list():
+    """The confidence-routing retry path reassigns ``reranked = retry_reranked`` —
+    a freshly reranked list that was never stamped. The final pre-return re-stamp
+    must (re)number the NEW list 1..N so the returned results still match the [N]
+    the model cited in the retry answer, with no stale index leaking through.
+    """
+    from src.retrieval.common.schemas import RankedResult
+
+    # Primary list stamped earlier in the pipeline (Stage 5.5).
+    primary = [
+        RankedResult(text="p1", score=0.9, metadata={"source": "p.pdf"}),
+        RankedResult(text="p2", score=0.8, metadata={"source": "q.pdf"}),
+    ]
+    RAGChain._stamp_citation_indices(primary)
+
+    # Retry produced a different, UNSTAMPED list that replaces `reranked`.
+    retry = [
+        RankedResult(text="r1", score=0.95, metadata={"source": "a.pdf"}),
+        RankedResult(text="r2", score=0.85, metadata={"source": "b.pdf"}),
+        RankedResult(text="r3", score=0.75, metadata={"source": "c.pdf"}),
+    ]
+    reranked = retry  # reassignment, as in the retry branch (rag_chain.py ~2815)
+
+    # The final pre-return re-stamp (the fix) runs unconditionally on `reranked`.
+    RAGChain._stamp_citation_indices(reranked)
+
+    assert [r.metadata["citation_index"] for r in reranked] == [1, 2, 3]
+    # The returned (retry) list is numbered 1..N by position — exactly what the
+    # generator emitted as [N] when it numbered ``retry_reranked``.
+    assert all(r.metadata["citation_index"] == i + 1 for i, r in enumerate(reranked))

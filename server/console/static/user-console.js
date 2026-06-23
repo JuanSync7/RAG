@@ -851,10 +851,18 @@ async function openSourceDocument(payload) {
 }
 var _viewPayloads = /* @__PURE__ */ new Map();
 var _viewCounter = 0;
-function buildCitationsHtml(results) {
+function buildCitationsHtml(results, answerText) {
   if (!results.length) return "";
-  let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
-  results.forEach((r, i) => {
+  const citedNums = /* @__PURE__ */ new Set();
+  if (answerText) {
+    const re = /\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(answerText)) !== null) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
+    }
+  }
+  const renderCard = (r, n) => {
     const meta = r.metadata || {};
     const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
     const filename = escHtml(filenameRaw);
@@ -883,9 +891,10 @@ function buildCitationsHtml(results) {
         provenance_confidence: numOrUndef(meta.provenance_confidence)
       });
     }
-    html += `
+    return `
           <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
+              <span class="citation-num">[${n}]</span>
               <span class="citation-icon">&#128196;</span>
               <div class="citation-info">
                 <div class="citation-filename"><span class="citation-name">${filename}</span>${viewKey ? `<a href="#" class="citation-view" onclick="event.stopPropagation();openSourceView(event,'${viewKey}')">[view]</a>` : ""}</div>
@@ -902,7 +911,26 @@ function buildCitationsHtml(results) {
               ${actionsHtml}
             </div>
           </div>`;
+  };
+  const cited = [];
+  const uncited = [];
+  results.forEach((r, i) => {
+    const n = i + 1;
+    (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
   });
+  if (!cited.length) {
+    const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
+    return label + uncited.join("");
+  }
+  let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+  html += cited.join("");
+  if (uncited.length) {
+    html += `
+          <details class="citations-more">
+            <summary class="citations-more-summary">Show ${uncited.length} more retrieved source${uncited.length > 1 ? "s" : ""} (not cited)</summary>
+            <div class="citations-more-body">${uncited.join("")}</div>
+          </details>`;
+  }
   return html;
 }
 function numOrUndef(v) {
@@ -1397,7 +1425,7 @@ async function loadConversationHistory(id) {
         const ts = fmtTime(turn.timestamp_ms ?? Date.now());
         const sources = turn.sources ?? [];
         if (sources.length) cacheDocsFromSources(sources);
-        const citationsHtml = sources.length ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>` : "";
+        const citationsHtml = sources.length ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult), turn.content)}</div>` : "";
         group.innerHTML = `
                     <div class="msg-row assistant">
                       <div class="avatar ai-av">AI</div>
@@ -1904,7 +1932,7 @@ async function streamQuery(queryText) {
           }
           const showCitations = byId("citationsToggle").checked;
           if (showCitations && results.length) {
-            citationsEl.innerHTML = buildCitationsHtml(results);
+            citationsEl.innerHTML = buildCitationsHtml(results, answer);
             wireCitationActions(citationsEl);
           }
           if (data.relevant_doc_ids || data.ignored_doc_ids) {
@@ -2040,7 +2068,7 @@ async function nonStreamQuery(queryText) {
       cacheDocsFromSources(results.map(chunkToSourceRef));
     }
     if (showCitations && results.length) {
-      citationsEl.innerHTML = buildCitationsHtml(results);
+      citationsEl.innerHTML = buildCitationsHtml(results, answer);
       wireCitationActions(citationsEl);
       revealCitations(citationsEl);
     }

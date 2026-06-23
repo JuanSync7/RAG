@@ -308,7 +308,7 @@ export async function streamQuery(queryText: string): Promise<void> {
                     }
                     const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
                     if (showCitations && results.length) {
-                        citationsEl.innerHTML = buildCitationsHtml(results);
+                        citationsEl.innerHTML = buildCitationsHtml(results, answer);
                         wireCitationActions(citationsEl);
                     }
                     if (data.relevant_doc_ids || data.ignored_doc_ids) {
@@ -479,7 +479,7 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
             cacheDocsFromSources(results.map(chunkToSourceRef));
         }
         if (showCitations && results.length) {
-            citationsEl.innerHTML = buildCitationsHtml(results);
+            citationsEl.innerHTML = buildCitationsHtml(results, answer);
             wireCitationActions(citationsEl);
             revealCitations(citationsEl);
         }

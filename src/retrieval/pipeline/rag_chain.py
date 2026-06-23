@@ -2945,6 +2945,14 @@ class RAGChain:
                         "elapsed_ms": 0.0,
                     }
 
+            # Re-stamp citation indices just before returning. The earlier stamp
+            # (Stage 5.5) runs on the primary ``reranked``, but the confidence-routing
+            # retry path may have reassigned ``reranked = retry_reranked`` (a freshly
+            # reranked list that was never stamped). Re-stamping here unconditionally —
+            # idempotent for the primary path, no-op for an empty list — guarantees the
+            # returned ``results`` always carry the SAME 1-based [N] the model cited.
+            self._stamp_citation_indices(reranked)
+
             return RAGResponse(
                 query=query,
                 processed_query=processed_query,

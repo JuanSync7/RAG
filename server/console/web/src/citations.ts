@@ -51,10 +51,38 @@ export async function openSourceDocument(payload: ViewPayload): Promise<void> {
 const _viewPayloads = new Map<string, ViewPayload>();
 let _viewCounter = 0;
 
-export function buildCitationsHtml(results: ChunkResult[]): string {
+/**
+ * Render the references panel.
+ *
+ * The generator numbers context chunks `[1..N]` in the SAME order they appear in
+ * `results`, so citation `[k]` in the answer maps to `results[k-1]`. We parse the
+ * `[N]` markers out of `answerText` to show the chunks the answer actually CITED
+ * first (each tagged with its `[N]`), and tuck the remaining retrieved-but-uncited
+ * chunks under a collapsed "show more" expander — nothing is hidden, the panel is
+ * just honest about what the answer used.
+ *
+ * Grounding is intentionally soft (the model may lean on a chunk without dropping a
+ * `[N]`), so if we can't detect ANY citations (no answer text, or nothing parseable)
+ * we fall back to showing every retrieved chunk, exactly as before.
+ *
+ * NOTE (CLI/UI parity): this cited-first presentation is intentionally specific to
+ * the web chat references panel. The CLI's `Top N retrieved chunks` view is a
+ * retrieval-inspection surface and deliberately lists every retrieved chunk.
+ */
+export function buildCitationsHtml(results: ChunkResult[], answerText?: string): string {
     if (!results.length) return "";
-    let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
-    results.forEach((r, i) => {
+
+    const citedNums = new Set<number>();
+    if (answerText) {
+        const re = /\[(\d+)\]/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(answerText)) !== null) {
+            const n = Number(m[1]);
+            if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
+        }
+    }
+
+    const renderCard = (r: ChunkResult, n: number): string => {
         const meta = r.metadata || {};
         const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
         const filename = escHtml(filenameRaw);
@@ -94,9 +122,10 @@ export function buildCitationsHtml(results: ChunkResult[]): string {
                 provenance_confidence: numOrUndef(meta.provenance_confidence),
             });
         }
-        html += `
+        return `
           <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
+              <span class="citation-num">[${n}]</span>
               <span class="citation-icon">&#128196;</span>
               <div class="citation-info">
                 <div class="citation-filename"><span class="citation-name">${filename}</span>${viewKey ? `<a href="#" class="citation-view" onclick="event.stopPropagation();openSourceView(event,'${viewKey}')">[view]</a>` : ""}</div>
@@ -113,7 +142,30 @@ export function buildCitationsHtml(results: ChunkResult[]): string {
               ${actionsHtml}
             </div>
           </div>`;
+    };
+
+    const cited: string[] = [];
+    const uncited: string[] = [];
+    results.forEach((r, i) => {
+        const n = i + 1;
+        (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
     });
+
+    // Fallback: no detectable citations — show everything as "retrieved".
+    if (!cited.length) {
+        const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
+        return label + uncited.join("");
+    }
+
+    let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+    html += cited.join("");
+    if (uncited.length) {
+        html += `
+          <details class="citations-more">
+            <summary class="citations-more-summary">Show ${uncited.length} more retrieved source${uncited.length > 1 ? "s" : ""} (not cited)</summary>
+            <div class="citations-more-body">${uncited.join("")}</div>
+          </details>`;
+    }
     return html;
 }
 
