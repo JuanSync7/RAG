@@ -1826,6 +1826,7 @@ async function streamQuery(queryText) {
   let lastTokenAt = 0;
   let tokenEventCount = 0;
   let lastBudget = null;
+  let lastResults = [];
   let reasoningText = "";
   let reasoningStartAt = 0;
   clearLastTurnStats();
@@ -1927,13 +1928,9 @@ async function streamQuery(queryText) {
           }
           const results = data.results ?? [];
           if (results.length) {
+            lastResults = results;
             const sourceRefs = results.map(chunkToSourceRef);
             cacheDocsFromSources(sourceRefs);
-          }
-          const showCitations = byId("citationsToggle").checked;
-          if (showCitations && results.length) {
-            citationsEl.innerHTML = buildCitationsHtml(results, answer);
-            wireCitationActions(citationsEl);
           }
           if (data.relevant_doc_ids || data.ignored_doc_ids) {
             applyDocState(
@@ -1980,6 +1977,10 @@ async function streamQuery(queryText) {
             }
           }
           const showCitations = byId("citationsToggle").checked;
+          if (showCitations && lastResults.length) {
+            citationsEl.innerHTML = buildCitationsHtml(lastResults, answer);
+            wireCitationActions(citationsEl);
+          }
           if (showCitations && citationsEl.innerHTML) {
             revealCitations(citationsEl);
           }

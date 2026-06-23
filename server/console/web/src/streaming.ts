@@ -174,6 +174,10 @@ export async function streamQuery(queryText: string): Promise<void> {
     let lastTokenAt = 0;
     let tokenEventCount = 0;
     let lastBudget: import("./user-types").TokenBudget | null = null;
+    // Retrieved chunks arrive in the `retrieval` event (before any answer token);
+    // stashed here so the `done` handler can render citations with the COMPLETE
+    // answer and thus collapse them to the chunks actually cited ([N]).
+    let lastResults: ChunkResult[] = [];
 
     // Live reasoning ("thinking") — a collapsible block rendered above the answer
     // bubble, filled from `reasoning` SSE events emitted by reasoning models.
@@ -303,14 +307,15 @@ export async function streamQuery(queryText: string): Promise<void> {
 
                     const results = (data.results ?? []) as ChunkResult[];
                     if (results.length) {
+                        lastResults = results;
                         const sourceRefs = results.map(chunkToSourceRef);
                         cacheDocsFromSources(sourceRefs);
                     }
-                    const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
-                    if (showCitations && results.length) {
-                        citationsEl.innerHTML = buildCitationsHtml(results, answer);
-                        wireCitationActions(citationsEl);
-                    }
+                    // Citations are NOT rendered here: this event fires before any
+                    // answer token, so no [N] markers exist yet and we could only
+                    // show "all retrieved". They are rendered in the `done` handler
+                    // below, once `answer` is complete, so the panel goes straight
+                    // to the cited-only view (no all-12 flash, no click needed).
                     if (data.relevant_doc_ids || data.ignored_doc_ids) {
                         applyDocState(
                             (data.relevant_doc_ids ?? []) as string[],
@@ -369,6 +374,12 @@ export async function streamQuery(queryText: string): Promise<void> {
                     }
 
                     const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
+                    if (showCitations && lastResults.length) {
+                        // Render now, with the COMPLETE answer, so the panel shows
+                        // the cited chunks first and collapses the uncited rest.
+                        citationsEl.innerHTML = buildCitationsHtml(lastResults, answer);
+                        wireCitationActions(citationsEl);
+                    }
                     if (showCitations && citationsEl.innerHTML) {
                         revealCitations(citationsEl);
                     }
