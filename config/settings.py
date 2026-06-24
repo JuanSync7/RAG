@@ -840,33 +840,61 @@ RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD = float(
 )
 
 # --- Inference Backend ---
-# "local": BGE models run in-process (dev venv path; requires the `local-embed`
-#          pyproject extra — torch + sentence-transformers + transformers).
-# "tei":   BGE models served by separate TEI containers (rag-embed / rag-rerank)
-#          via direct HTTP. Compose default. Worker image does NOT ship torch.
+# Selects WHERE embed/rerank run. Behind "http" the transport is just whatever
+# URL you point RAG_EMBED_URL / RAG_RERANK_URL at — a tunnel to a remote vLLM
+# (the dev / ai01 path), a self-hosted TEI pool (the optional `self-host`
+# compose profile), or any other OpenAI-compatible API. One direct setting per
+# service; no default→override repointing.
+#   "local": BGE models run in-process (requires the `local-embed` pyproject
+#            extra — torch + sentence-transformers). Worker image omits torch.
+#   "http":  embed/rerank served over HTTP by an OpenAI-compatible endpoint.
+#            ("tei" is accepted as a deprecated alias of "http".)
 INFERENCE_BACKEND: str = os.environ.get("RAG_INFERENCE_BACKEND", "local").strip().lower()
-_VALID_INFERENCE_BACKENDS = {"local", "tei"}
+if INFERENCE_BACKEND == "tei":  # deprecated alias — the client is generic HTTP, not TEI-specific
+    INFERENCE_BACKEND = "http"
+_VALID_INFERENCE_BACKENDS = {"local", "http"}
 if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     raise ValueError(
-        f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; "
-        f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
+        f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; must be one of "
+        f"{sorted(_VALID_INFERENCE_BACKENDS)} (or 'tei', a deprecated alias of 'http')"
     )
 
-# TEI service URLs — used when INFERENCE_BACKEND="tei".
-# Default routes through rag-nginx so replicas can be scaled horizontally
-# (`docker compose up -d --scale rag-embed=N`). Override to direct service DNS
-# (http://rag-embed:80) for single-replica dev or to bypass the LB.
-TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-nginx:8081")
-TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-nginx:8082")
 
-# Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
-# mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.
-TEI_EMBEDDING_MODEL: str = os.environ.get("RAG_TEI_EMBEDDING_MODEL", "BAAI/bge-m3")
-TEI_RERANKER_MODEL: str = os.environ.get("RAG_TEI_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+def _embed_rerank_env(name: str, legacy_name: str, default: str) -> str:
+    """Read an embed/rerank endpoint setting, honouring the deprecated RAG_TEI_* name.
 
-# Timeout for HTTP inference calls (embed + rerank). Should exceed the
-# model's p99 latency, including GPU warm-up on first call.
-TEI_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_TEI_TIMEOUT_SECONDS", "30"))
+    The canonical RAG_EMBED_*/RAG_RERANK_* var wins; the old RAG_TEI_* var is
+    still read as a fallback for one release so live deployments keep working
+    through the rename.
+    """
+    return os.environ.get(name, os.environ.get(legacy_name, default))
+
+
+# Embed / rerank endpoints (used when INFERENCE_BACKEND="http"). Set each one
+# directly to wherever the service lives — a tunnel, an external API, or a local
+# server. Live deployments override these explicitly; the defaults follow the
+# vLLM tunnel used by the dev stack.
+RAG_EMBED_URL: str = _embed_rerank_env("RAG_EMBED_URL", "RAG_TEI_EMBED_URL", "http://rag-vllm-tunnel:18002")
+RAG_RERANK_URL: str = _embed_rerank_env("RAG_RERANK_URL", "RAG_TEI_RERANK_URL", "http://rag-vllm-tunnel:18005")
+
+# Model name sent in the request body (the OpenAI "model" field); must match the
+# name the endpoint serves. Defaults follow the dev vLLM stack (Qwen3).
+RAG_EMBED_MODEL: str = _embed_rerank_env("RAG_EMBED_MODEL", "RAG_TEI_EMBEDDING_MODEL", "qwen3-embed-4b")
+RAG_RERANK_MODEL: str = _embed_rerank_env("RAG_RERANK_MODEL", "RAG_TEI_RERANKER_MODEL", "qwen3-reranker-4b")
+
+# Timeout for HTTP embed/rerank calls. Should exceed the model's p99 latency,
+# including GPU warm-up on first call.
+RAG_INFERENCE_TIMEOUT_SECONDS: int = int(
+    _embed_rerank_env("RAG_INFERENCE_TIMEOUT_SECONDS", "RAG_TEI_TIMEOUT_SECONDS", "30")
+)
+
+# Deprecated symbol aliases (one release) — keep old `TEI_*` import names working
+# while callers migrate to the RAG_EMBED_*/RAG_RERANK_* names above.
+TEI_EMBED_URL = RAG_EMBED_URL
+TEI_RERANK_URL = RAG_RERANK_URL
+TEI_EMBEDDING_MODEL = RAG_EMBED_MODEL
+TEI_RERANKER_MODEL = RAG_RERANK_MODEL
+TEI_TIMEOUT_SECONDS = RAG_INFERENCE_TIMEOUT_SECONDS
 
 # --- Reranker ---
 RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))

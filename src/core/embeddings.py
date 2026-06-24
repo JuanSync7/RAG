@@ -1,14 +1,18 @@
 # @summary
-# Embedding providers: local BAAI/bge-m3 (in-process) and TEI over HTTP.
+# Embedding providers: local BGE (in-process) and a remote OpenAI-compatible
+# HTTP client (vLLM / TEI / any compatible API), selected by INFERENCE_BACKEND.
 # Exports: LocalBGEEmbeddings, TEIEmbeddings, get_embedding_provider
 # Deps: sentence-transformers (local path only), httpx, numpy, langchain_core, config.settings
 # @end-summary
 """Embedding provider implementations and factory.
 
-Two backends:
-  local — BAAI/bge-m3 loaded in-process via sentence-transformers (dev venv only;
-          requires the `local-embed` pyproject extra).
-  tei   — BAAI/bge-m3 served by a separate TEI container (rag-embed) over HTTP.
+Two backends (selected by ``RAG_INFERENCE_BACKEND``):
+  local — BGE loaded in-process via sentence-transformers (requires the
+          `local-embed` pyproject extra).
+  http  — embeddings served over an OpenAI-compatible ``/v1/embeddings`` endpoint,
+          i.e. whatever ``RAG_EMBED_URL`` points at: a remote vLLM (the dev path),
+          a self-hosted TEI pool, or any compatible API. (``TEIEmbeddings`` is the
+          client class — the name predates the move off TEI-specific servers.)
 """
 from __future__ import annotations
 
@@ -20,11 +24,11 @@ from langchain_core.embeddings import Embeddings
 from config.settings import (
     EMBEDDING_MODEL_PATH,
     INFERENCE_BACKEND,
+    RAG_EMBED_MODEL,
+    RAG_EMBED_URL,
     RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS,
     RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING,
-    TEI_EMBED_URL,
-    TEI_EMBEDDING_MODEL,
-    TEI_TIMEOUT_SECONDS,
+    RAG_INFERENCE_TIMEOUT_SECONDS,
 )
 from src.platform.observability import get_tracer
 
@@ -111,9 +115,9 @@ class TEIEmbeddings(Embeddings):
 
     def __init__(
         self,
-        base_url: str = TEI_EMBED_URL,
-        model: str = TEI_EMBEDDING_MODEL,
-        timeout: int = TEI_TIMEOUT_SECONDS,
+        base_url: str = RAG_EMBED_URL,
+        model: str = RAG_EMBED_MODEL,
+        timeout: int = RAG_INFERENCE_TIMEOUT_SECONDS,
         tier: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -172,16 +176,19 @@ def get_embedding_provider(tier: str | None = None) -> Embeddings:
     """Return the configured embedding provider.
 
     Reads ``INFERENCE_BACKEND`` from settings:
-      - ``"tei"``   → :class:`TEIEmbeddings` (HTTP to rag-nginx → rag-embed pool)
+      - ``"http"`` → :class:`TEIEmbeddings` (OpenAI-compatible HTTP to whatever
+                      ``RAG_EMBED_URL`` points at — remote vLLM, a self-hosted TEI
+                      pool, or any compatible API)
       - anything else → :class:`LocalBGEEmbeddings` (in-process sentence-transformers;
-                         dev venv path — requires the `local-embed` pyproject extra)
+                         requires the `local-embed` pyproject extra)
 
     Args:
-        tier: Optional rag-nginx routing hint. Pass ``"ingest"`` from ingestion
-            paths to pin embedding traffic to the CPU pool (rag-embed-cpu),
-            leaving the GPU free for latency-sensitive query embedding.
-            Ignored by ``LocalBGEEmbeddings`` (no LB layer in dev).
+        tier: Optional load-balancer routing hint (X-RagWeave-Tier header). Pass
+            ``"ingest"`` from ingestion paths to pin embedding traffic to a CPU
+            pool, leaving the GPU free for latency-sensitive query embedding.
+            Only meaningful for an nginx-fronted self-hosted pool; ignored
+            otherwise (no-op for direct vLLM and ``LocalBGEEmbeddings``).
     """
-    if INFERENCE_BACKEND == "tei":
+    if INFERENCE_BACKEND == "http":
         return TEIEmbeddings(tier=tier)
     return LocalBGEEmbeddings()
