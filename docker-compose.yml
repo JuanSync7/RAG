@@ -795,17 +795,15 @@ services:
               count: all
               capabilities: [gpu]
 
-  rag-nginx:
-    # Always-on: fronts rag-api on 80/443 (TLS) AND load-balances TEI embed
-    # (8081) / rerank (8082) replicas. Profile-less so rag-worker (workers
-    # profile) can also route TEI traffic through it.
-    # Self-host only: this nginx fronts the API on 80/443 AND load-balances the
-    # local TEI embed/rerank pools. The default http inference path bypasses it
-    # (embed/rerank go straight to RAG_*_URL), and the ai03 overlays ship their
-    # own API-front nginx, so it is gated to the `self-host` profile.
+  # Self-host only: load-balances the local TEI embed (8081) / rerank (8082)
+  # pools for the `self-host` inference path. The default http path bypasses it
+  # (embed/rerank go straight to RAG_*_URL), so it is gated to the `self-host`
+  # profile. NOTE: the API-front nginx (TLS → rag-api) is a separate service
+  # named `rag-nginx`, supplied by each deployment overlay (e.g. docker-compose.ai03.yml).
+  rag-tei-nginx:
     profiles: ["self-host"]
     image: nginx:alpine
-    container_name: rag-nginx
+    container_name: rag-tei-nginx
     ports:
       - "${RAG_NGINX_HTTP_PORT:-80}:80"
       - "${RAG_NGINX_HTTPS_PORT:-443}:443"
