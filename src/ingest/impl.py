@@ -527,8 +527,6 @@ def ingest_file(
     source_id: str,
     connector: str,
     source_version: str,
-    existing_hash: str = "",
-    existing_source_uri: str = "",
     batch_id: str = "",
     raw_bytes: bytes | None = None,
 ) -> IngestFileResult:
@@ -547,8 +545,6 @@ def ingest_file(
         source_id: Stable identity for the source.
         connector: Connector identifier.
         source_version: Source version string.
-        existing_hash: Previously stored content hash (for incremental updates).
-        existing_source_uri: Previously stored URI (for incremental updates).
         batch_id: Optional batch grouping ID (FR-3053). Empty string when not
             part of a named batch run.
         raw_bytes: Pre-read file bytes. When provided, ``document_ingestion_node``
@@ -832,7 +828,6 @@ def ingest_directory(
               )
               matched_key, matched_entry = _find_manifest_entry(manifest, source)
               previous_hash = matched_entry.get("content_hash", "") if update else ""
-              previous_uri = matched_entry.get("source_uri", "") if update else ""
               # Idempotency check: skip if source unchanged (hash match in manifest).
               # Read bytes once here so we can reuse them in ingest_file, avoiding
               # a second disk read inside document_ingestion_node.
@@ -869,8 +864,6 @@ def ingest_directory(
                       source_id=source["source_id"],
                       connector=source["connector"],
                       source_version=source["source_version"],
-                      existing_hash=previous_hash if update else "",
-                      existing_source_uri=previous_uri if update else "",
                       batch_id=batch_id,
                       raw_bytes=raw_bytes,
                   )

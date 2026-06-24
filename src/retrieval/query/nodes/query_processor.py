@@ -17,7 +17,6 @@ Falls back to word-count heuristic if Ollama is unavailable.
 from __future__ import annotations
 
 
-import orjson
 import logging
 import os
 import re
@@ -405,10 +404,6 @@ def _check_llm_available() -> bool:
             return False
 
 
-# Backward-compatible alias
-_check_ollama_available = _check_llm_available
-
-
 # ---------------------------------------------------------------------------
 # Fallback heuristic (preserves old behavior when Ollama is unavailable)
 # ---------------------------------------------------------------------------
@@ -580,7 +575,7 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
                 "confidence": confidence,
                 "reasoning": reasoning,
             }
-        except (orjson.JSONDecodeError, ValueError, TypeError) as e:
+        except (ValueError, TypeError) as e:
             logger.warning(
                 "Failed to parse combined JSON: %s. Raw: %s", e, result[:200]
             )

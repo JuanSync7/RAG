@@ -23,7 +23,12 @@ from src.db.minio.store import (
     get_document_url as _mn_get_document_url,
     list_documents as _mn_list_documents,
 )
-from config.settings import MINIO_BUCKET
+from config.settings import (
+    MINIO_BUCKET,
+    RAG_MINIO_LIST_DEFAULT_LIMIT,
+    RAG_MINIO_LIST_DEFAULT_OFFSET,
+    RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
+)
 
 logger = logging.getLogger("rag.db.minio")
 
@@ -91,7 +96,7 @@ class MinioBackend(DocumentBackend):
         client: Any,
         document_id: str,
         bucket: Optional[str] = None,
-        expires_in_seconds: int = 3600,
+        expires_in_seconds: int = RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
     ) -> str:
         return _mn_get_document_url(
             client, document_id, bucket=self._bucket(bucket),
@@ -103,8 +108,8 @@ class MinioBackend(DocumentBackend):
         client: Any,
         bucket: Optional[str] = None,
         prefix: str = "",
-        limit: int = 1000,
-        offset: int = 0,
+        limit: int = RAG_MINIO_LIST_DEFAULT_LIMIT,
+        offset: int = RAG_MINIO_LIST_DEFAULT_OFFSET,
     ) -> list[dict]:
         return _mn_list_documents(
             client, bucket=self._bucket(bucket), prefix=prefix, limit=limit, offset=offset

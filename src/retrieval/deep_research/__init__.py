@@ -14,6 +14,7 @@ from src.retrieval.deep_research.metrics import (
     DR_ITERATION_DURATION,
     DR_ITERATIONS,
     DR_LLM_CALLS_TOTAL,
+    DR_PER_TOPIC_RERANK_TOTAL,
     DR_RUN_DURATION,
     DR_RUNS_TOTAL,
     DR_TOPIC_COUNT,
@@ -26,4 +27,5 @@ __all__ = [
     "DR_TOPIC_COUNT",
     "DR_ITERATION_DURATION",
     "DR_RUN_DURATION",
+    "DR_PER_TOPIC_RERANK_TOTAL",
 ]

@@ -17,6 +17,7 @@ from config.settings import (
     RAG_MEMORY_TURN_MAX_CHARS,
     RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS,
     RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS,
+    TOKEN_BUDGET_CHARS_PER_TOKEN,
 )
 from src.platform.memory.schemas import ConversationTurn
 
@@ -77,8 +78,9 @@ def estimate_token_count(text: str) -> int:
 
     if not text:
         return 0
-    # Rough rule: ~4 chars per token for English-like text.
-    return max(1, len(text) // 4)
+    # Rough rule: ~N chars per token (operator-tunable heuristic, default 4).
+    cpt = max(1, TOKEN_BUDGET_CHARS_PER_TOKEN)
+    return max(1, len(text) // cpt)
 
 
 def trim_turns_to_budget(

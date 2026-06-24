@@ -14,7 +14,7 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.document_storage")
 
-from src.db import build_document_id, put_document  # noqa: F401 — put_document kept for legacy refs
+from src.db import build_document_id
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span

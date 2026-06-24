@@ -4,8 +4,8 @@
 # never import from third-party frameworks directly.
 # Exports: get_llm, structured_output, parallel, aparallel, enable_cache,
 #          disable_cache, clear_cache, batch, abatch, fallback_chain,
-#          afallback_chain, stream, astream, conversation, workflow,
-#          get_checkpointer, human_gate, and all public schemas.
+#          afallback_chain, stream, astream, conversation,
+#          and all public schemas.
 # Deps: src.common.llm.* submodules
 # @end-summary
 """LLM composition layer — provider-agnostic, framework-agnostic.
@@ -52,15 +52,6 @@ from src.common.llm.stream import astream, stream
 # ── Conversation memory ──────────────────────────────────────────────────
 from src.common.llm.memory import ConversationSession, conversation
 
-# ── Graph primitives ─────────────────────────────────────────────────────
-from src.common.llm.graph import (
-    CompiledWorkflow,
-    WorkflowBuilder,
-    get_checkpointer,
-    human_gate,
-    workflow,
-)
-
 # ── Public schemas ───────────────────────────────────────────────────────
 from src.common.llm.schemas import (
     BatchResult,
@@ -103,12 +94,6 @@ __all__ = [
     # Memory
     "conversation",
     "ConversationSession",
-    # Graph
-    "workflow",
-    "WorkflowBuilder",
-    "CompiledWorkflow",
-    "get_checkpointer",
-    "human_gate",
     # Schemas
     "ModelTier",
     "OutputResult",

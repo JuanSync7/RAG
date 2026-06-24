@@ -1,10 +1,8 @@
 # @summary
 # Document text preprocessing helpers for ingestion (cleaning, metadata, chunking).
 # Exports: DocumentMetadata, strip_boilerplate, normalize_unicode, clean_whitespace,
-#          strip_section_markers, strip_trailing_short_lines, clean_text,
-#          extract_metadata, metadata_to_dict, chunk_text, process_document
-# Deps: re, unicodedata, dataclasses, typing, langchain_text_splitters, config.settings,
-#       src.ingest.common.schemas
+#          strip_trailing_short_lines, extract_metadata, metadata_to_dict
+# Deps: re, unicodedata, dataclasses, config.settings
 # @end-summary
 """Document text preprocessing helpers for ingestion.
 
@@ -18,10 +16,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID, RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS
-from src.ingest.common import ProcessedChunk
+from config.settings import DEFAULT_TENANT_ID, RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS
 
 
 @dataclass
@@ -190,30 +185,6 @@ def clean_whitespace(text: str) -> str:
     return text.strip()
 
 
-def strip_section_markers(text: str) -> str:
-    """Normalize markdown/wiki section headers to plain text.
-
-    Args:
-        text: Input text.
-
-    Returns:
-        Text with header markers removed while preserving heading text.
-    """
-    # Markdown headers: ## Heading -> Heading
-    text = re.sub(r"^\s*#{1,6}\s+", "", text, flags=re.MULTILINE)
-    # Wiki-style headers: == Heading == -> Heading
-    text = re.sub(r"^\s*={2,}\s*(.*?)\s*={2,}\s*$", r"\1", text, flags=re.MULTILINE)
-    # Numbered section headers: "1. INTRODUCTION" or "2.1 Supervised Learning"
-    # Matches "N." or "N.N" prefix followed by ALL CAPS text
-    text = re.sub(
-        r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Z &/]+)$",
-        lambda m: f"{m.group(2).title()}",
-        text,
-        flags=re.MULTILINE,
-    )
-    return text
-
-
 def strip_trailing_short_lines(text: str, max_words: int = RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS) -> str:
     """Remove very short trailing lines (likely signature/name remnants).
 
@@ -232,24 +203,6 @@ def strip_trailing_short_lines(text: str, max_words: int = RAG_INGEST_STRIP_TRAI
             break
         lines.pop()
     return "\n".join(lines)
-
-
-def clean_text(text: str) -> str:
-    """Run the full text cleaning pipeline.
-
-    Args:
-        text: Raw text.
-
-    Returns:
-        Cleaned text.
-    """
-    text = strip_boilerplate(text)
-    text = normalize_unicode(text)
-    text = clean_whitespace(text)
-    text = strip_section_markers(text)
-    text = strip_trailing_short_lines(text)
-    text = clean_whitespace(text)  # final pass after marker removal
-    return text
 
 
 # --- Stage 3: Metadata Extraction ---
@@ -309,69 +262,3 @@ def metadata_to_dict(meta: DocumentMetadata) -> dict:
     if meta.tags:
         d["tags"] = ", ".join(meta.tags)
     return d
-
-
-# --- Stage 4: Chunking ---
-
-def chunk_text(
-    text: str,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
-) -> list[str]:
-    """Split text into overlapping chunks using recursive character splitting.
-
-    Args:
-        text: Cleaned text to split.
-        chunk_size: Target maximum chunk size in characters.
-        chunk_overlap: Overlap between consecutive chunks in characters.
-
-    Returns:
-        List of chunk strings.
-    """
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    return splitter.split_text(text)
-
-
-# --- Full Pipeline ---
-
-def process_document(raw_text: str, source: str = "unknown") -> list[ProcessedChunk]:
-    """Full document processing pipeline.
-
-    Stages:
-        1. Extract metadata from raw text (before cleaning)
-        2. Clean text (boilerplate removal, unicode normalization, whitespace)
-        3. Chunk cleaned text
-        4. Attach metadata to each chunk
-
-    Args:
-        raw_text: The raw document text with all its artifacts.
-        source: Source identifier (e.g., filename).
-
-    Returns:
-        List of ProcessedChunk objects ready for embedding.
-    """
-    # Stage 1: Extract metadata from raw text (before we strip headers)
-    doc_metadata = extract_metadata(raw_text, source)
-    base_metadata = metadata_to_dict(doc_metadata)
-
-    # Stage 2: Clean text
-    cleaned = clean_text(raw_text)
-
-    if not cleaned:
-        return []
-
-    # Stage 3: Chunk text
-    chunks = chunk_text(cleaned)
-
-    # Stage 4: Build processed chunks with metadata
-    processed = []
-    for i, chunk in enumerate(chunks):
-        metadata = {**base_metadata, "chunk_index": i, "total_chunks": len(chunks)}
-        processed.append(ProcessedChunk(text=chunk, metadata=metadata))
-
-    return processed

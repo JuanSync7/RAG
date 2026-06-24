@@ -25,10 +25,7 @@ from typing import Any
 from src.ingest.common import ProcessedChunk, append_processing_log
 from src.ingest.common.observability import node_span
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.vector_db.weaviate.store import (
-    build_parent_section_id,
-    build_section_node_id,
-)
+from src.vector_db.weaviate.store import build_section_node_id
 
 logger = logging.getLogger("rag.ingest.embedding.tree_node_synthesis")
 

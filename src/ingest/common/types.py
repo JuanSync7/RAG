@@ -92,6 +92,8 @@ from config.settings import (
     RAG_INGESTION_EMBEDDING_BATCH_SIZE,
     RAG_INGEST_NATIVE_MIN_CHUNK_CHARS,
     RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD,
+    RAG_INGEST_FUZZY_SHINGLE_SIZE,
+    RAG_INGEST_FUZZY_NUM_HASHES,
     RAG_INGESTION_BUILD_DOCUMENT_CARDS,
     RAG_INGESTION_CARD_LLM_SUMMARY,
     RAG_INGESTION_CARD_MAX_HEADINGS,
@@ -290,9 +292,9 @@ class IngestionConfig:
     """Enable Tier 2 MinHash fuzzy dedup (requires enable_cross_document_dedup=True). Default: False. FR-3420."""
     fuzzy_similarity_threshold: float = RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD
     """Jaccard similarity threshold for fuzzy match. Range: [0.0, 1.0]. Default: 0.95. FR-3422."""
-    fuzzy_shingle_size: int = 3
+    fuzzy_shingle_size: int = RAG_INGEST_FUZZY_SHINGLE_SIZE
     """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
-    fuzzy_num_hashes: int = 128
+    fuzzy_num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES
     """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
     dedup_override_sources: list[str] = field(default_factory=list)
     """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""

@@ -16,7 +16,6 @@ Usage:
 
 import asyncio
 import logging
-import os
 import signal
 import sys
 import time
@@ -29,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from config.settings import TEMPORAL_TARGET_HOST
+from config.settings import RAG_WORKER_CONCURRENCY, TEMPORAL_TARGET_HOST
 from server.activities import execute_rag_query, init_rag_chain, shutdown_rag_chain
 from server.workflows import RAGQueryWorkflow, RAG_QUERY_TASK_QUEUE
 
@@ -55,7 +54,7 @@ def _configure_console_logging() -> None:
 _configure_console_logging()
 logger = logging.getLogger("rag.server.worker")
 
-MAX_CONCURRENT_ACTIVITIES = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
+MAX_CONCURRENT_ACTIVITIES = RAG_WORKER_CONCURRENCY
 
 
 async def main() -> None:

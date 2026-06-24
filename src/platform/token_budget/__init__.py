@@ -3,7 +3,7 @@
 # via litellm.token_counter(), and context window usage calculation.
 # Exports: ModelCapabilities, TokenBreakdown, TokenBudgetSnapshot,
 #          get_capabilities, refresh_capabilities, calculate_budget,
-#          count_tokens, estimate_tokens
+#          count_tokens
 # Deps: .schemas, .provider, .utils
 # @end-summary
 """Token budget tracker for context window usage visibility."""
@@ -18,7 +18,7 @@ from src.platform.token_budget.schemas import (
     TokenBreakdown,
     TokenBudgetSnapshot,
 )
-from src.platform.token_budget.utils import count_tokens, estimate_tokens
+from src.platform.token_budget.utils import count_tokens
 
 __all__ = [
     "ModelCapabilities",
@@ -26,7 +26,6 @@ __all__ = [
     "TokenBudgetSnapshot",
     "calculate_budget",
     "count_tokens",
-    "estimate_tokens",
     "get_capabilities",
     "refresh_capabilities",
 ]

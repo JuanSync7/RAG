@@ -22,6 +22,7 @@ import weaviate
 from weaviate.classes.config import Configure, DataType, Property
 from weaviate.classes.query import Filter, MetadataQuery
 
+from config.settings import RAG_INGESTION_VISUAL_TARGET_COLLECTION
 from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.vector_db.weaviate.visual_store")
@@ -30,7 +31,7 @@ tracer = get_tracer()
 
 def ensure_visual_collection(
     client: weaviate.WeaviateClient,
-    collection: str = "RAGVisualPages",
+    collection: str = RAG_INGESTION_VISUAL_TARGET_COLLECTION,
 ) -> None:
     """Create the visual page collection if it does not exist (idempotent).
 
@@ -84,7 +85,7 @@ def ensure_visual_collection(
 def add_visual_documents(
     client: weaviate.WeaviateClient,
     documents: list[dict[str, Any]],
-    collection: str = "RAGVisualPages",
+    collection: str = RAG_INGESTION_VISUAL_TARGET_COLLECTION,
 ) -> int:
     """Batch-insert visual page objects into the named collection.
 
@@ -131,7 +132,7 @@ def visual_search(
     limit: int,
     score_threshold: float,
     tenant_id: Optional[str] = None,
-    collection: str = "RAGVisualPages",
+    collection: str = RAG_INGESTION_VISUAL_TARGET_COLLECTION,
 ) -> list[dict[str, Any]]:
     """Search the visual page collection by near-vector similarity.
 
@@ -226,7 +227,7 @@ def visual_search(
 def delete_visual_by_source_key(
     client: weaviate.WeaviateClient,
     source_key: str,
-    collection: str = "RAGVisualPages",
+    collection: str = RAG_INGESTION_VISUAL_TARGET_COLLECTION,
 ) -> int:
     """Delete all visual page objects matching source_key.
 

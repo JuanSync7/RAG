@@ -201,9 +201,6 @@ _TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
 # the ingest-time drop and this query-time rerank filter use one predicate (kept
 # symmetric). Imported under the existing private names so call sites are unchanged.
 from src.ingest.common.shared import (  # noqa: E402
-    _TOC_LEADER_RE,
-    _NAV_PHRASE_RE,
-    toc_leader_ratio as _toc_leader_ratio,
     is_navigational as _is_navigational,
 )
 

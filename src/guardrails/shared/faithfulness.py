@@ -45,36 +45,6 @@ def _format_numbered_chunks(chunks: list[str]) -> str:
     """
     return "\n\n".join(f"[{i + 1}] {chunk}" for i, chunk in enumerate(chunks))
 
-# NeMo-style self-check-facts prompt (adapted from NeMo's built-in task)
-_SELF_CHECK_FACTS_PROMPT = """\
-You are given a task to identify if the hypothesis is grounded by / supported by the evidence.
-You will only use the contents of the evidence and not rely on external knowledge.
-
-Evidence:
-{evidence}
-
-Hypothesis:
-{hypothesis}
-
-Based on the evidence, is the hypothesis true? Respond with a score from 0.0 to 1.0.
-1.0 means fully supported by the evidence, 0.0 means completely unsupported.
-Output only a number."""
-
-# Full claim-scoring prompt for detailed breakdown
-_CLAIM_SCORING_PROMPT = """\
-You are a faithfulness evaluator. Given an answer and context chunks, score how well each claim in the answer is supported by the context.
-
-Context:
-{context}
-
-Answer:
-{answer}
-
-For each sentence in the answer, output a JSON array:
-[{{"claim": "sentence text", "score": 0.0, "supported": true}}]
-
-Score 1.0 = fully supported by the context, 0.0 = completely unsupported.
-Output ONLY the JSON array, no other text."""
 
 _FALLBACK_MESSAGE = (
     "I could not generate a reliable answer from the available documents. "

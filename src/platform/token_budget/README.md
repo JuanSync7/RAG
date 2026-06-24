@@ -18,7 +18,7 @@ heuristic fallback for models not in litellm's registry.
 | `__init__.py` | Public API facade | `count_tokens`, `calculate_budget`, `get_capabilities`, etc. |
 | `schemas.py` | Frozen dataclasses for budget state | `ModelCapabilities`, `TokenBreakdown`, `TokenBudgetSnapshot` |
 | `provider.py` | Model capability discovery + budget calculation | `get_capabilities`, `refresh_capabilities`, `calculate_budget` |
-| `utils.py` | Token counting via litellm (heuristic fallback) | `count_tokens`, `estimate_tokens` |
+| `utils.py` | Token counting via litellm (heuristic fallback) | `count_tokens` |
 
 ## Token Counting
 

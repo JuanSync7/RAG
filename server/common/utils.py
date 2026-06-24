@@ -1,6 +1,6 @@
 # @summary
 # Shared server helper functions for request id extraction and error/console envelopes.
-# Exports: request_id_from_request, error_payload, console_ok, console_err
+# Exports: request_id_from_request, error_payload, console_ok
 # Deps: fastapi, server.common.schemas
 # @end-summary
 """Server-common utility helpers."""
@@ -103,19 +103,3 @@ def validate_optional_dependencies() -> list[str]:
             _startup_logger.warning(msg)
             warnings.append(msg)
     return warnings
-
-
-def console_err(
-    request: Request,
-    *,
-    code: str,
-    message: str,
-    details: dict | None = None,
-) -> ConsoleEnvelope:
-    """Build error envelope payload for console endpoints."""
-
-    return ConsoleEnvelope(
-        ok=False,
-        request_id=request_id_from_request(request),
-        error=ApiErrorDetail(code=code, message=message, details=details),
-    )

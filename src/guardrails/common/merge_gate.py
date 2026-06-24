@@ -58,18 +58,22 @@ class RailMergeGate:
 
         # Priority 1: injection reject
         if rail_result.injection_verdict == RailVerdict.REJECT:
+            from src.guardrails.shared.injection import REJECTION_MESSAGE as INJECTION_MSG
+
             logger.info("Merge gate: REJECT (injection)")
             return {
                 "action": "reject",
-                "message": "Your query could not be processed. Please rephrase your question.",
+                "message": INJECTION_MSG,
             }
 
         # Priority 2: toxicity reject
         if rail_result.toxicity_verdict == RailVerdict.REJECT:
+            from src.guardrails.shared.toxicity import REJECTION_MESSAGE as TOXICITY_MSG
+
             logger.info("Merge gate: REJECT (toxicity)")
             return {
                 "action": "reject",
-                "message": "Your query contains content that violates our usage policy. Please rephrase.",
+                "message": TOXICITY_MSG,
             }
 
         # Priority 3: topic safety (LLM-based off-topic detection)

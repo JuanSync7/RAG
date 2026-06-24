@@ -28,6 +28,7 @@ from src.ingest.embedding.common.dedup_utils import normalise_chunk_text
 from config.settings import (
     RAG_INGEST_FUZZY_SHINGLE_SIZE,
     RAG_INGEST_FUZZY_NUM_HASHES,
+    VECTOR_COLLECTION_DEFAULT,
 )
 
 logger = logging.getLogger("rag.ingest.embedding.minhash")
@@ -141,6 +142,7 @@ def find_chunk_by_fuzzy_fingerprint(
     fingerprint: str,
     threshold: float,
     num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES,
+    collection_name: str = VECTOR_COLLECTION_DEFAULT,
 ) -> Optional[dict[str, Any]]:
     """Find the best fuzzy match above threshold in Weaviate.
 
@@ -156,6 +158,8 @@ def find_chunk_by_fuzzy_fingerprint(
         fingerprint: Hex-encoded MinHash signature of the candidate chunk.
         threshold: Minimum Jaccard similarity to consider a match.
         num_hashes: Must match the num_hashes used during fingerprint creation.
+        collection_name: Weaviate collection name. Defaults to
+            ``VECTOR_COLLECTION_DEFAULT``.
 
     Returns:
         Best-matching dict with uuid, similarity, text_length; or None.
@@ -166,7 +170,7 @@ def find_chunk_by_fuzzy_fingerprint(
     try:
         from weaviate.classes.query import Filter  # lazy import — Weaviate optional
 
-        collection = client.collections.get("Chunk")
+        collection = client.collections.get(collection_name)
         results = collection.query.fetch_objects(
             filters=Filter.by_property("fuzzy_fingerprint").is_not_none(),
             limit=10_000,

@@ -22,9 +22,7 @@ import os
 import re
 import readline
 import sys
-import termios
 import time
-import tty
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -128,121 +126,6 @@ def _get_menu_items(filter_text: str = "") -> list[tuple[str, str]]:
         for name, (_, desc) in visible.items()
         if name.lower().startswith(ft)
     ]
-
-
-def _redraw_menu(prompt: str, buf: str, items: list, sel: int) -> None:
-    w = _BOX_W
-    sys.stdout.write(f"\r\033[J{prompt}{buf}")
-    sys.stdout.write("\033[s")
-    if items:
-        sys.stdout.write(f"\n  {DIM}┌{'─' * w}┐{RESET}")
-        for i, (name, desc) in enumerate(items):
-            tag = f"/{name}"
-            desc_w = w - 17
-            cell_name = tag.ljust(14)
-            cell_desc = desc[:desc_w].ljust(desc_w)
-            if i == sel:
-                sys.stdout.write(
-                    f"\n  {DIM}│{_BG_SEL} {B_CYAN}{cell_name}"
-                    f"{RESET}{_BG_SEL} {cell_desc} {RESET}{DIM}│{RESET}"
-                )
-            else:
-                sys.stdout.write(
-                    f"\n  {DIM}│{RESET} {B_CYAN}{cell_name}"
-                    f"{RESET} {DIM}{cell_desc}{RESET} {DIM}│{RESET}"
-                )
-        sys.stdout.write(f"\n  {DIM}└{'─' * w}┘{RESET}")
-    else:
-        sys.stdout.write(f"\n    {DIM}No matching commands{RESET}")
-    sys.stdout.write("\033[u")
-    sys.stdout.flush()
-
-
-def _read_key(fd: int) -> str:
-    ch = sys.stdin.read(1)
-    if ch == "\x1b":
-        old_flags = termios.tcgetattr(fd)
-        try:
-            import fcntl
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            try:
-                seq = os.read(fd, 10).decode("utf-8", errors="replace")
-            except (BlockingIOError, OSError):
-                seq = ""
-            finally:
-                fcntl.fcntl(fd, fcntl.F_SETFL, flags)
-        except Exception:
-            seq = ""
-
-        if seq.startswith("[A"):
-            return "UP"
-        if seq.startswith("[B"):
-            return "DOWN"
-        if seq.startswith("[C"):
-            return "RIGHT"
-        if seq.startswith("[D"):
-            return "LEFT"
-        return "ESC"
-    return ch
-
-
-def _interactive_command_select(prompt: str) -> str | None:
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    buf = "/"
-    sel = 0
-    items = _get_menu_items()
-    try:
-        tty.setcbreak(fd)
-        _redraw_menu(prompt, buf, items, sel)
-        while True:
-            key = _read_key(fd)
-            if key in ("\r", "\n"):
-                sys.stdout.write("\r\033[J")
-                if items:
-                    chosen = items[sel][0]
-                    sys.stdout.write(f"{prompt}/{chosen}\n")
-                    sys.stdout.flush()
-                    return chosen
-                sys.stdout.flush()
-                return None
-            elif key == "ESC":
-                sys.stdout.write("\r\033[J")
-                sys.stdout.flush()
-                return None
-            elif key == "UP":
-                sel = max(0, sel - 1)
-            elif key == "DOWN":
-                sel = min(len(items) - 1, sel + 1) if items else 0
-            elif key in ("\x7f", "\x08"):
-                if len(buf) > 1:
-                    buf = buf[:-1]
-                    sel = 0
-                else:
-                    sys.stdout.write("\r\033[J")
-                    sys.stdout.flush()
-                    return None
-            elif key == "\x03":
-                sys.stdout.write("\r\033[J")
-                sys.stdout.flush()
-                raise KeyboardInterrupt
-            elif key == "\x04":
-                sys.stdout.write("\r\033[J")
-                sys.stdout.flush()
-                raise EOFError
-            elif len(key) == 1 and key.isprintable():
-                buf += key
-                sel = 0
-            else:
-                continue
-
-            items = _get_menu_items(buf[1:])
-            if sel >= len(items):
-                sel = max(0, len(items) - 1)
-            _redraw_menu(prompt, buf, items, sel)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def _get_input(prompt: str) -> str:

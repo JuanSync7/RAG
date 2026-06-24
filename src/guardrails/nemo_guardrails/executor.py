@@ -30,7 +30,6 @@ from config.settings import (
     RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS,
 )
 from src.guardrails.common import (
-    GuardrailsMetadata,
     InputRailResult,
     OutputRailResult,
     RailExecution,

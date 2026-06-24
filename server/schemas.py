@@ -24,7 +24,7 @@ from server.common import (
 
 # Single source of truth for retrieval sizing (env-driven). Request schema
 # defaults derive from these so there is ONE place to change them.
-from config.settings import RERANK_TOP_K, SEARCH_LIMIT
+from config.settings import HYBRID_SEARCH_ALPHA, RERANK_TOP_K, SEARCH_LIMIT
 
 
 class QueryRequest(BaseModel):
@@ -34,7 +34,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=32000, description="The search query")
     source_filter: Optional[str] = Field(None, description="Filter by source document filename")
     heading_filter: Optional[str] = Field(None, description="Filter by section heading")
-    alpha: float = Field(0.5, ge=0.0, le=1.0, description="Hybrid search balance (0=BM25, 1=vector)")
+    alpha: float = Field(HYBRID_SEARCH_ALPHA, ge=0.0, le=1.0, description="Hybrid search balance (0=BM25, 1=vector)")
     search_limit: int = Field(SEARCH_LIMIT, ge=1, le=100, description="Max results from hybrid search")
     rerank_top_k: int = Field(RERANK_TOP_K, ge=1, le=50, description="Top-K results after reranking")
     tenant_id: Optional[str] = Field(None, description="Optional tenant override for admins")
@@ -338,7 +338,7 @@ class ConsoleQueryRequest(BaseModel):
     stream: bool = Field(default=True)
     source_filter: Optional[str] = None
     heading_filter: Optional[str] = None
-    alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+    alpha: float = Field(default=HYBRID_SEARCH_ALPHA, ge=0.0, le=1.0)
     search_limit: int = Field(default=SEARCH_LIMIT, ge=1, le=100)
     rerank_top_k: int = Field(default=RERANK_TOP_K, ge=1, le=50)
     tenant_id: Optional[str] = None

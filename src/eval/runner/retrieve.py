@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from config.settings import HYBRID_SEARCH_ALPHA
 from src.core.embeddings import get_embedding_provider
 from src.eval.pack.schema import Golden
 from src.vector_db import close_client, create_persistent_client, search
@@ -93,7 +94,7 @@ def retrieve_for_goldens(
                     client,
                     query,
                     query_embedding,
-                    0.5,
+                    HYBRID_SEARCH_ALPHA,
                     k,
                     collection=collection_name,
                 )

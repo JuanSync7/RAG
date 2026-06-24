@@ -33,6 +33,7 @@ from config.settings import (
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
     RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
+    RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS,
 )
 from langchain_core.embeddings import Embeddings
 from src.core.embeddings import get_embedding_provider
@@ -186,7 +187,7 @@ class RecordPhaseStatusArgs:
     success: bool
     error: Optional[str] = None
     error_class: Optional[str] = None  # "transient" | "document" | "system"
-    max_attempts: int = 10
+    max_attempts: int = RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS
 
 
 @dataclass

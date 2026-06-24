@@ -653,6 +653,10 @@ class RedisConversationMemory(ConversationMemoryProvider):
                     )
                 )
             except Exception:
+                logger.warning(
+                    "memory.get_turns: dropping unparsable turn row in conversation %s (scope=%s)",
+                    conversation_id, scope, exc_info=True,
+                )
                 continue
         return turns
 

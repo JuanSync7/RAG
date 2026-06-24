@@ -6,7 +6,7 @@ Phase 1 of the two-phase ingestion pipeline: transforms source documents into cl
 
 ## Overview
 
-This sub-package implements Phase 1 of the ingestion pipeline — the **Document Processing Pipeline** (5 LangGraph nodes). It transforms raw source documents into clean, structured Markdown text, which is written atomically to the `CleanDocumentStore` at `src/ingest/clean_store.py`.
+This sub-package implements Phase 1 of the ingestion pipeline — the **Document Processing Pipeline** (5 LangGraph nodes). It transforms raw source documents into clean, structured Markdown text, which is written atomically to the `CleanDocumentStore` at `src/ingest/common/clean_store.py`.
 
 **Entry point:** `run_document_processing(runtime, source_path, ...)` in `impl.py`
 

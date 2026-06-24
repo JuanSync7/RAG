@@ -1855,7 +1855,9 @@ class DoclingParser:
         from src.ingest.support.parser_base import ParseResult
 
         self._vlm_mode = getattr(config, "vlm_mode", "disabled")
-        self._max_tokens = getattr(config, "hybrid_chunker_max_tokens", 1024)
+        self._max_tokens = getattr(
+            config, "hybrid_chunker_max_tokens", RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+        )
         self._config = config
 
         result = parse_with_docling(

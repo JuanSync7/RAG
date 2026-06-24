@@ -2,7 +2,7 @@
 # Deterministic token-coverage check: do a set of chunks losslessly cover the
 # document they were derived from? Pure + side-effect free so it is cheap to
 # unit-test; the ingest node lossless_verification wraps it.
-# Exports: CoverageResult, MissingSpan, coverage_report, tokenize, shingles
+# Exports: CoverageResult, MissingSpan, coverage_report, tokenize
 # Deps: (stdlib only)
 # @end-summary
 """Lossless coverage verification.
@@ -45,7 +45,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-__all__ = ["CoverageResult", "MissingSpan", "coverage_report", "tokenize", "shingles"]
+__all__ = ["CoverageResult", "MissingSpan", "coverage_report", "tokenize"]
 
 # Default k for the anchor k-gram. 5 words is long enough that incidental
 # cross-chunk word collisions are rare, short enough that a single dropped
@@ -59,17 +59,6 @@ def tokenize(text: str) -> list[str]:
     """Lowercased ``\\w+`` word tokens. Drops punctuation, markdown pipes/dashes,
     and whitespace so two renderings of the same content tokenize identically."""
     return _WORD_RE.findall((text or "").lower())
-
-
-def shingles(tokens: list[str], k: int) -> list[tuple]:
-    """Overlapping k-grams of ``tokens``. A token list shorter than ``k`` yields
-    a single shingle of the whole list; an empty list yields none. (Retained as
-    a small reusable primitive; coverage_report indexes k-grams directly.)"""
-    if not tokens:
-        return []
-    if len(tokens) <= k:
-        return [tuple(tokens)]
-    return [tuple(tokens[i : i + k]) for i in range(len(tokens) - k + 1)]
 
 
 def _contains_sublist(haystack: list[str], needle: tuple) -> bool:

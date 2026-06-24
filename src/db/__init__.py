@@ -17,6 +17,11 @@ import logging
 from contextlib import contextmanager
 from typing import Any, Generator, Optional
 
+from config.settings import (
+    RAG_MINIO_LIST_DEFAULT_LIMIT,
+    RAG_MINIO_LIST_DEFAULT_OFFSET,
+    RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
+)
 from src.db.backend import DocumentBackend
 from src.db.common import StoredDocument
 from src.db.minio import build_document_id
@@ -130,7 +135,7 @@ def get_document_url(
     client: Any,
     document_id: str,
     bucket: Optional[str] = None,
-    expires_in_seconds: int = 3600,
+    expires_in_seconds: int = RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS,
 ) -> str:
     """Return a presigned URL for direct download of the document content."""
     return _get_db_backend().get_document_url(client, document_id, bucket, expires_in_seconds)
@@ -140,8 +145,8 @@ def list_documents(
     client: Any,
     bucket: Optional[str] = None,
     prefix: str = "",
-    limit: int = 1000,
-    offset: int = 0,
+    limit: int = RAG_MINIO_LIST_DEFAULT_LIMIT,
+    offset: int = RAG_MINIO_LIST_DEFAULT_OFFSET,
 ) -> list[dict]:
     """List documents from the document store.
 

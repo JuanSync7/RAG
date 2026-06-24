@@ -15,7 +15,7 @@ This directory contains support libraries consumed by pipeline nodes. These are 
 | `docling.py` | Docling document parsing and model warmup | `parse_with_docling`, `ensure_docling_ready`, `warmup_docling_models` | `nodes/structure_detection`, `pipeline/impl` |
 | `vision.py` | Vision/VLM figure caption, OCR, and tag extraction via LiteLLM Router | `generate_vision_notes`, `ensure_vision_ready` | `nodes/multimodal_processing`, `pipeline/impl` |
 | `llm.py` | LLM JSON helper backed by LiteLLM Router | `_llm_json` | `nodes/document_refactoring`, `nodes/metadata_generation` |
-| `document.py` | Legacy text cleaning, metadata extraction, and plain-text chunking | `extract_metadata`, `metadata_to_dict`, `clean_text`, `process_document` | `nodes/chunking`, `support/markdown` |
+| `document.py` | Text cleaning primitives and metadata extraction | `extract_metadata`, `metadata_to_dict`, `strip_boilerplate`, `normalize_unicode`, `clean_whitespace`, `strip_trailing_short_lines` | `support/markdown` |
 | `markdown.py` | Markdown-aware cleaning and semantic chunking | `chunk_markdown`, `clean_document`, `normalize_headings_to_markdown` | `nodes/chunking`, `nodes/text_cleaning` |
 
 ## Dependency Notes

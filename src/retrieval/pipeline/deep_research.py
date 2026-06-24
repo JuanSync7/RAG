@@ -675,7 +675,7 @@ class DeepResearch:
     ) -> Optional[dict[str, Any]]:
         if self._budget_check():
             return None
-        evidence = evidence_pool.evidence_text(max_chars=8000)
+        evidence = evidence_pool.evidence_text(max_chars=RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS)
         prompt = _render(
             self._decomp_template,
             original_question=self._original_question,

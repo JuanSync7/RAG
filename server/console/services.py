@@ -212,6 +212,7 @@ def build_source_preview_payload(
 ) -> dict:
     """Build payload for `/console/source-document` preview endpoint."""
     total_chars = len(text)
+    # Deliberate preview-size guardrails clamping user-supplied params (200..20000 chars).
     effective_max_chars = max(200, min(max_chars, 20000))
     preview_start = 0
     preview_end = min(total_chars, effective_max_chars)
@@ -221,6 +222,7 @@ def build_source_preview_payload(
     if start is not None and end is not None and end > start:
         safe_start = max(0, min(start, total_chars))
         safe_end = max(safe_start, min(end, total_chars))
+        # Deliberate preview-size guardrails clamping user-supplied params (100..5000 chars).
         context = max(100, min(context_chars, 5000))
         preview_start = max(0, safe_start - context)
         preview_end = min(total_chars, safe_end + context)

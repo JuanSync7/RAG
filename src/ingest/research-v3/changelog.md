@@ -55,7 +55,7 @@ Files still below 75% that could be targeted in a future run:
 
 ### Test infrastructure notes
 
-- **Scorer**: `src/ingest/scorer_v3.py` — measures coverage % via `pytest-cov`, enforces `test_mock_*` naming convention, correctness guard (all tests must pass)
+- **Scorer**: `src/ingest/scorer_v5.py` — measures coverage % via `pytest-cov`, enforces `test_mock_*` naming convention, correctness guard (all tests must pass)
 - **Dependency added**: `pytest-cov` (dev dependency)
 - **Conftest fix**: `tests/ingest/conftest.py` modified to eagerly import datasketch before lifecycle conftest installs a redis stub, preventing cross-test pollution
 - **Naming convention**: 2 pre-existing violations are grandfathered in the scorer; all new mock tests follow `test_mock_*`

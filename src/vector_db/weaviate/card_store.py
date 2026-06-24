@@ -32,6 +32,7 @@ from typing import Any
 import weaviate
 from weaviate.classes.config import Configure, DataType, Property
 
+from config.settings import RAG_DOCUMENT_CARD_COLLECTION
 from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.vector_db.weaviate.card_store")
@@ -70,7 +71,7 @@ CARD_PROPERTY_NAMES: tuple[str, ...] = (
 
 def ensure_card_collection(
     client: weaviate.WeaviateClient,
-    collection: str = "RAGDocumentCards",
+    collection: str = RAG_DOCUMENT_CARD_COLLECTION,
 ) -> None:
     """Create the document-card collection if it does not exist (idempotent).
 
@@ -112,7 +113,7 @@ def ensure_card_collection(
 def add_document_cards(
     client: weaviate.WeaviateClient,
     cards: list[dict[str, Any]],
-    collection: str = "RAGDocumentCards",
+    collection: str = RAG_DOCUMENT_CARD_COLLECTION,
 ) -> int:
     """Insert/replace document cards, each with its pre-computed vector.
 
@@ -168,7 +169,7 @@ def add_document_cards(
 def delete_document_cards(
     client: weaviate.WeaviateClient,
     document_ids: list[str],
-    collection: str = "RAGDocumentCards",
+    collection: str = RAG_DOCUMENT_CARD_COLLECTION,
 ) -> int:
     """Delete document cards for the given ``document_id`` values (rollback).
 

@@ -317,9 +317,6 @@ def _compute_ngram_overlap(
     return grounded_count / len(sentences)
 
 
-_DEFAULT_WEIGHTS = ConfidenceWeights(retrieval=0.50, llm=0.25, citation=0.25)
-
-
 def compute_composite_confidence(
     reranker_scores: list[float],
     llm_confidence_text: str,
