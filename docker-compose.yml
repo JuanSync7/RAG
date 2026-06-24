@@ -146,12 +146,16 @@ services:
       - RAG_WEAVIATE_HOST=rag-weaviate
       - RAG_WEAVIATE_HTTP_PORT=8080
       - RAG_WEAVIATE_GRPC_PORT=50051
-      # TEI-backed embed + rerank, fronted by rag-nginx for replica load
-      # balancing. Direct service DNS (rag-embed:80 / rag-rerank:80) also works
-      # at scale=1 but caches DNS — at scale>1, clients pin to one replica.
-      - RAG_INFERENCE_BACKEND=tei
-      - RAG_TEI_EMBED_URL=http://rag-nginx:8081
-      - RAG_TEI_RERANK_URL=http://rag-nginx:8082
+      # Embed + rerank over HTTP (OpenAI-compatible), env-driven so each env
+      # overlay points it wherever it likes (remote vLLM tunnel, a self-hosted
+      # TEI pool, any compatible API). Defaults preserve the self-hosted TEI pool
+      # fronted by rag-nginx (run with `--profile self-host`); the dev/prod
+      # overlays override these to the qwen3 vLLM tunnel.
+      - RAG_INFERENCE_BACKEND=${RAG_INFERENCE_BACKEND:-tei}
+      - RAG_EMBED_URL=${RAG_EMBED_URL:-http://rag-nginx:8081}
+      - RAG_RERANK_URL=${RAG_RERANK_URL:-http://rag-nginx:8082}
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-BAAI/bge-m3}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
       # Allow the console to serve source documents ingested by the local worker.
       # The worker records absolute host paths; mount them at the same path above.
       # Override via RAG_CONSOLE_SOURCE_ROOTS in .env to add more dirs.
@@ -165,10 +169,9 @@ services:
         condition: service_healthy
       rag-weaviate:
         condition: service_healthy
-      rag-nginx:
-        condition: service_healthy
-      rag-ollama:
-        condition: service_healthy
+      # NOTE: rag-nginx + rag-ollama deps removed — the default http inference
+      # path needs neither (embed/rerank/gen are reached via RAG_*_URL). They
+      # belong to the optional `self-host` profile.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -201,14 +204,16 @@ services:
       # Ollama is expected to run on the host in this setup.
       # The proxy port forwards to the actual Ollama port on 127.0.0.1.
       - RAG_OLLAMA_URL=http://rag-ollama:11434
-      # Embed + rerank are served by TEI containers, not in-process. The worker
-      # image ships without torch/transformers; hitting the local path here would
-      # raise ImportError (by design — install the `local-embed` extra in a venv
-      # if you need in-process models for dev iteration).
-      - RAG_INFERENCE_BACKEND=tei
-      - RAG_TEI_EMBED_URL=http://rag-nginx:8081
-      - RAG_TEI_RERANK_URL=http://rag-nginx:8082
-      - RAG_WORKER_CONCURRENCY=4
+      # Embed + rerank over HTTP (OpenAI-compatible), env-driven (see rag-api).
+      # Defaults to the self-hosted TEI pool via rag-nginx; dev/prod overlays
+      # override to the qwen3 vLLM tunnel. The worker image ships no torch, so
+      # the in-process ("local") backend is venv-only (`local-embed` extra).
+      - RAG_INFERENCE_BACKEND=${RAG_INFERENCE_BACKEND:-tei}
+      - RAG_EMBED_URL=${RAG_EMBED_URL:-http://rag-nginx:8081}
+      - RAG_RERANK_URL=${RAG_RERANK_URL:-http://rag-nginx:8082}
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-BAAI/bge-m3}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RAG_WORKER_CONCURRENCY=${RAG_WORKER_CONCURRENCY:-4}
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -230,10 +235,7 @@ services:
         condition: service_started
       rag-weaviate:
         condition: service_healthy
-      rag-nginx:
-        condition: service_healthy
-      rag-ollama:
-        condition: service_healthy
+      # rag-nginx + rag-ollama deps removed (see rag-api) — `self-host` profile only.
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -635,6 +637,10 @@ services:
     # binds to all available GPUs; for true horizontal scale on AWS, run one
     # replica per GPU node and let ALB target groups distribute (compose's GPU
     # reservation on a single host means N replicas share one device).
+    # Opt-in self-hosted local inference (BGE via TEI). Off by default — the
+    # default inference path is remote HTTP (see rag-api). Start with
+    # `--profile self-host` for an all-local stack.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_IMAGE_TAG:-turing-1.5}
     environment:
       - MODEL_ID=${RAG_TEI_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -681,6 +687,7 @@ services:
     #     freeing the GPU for latency-sensitive queries.
     # Cold start is seconds (no GPU init), so this scales fast for spikes.
     # Scalable: `docker compose up -d --scale rag-embed-cpu=N`.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
     environment:
       - MODEL_ID=${RAG_TEI_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -715,6 +722,7 @@ services:
     #
     # Scalable: `docker compose up -d --scale rag-rerank=N`. Fronted by rag-nginx
     # on port 8082. See rag-embed for the GPU-replica caveat.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_RERANK_IMAGE_TAG:-turing-1.8}
     environment:
       - MODEL_ID=${RAG_TEI_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -755,6 +763,7 @@ services:
     # Ollama serves generative LLMs (qwen2.5:3b for "default"/"query",
     # qwen2.5vl:3b for "vision"). Bind-mounts the host's pre-pulled
     # model dir so we don't re-download ~3 GB per clean stack.
+    profiles: ["self-host"]
     image: ollama/ollama:latest
     container_name: rag-ollama
     # Host systemd ollama was removed and .ollama_data migrated into the repo,
@@ -790,6 +799,11 @@ services:
     # Always-on: fronts rag-api on 80/443 (TLS) AND load-balances TEI embed
     # (8081) / rerank (8082) replicas. Profile-less so rag-worker (workers
     # profile) can also route TEI traffic through it.
+    # Self-host only: this nginx fronts the API on 80/443 AND load-balances the
+    # local TEI embed/rerank pools. The default http inference path bypasses it
+    # (embed/rerank go straight to RAG_*_URL), and the ai03 overlays ship their
+    # own API-front nginx, so it is gated to the `self-host` profile.
+    profiles: ["self-host"]
     image: nginx:alpine
     container_name: rag-nginx
     ports:

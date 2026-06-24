@@ -1,0 +1,547 @@
+# =============================================================================
+# RagWeave DEV stack — uk-ai03, full containerized mirror of prod.
+#
+# Self-contained podman file (NOT an overlay on docker-compose.yml). Mirrors the
+# rootless-podman conventions of docker-compose.prod.yml (user: root, entrypoint
+# overrides, podman sock, rootless ports, uk-ai01 host mapping) but runs as a
+# fully SEPARATE stack alongside prod:
+#   - every container has a `-dev` suffix  (no name collision with prod)
+#   - distinct host ports                  (see PORT MAP below)
+#   - dedicated volumes / data dirs        (no shared state with prod)
+#
+# Run:   podman compose -p ragweave-dev -f docker-compose.dev.yml up -d
+#
+# Embed / rerank / generation are remote on uk-ai01 vLLM, reached through the
+# rag-vllm-tunnel-dev SSH sidecar (qwen3-embed-4b :8002, qwen3-reranker-4b :8005,
+# qwopus-9b gen :8000). This is the qwen3 "http" inference path — no local TEI.
+#
+# Dev corpus: rag-weaviate-dev is the repurposed former sanity instance, RE-INGESTED
+# FRESH (old data is discarded). Full 2.4k-doc corpus is the eventual target.
+#
+# ----------------------------------------------------------------------------
+# PORT MAP (dev | prod) — all dev host ports are distinct from prod:
+#   rag-api-dev        8102 | 8000      rag-weaviate-dev   8190/50152 | 8079/50051
+#   rag-minio-dev      9010/9011 | 9000/9001               rag-redis-dev   6380 | 6379
+#   rag-temporal-dev   7234 (+ui 8234) | host 7233         rag-nginx-dev   8082/8444 | 8080/8443
+#   langfuse-web-dev   3010 | (off in prod today)          prometheus-dev  9092 | 9091
+#   grafana-dev        3011 | 3001                         alertmanager-dev 9094 | 9093
+#   dozzle-dev         9998 | 9999
+# Postgres / temporal-db / langfuse-internal services have no host port (in-network only).
+# =============================================================================
+services:
+
+  # --- Remote inference tunnel: SSH local-forwards to uk-ai01 vLLM ------------
+  # 18000 = qwopus-9b generation, 18002 = qwen3-embed-4b, 18005 = qwen3-reranker-4b.
+  rag-vllm-tunnel-dev:
+    image: alpine:3.20
+    container_name: rag-vllm-tunnel-dev
+    command: >
+      sh -c "apk add --no-cache openssh-client >/dev/null 2>&1 &&
+             exec ssh -N -T -o BatchMode=yes -o StrictHostKeyChecking=no
+                  -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+                  -o ExitOnForwardFailure=yes -i /key -l Juan.Kok
+                  -L 0.0.0.0:18000:127.0.0.1:8000
+                  -L 0.0.0.0:18001:127.0.0.1:8001
+                  -L 0.0.0.0:18002:127.0.0.1:8002
+                  -L 0.0.0.0:18005:127.0.0.1:8005
+                  ai01.atlas.aionsilicon.local"
+    volumes:
+      - /home/Juan.Kok/.ssh/id_ed25519:/key:ro
+    restart: unless-stopped
+
+  rag-redis-dev:
+    image: redis:7-alpine
+    container_name: rag-redis-dev
+    # Skip the su-exec drop to the redis user — required in rootless Podman
+    # without setuid newuidmap/newgidmap (matches prod).
+    entrypoint: redis-server
+    command: ["--appendonly", "yes", "--bind", "0.0.0.0"]
+    ports:
+      - "${RAG_DEV_REDIS_PORT:-6380}:6379"
+    volumes:
+      - rag-redis-dev-data:/data
+    restart: unless-stopped
+
+  # --- LiteLLM spend-tracking Postgres (replaces prod's SQLite; full stack) ---
+  rag-postgres-dev:
+    image: postgres:16-alpine
+    container_name: rag-postgres-dev
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_USER: ${RAG_POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${RAG_POSTGRES_PASSWORD:-litellm}
+      POSTGRES_DB: ${RAG_POSTGRES_DB:-litellm}
+    volumes:
+      - rag-postgres-dev-data:/var/lib/postgresql/data
+      - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RAG_POSTGRES_USER:-litellm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --- Containerized Temporal (dev is greenfield: no host-history migration) --
+  temporal-db-dev:
+    image: postgres:16-alpine
+    container_name: rag-temporal-db-dev
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal}
+      POSTGRES_DB: ${TEMPORAL_POSTGRES_DB:-temporal}
+    volumes:
+      - temporal-db-dev-data:/var/lib/postgresql/data
+      - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  rag-temporal-dev:
+    image: temporalio/auto-setup:${TEMPORAL_IMAGE_TAG:-1.25.2}
+    container_name: rag-temporal-dev
+    ports:
+      - "${RAG_DEV_TEMPORAL_PORT:-7234}:7233"
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=${TEMPORAL_POSTGRES_USER:-temporal}
+      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD:-temporal}
+      - POSTGRES_SEEDS=temporal-db-dev
+      - TEMPORAL_DEFAULT_NAMESPACE_RETENTION=${TEMPORAL_WORKFLOW_RETENTION:-720h}
+    depends_on:
+      temporal-db-dev:
+        condition: service_healthy
+    restart: unless-stopped
+
+  rag-temporal-ui-dev:
+    image: temporalio/ui:${TEMPORAL_UI_IMAGE_TAG:-2.31.2}
+    container_name: rag-temporal-ui-dev
+    ports:
+      - "${RAG_DEV_TEMPORAL_UI_PORT:-8234}:8080"
+    environment:
+      - TEMPORAL_ADDRESS=rag-temporal-dev:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:${RAG_DEV_LANGFUSE_PORT:-3010}
+    depends_on:
+      - rag-temporal-dev
+    restart: unless-stopped
+
+  rag-minio-dev:
+    image: minio/minio:latest
+    container_name: rag-minio-dev
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${RAG_MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${RAG_MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "${RAG_DEV_MINIO_PORT:-9010}:9000"
+      - "${RAG_DEV_MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - /vols/sondrel_rnd/user_areas/Juan.Kok/.minio-data-dev:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Dedicated dev vector store (repurposed from the former sanity instance;
+  #     re-ingested fresh). Point the data dir at a clean dev path. -------------
+  rag-weaviate-dev:
+    image: semitechnologies/weaviate:1.30.5
+    container_name: rag-weaviate-dev
+    user: root
+    environment:
+      - CLUSTER_HOSTNAME=rag-weaviate-dev
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_API_BASED_MODULES=true
+    ports:
+      - "${RAG_DEV_WEAVIATE_PORT:-8190}:8080"
+      - "${RAG_DEV_WEAVIATE_GRPC_PORT:-50152}:50051"
+    volumes:
+      - /vols/sondrel_rnd/user_areas/Juan.Kok/RagWeave/.weaviate_data_dev:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  rag-api-dev:
+    image: rag-api:local
+    container_name: rag-api-dev
+    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_DEV_API_PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
+    ports:
+      - "${RAG_DEV_API_HOST_PORT:-8102}:${RAG_DEV_API_PORT:-8000}"
+    environment:
+      - RAG_API_PORT=${RAG_DEV_API_PORT:-8000}
+      - RAG_TEMPORAL_TARGET_HOST=rag-temporal-dev:7233
+      # Generation via uk-ai01 vLLM through the dev tunnel.
+      - RAG_LLM_API_BASE=http://rag-vllm-tunnel-dev:18000/v1
+      - RAG_LLM_MODEL=${RAG_LLM_MODEL:-hosted_vllm/qwopus-9b}
+      - RAG_LLM_QUERY_MODEL=${RAG_LLM_QUERY_MODEL:-hosted_vllm/qwopus-9b}
+      # qwen3 embed + rerank over HTTP (the new direct-param surface).
+      - RAG_INFERENCE_BACKEND=http
+      - RAG_EMBED_URL=http://rag-vllm-tunnel-dev:18002
+      - RAG_RERANK_URL=http://rag-vllm-tunnel-dev:18005
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-qwen3-embed-4b}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-qwen3-reranker-4b}
+      # Observability: Langfuse on (full stack).
+      - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-langfuse}
+      - LANGFUSE_HOST=http://langfuse-web-dev:3000
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - RAG_CACHE_PROVIDER=redis
+      - RAG_CACHE_REDIS_URL=redis://rag-redis-dev:6379/0
+      - RAG_MEMORY_PROVIDER=redis
+      - RAG_MEMORY_REDIS_URL=redis://rag-redis-dev:6379/0
+      - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
+      - RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS=${RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS:-120000}
+      # LiteLLM spend tracking on Postgres (full stack, not SQLite).
+      - DATABASE_URL=postgresql://${RAG_POSTGRES_USER:-litellm}:${RAG_POSTGRES_PASSWORD:-litellm}@rag-postgres-dev:5432/${RAG_POSTGRES_DB:-litellm}
+      - RAG_AUTH_API_KEYS_REQUIRED=false
+      - RAG_AUTH_JWT_ENABLED=false
+      - RAG_AUTH_OIDC_ENABLED=false
+      - RAG_AUTH_API_KEYS_STORE_PATH=/app/.runtime/security/api_keys.json
+      - RAG_AUTH_QUOTAS_STORE_PATH=/app/.runtime/security/quotas.json
+      - RAG_MINIO_ENDPOINT=rag-minio-dev:9000
+      - RAG_MINIO_ACCESS_KEY=${RAG_MINIO_ACCESS_KEY:-minioadmin}
+      - RAG_MINIO_SECRET_KEY=${RAG_MINIO_SECRET_KEY:-minioadmin}
+      - RAG_WEAVIATE_MODE=networked
+      - RAG_WEAVIATE_HOST=rag-weaviate-dev
+      - RAG_WEAVIATE_HTTP_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
+    depends_on:
+      rag-redis-dev:
+        condition: service_started
+      rag-postgres-dev:
+        condition: service_healthy
+      rag-minio-dev:
+        condition: service_healthy
+      rag-weaviate-dev:
+        condition: service_healthy
+      rag-temporal-dev:
+        condition: service_started
+      rag-vllm-tunnel-dev:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "uk-ai01:172.16.10.137"
+    volumes:
+      - /vols/sondrel_rnd/user_areas/Juan.Kok/RagWeave/.runtime-dev:/app/.runtime
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('RAG_API_PORT','8000') + '/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  rag-worker-dev:
+    image: rag-worker:local
+    container_name: rag-worker-dev
+    command: python -m server.worker
+    environment:
+      - RAG_TEMPORAL_TARGET_HOST=rag-temporal-dev:7233
+      - RAG_LLM_API_BASE=http://rag-vllm-tunnel-dev:18000/v1
+      - RAG_LLM_MODEL=${RAG_LLM_MODEL:-hosted_vllm/qwopus-9b}
+      - RAG_INGESTION_LLM_MODEL=${RAG_INGESTION_LLM_MODEL:-hosted_vllm/qwopus-9b}
+      # qwen3 embed + rerank over HTTP — NOT in-process (worker image ships no torch).
+      - RAG_INFERENCE_BACKEND=http
+      - RAG_EMBED_URL=http://rag-vllm-tunnel-dev:18002
+      - RAG_RERANK_URL=http://rag-vllm-tunnel-dev:18005
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-qwen3-embed-4b}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-qwen3-reranker-4b}
+      - RAG_WORKER_CONCURRENCY=${RAG_WORKER_CONCURRENCY:-4}
+      - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-langfuse}
+      - LANGFUSE_HOST=http://langfuse-web-dev:3000
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - RAG_CACHE_PROVIDER=redis
+      - RAG_CACHE_REDIS_URL=redis://rag-redis-dev:6379/0
+      - RAG_MINIO_ENDPOINT=rag-minio-dev:9000
+      - RAG_MINIO_ACCESS_KEY=${RAG_MINIO_ACCESS_KEY:-minioadmin}
+      - RAG_MINIO_SECRET_KEY=${RAG_MINIO_SECRET_KEY:-minioadmin}
+      - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
+      - RAG_WORKFLOW_DEFAULT_TIMEOUT_MS=${RAG_WORKFLOW_DEFAULT_TIMEOUT_MS:-1800000}
+      - RAG_RETRIEVAL_TIMEOUT_MS=${RAG_RETRIEVAL_TIMEOUT_MS:-1800000}
+      - RAG_WEAVIATE_HOST=rag-weaviate-dev
+      - RAG_WEAVIATE_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
+    depends_on:
+      rag-redis-dev:
+        condition: service_started
+      rag-weaviate-dev:
+        condition: service_healthy
+      rag-temporal-dev:
+        condition: service_started
+      rag-vllm-tunnel-dev:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "uk-ai01:172.16.10.137"
+    restart: unless-stopped
+
+  rag-nginx-dev:
+    image: nginx:alpine
+    container_name: rag-nginx-dev
+    user: root
+    command: >
+      sh -c "sed -i 's/^user[[:space:]][^;]*;//' /etc/nginx/nginx.conf &&
+             nginx -g 'user root; daemon off;'"
+    ports:
+      - "${RAG_DEV_NGINX_HTTP_PORT:-8082}:80"
+      - "${RAG_DEV_NGINX_HTTPS_PORT:-8444}:443"
+    volumes:
+      - ./ops/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      rag-api-dev:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1/health 2>/dev/null | grep -q '\"status\"'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Langfuse (LLM tracing) — full 6-container stack, dev-isolated -----------
+  langfuse-postgres-dev:
+    image: postgres:17
+    container_name: rag-langfuse-postgres-dev
+    environment:
+      - POSTGRES_USER=${LANGFUSE_POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${LANGFUSE_POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${LANGFUSE_POSTGRES_DB:-postgres}
+      - TZ=UTC
+      - PGTZ=UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_POSTGRES_USER:-postgres}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - langfuse-postgres-dev-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  langfuse-redis-dev:
+    image: redis:7
+    container_name: rag-langfuse-redis-dev
+    command: --requirepass ${LANGFUSE_REDIS_AUTH:-myredissecret} --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH:-myredissecret}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - langfuse-redis-dev-data:/data
+    restart: unless-stopped
+
+  langfuse-clickhouse-dev:
+    image: clickhouse/clickhouse-server
+    container_name: rag-langfuse-clickhouse-dev
+    user: "101:101"
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    volumes:
+      - langfuse-clickhouse-dev-data:/var/lib/clickhouse
+      - langfuse-clickhouse-dev-logs:/var/log/clickhouse-server
+    restart: unless-stopped
+
+  langfuse-minio-dev:
+    image: cgr.dev/chainguard/minio
+    container_name: rag-langfuse-minio-dev
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      - MINIO_ROOT_USER=${LANGFUSE_MINIO_USER:-minio}
+      - MINIO_ROOT_PASSWORD=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    volumes:
+      - langfuse-minio-dev-data:/data
+    restart: unless-stopped
+
+  langfuse-worker-dev:
+    image: langfuse/langfuse-worker:3
+    container_name: rag-langfuse-worker-dev
+    depends_on:
+      langfuse-postgres-dev:
+        condition: service_healthy
+      langfuse-minio-dev:
+        condition: service_healthy
+      langfuse-redis-dev:
+        condition: service_healthy
+      langfuse-clickhouse-dev:
+        condition: service_healthy
+    environment: &langfuse-dev-env
+      - DATABASE_URL=postgresql://${LANGFUSE_POSTGRES_USER:-postgres}:${LANGFUSE_POSTGRES_PASSWORD:-postgres}@langfuse-postgres-dev:5432/${LANGFUSE_POSTGRES_DB:-postgres}
+      - SALT=${LANGFUSE_SALT:-mysalt}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      - TELEMETRY_ENABLED=${LANGFUSE_TELEMETRY_ENABLED:-true}
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://langfuse-clickhouse-dev:9000
+      - CLICKHOUSE_URL=http://langfuse-clickhouse-dev:8123
+      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio-dev:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
+      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
+      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
+      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio-dev:9000
+      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/
+      - REDIS_HOST=langfuse-redis-dev
+      - REDIS_PORT=6379
+      - REDIS_AUTH=${LANGFUSE_REDIS_AUTH:-myredissecret}
+    restart: unless-stopped
+
+  langfuse-web-dev:
+    image: langfuse/langfuse:3
+    container_name: rag-langfuse-web-dev
+    depends_on:
+      langfuse-postgres-dev:
+        condition: service_healthy
+      langfuse-minio-dev:
+        condition: service_healthy
+      langfuse-redis-dev:
+        condition: service_healthy
+      langfuse-clickhouse-dev:
+        condition: service_healthy
+    environment:
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
+      - NEXTAUTH_URL=${LANGFUSE_DEV_NEXTAUTH_URL:-http://localhost:3010}
+      - LANGFUSE_INIT_ORG_ID=${LANGFUSE_INIT_ORG_ID:-ragweave}
+      - LANGFUSE_INIT_PROJECT_ID=${LANGFUSE_INIT_PROJECT_ID:-rag-observability-dev}
+      - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-RAG Dev}
+      - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-rag-observability-dev}
+      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
+      - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-admin}
+      - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD:-admin1234}
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      # Shared backend wiring (mirrors langfuse-worker-dev; list-form env can't
+      # use a YAML merge key, so it is re-listed here as in the base compose).
+      - DATABASE_URL=postgresql://${LANGFUSE_POSTGRES_USER:-postgres}:${LANGFUSE_POSTGRES_PASSWORD:-postgres}@langfuse-postgres-dev:5432/${LANGFUSE_POSTGRES_DB:-postgres}
+      - SALT=${LANGFUSE_SALT:-mysalt}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      - TELEMETRY_ENABLED=${LANGFUSE_TELEMETRY_ENABLED:-true}
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://langfuse-clickhouse-dev:9000
+      - CLICKHOUSE_URL=http://langfuse-clickhouse-dev:8123
+      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio-dev:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
+      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
+      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
+      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio-dev:9000
+      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/
+      - REDIS_HOST=langfuse-redis-dev
+      - REDIS_PORT=6379
+      - REDIS_AUTH=${LANGFUSE_REDIS_AUTH:-myredissecret}
+    ports:
+      - "${RAG_DEV_LANGFUSE_PORT:-3010}:3000"
+    restart: unless-stopped
+
+  # --- Metrics observability (Prometheus / Grafana / Alertmanager), dev-isolated
+  prometheus-dev:
+    image: prom/prometheus:latest
+    container_name: rag-prometheus-dev
+    user: root
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "${RAG_DEV_PROMETHEUS_PORT:-9092}:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-dev-data:/prometheus
+    depends_on:
+      - rag-api-dev
+    restart: unless-stopped
+
+  alertmanager-dev:
+    image: prom/alertmanager:latest
+    container_name: rag-alertmanager-dev
+    user: root
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "${RAG_DEV_ALERTMANAGER_PORT:-9094}:9093"
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    restart: unless-stopped
+
+  grafana-dev:
+    image: grafana/grafana:latest
+    container_name: rag-grafana-dev
+    user: root
+    ports:
+      - "${RAG_DEV_GRAFANA_PORT:-3011}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-dev-data:/var/lib/grafana
+    depends_on:
+      - prometheus-dev
+    restart: unless-stopped
+
+  dozzle-dev:
+    image: amir20/dozzle:latest
+    container_name: rag-monitor-dev
+    user: "0:0"
+    environment:
+      DOZZLE_ENABLE_ACTIONS: "true"
+    ports:
+      - "${RAG_DEV_DOZZLE_PORT:-9998}:8080"
+    volumes:
+      - /run/user/5153928/podman/podman.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  rag-redis-dev-data:
+  rag-postgres-dev-data:
+  temporal-db-dev-data:
+  langfuse-postgres-dev-data:
+  langfuse-redis-dev-data:
+  langfuse-clickhouse-dev-data:
+  langfuse-clickhouse-dev-logs:
+  langfuse-minio-dev-data:
+  prometheus-dev-data:
+  grafana-dev-data:
