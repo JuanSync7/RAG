@@ -316,10 +316,10 @@ _MAX_SUBQUERY_WORDS = 12
 
 # Small, capped output budget — the response is just a short JSON list. Keep
 # this tight: the decomposer runs on a reasoning model and latency matters.
-_LLM_MAX_TOKENS = 256
+# Operator-tunable via settings.RAG_DECOMPOSITION_LLM_MAX_TOKENS (default 256).
 
 # Low temperature for a deterministic, structured extraction task.
-_LLM_TEMPERATURE = 0.0
+# Operator-tunable via settings.RAG_DECOMPOSITION_LLM_TEMPERATURE (default 0.0).
 
 
 def _render_glossary() -> str:
@@ -444,8 +444,8 @@ def llm_decompose(query: str, *, timeout: int | None = None) -> List[str]:
     try:
         response = get_llm_provider().json_completion(
             messages,
-            temperature=_LLM_TEMPERATURE,
-            max_tokens=_LLM_MAX_TOKENS,
+            temperature=settings.RAG_DECOMPOSITION_LLM_TEMPERATURE,
+            max_tokens=settings.RAG_DECOMPOSITION_LLM_MAX_TOKENS,
             timeout=timeout or settings.RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # provider error / timeout

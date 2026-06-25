@@ -30,6 +30,7 @@ from config.settings import (
     MEMORY_SUMMARY_MAX_SOURCE_TURNS,
     MEMORY_SUMMARY_TRIGGER_TURNS,
     RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT,
+    RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT,
     RAG_MEMORY_CONTEXT_MAX_CHARS,
     RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS,
     RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS,
@@ -108,7 +109,7 @@ class ConversationMemoryProvider:
         tenant_id: str,
         subject: str,
         project_id: str | None,
-        limit: int = 50,
+        limit: int = RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT,
     ) -> list[ConversationMeta]:
         """List recent conversations for a subject scope.
 
@@ -340,7 +341,7 @@ class NoopConversationMemory(ConversationMemoryProvider):
         tenant_id: str,
         subject: str,
         project_id: str | None,
-        limit: int = 50,
+        limit: int = RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT,
     ) -> list[ConversationMeta]:
         return []
 
@@ -615,7 +616,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         tenant_id: str,
         subject: str,
         project_id: str | None,
-        limit: int = 50,
+        limit: int = RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT,
     ) -> list[ConversationMeta]:
         scope = self._scope(tenant_id, subject, project_id)
         conv_ids = self._client.zrevrange(self._index_key(scope), 0, max(0, limit - 1))

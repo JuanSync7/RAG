@@ -42,8 +42,9 @@ logger = logging.getLogger("rag.retrieval.routing.router")
 
 # Vector-first routing: cards are matched by semantic similarity to the query,
 # so the hybrid search runs at pure-vector alpha. ``query_text`` (when given)
-# only supplies the keyword component; alpha keeps it vector-dominant.
-_ROUTING_ALPHA = 1.0
+# only supplies the keyword component; alpha keeps it vector-dominant. The alpha
+# is operator-tunable via ``settings.RAG_DOCUMENT_ROUTING_ALPHA`` (default 1.0 =
+# pure vector); see ``route_documents`` where it is resolved from settings.
 
 
 def route_documents(
@@ -73,8 +74,10 @@ def route_documents(
         collection: Card collection name. ``None`` →
             ``settings.RAG_DOCUMENT_CARD_COLLECTION``.
         query_text: Optional keyword/BM25 component for the hybrid search. The
-            search stays vector-dominant (``alpha=1.0``) regardless; this is
-            forwarded only so the facade has a text query when it needs one.
+            search stays vector-dominant (``alpha`` →
+            ``settings.RAG_DOCUMENT_ROUTING_ALPHA``, default ``1.0`` = pure
+            vector) regardless; this is forwarded only so the facade has a text
+            query when it needs one.
 
     Returns:
         A :class:`RoutingResult`. ``used=True`` with rank-ordered ``doc_ids``
@@ -96,6 +99,9 @@ def route_documents(
     if collection is None:
         collection = settings.RAG_DOCUMENT_CARD_COLLECTION
 
+    # Pure-vector alpha by default (1.0); operator-tunable via settings.
+    routing_alpha = settings.RAG_DOCUMENT_ROUTING_ALPHA
+
     _unused = RoutingResult(doc_ids=[], scores={}, used=False)
 
     try:
@@ -108,7 +114,7 @@ def route_documents(
                 client=client,
                 query=query_text,
                 query_embedding=query_embedding,
-                alpha=_ROUTING_ALPHA,
+                alpha=routing_alpha,
                 limit=top_n,
                 filters=None,
                 collection=collection,
@@ -121,7 +127,7 @@ def route_documents(
                     client=_ephemeral,
                     query=query_text,
                     query_embedding=query_embedding,
-                    alpha=_ROUTING_ALPHA,
+                    alpha=routing_alpha,
                     limit=top_n,
                     filters=None,
                     collection=collection,

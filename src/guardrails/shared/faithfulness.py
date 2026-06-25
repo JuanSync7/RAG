@@ -29,7 +29,11 @@ from src.guardrails.models import (
     GuardianUnavailable,
 )
 from src.platform.llm import call_oneshot
-from config.settings import RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS
+from config.settings import (
+    RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS,
+    RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
+    RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
+)
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
@@ -106,6 +110,8 @@ class FaithfulnessChecker:
         action: str = "flag",
         use_self_check: bool = True,
         guardian: Optional[GuardianModel] = None,
+        penalty_per_entity: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
+        penalty_cap: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
     ) -> None:
         """Initialize a faithfulness checker.
 
@@ -119,11 +125,16 @@ class FaithfulnessChecker:
                 ``GROUNDEDNESS``. When supplied and supported, replaces the
                 ``call_oneshot`` self-check; on ``GuardianUnavailable`` the
                 rail falls through to the legacy LLM scorer.
+            penalty_per_entity: Score penalty applied per hallucinated entity.
+            penalty_cap: Maximum total hallucination penalty applied to the
+                overall score.
         """
         self._threshold = threshold
         self._action = action  # "reject" or "flag"
         self._use_self_check = use_self_check
         self._guardian = guardian
+        self._penalty_per_entity = penalty_per_entity
+        self._penalty_cap = penalty_cap
 
     def check(
         self,
@@ -182,7 +193,7 @@ class FaithfulnessChecker:
 
         # Penalize for hallucinated entities
         if hallucinated:
-            penalty = min(0.3, len(hallucinated) * 0.1)
+            penalty = min(self._penalty_cap, len(hallucinated) * self._penalty_per_entity)
             overall = max(0.0, overall - penalty)
 
         # Determine verdict based on threshold and action

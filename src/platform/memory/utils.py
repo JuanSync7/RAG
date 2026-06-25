@@ -17,6 +17,7 @@ from config.settings import (
     RAG_MEMORY_TURN_MAX_CHARS,
     RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS,
     RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS,
+    RAG_MEMORY_HEURISTIC_SUMMARY_TURNS,
     TOKEN_BUDGET_CHARS_PER_TOKEN,
 )
 from src.platform.memory.schemas import ConversationTurn
@@ -152,7 +153,7 @@ def summarize_heuristic(turns: list[ConversationTurn], max_chars: int = RAG_MEMO
     if not turns:
         return ""
     lines: list[str] = ["Key conversation points:"]
-    for turn in turns[-12:]:
+    for turn in turns[-RAG_MEMORY_HEURISTIC_SUMMARY_TURNS:]:
         prefix = "User" if turn.role == "user" else "Assistant"
         lines.append(f"- {prefix}: {sanitize_memory_text(turn.content, max_chars=RAG_MEMORY_SNIPPET_MAX_CHARS)}")
     return sanitize_memory_text("\n".join(lines), max_chars=max_chars)

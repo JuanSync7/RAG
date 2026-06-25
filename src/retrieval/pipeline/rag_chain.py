@@ -139,6 +139,8 @@ from config.settings import (
     RAG_CONFIDENCE_LLM_WEIGHT,
     RAG_CONFIDENCE_CITATION_WEIGHT,
     RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
+    RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA,
+    RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
     RAG_DOCUMENT_FORMATTING_ENABLED,
     RAG_VISUAL_RETRIEVAL_ENABLED,
     RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS,
@@ -161,6 +163,7 @@ from config.settings import (
     RAG_DOCUMENT_ROUTING_ENABLED,
     RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
     RAG_DOCUMENT_ROUTING_MAX_CANDIDATES,
+    RAG_KG_BM25_APPEND_TERMS,
 )
 # RAPTOR-lite Stage-1 document routing (B3 wiring). Imported into the module
 # namespace so run() can call them directly (and tests can patch them here).
@@ -396,15 +399,14 @@ class RAGChain:
         # a lone hit is self-interpretable; expansion only pulls the SIBLING row
         # blocks of the same table. It is therefore opt-in via
         # RAG_TABLE_EXPANSION_MAX_ROWS (max sibling blocks/group; 0 = no-op).
-        self.enable_table_group_expansion: bool = _os.environ.get(
-            "RAG_TABLE_EXPANSION_ENABLED", "true",
-        ).lower() in ("true", "1", "yes")
-        self.table_expansion_max_rows: int = int(
-            _os.environ.get("RAG_TABLE_EXPANSION_MAX_ROWS", "0")
+        from config.settings import (
+            RAG_TABLE_EXPANSION_ENABLED,
+            RAG_TABLE_EXPANSION_MAX_ROWS,
+            RAG_TABLE_EXPANSION_MAX_GROUPS,
         )
-        self.table_expansion_max_groups: int = int(
-            _os.environ.get("RAG_TABLE_EXPANSION_MAX_GROUPS", "8")
-        )
+        self.enable_table_group_expansion: bool = RAG_TABLE_EXPANSION_ENABLED
+        self.table_expansion_max_rows: int = RAG_TABLE_EXPANSION_MAX_ROWS
+        self.table_expansion_max_groups: int = RAG_TABLE_EXPANSION_MAX_GROUPS
 
         # Cross-reference (xref) expansion — MVP, default-off dark launch.
         # Resolves ``section`` / ``section_symbol`` refs only; table/figure/
@@ -1997,7 +1999,7 @@ class RAGChain:
 
             if not _dr_active:
                 if kg_expanded_terms:
-                    bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
+                    bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:RAG_KG_BM25_APPEND_TERMS])
                 else:
                     bm25_query = processed_query
 
@@ -2361,7 +2363,7 @@ class RAGChain:
 
                     # Build BM25 query with KG terms
                     fb_bm25_query = (
-                        fb_query + " " + " ".join(kg_expanded_terms[:3])
+                        fb_query + " " + " ".join(kg_expanded_terms[:RAG_KG_BM25_APPEND_TERMS])
                         if kg_expanded_terms
                         else fb_query
                     )
@@ -2748,8 +2750,8 @@ class RAGChain:
                     # Reuses already-embedded query to avoid redundant model calls.
                     # Input-rails and PII gate are NOT re-run (query is already clean).
                     first_composite = breakdown.composite
-                    retry_alpha = max(0.0, alpha - 0.15)
-                    retry_search_limit = search_limit + 5
+                    retry_alpha = max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA)
+                    retry_search_limit = search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA
                     retry_bm25_query = bm25_query
 
                     with self.tracer.span("retrieval.re_retrieval", parent=root_span) as rr_span:
@@ -2855,8 +2857,8 @@ class RAGChain:
                     # Retries exhausted — advisory flag for caller-driven broader pass.
                     re_retrieval_suggested = True
                     re_retrieval_params = {
-                        "alpha": max(0.0, alpha - 0.15),
-                        "search_limit": search_limit + 5,
+                        "alpha": max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA),
+                        "search_limit": search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
                         "rerank_top_k": rerank_top_k,
                         "fast_path": True,
                     }
@@ -2882,8 +2884,8 @@ class RAGChain:
                     if first_composite is not None:
                         re_retrieval_suggested = True
                         re_retrieval_params = {
-                            "alpha": max(0.0, alpha - 0.15),
-                            "search_limit": search_limit + 5,
+                            "alpha": max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA),
+                            "search_limit": search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
                             "rerank_top_k": rerank_top_k,
                             "fast_path": True,
                         }

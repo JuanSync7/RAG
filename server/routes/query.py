@@ -23,6 +23,7 @@ from temporalio.service import RPCError  # pyright: ignore[reportMissingImports]
 from config.settings import (
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
+    RAG_MEMORY_TITLE_DERIVE_MAX_CHARS,
 )
 from server.schemas import ApiErrorResponse, QueryRequest, QueryResponse
 from server.schemas import (
@@ -56,7 +57,9 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json_mod.dumps(data).decode()}\n\n"
 
 
-def _derive_title_from_query(query: str, *, max_len: int = 60) -> str:
+def _derive_title_from_query(
+    query: str, *, max_len: int = RAG_MEMORY_TITLE_DERIVE_MAX_CHARS
+) -> str:
     """Condense the user's first query into a short conversation title."""
     text = " ".join(str(query or "").split())
     if not text:

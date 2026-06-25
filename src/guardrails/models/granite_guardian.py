@@ -37,6 +37,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+from config.settings import RAG_GUARDIAN_TOP_LOGPROBS
 from src.guardrails.models.base import (
     Direction,
     GuardianModel,
@@ -127,6 +128,7 @@ class GraniteGuardian(GuardianModel):
         timeout_s: float = 5.0,
         device: Optional[str] = None,
         threshold: float = 0.5,
+        top_logprobs: int = RAG_GUARDIAN_TOP_LOGPROBS,
     ) -> None:
         if mode not in ("transformers", "vllm"):
             raise ValueError(f"unknown mode: {mode!r}")
@@ -136,6 +138,7 @@ class GraniteGuardian(GuardianModel):
         self._api_key = api_key
         self._timeout_s = timeout_s
         self._threshold = threshold
+        self._top_logprobs = top_logprobs
         self._device = device
 
         # Backend-specific lazy state (initialised on first classify call to
@@ -338,7 +341,7 @@ class GraniteGuardian(GuardianModel):
             "max_tokens": 1,
             "temperature": 0.0,
             "logprobs": True,
-            "top_logprobs": 5,
+            "top_logprobs": self._top_logprobs,
             # vLLM-specific passthrough so the chat template sees the risk
             "chat_template_kwargs": {"guardian_config": guardian_config},
         }

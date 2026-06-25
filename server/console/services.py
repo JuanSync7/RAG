@@ -16,7 +16,15 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException
 
-from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL, PROJECT_ROOT
+from config.settings import (
+    DOCUMENTS_DIR,
+    OLLAMA_BASE_URL,
+    PROJECT_ROOT,
+    RAG_CONSOLE_PREVIEW_CONTEXT_CAP,
+    RAG_CONSOLE_PREVIEW_CONTEXT_MIN,
+    RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP,
+    RAG_CONSOLE_PREVIEW_MIN_CHARS,
+)
 from server.schemas import ConsoleLogsResponse
 
 logger = logging.getLogger(__name__)
@@ -213,7 +221,9 @@ def build_source_preview_payload(
     """Build payload for `/console/source-document` preview endpoint."""
     total_chars = len(text)
     # Deliberate preview-size guardrails clamping user-supplied params (200..20000 chars).
-    effective_max_chars = max(200, min(max_chars, 20000))
+    effective_max_chars = max(
+        RAG_CONSOLE_PREVIEW_MIN_CHARS, min(max_chars, RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP)
+    )
     preview_start = 0
     preview_end = min(total_chars, effective_max_chars)
     highlight_start = None
@@ -223,7 +233,9 @@ def build_source_preview_payload(
         safe_start = max(0, min(start, total_chars))
         safe_end = max(safe_start, min(end, total_chars))
         # Deliberate preview-size guardrails clamping user-supplied params (100..5000 chars).
-        context = max(100, min(context_chars, 5000))
+        context = max(
+            RAG_CONSOLE_PREVIEW_CONTEXT_MIN, min(context_chars, RAG_CONSOLE_PREVIEW_CONTEXT_CAP)
+        )
         preview_start = max(0, safe_start - context)
         preview_end = min(total_chars, safe_end + context)
         if preview_end - preview_start > effective_max_chars:

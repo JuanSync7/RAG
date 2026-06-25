@@ -50,6 +50,8 @@ with workflow.unsafe.imports_passed_through():
         RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN,
         RAG_INGEST_TEMPORAL_KG_RETRY_MAX,
         RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S,
+        RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX,
+        RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S,
     )
     from kgweave.contracts import (
         KG_PHASE2B_ACTIVITY,
@@ -164,7 +166,8 @@ _KG_PHASE2B_RETRY = RetryPolicy(
     maximum_interval=timedelta(minutes=5),
     non_retryable_error_types=["document", "system"],
 )
-_LEDGER_RETRY = RetryPolicy(maximum_attempts=3)
+_LEDGER_RETRY = RetryPolicy(maximum_attempts=RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX)
+_LEDGER_TIMEOUT = timedelta(seconds=RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S)
 
 
 def _extract_error_class(exc: BaseException) -> str:
@@ -336,7 +339,7 @@ class IngestDocumentWorkflow:
                     error=str(exc)[:500],
                     error_class=error_class,
                 ),
-                schedule_to_close_timeout=timedelta(seconds=30),
+                schedule_to_close_timeout=_LEDGER_TIMEOUT,
                 retry_policy=_LEDGER_RETRY,
             )
             workflow.logger.warning(
@@ -357,7 +360,7 @@ class IngestDocumentWorkflow:
                 phase="phase2b",
                 success=True,
             ),
-            schedule_to_close_timeout=timedelta(seconds=30),
+            schedule_to_close_timeout=_LEDGER_TIMEOUT,
             retry_policy=_LEDGER_RETRY,
         )
         return ("ok", "", result.entities_added, result.triples_added)
@@ -515,7 +518,7 @@ class BackfillKGWorkflow:
         keys = await workflow.execute_activity(
             list_pending_phase2b_activity,
             ListPendingPhase2bArgs(clean_store_dir=args.clean_store_dir),
-            schedule_to_close_timeout=timedelta(seconds=30),
+            schedule_to_close_timeout=_LEDGER_TIMEOUT,
             retry_policy=_LEDGER_RETRY,
         )
         worklist = list(keys)[: args.max_per_run]
@@ -557,7 +560,7 @@ class BackfillKGWorkflow:
                         error=str(exc)[:500],
                         error_class=error_class,
                     ),
-                    schedule_to_close_timeout=timedelta(seconds=30),
+                    schedule_to_close_timeout=_LEDGER_TIMEOUT,
                     retry_policy=_LEDGER_RETRY,
                 )
                 if error_class in ("document", "system"):
@@ -574,7 +577,7 @@ class BackfillKGWorkflow:
                     phase="phase2b",
                     success=True,
                 ),
-                schedule_to_close_timeout=timedelta(seconds=30),
+                schedule_to_close_timeout=_LEDGER_TIMEOUT,
                 retry_policy=_LEDGER_RETRY,
             )
             succeeded += 1

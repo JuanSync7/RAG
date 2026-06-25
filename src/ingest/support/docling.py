@@ -159,10 +159,15 @@ def _stamp_xref_targets(meta: dict, text: str) -> None:
     meta["xref_targets"] = json.dumps(refs)
 
 try:
-    from config.settings import EMBEDDING_MODEL_PATH, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+    from config.settings import (
+        EMBEDDING_MODEL_PATH,
+        RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
+        RAG_INGESTION_TABLE_DOMINANT_FRACTION,
+    )
 except Exception:  # pragma: no cover — defensive; settings should always import
     EMBEDDING_MODEL_PATH = ""
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS = 1024
+    RAG_INGESTION_TABLE_DOMINANT_FRACTION = 0.6
 
 from src.platform.observability import get_tracer
 
@@ -1516,16 +1521,24 @@ def _table_signature(markdown: str) -> str:
     return ""
 
 
-def _is_table_dominant(chunk_text: str, table_md: str, signature: str) -> bool:
+def _is_table_dominant(
+    chunk_text: str,
+    table_md: str,
+    signature: str,
+    fraction: float = RAG_INGESTION_TABLE_DOMINANT_FRACTION,
+) -> bool:
     """A chunk is "table-dominant" iff it contains the signature row AND the
-    table markdown forms >=60% of the chunk text length.
+    table markdown forms >=``fraction`` (default 0.6) of the chunk text length.
+
+    ``fraction`` is operator-tunable via ``RAG_INGESTION_TABLE_DOMINANT_FRACTION``;
+    the default preserves the historical >=60% threshold.
     """
     if not signature or signature not in chunk_text:
         return False
     text_len = len(chunk_text)
     if text_len == 0:
         return False
-    return (len(table_md) / text_len) >= 0.6
+    return (len(table_md) / text_len) >= fraction
 
 
 def _apply_adaptive_table_chunking(
@@ -1540,6 +1553,12 @@ def _apply_adaptive_table_chunking(
     from src.ingest.support.parser_base import Chunk
 
     prepend_breadcrumb = bool(getattr(cfg, "table_embed_prepend_section_path", True))
+    # Table-dominance threshold: prefer a config override, else the env-backed
+    # setting (default 0.6 preserves the historical >=60% behaviour).
+    _cfg_fraction = getattr(cfg, "table_dominant_fraction", None)
+    dominant_fraction = float(
+        _cfg_fraction if _cfg_fraction is not None else RAG_INGESTION_TABLE_DOMINANT_FRACTION
+    )
     # ONE knob, shared with the prose chunker: the token budget. A table is split
     # into chunks that each restate the header and pack as many WHOLE rows as fit
     # under ``max_tokens``. No row/col gate, no summary-only path, no char cap —
@@ -1568,7 +1587,7 @@ def _apply_adaptive_table_chunking(
         for i, c in enumerate(chunks):
             if i in drop_indices:
                 continue
-            if _is_table_dominant(c.text, md, sig):
+            if _is_table_dominant(c.text, md, sig, dominant_fraction):
                 drop_indices.add(i)
                 insertion_anchor.setdefault(tbl.table_id, i)
                 # Mark only the first match per table; let other matches remain

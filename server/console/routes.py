@@ -18,6 +18,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
+from config.settings import RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD
 from server.common import ApiErrorResponse
 from server.console.services import (
     CONSOLE_HTML_PATH,
@@ -73,7 +74,7 @@ from src.platform import (
 )
 
 
-_PROVENANCE_TRUST_THRESHOLD = 0.9
+_PROVENANCE_TRUST_THRESHOLD = RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD
 
 
 def _resolve_highlight_range(

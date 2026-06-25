@@ -224,6 +224,11 @@ TOKEN_BUDGET_WARN_PERCENT = int(
 TOKEN_BUDGET_CRITICAL_PERCENT = int(
     os.environ.get("RAG_TOKEN_BUDGET_CRITICAL_PERCENT", "90")
 )
+# Assumed prompt-template overhead (chars) reserved by calculate_budget
+# (src/platform/token_budget/provider.py). Default 200.
+TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS = int(
+    os.environ.get("RAG_TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS", "200")
+)
 
 # Query-processing model alias — defaults to the primary LLM model.
 # Used by the retrieval query processor for reformulation/evaluation.
@@ -253,6 +258,17 @@ RAG_INGEST_TEMPORAL_DOC_TIMEOUT_MIN = int(os.environ.get("RAG_INGEST_TEMPORAL_DO
 RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN = int(os.environ.get("RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN", "30"))
 RAG_INGEST_TEMPORAL_RETRY_MAX = int(os.environ.get("RAG_INGEST_TEMPORAL_RETRY_MAX", "3"))
 RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S = int(os.environ.get("RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S", "5"))
+# Status-ledger activity retry/timeout (src/ingest/temporal/workflows.py:_LEDGER_RETRY
+# and the schedule_to_close_timeout on record_phase_status_activity). Defaults 3 / 30s.
+RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX = int(os.environ.get("RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX", "3"))
+RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S = int(os.environ.get("RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S", "30"))
+# In-memory ingest-job registry knobs (server/routes/ingest.py): max recent jobs
+# retained, finished-job retention window, stale-job reaping window, and sweeper
+# sleep interval. Defaults 50 / 3600s / 1800s / 60s.
+RAG_INGEST_MAX_RECENT_JOBS = int(os.environ.get("RAG_INGEST_MAX_RECENT_JOBS", "50"))
+RAG_INGEST_JOB_RETENTION_SECONDS = int(os.environ.get("RAG_INGEST_JOB_RETENTION_SECONDS", "3600"))
+RAG_INGEST_STALE_JOB_SECONDS = int(os.environ.get("RAG_INGEST_STALE_JOB_SECONDS", "1800"))
+RAG_INGEST_SWEEP_INTERVAL_SECONDS = int(os.environ.get("RAG_INGEST_SWEEP_INTERVAL_SECONDS", "60"))
 
 # --- Server ---
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
@@ -494,6 +510,11 @@ RAG_INGESTION_LOSSLESS_MIN_COVERAGE = float(
 RAG_INGESTION_LOSSLESS_STRICT = os.environ.get(
     "RAG_INGESTION_LOSSLESS_STRICT", "false"
 ).lower() in ("true", "1", "yes")
+# Shingle (token-window) size used by the lossless coverage check
+# (src/ingest/support/lossless.py:coverage_report). Default 5.
+RAG_INGESTION_LOSSLESS_SHINGLE_SIZE: int = int(
+    os.environ.get("RAG_INGESTION_LOSSLESS_SHINGLE_SIZE", "5")
+)
 # Production default: KG runs via Temporal handoff (KGWeave worker fleet on
 # KG_TASK_QUEUE). Set to false to skip the KG phase entirely — used by the
 # offline CLI ingest and benchmark scripts that don't run a Temporal cluster.
@@ -562,6 +583,15 @@ carries its embedded breadcrumb — outranks the table that actually holds the
 answer, at BOTH the dense and reranker stages. ``table_markdown`` metadata is left
 unchanged. Changes embedded text -> chunk_id, so flipping this requires a
 re-ingest / collection recreate."""
+
+RAG_INGESTION_TABLE_DOMINANT_FRACTION: float = float(
+    os.environ.get("RAG_INGESTION_TABLE_DOMINANT_FRACTION", "0.6")
+)
+"""Fraction of chunk text that must be table markdown for a chunk to count as
+table-dominant (src/ingest/support/docling.py:_is_table_dominant). Such chunks
+have their prose dropped and are replaced by table-summary / table-row chunks.
+Default 0.6 (>=60%). Changing this alters which chunks are dropped -> chunk_ids
+change, so a re-ingest / recreate is required (same caveat as sibling table knobs)."""
 
 RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
     "RAG_INGESTION_DROP_NAVIGATIONAL", "true"
@@ -785,6 +815,36 @@ RAG_NEMO_FAITHFULNESS_SELF_CHECK = os.environ.get(
 RAG_NEMO_PII_GLINER_ENABLED = os.environ.get(
     "RAG_NEMO_PII_GLINER_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
+# GLiNER entity-confidence threshold gating which PII entities are detected
+# (config/guardrails/shared/gliner_pii.py:GLiNERPIIDetector). Default 0.5.
+RAG_NEMO_PII_GLINER_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_PII_GLINER_THRESHOLD", "0.5")
+)
+
+# Abuse / jailbreak rate heuristics (config/guardrails/actions.py).
+# check_abuse_pattern: more than MAX_QUERIES within WINDOW_SECONDS flags abuse.
+# check_jailbreak_escalation: BLOCK at/above the block threshold, WARN at/above warn.
+RAG_NEMO_ABUSE_WINDOW_SECONDS = int(
+    os.environ.get("RAG_NEMO_ABUSE_WINDOW_SECONDS", "60")
+)
+RAG_NEMO_ABUSE_MAX_QUERIES = int(
+    os.environ.get("RAG_NEMO_ABUSE_MAX_QUERIES", "20")
+)
+RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD = int(
+    os.environ.get("RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD", "3")
+)
+RAG_NEMO_JAILBREAK_WARN_THRESHOLD = int(
+    os.environ.get("RAG_NEMO_JAILBREAK_WARN_THRESHOLD", "1")
+)
+
+# Faithfulness hallucination-penalty scoring (src/guardrails/shared/faithfulness.py).
+# overall score is reduced by min(CAP, n_hallucinated_entities * PER_ENTITY).
+RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY = float(
+    os.environ.get("RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY", "0.1")
+)
+RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP = float(
+    os.environ.get("RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP", "0.3")
+)
 
 # --- Guardian classifier (shared judge model used by multiple rails) ---
 # RAG_GUARDIAN_PROVIDER picks the judge model. Valid: "granite", "self_check", "".
@@ -802,6 +862,10 @@ RAG_GUARDIAN_ENDPOINT = os.environ.get("RAG_GUARDIAN_ENDPOINT", "")
 RAG_GUARDIAN_API_KEY = os.environ.get("RAG_GUARDIAN_API_KEY", "")
 RAG_GUARDIAN_TIMEOUT_S = float(os.environ.get("RAG_GUARDIAN_TIMEOUT_S", "5.0"))
 RAG_GUARDIAN_THRESHOLD = float(os.environ.get("RAG_GUARDIAN_THRESHOLD", "0.5"))
+# Number of top log-probabilities requested per decode position in the
+# Granite Guardian HTTP classify request (src/guardrails/models/granite_guardian.py).
+# The yes/no token scan only inspects this many candidates. Default 5.
+RAG_GUARDIAN_TOP_LOGPROBS = int(os.environ.get("RAG_GUARDIAN_TOP_LOGPROBS", "5"))
 
 # --- Composite Confidence Routing ---
 RAG_CONFIDENCE_ROUTING_ENABLED = os.environ.get(
@@ -824,6 +888,15 @@ RAG_CONFIDENCE_CITATION_WEIGHT = float(
 )
 RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES = int(
     os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES", "1")
+)
+# Broadening deltas applied on low-confidence re-retrieval (Stage 7.5,
+# src/retrieval/pipeline/rag_chain.py): alpha is decreased by ALPHA_DELTA
+# (toward BM25) and search_limit increased by LIMIT_DELTA.
+RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA = float(
+    os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA", "0.15")
+)
+RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA = int(
+    os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA", "5")
 )
 
 # --- Retrieval quality classification thresholds ---
@@ -996,6 +1069,24 @@ RAG_XREF_MAX_TOTAL: int = int(os.environ.get("RAG_XREF_MAX_TOTAL", "6"))
 RAG_XREF_EXTRACT_FIGURE_REFS: bool = os.environ.get(
     "RAG_XREF_EXTRACT_FIGURE_REFS", "true"
 ).lower() in ("true", "1", "yes")
+
+# --- Table-group expansion (retrieval-time) ---
+# Mirrors the RAG_XREF_* budget pattern above. Controls the table-group
+# expansion performed by src.retrieval.pipeline.rag_chain at retrieval time.
+RAG_TABLE_EXPANSION_ENABLED: bool = os.environ.get(
+    "RAG_TABLE_EXPANSION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for retrieval-time table-group expansion. Default True."""
+
+RAG_TABLE_EXPANSION_MAX_ROWS: int = int(
+    os.environ.get("RAG_TABLE_EXPANSION_MAX_ROWS", "0")
+)
+"""Max rows pulled per expanded table group. 0 = no row cap (default)."""
+
+RAG_TABLE_EXPANSION_MAX_GROUPS: int = int(
+    os.environ.get("RAG_TABLE_EXPANSION_MAX_GROUPS", "8")
+)
+"""Max number of table groups expanded for a single query. Default 8."""
 
 # --- Visual Embedding Pipeline ---
 RAG_INGESTION_ENABLE_VISUAL_EMBEDDING: bool = os.environ.get(
@@ -1238,6 +1329,11 @@ RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS: int = int(
 RAG_LLM_ONESHOT_MAX_TOKENS: int = int(
     os.environ.get("RAG_LLM_ONESHOT_MAX_TOKENS", "256")
 )
+# Default max concurrency (ThreadPoolExecutor workers / asyncio.Semaphore size)
+# for the LLM batch/abatch helpers (src/common/llm/batch.py). Default 10.
+RAG_LLM_BATCH_MAX_CONCURRENCY: int = int(
+    os.environ.get("RAG_LLM_BATCH_MAX_CONCURRENCY", "10")
+)
 
 # --- Platform: Memory text limits ---
 RAG_MEMORY_SUMMARY_MAX_CHARS: int = int(
@@ -1253,6 +1349,29 @@ RAG_MEMORY_SNIPPET_MAX_CHARS: int = int(
 # --- Platform: Observability ---
 RAG_OBSERVABILITY_MAX_CAPTURE_LEN: int = int(
     os.environ.get("RAG_OBSERVABILITY_MAX_CAPTURE_LEN", "500")
+)
+
+# --- Web Console ---
+# Provenance-trust floor above which a citation highlight range is trusted
+# (server/console/routes.py:_resolve_highlight_range). Default 0.9.
+RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD: float = float(
+    os.environ.get("RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD", "0.9")
+)
+# Source-document preview clamp bounds (server/console/services.py:
+# build_source_preview_payload). MIN/MAX cap the user-supplied max_chars; the
+# CONTEXT_MIN/CONTEXT_CAP cap the surrounding context window. Defaults 200 /
+# 20000 / 100 / 5000.
+RAG_CONSOLE_PREVIEW_MIN_CHARS: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_MIN_CHARS", "200")
+)
+RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP", "20000")
+)
+RAG_CONSOLE_PREVIEW_CONTEXT_MIN: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_CONTEXT_MIN", "100")
+)
+RAG_CONSOLE_PREVIEW_CONTEXT_CAP: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_CONTEXT_CAP", "5000")
 )
 
 # --- Platform: Reliability / retry defaults ---
@@ -1309,6 +1428,23 @@ RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS: int = int(
 # ones explicitly. Identical defaults, so this removes the duplicate knobs.
 RAG_GUARDRAILS_INJECTION_LP_THRESHOLD: float = RAG_NEMO_INJECTION_LP_THRESHOLD
 RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD: float = RAG_NEMO_INJECTION_PS_PPL_THRESHOLD
+# Query-length input rail bounds (config/guardrails/actions.py:check_query_length).
+# Queries shorter than MIN or longer than MAX are aborted by the first input rail.
+RAG_GUARDRAILS_QUERY_MIN_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_QUERY_MIN_CHARS", "3")
+)
+RAG_GUARDRAILS_QUERY_MAX_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_QUERY_MAX_CHARS", "2000")
+)
+# Answer-length output rail bounds (config/guardrails/actions.py:check_answer_length
+# / adjust_answer_length). MAX also drives the truncation cap so the check and the
+# clamp share one constant.
+RAG_GUARDRAILS_ANSWER_MIN_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_ANSWER_MIN_CHARS", "20")
+)
+RAG_GUARDRAILS_ANSWER_MAX_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_ANSWER_MAX_CHARS", "5000")
+)
 
 # --- Ingest: misc support helpers ---
 RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS: int = int(
@@ -1328,6 +1464,11 @@ RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS: int = int(
 RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS: int = int(
     os.environ.get("RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS", "1800")
 )
+# Number of most-recent turns folded into the heuristic-summary fallback
+# (src/platform/memory/utils.py:summarize_heuristic). Default 12.
+RAG_MEMORY_HEURISTIC_SUMMARY_TURNS: int = int(
+    os.environ.get("RAG_MEMORY_HEURISTIC_SUMMARY_TURNS", "12")
+)
 RAG_MEMORY_CONTEXT_MAX_CHARS: int = int(
     os.environ.get("RAG_MEMORY_CONTEXT_MAX_CHARS", "5000")
 )
@@ -1340,8 +1481,19 @@ RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS: int = int(
 RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS: int = int(
     os.environ.get("RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS", "200")
 )
+# Condensation cap (chars) for auto-derived conversation titles
+# (server/routes/query.py:_derive_title_from_query). Distinct from the 200-char
+# storage clamp above. Default 60.
+RAG_MEMORY_TITLE_DERIVE_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_TITLE_DERIVE_MAX_CHARS", "60")
+)
 RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT: int = int(
     os.environ.get("RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT", "100")
+)
+# Default page size for list_conversations across memory providers
+# (src/platform/memory/provider.py). Mirrors RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT.
+RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT", "50")
 )
 
 # --- Platform: Token budget ---
@@ -1357,6 +1509,11 @@ RAG_LLM_CACHE_DEFAULT_TTL_S: int = int(
 # --- Retrieval: query/pipeline (extended) ---
 RAG_QUERY_KG_MATCH_MAX_TERMS: int = int(
     os.environ.get("RAG_QUERY_KG_MATCH_MAX_TERMS", "20")
+)
+# Number of KG-expanded terms appended to the BM25 query in the primary and
+# fallback retrieval paths (src/retrieval/pipeline/rag_chain.py). Default 3.
+RAG_KG_BM25_APPEND_TERMS: int = int(
+    os.environ.get("RAG_KG_BM25_APPEND_TERMS", "3")
 )
 RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS", "8000")
@@ -1521,6 +1678,13 @@ RAG_DOCUMENT_ROUTING_BOOST: float = float(
 """Tiny optional tie-break boost for routed-doc candidates. Default 0.0 = no
 score influence (rerank decides). Soft only — never a hard filter."""
 
+RAG_DOCUMENT_ROUTING_ALPHA: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_ALPHA", "1.0")
+)
+"""Hybrid-search alpha used by the Stage-1 card router
+(src/retrieval/routing/router.py). 1.0 = pure-vector card routing (default,
+an intentional invariant); lower values blend in the BM25 component."""
+
 RAG_DOCUMENT_CARD_COLLECTION: str = os.environ.get(
     "RAG_DOCUMENT_CARD_COLLECTION", "RAGDocumentCards"
 )
@@ -1547,6 +1711,18 @@ RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS: int = int(
     os.environ.get("RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS", "8")
 )
 """Per-call timeout for the Tier-2 decomposition LLM call."""
+
+RAG_DECOMPOSITION_LLM_MAX_TOKENS: int = int(
+    os.environ.get("RAG_DECOMPOSITION_LLM_MAX_TOKENS", "256")
+)
+"""Max output tokens for the Tier-2 decomposition LLM call. Tight by design —
+the response is a short sub-query list, and a low cap keeps latency down."""
+
+RAG_DECOMPOSITION_LLM_TEMPERATURE: float = float(
+    os.environ.get("RAG_DECOMPOSITION_LLM_TEMPERATURE", "0.0")
+)
+"""Sampling temperature for the Tier-2 decomposition LLM call. 0.0 =
+deterministic extraction (default)."""
 
 RAG_DECOMPOSITION_MIN_SUBQUERIES: int = int(
     os.environ.get("RAG_DECOMPOSITION_MIN_SUBQUERIES", "2")

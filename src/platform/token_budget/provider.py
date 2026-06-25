@@ -25,6 +25,7 @@ from config.settings import (
     LLM_MODEL,
     TOKEN_BUDGET_CHARS_PER_TOKEN,
     TOKEN_BUDGET_DEFAULT_CONTEXT_LENGTH,
+    TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS,
     RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S,
 )
 from src.platform.token_budget.schemas import (
@@ -205,7 +206,7 @@ def calculate_budget(
     memory_context: str | None = None,
     chunks: list[str] | None = None,
     query: str | None = None,
-    template_overhead_chars: int = 200,
+    template_overhead_chars: int | None = None,
     output_reservation: int | None = None,
     model: str | None = None,
 ) -> TokenBudgetSnapshot:
@@ -235,8 +236,13 @@ def calculate_budget(
     mem_tokens = count_tokens(text=memory_context, model=mdl)
     chunk_tokens = sum(count_tokens(text=c, model=mdl) for c in (chunks or []))
     query_tokens = count_tokens(text=query, model=mdl)
+    overhead_chars = (
+        template_overhead_chars
+        if template_overhead_chars is not None
+        else TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS
+    )
     overhead_tokens = max(
-        0, template_overhead_chars // max(1, TOKEN_BUDGET_CHARS_PER_TOKEN)
+        0, overhead_chars // max(1, TOKEN_BUDGET_CHARS_PER_TOKEN)
     )
 
     input_tokens = sp_tokens + mem_tokens + chunk_tokens + query_tokens + overhead_tokens
