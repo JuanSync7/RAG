@@ -100,7 +100,7 @@ services:
     ports:
       - "${RAG_TEMPORAL_UI_PORT:-8080}:8080"
     environment:
-      - TEMPORAL_ADDRESS=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:${LANGFUSE_PORT:-3000}
     depends_on:
       - temporal
@@ -122,7 +122,7 @@ services:
       - "${RAG_API_HOST_PORT:-8000}:${RAG_API_PORT:-8000}"
     environment:
       - RAG_API_PORT=${RAG_API_PORT:-8000}
-      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
       # API stream-generation needs Ollama access too.
       - RAG_OLLAMA_URL=http://rag-ollama:11434
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
@@ -130,9 +130,9 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
       - RAG_MEMORY_PROVIDER=redis
-      - RAG_MEMORY_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_MEMORY_REDIS_URL=redis://rag-redis:6379/0
       - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
       - DATABASE_URL=postgresql://litellm:litellm@rag-postgres:5432/litellm
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
@@ -200,7 +200,7 @@ services:
         kgweave: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
     command: python -m server.worker
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
       # Ollama is expected to run on the host in this setup.
       # The proxy port forwards to the actual Ollama port on 127.0.0.1.
       - RAG_OLLAMA_URL=http://rag-ollama:11434
@@ -219,7 +219,7 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
       - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
       - RAG_STAGE_BUDGET_EMBEDDING_MS=${RAG_STAGE_BUDGET_EMBEDDING_MS:-8000}
       - RAG_STAGE_BUDGET_RERANKING_MS=${RAG_STAGE_BUDGET_RERANKING_MS:-15000}
