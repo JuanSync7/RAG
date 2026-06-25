@@ -1,115 +1,51 @@
 # =============================================================================
-# RagWeave DEV overlay — uk-ai03, full mirror of prod, isolated alongside it.
+# DEV overlay — uk-ai03, full mirror of prod, isolated alongside it.
 #
-# THIN overlay on docker-compose.yml (the canonical base). Defines only DEV
-# deltas — base provides every service definition. Run via the wrapper:
+# THIN env overlay. Layered: base (docker-compose.yml) + ai03 platform layer
+# (docker-compose.ai03.yml) + this. Carries ONLY dev-specific deltas:
+#   - container_name (-dev) so nothing collides with prod
+#   - dev bind-mount paths / a project-scoped weaviate volume
+# Host-port remaps + COMPOSE_PROJECT_NAME=ragweave-dev live in .env.dev.
+# The shared ai03 config (vLLM tunnel, qwen3 env, rootless tweaks) is in the
+# ai03 layer. No API-front nginx in dev — the API is reached directly on :8102.
 #
-#     ./scripts/dev-up.sh up -d           # or: down / restart / logs ...
+# Run:  ./scripts/dev-up.sh up -d
 #
-# which expands to:
-#     podman compose -f docker-compose.yml -f docker-compose.dev.yml \
-#       --env-file .env.dev -p ragweave-dev \
-#       --profile app --profile workers --profile observability --profile monitoring <args>
-#
-# Isolation: COMPOSE_PROJECT_NAME=ragweave-dev (in .env.dev) auto-scopes networks
-# and named volumes; this file overrides container_name (-dev), bind-mount paths,
-# the qwen3 + Langfuse env, and the rootless-podman bits. Host port remaps live
-# in .env.dev. Embed/rerank/gen are remote on uk-ai01 vLLM via rag-vllm-tunnel.
-#
-# Dev corpus: re-ingested fresh into the (named, project-scoped) weaviate volume.
+# Dev corpus: re-ingested fresh into the project-scoped weaviate-dev-data volume.
 # =============================================================================
 services:
-
-  # --- New service: SSH tunnel to uk-ai01 vLLM (gen 18000, embed 18002, rerank 18005)
   rag-vllm-tunnel:
-    image: alpine:3.20
     container_name: rag-vllm-tunnel-dev
-    command: >
-      sh -c "apk add --no-cache openssh-client >/dev/null 2>&1 &&
-             exec ssh -N -T -o BatchMode=yes -o StrictHostKeyChecking=no
-                  -o ServerAliveInterval=15 -o ServerAliveCountMax=3
-                  -o ExitOnForwardFailure=yes -i /key -l Juan.Kok
-                  -L 0.0.0.0:18000:127.0.0.1:8000
-                  -L 0.0.0.0:18001:127.0.0.1:8001
-                  -L 0.0.0.0:18002:127.0.0.1:8002
-                  -L 0.0.0.0:18005:127.0.0.1:8005
-                  ai01.atlas.aionsilicon.local"
-    volumes:
-      - /home/Juan.Kok/.ssh/id_ed25519:/key:ro
-    restart: unless-stopped
 
   rag-postgres:
     container_name: rag-postgres-dev
-
   pg-maintenance:
     container_name: rag-pg-maintenance-dev
-
   temporal-db:
     container_name: rag-temporal-db-dev
-
   temporal:
-    container_name: rag-temporal-dev   # host port via RAG_TEMPORAL_PORT in .env.dev
-
+    container_name: rag-temporal-dev
   temporal-ui:
     container_name: rag-temporal-ui-dev
-
   rag-minio:
     container_name: rag-minio-dev
-
   rag-redis:
     container_name: rag-redis-dev
-    # Rootless podman: skip the image entrypoint's su-exec drop to the redis user.
-    entrypoint: redis-server
-    command: ["--appendonly", "yes", "--bind", "0.0.0.0"]
 
   rag-weaviate:
     container_name: rag-weaviate-dev
-    # Use a project-scoped named volume (auto-isolated from prod) instead of the
-    # base's ./.weaviate_data bind; the memwrap.sh mount from base is preserved.
+    # Project-scoped named volume (auto-isolated from prod); base's memwrap mount
+    # is preserved by the merge.
     volumes:
       - weaviate-dev-data:/var/lib/weaviate
 
   rag-api:
     container_name: rag-api-dev
-    image: rag-api:local
-    environment:
-      # qwen3 embed/rerank + qwopus gen, all via the dev vLLM tunnel.
-      - RAG_INFERENCE_BACKEND=http
-      - RAG_EMBED_URL=http://rag-vllm-tunnel:18002
-      - RAG_RERANK_URL=http://rag-vllm-tunnel:18005
-      - RAG_EMBED_MODEL=qwen3-embed-4b
-      - RAG_RERANK_MODEL=qwen3-reranker-4b
-      - RAG_LLM_API_BASE=http://rag-vllm-tunnel:18000/v1
-      - RAG_LLM_MODEL=hosted_vllm/qwopus-9b
-      - RAG_LLM_QUERY_MODEL=hosted_vllm/qwopus-9b
-      # Langfuse tracing on (full stack).
-      - RAG_OBSERVABILITY_PROVIDER=langfuse
-      - LANGFUSE_HOST=http://langfuse-web:3000
     volumes:
       - ./.runtime-dev:/app/.runtime
-    depends_on:
-      rag-vllm-tunnel:
-        condition: service_started
-
   rag-worker:
     container_name: rag-worker-dev
-    image: rag-worker:local
-    environment:
-      - RAG_INFERENCE_BACKEND=http
-      - RAG_EMBED_URL=http://rag-vllm-tunnel:18002
-      - RAG_RERANK_URL=http://rag-vllm-tunnel:18005
-      - RAG_EMBED_MODEL=qwen3-embed-4b
-      - RAG_RERANK_MODEL=qwen3-reranker-4b
-      - RAG_LLM_API_BASE=http://rag-vllm-tunnel:18000/v1
-      - RAG_LLM_MODEL=hosted_vllm/qwopus-9b
-      - RAG_INGESTION_LLM_MODEL=hosted_vllm/qwopus-9b
-      - RAG_OBSERVABILITY_PROVIDER=langfuse
-      - LANGFUSE_HOST=http://langfuse-web:3000
-    depends_on:
-      rag-vllm-tunnel:
-        condition: service_started
 
-  # --- Langfuse (observability profile): dev container names ------------------
   langfuse-postgres:
     container_name: rag-langfuse-postgres-dev
   langfuse-redis:
@@ -121,22 +57,16 @@ services:
   langfuse-worker:
     container_name: rag-langfuse-worker-dev
   langfuse-web:
-    container_name: rag-langfuse-web-dev   # host port via LANGFUSE_PORT in .env.dev
+    container_name: rag-langfuse-web-dev
 
-  # --- Metrics (monitoring profile): dev names + rootless user ----------------
   prometheus:
     container_name: rag-prometheus-dev
-    user: root
   alertmanager:
     container_name: rag-alertmanager-dev
-    user: root
   grafana:
     container_name: rag-grafana-dev
-    user: root
-
   dozzle:
     container_name: rag-monitor-dev
-    user: "0:0"   # CONTAINER_SOCK (podman sock) + DOZZLE_HOST_PORT in .env.dev
 
 volumes:
   weaviate-dev-data:

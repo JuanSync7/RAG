@@ -17,6 +17,7 @@ cd "$(dirname "$0")/.."
 
 exec podman compose \
   -f docker-compose.yml \
+  -f docker-compose.ai03.yml \
   -f docker-compose.dev.yml \
   --env-file .env.dev \
   -p ragweave-dev \
