@@ -1,5 +1,7 @@
 <!-- @summary
-Operations documentation: platform spec/implementation, Podman migration guide and architecture, and 100-user execution plan.
+Operations documentation: deployment topology (uk-ai03 prod+dev), platform
+spec/implementation, Podman migration guide and architecture, and 100-user
+execution plan.
 @end-summary -->
 
 # docs/operations
@@ -12,6 +14,7 @@ Engineering documentation for deploying, operating, and scaling the RAG platform
 
 | File | Purpose |
 | --- | --- |
+| `DEPLOYMENT_TOPOLOGY.md` | **Start here** — what runs where on uk-ai03: the base+ai03+env compose layering, the prod and dev stacks (live vs target), the uk-ai01 vLLM inference path, how to operate each, and the prod cutover plan |
 | `OPERATIONS_PLATFORM_SPEC.md` | Operations platform specification (deployment profiles, scaling, monitoring, DR, CI/CD) |
 | `OPERATIONS_PLATFORM_IMPLEMENTATION.md` | Operations platform implementation guide |
 | `PODMAN_SPEC.md` | Podman migration specification (rootless containers, drop-in Docker replacement) |
