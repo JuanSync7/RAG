@@ -43,6 +43,10 @@ class LLMConfig:
     query_model: Optional[str] = None
     controller_model: Optional[str] = None
     judge_model: Optional[str] = None
+    # Optional per-alias API base (fall back to ``api_base`` when None) so the
+    # controller/judge can run on a different endpoint than the default model.
+    controller_api_base: Optional[str] = None
+    judge_api_base: Optional[str] = None
 
 
 @dataclass

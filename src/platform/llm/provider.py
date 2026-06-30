@@ -21,8 +21,10 @@ from litellm import Router
 from config.settings import (
     LLM_API_BASE,
     LLM_API_KEY,
+    LLM_CONTROLLER_API_BASE,
     LLM_CONTROLLER_MODEL,
     LLM_FALLBACK_MODELS,
+    LLM_JUDGE_API_BASE,
     LLM_JUDGE_MODEL,
     LLM_MAX_TOKENS,
     LLM_MODEL,
@@ -133,15 +135,16 @@ def _build_router_from_env(config: LLMConfig) -> Router:
     # model when one is configured, otherwise it is aliased to the default model
     # so the agentic loop works with zero new deployment (controller/judge fall
     # back to the default model). Mirrors the "query" alias handling above.
-    for alias_name, alias_model in (
-        ("controller", config.controller_model),
-        ("judge", config.judge_model),
+    for alias_name, alias_model, alias_base in (
+        ("controller", config.controller_model, config.controller_api_base),
+        ("judge", config.judge_model, config.judge_api_base),
     ):
+        _base = alias_base or config.api_base
         model_list.append({
             "model_name": alias_name,
             "litellm_params": {
                 "model": alias_model or config.model,
-                **({"api_base": config.api_base} if config.api_base else {}),
+                **({"api_base": _base} if _base else {}),
                 **({"api_key": config.api_key} if config.api_key else {}),
             },
         })
@@ -192,6 +195,8 @@ class LLMProvider:
             query_model=LLM_QUERY_MODEL or None,
             controller_model=LLM_CONTROLLER_MODEL or None,
             judge_model=LLM_JUDGE_MODEL or None,
+            controller_api_base=LLM_CONTROLLER_API_BASE or None,
+            judge_api_base=LLM_JUDGE_API_BASE or None,
         )
 
         if router:

@@ -245,6 +245,11 @@ LLM_QUERY_MODEL = os.environ.get(
 # to upgrade judge quality without any code change. See AGENTIC_RETRIEVAL_DESIGN.md.
 LLM_CONTROLLER_MODEL = os.environ.get("RAG_LLM_CONTROLLER_MODEL", "")
 LLM_JUDGE_MODEL = os.environ.get("RAG_LLM_JUDGE_MODEL", "")
+# Optional per-alias API base — lets the controller/judge run on a DIFFERENT
+# endpoint than the default/gen model (e.g. a fast local instruct judge on its own
+# vLLM port), instead of sharing RAG_LLM_API_BASE. Empty = share the default base.
+LLM_CONTROLLER_API_BASE = os.environ.get("RAG_LLM_CONTROLLER_API_BASE", "")
+LLM_JUDGE_API_BASE = os.environ.get("RAG_LLM_JUDGE_API_BASE", "")
 
 # --- Reliability / Retry ---
 RETRY_PROVIDER = os.environ.get("RAG_RETRY_PROVIDER", "local")
