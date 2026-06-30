@@ -127,6 +127,13 @@ class AgenticState:
     judge_calls: int = 0
     ranker_calls: int = 0  # finalize cross-round re-rank calls
     backfilled: int = 0    # chunks added by the anti-refusal floor
+    # Rounds where the controller HyDE returned None -> the loop fell back to
+    # embedding the LITERAL query instead of an answer-space hypothetical. A
+    # nonzero count is a SILENT-DEGRADATION alarm: e.g. a reasoning controller
+    # model emitting empty content under the small HyDE token budget. When this
+    # is high, the loop is no longer doing HyDE at all — just plain retrieval —
+    # which is exactly the failure that hid here until it was surfaced.
+    hyde_failures: int = 0
     stop_reason: Optional[str] = None
 
 
@@ -146,6 +153,10 @@ class AgenticResult:
     ranker: str = "judge"
     ranker_calls: int = 0
     backfilled: int = 0
+    # Count of rounds whose HyDE generation failed (controller returned None) and
+    # silently degraded to literal-query retrieval. Surfaced in telemetry so this
+    # class of silent failure is observable per request, never undiagnosed.
+    hyde_failures: int = 0
     stop_reason: str = ""
     elapsed_ms: float = 0.0
 
@@ -161,6 +172,7 @@ class AgenticResult:
             "ranker": self.ranker,
             "ranker_calls": int(self.ranker_calls),
             "backfilled": int(self.backfilled),
+            "hyde_failures": int(self.hyde_failures),
             "stop_reason": self.stop_reason,
             "elapsed_ms": float(self.elapsed_ms),
         }

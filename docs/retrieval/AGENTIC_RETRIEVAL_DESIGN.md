@@ -140,6 +140,19 @@ open often and the order degrades to **raw-hybrid (~0.671)** — still better th
 the cross-encoder (0.408), so enabling the loop never silently underperforms
 hybrid, but the headline win needs a reliable judge.
 
+> **The `controller` (HyDE) alias MUST be an instruct model, not a reasoning
+> model.** HyDE is short structured generation under a small token budget
+> (`RAG_AGENTIC_HYDE_MAX_TOKENS`, default 256). A reasoning model spends that
+> entire budget inside its hidden `<think>` block and returns **empty content**,
+> so HyDE yields `None` and the loop silently degrades to embedding the *literal*
+> query — discarding the answer-space HyDE that lifts answer-bearing chunks into
+> the keep window. This failure is now counted as **`hyde_failures`** in the
+> agentic telemetry; a persistently nonzero value means the controller is
+> mis-provisioned (point its alias at the same instruct model as the judge). On
+> uk-ai03 dev, both run on the qwen2.5-7b instruct model via the `:18005` tunnel
+> (`docker-compose.dev.yml`), with `RAG_AGENTIC_LLM_JSON_MODE=true` for guided
+> JSON on both calls.
+
 ## 5. Configuration (`config/settings.py`, `RAG_AGENTIC_*`)
 
 | Key | Default | Effect |

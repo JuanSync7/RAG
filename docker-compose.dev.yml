@@ -41,10 +41,24 @@ services:
 
   rag-api:
     container_name: rag-api-dev
+    # Agentic retrieval is a DEV-ONLY feature (prod stays linear, so these live
+    # in the dev overlay, never the shared ai03 layer). HyDE + judge both run on
+    # the fast instruct model on the :18005 tunnel: the controller alias points
+    # at the `judge` deployment because the controller MUST be an instruct model
+    # — a reasoning model emits empty HyDE under the token budget and the loop
+    # silently degrades to literal-query retrieval (watch `hyde_failures` in the
+    # agentic telemetry). See the RAG_AGENTIC_CONTROLLER_MODEL_ALIAS docstring.
+    environment: &agentic-dev-env
+      - RAG_AGENTIC_RETRIEVAL_ENABLED=true
+      - RAG_LLM_JUDGE_MODEL=hosted_vllm/qwen2.5-7b-judge
+      - RAG_LLM_JUDGE_API_BASE=http://rag-vllm-tunnel:18005/v1
+      - RAG_AGENTIC_CONTROLLER_MODEL_ALIAS=judge
+      - RAG_AGENTIC_LLM_JSON_MODE=true
     volumes:
       - ./.runtime-dev:/app/.runtime
   rag-worker:
     container_name: rag-worker-dev
+    environment: *agentic-dev-env
 
   langfuse-postgres:
     container_name: rag-langfuse-postgres-dev

@@ -427,6 +427,30 @@ def test_judge_fail_open_preserves_hybrid_order_not_flat():
     assert [r.text for r in result.reranked] == ["chunk 0", "chunk 1", "chunk 2", "chunk 3"]
 
 
+def test_hyde_failure_is_counted_in_telemetry():
+    """Regression (silent-degradation class): when the controller HyDE returns
+    nothing parseable, the loop falls back to the LITERAL query — and that MUST be
+    observable. ``hyde_failures`` counts it so a mis-provisioned controller (e.g. a
+    reasoning model emitting empty content under the HyDE token budget) cannot hide
+    as 'working'. This is the exact failure that went undiagnosed in deployment."""
+    async def retrieve(hyde_answer, search_terms):
+        return [_sr(i, f"chunk {i}") for i in range(3)]
+
+    provider = RoutingProvider(
+        hyde={},  # empty -> no hypothetical_answer -> generate_hyde returns None
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(3)],
+               "ranking": [0, 1, 2], "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1), final_top_k=3)
+    result = asyncio.run(orch.run())
+
+    assert result.hyde_failures == 1
+    assert result.telemetry()["hyde_failures"] == 1
+    # The fallback still retrieved + kept (degraded, never worse than baseline).
+    assert result.kept_count == 3
+
+
 def test_single_round_drops_unfaithful_chunk():
     async def retrieve(hyde_answer, search_terms):
         return [_sr(i, f"body chunk {i}") for i in range(3)]

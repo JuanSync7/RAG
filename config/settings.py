@@ -1310,7 +1310,17 @@ RAG_AGENTIC_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
     "RAG_AGENTIC_CONTROLLER_MODEL_ALIAS", "controller"
 )
 """LLMProvider router alias for the controller (next-HyDE / finalize). Falls
-back to 'query' → 'default' when the alias model env is unset."""
+back to 'query' → 'default' when the alias model env is unset.
+
+MUST resolve to an INSTRUCT model, not a reasoning model. HyDE is short
+structured generation under a small token budget (``RAG_AGENTIC_HYDE_MAX_TOKENS``,
+default 256); a reasoning model spends that entire budget inside its hidden
+``<think>`` block and emits EMPTY content, so HyDE returns None and the loop
+silently degrades to embedding the literal query (forfeiting the answer-space
+HyDE that lifts answer-bearing chunks into the keep window). Point this alias at
+a fast instruct model (the same one as ``RAG_AGENTIC_JUDGE_MODEL_ALIAS`` is a
+fine default) and watch ``hyde_failures`` in the agentic telemetry — a nonzero
+count means the controller is mis-provisioned."""
 
 RAG_AGENTIC_JUDGE_MODEL_ALIAS: str = os.environ.get(
     "RAG_AGENTIC_JUDGE_MODEL_ALIAS", "judge"

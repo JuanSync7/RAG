@@ -151,6 +151,7 @@ class AgenticRetrieval:
             ranker=self._ranker,
             ranker_calls=s.ranker_calls,
             backfilled=s.backfilled,
+            hyde_failures=s.hyde_failures,
             stop_reason=s.stop_reason or "single_round",
             elapsed_ms=elapsed_ms,
         )
@@ -379,7 +380,12 @@ class AgenticRetrieval:
         s.llm_calls += 1
         if variant is None:
             # Fail-open: embed the processed query itself → one standard hybrid
-            # search. Never worse than the baseline linear path.
+            # search. Never worse than the baseline linear path — BUT it forfeits
+            # the answer-space HyDE advantage, so count it: a persistently nonzero
+            # hyde_failures means the controller is mis-provisioned (e.g. a
+            # reasoning model returning empty content under the token budget) and
+            # the loop is silently running plain literal-query retrieval.
+            s.hyde_failures += 1
             return HydeVariant(
                 hypothetical_answer=s.processed_query,
                 search_terms=[],
