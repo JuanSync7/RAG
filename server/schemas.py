@@ -125,6 +125,55 @@ class QueryRequest(BaseModel):
             "for analytical / multi-aspect questions."
         ),
     )
+    agentic_retrieval: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Per-request override for the agentic HyDE/controller/judge "
+            "retrieval loop. ``None`` (default) uses the "
+            "``RAG_AGENTIC_RETRIEVAL_ENABLED`` config setting. ``true``/"
+            "``false`` force on/off for this request only. Replaces the "
+            "linear kg_expand → embed → hybrid_search → rerank stages with a "
+            "controller LLM that drives retrieval as a tool, generating HyDE "
+            "and judging each chunk for relevance/faithfulness until the kept "
+            "set is sufficient. See AGENTIC_RETRIEVAL_DESIGN.md."
+        ),
+    )
+    max_agentic_rounds: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description=(
+            "Per-request override of the agentic round cap (number of distinct "
+            "HyDE variants tried). Clamped to ``RAG_AGENTIC_MAX_ROUNDS`` at "
+            "runtime. Only consulted when the agentic loop is active."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_agentic_retrieval(self) -> "QueryRequest":
+        if self.agentic_retrieval is True:
+            if self.deep_research:
+                raise ValueError(
+                    "agentic_retrieval and deep_research cannot both be "
+                    "enabled — they are competing retrieval orchestrators that "
+                    "each replace the linear stages 2-5"
+                )
+            if self.tree_retrieval is True:
+                raise ValueError(
+                    "agentic_retrieval and tree_retrieval cannot both be "
+                    "forced on — the agentic loop replaces the linear "
+                    "hybrid-search stage that tree retrieval extends"
+                )
+            if (
+                self.fast_path is True
+                and self.max_agentic_rounds is not None
+                and self.max_agentic_rounds > 1
+            ):
+                raise ValueError(
+                    "fast_path forces a single agentic round; "
+                    "max_agentic_rounds>1 contradicts it"
+                )
+        return self
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -355,6 +404,32 @@ class ConsoleQueryRequest(BaseModel):
     extra_processing: bool = Field(default=False)
     tree_retrieval: Optional[bool] = Field(default=None)
     deep_research: bool = Field(default=False)
+    agentic_retrieval: Optional[bool] = Field(default=None)
+    max_agentic_rounds: Optional[int] = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _validate_agentic_retrieval(self) -> "ConsoleQueryRequest":
+        if self.agentic_retrieval is True:
+            if self.deep_research:
+                raise ValueError(
+                    "agentic_retrieval and deep_research cannot both be "
+                    "enabled — they are competing retrieval orchestrators"
+                )
+            if self.tree_retrieval is True:
+                raise ValueError(
+                    "agentic_retrieval and tree_retrieval cannot both be "
+                    "forced on"
+                )
+            if (
+                self.fast_path is True
+                and self.max_agentic_rounds is not None
+                and self.max_agentic_rounds > 1
+            ):
+                raise ValueError(
+                    "fast_path forces a single agentic round; "
+                    "max_agentic_rounds>1 contradicts it"
+                )
+        return self
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.

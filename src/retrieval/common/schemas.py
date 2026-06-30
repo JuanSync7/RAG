@@ -73,6 +73,15 @@ class RAGRequest:
     # None = use the global ``RAG_TREE_RETRIEVAL_ENABLED`` config default.
     # True/False = force on/off for this request only.
     tree_retrieval: Optional[bool] = None
+    # Per-request retrieval-mode flags that flow straight to ``RAGChain.run``.
+    mode: str = "query"
+    retrieval_sub_mode: str = "auto"
+    extra_processing: bool = False
+    deep_research: bool = False
+    # Agentic-retrieval per-request override (AGENTIC_RETRIEVAL_DESIGN.md).
+    # None = use the global ``RAG_AGENTIC_RETRIEVAL_ENABLED`` config default.
+    agentic_retrieval: Optional[bool] = None
+    max_agentic_rounds: Optional[int] = None
 
 
 @dataclass

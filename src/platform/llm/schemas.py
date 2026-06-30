@@ -41,6 +41,8 @@ class LLMConfig:
     fallback_models: list[str] = field(default_factory=list)
     vision_model: Optional[str] = None
     query_model: Optional[str] = None
+    controller_model: Optional[str] = None
+    judge_model: Optional[str] = None
 
 
 @dataclass

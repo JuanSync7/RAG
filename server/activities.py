@@ -19,6 +19,7 @@ from typing import Optional
 
 from temporalio import activity
 from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
+from config.settings import RAG_AGENTIC_RETRIEVAL_ENABLED
 from src.platform.cache import get_cache
 from src.platform import (
     CACHE_HITS,
@@ -96,6 +97,24 @@ def execute_rag_query(request: dict) -> dict:
     _tree = request.get("tree_retrieval")
     tree_retrieval: Optional[bool] = _tree if isinstance(_tree, bool) else None
     deep_research: bool = bool(request.get("deep_research") or False)
+    # Agentic-retrieval per-request override (AGENTIC_RETRIEVAL_DESIGN.md).
+    # Only treat as override when explicitly present and bool-typed; else None
+    # so the resolution falls back to the RAG_AGENTIC_RETRIEVAL_ENABLED config.
+    _agentic = request.get("agentic_retrieval")
+    agentic_retrieval: Optional[bool] = _agentic if isinstance(_agentic, bool) else None
+    _max_rounds = request.get("max_agentic_rounds")
+    max_agentic_rounds: Optional[int] = (
+        int(_max_rounds) if isinstance(_max_rounds, int) else None
+    )
+    # Whether the agentic loop will actually run for this request — drives the
+    # result-cache bypass below (the controller/judge loop is nondeterministic
+    # by design, so caching one stochastic outcome under a deterministic key
+    # would stale-serve).
+    _agentic_active: bool = (
+        agentic_retrieval
+        if isinstance(agentic_retrieval, bool)
+        else RAG_AGENTIC_RETRIEVAL_ENABLED
+    )
     # Retrieval mode skips answer generation by definition. The route
     # handler may also set skip_generation directly (e.g. for streaming);
     # union both signals so neither path accidentally enables generation.
@@ -124,16 +143,24 @@ def execute_rag_query(request: dict) -> dict:
         "extra_processing": extra_processing,
         "tree_retrieval": tree_retrieval,
         "deep_research": deep_research,
+        "agentic_retrieval": agentic_retrieval,
+        "max_agentic_rounds": max_agentic_rounds,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
 
-    cached = _cache.get(cache_key)
-    if isinstance(cached, dict):
-        CACHE_HITS.labels(layer="activity_result").inc()
-        return cached
-    CACHE_MISSES.labels(layer="activity_result").inc()
+    # The agentic loop is nondeterministic (controller/judge LLM calls), so a
+    # cached result under a deterministic key would stale-serve. Bypass the
+    # result cache entirely when the loop is active. The flag is still part of
+    # cache_payload above so an agentic vs non-agentic run of the same query
+    # can never collide on the non-agentic (cached) path.
+    if not _agentic_active:
+        cached = _cache.get(cache_key)
+        if isinstance(cached, dict):
+            CACHE_HITS.labels(layer="activity_result").inc()
+            return cached
+        CACHE_MISSES.labels(layer="activity_result").inc()
 
     activity.logger.info("Processing query: %s", query[:80])
 
@@ -160,6 +187,8 @@ def execute_rag_query(request: dict) -> dict:
         extra_processing=extra_processing,
         tree_retrieval=tree_retrieval,
         deep_research=deep_research,
+        agentic_retrieval=agentic_retrieval,
+        max_agentic_rounds=max_agentic_rounds,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -173,5 +202,7 @@ def execute_rag_query(request: dict) -> dict:
         response.action,
         "skipped" if skip_generation else "included",
     )
-    _cache.set(cache_key, result)
+    # Do not cache nondeterministic agentic-loop results (see bypass above).
+    if not _agentic_active:
+        _cache.set(cache_key, result)
     return result

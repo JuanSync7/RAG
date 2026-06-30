@@ -121,6 +121,34 @@ from config.settings import (
     RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS,
     RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE,
 )
+from config.settings import (
+    RAG_AGENTIC_RETRIEVAL_ENABLED,
+    RAG_AGENTIC_MAX_ROUNDS,
+    RAG_AGENTIC_MAX_LLM_CALLS,
+    RAG_AGENTIC_WALL_CLOCK_MS,
+    RAG_AGENTIC_KEEP_TOP_K_PER_ROUND,
+    RAG_AGENTIC_FINAL_MAX_CHUNKS,
+    RAG_AGENTIC_MIN_KEPT_CHUNKS,
+    RAG_AGENTIC_MIN_SOURCES,
+    RAG_AGENTIC_RELEVANCE_THRESHOLD,
+    RAG_AGENTIC_FAITHFULNESS_THRESHOLD,
+    RAG_AGENTIC_SUFFICIENCY_TARGET,
+    RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE,
+    RAG_AGENTIC_HYDE_MAX_TOKENS,
+    RAG_AGENTIC_HYDE_TEMPERATURE,
+    RAG_AGENTIC_CONTROLLER_MODEL_ALIAS,
+    RAG_AGENTIC_JUDGE_MODEL_ALIAS,
+    RAG_AGENTIC_QFS_AUTO,
+    RAG_AGENTIC_RANKER,
+    RAG_AGENTIC_JUDGE_POOL_MAX,
+    RAG_AGENTIC_FILL_MODE,
+    RAG_AGENTIC_JUDGE_VERBOSE,
+    RAG_AGENTIC_LLM_JSON_MODE,
+    RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS,
+    QUERY_PROCESSING_TIMEOUT,
+    validate_agentic_retrieval_config,
+)
+from src.retrieval.pipeline.agentic import AgenticBudget, AgenticRetrieval
 from src.platform import TimingPool
 from config.settings import GUARDRAIL_BACKEND
 from src.guardrails import (
@@ -1540,6 +1568,156 @@ class RAGChain:
         )
         return top
 
+    # ------------------------------------------------------------------
+    # Agentic-retrieval branch helper
+    # ------------------------------------------------------------------
+
+    def _run_agentic_retrieval(
+        self,
+        *,
+        original_question: str,
+        processed_query: str,
+        ignored_doc_ids: Optional[list[str]],
+        source_filter: Optional[str],
+        heading_filter: Optional[str],
+        tenant_id: Optional[str],
+        alpha: float,
+        search_limit: int,
+        rerank_top_k: int,
+        max_agentic_rounds: Optional[int],
+        fast_path: bool = False,
+    ):
+        """Run the agentic HyDE/controller/judge loop synchronously.
+
+        One ``asyncio.run`` island contained inside the activity thread, exactly
+        like ``_run_deep_research``. Composes the chain's existing retrieval and
+        rerank primitives (as injected callables) around the orchestrator's two
+        model-driven steps. Returns an ``AgenticResult``.
+        """
+        import asyncio as _asyncio
+
+        # Fail-fast on contradictory agentic config (fail-fast-at-use, matching
+        # validate_document_routing_config / validate_visual_retrieval_config).
+        validate_agentic_retrieval_config()
+
+        # Build the SearchFilter list once — reused for every retrieve call.
+        filters: list[SearchFilter] = []
+        if ignored_doc_ids:
+            filters.append(
+                SearchFilter(property="document_id", operator="not_in", value=list(ignored_doc_ids))
+            )
+        if source_filter:
+            filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
+        if heading_filter:
+            filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
+        if tenant_id and tenant_id != "default":
+            filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
+        filters_arg = filters or None
+
+        # Capture refs so the closures don't hold method bindings across threads.
+        embeddings = self.embeddings
+        retry_provider = self.retry_provider
+        retry_policy = self.retry_policy
+        do_search = self._do_search
+        kb_top = max(1, search_limit)
+
+        async def retrieve(hyde_answer: str, search_terms: list):
+            def _blocking():
+                # Embed the HyDE answer keyed on the HyDE TEXT — never the
+                # processed_query — so the processed_query LRU is not poisoned
+                # with a hypothetical-answer vector. The agentic embed bypasses
+                # self._embedding_cache entirely.
+                emb = embeddings.embed_query(hyde_answer)
+                terms = " ".join(t for t in (search_terms or []) if t)
+                # HyDE asymmetry: the dense vector follows the hypothetical
+                # answer; the BM25/lexical side stays anchored to the user's
+                # processed query (+ the controller's literal search terms).
+                bm25_query = (processed_query + " " + terms).strip() if terms else processed_query
+                results = retry_provider.execute(
+                    operation_name="weaviate_hybrid_search_agentic",
+                    fn=lambda: do_search(bm25_query, emb, alpha, kb_top, filters_arg),
+                    policy=retry_policy,
+                    idempotency_key=(
+                        f"agentic_search:{hyde_answer}:{source_filter}:{heading_filter}:{kb_top}"
+                    ),
+                )
+                return list(results or [])
+
+            return await _asyncio.to_thread(_blocking)
+
+        def thin_filter(items):
+            return _filter_thin_candidates(
+                items,
+                min_chars=RERANK_MIN_CHARS,
+                floor=rerank_top_k,
+                drop_nav=RERANK_DROP_NAVIGATIONAL,
+                nav_max_chars=RERANK_NAV_MAX_CHARS,
+            )
+
+        # Effective round ceiling (QFS routing without a surface classifier):
+        #  - explicit per-request override wins (clamped to the configured max);
+        #  - else QFS_AUTO lets the loop run up to max_rounds and the JUDGE's
+        #    sufficiency verdict is the real router — a single-doc query stops at
+        #    round 1 ("sufficient"), a compound/QFS query keeps finding gaps and
+        #    iterates;
+        #  - else a ceiling of 1 reproduces INC-1 single-round behaviour (combine
+        #    with RAG_AGENTIC_RANKER="cross_encoder" to also restore INC-1 order).
+        if fast_path:
+            # fast_path is the latency-first lane — the request schema already
+            # forbids an explicit max_agentic_rounds>1 here, so honour the same
+            # contract for the QFS-auto path: a single round, no iteration.
+            eff_rounds = 1
+        elif isinstance(max_agentic_rounds, int):
+            eff_rounds = max(1, min(RAG_AGENTIC_MAX_ROUNDS, max_agentic_rounds))
+        elif RAG_AGENTIC_QFS_AUTO:
+            eff_rounds = RAG_AGENTIC_MAX_ROUNDS
+        else:
+            eff_rounds = 1
+
+        # A source/heading filter pins retrieval to a single document, so the
+        # distinct-source floor cannot exceed 1 — otherwise the 'sufficient' stop
+        # could never fire and the loop would always burn to the round cap.
+        eff_min_sources = RAG_AGENTIC_MIN_SOURCES
+        if source_filter or heading_filter:
+            eff_min_sources = 1
+
+        budget = AgenticBudget(
+            max_rounds=eff_rounds,
+            max_llm_calls=RAG_AGENTIC_MAX_LLM_CALLS,
+            wall_clock_ms=RAG_AGENTIC_WALL_CLOCK_MS,
+            keep_top_k_per_round=RAG_AGENTIC_KEEP_TOP_K_PER_ROUND,
+            final_max_chunks=RAG_AGENTIC_FINAL_MAX_CHUNKS,
+            min_kept_chunks=RAG_AGENTIC_MIN_KEPT_CHUNKS,
+            min_sources=eff_min_sources,
+            relevance_threshold=RAG_AGENTIC_RELEVANCE_THRESHOLD,
+            faithfulness_threshold=RAG_AGENTIC_FAITHFULNESS_THRESHOLD,
+            sufficiency_target=RAG_AGENTIC_SUFFICIENCY_TARGET,
+            hyde_diversity_max_cosine=RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE,
+            ranker=RAG_AGENTIC_RANKER,
+            judge_pool_max=RAG_AGENTIC_JUDGE_POOL_MAX,
+        )
+
+        orchestrator = AgenticRetrieval(
+            provider=get_llm_provider(),
+            retrieve=retrieve,
+            reranker=self.reranker,
+            thin_filter=thin_filter,
+            doc_diversity=self._apply_doc_diversity,
+            original_question=original_question,
+            processed_query=processed_query,
+            budget=budget,
+            controller_alias=RAG_AGENTIC_CONTROLLER_MODEL_ALIAS,
+            judge_alias=RAG_AGENTIC_JUDGE_MODEL_ALIAS,
+            hyde_max_tokens=RAG_AGENTIC_HYDE_MAX_TOKENS,
+            hyde_temperature=RAG_AGENTIC_HYDE_TEMPERATURE,
+            llm_timeout_s=QUERY_PROCESSING_TIMEOUT,
+            final_top_k=rerank_top_k,
+            json_mode=RAG_AGENTIC_LLM_JSON_MODE,
+            judge_concise=not RAG_AGENTIC_JUDGE_VERBOSE,
+            fill_mode=RAG_AGENTIC_FILL_MODE,
+        )
+        return _asyncio.run(orchestrator.run())
+
     def run(
         self,
         query: str,
@@ -1564,6 +1742,8 @@ class RAGChain:
         extra_processing: bool = False,
         tree_retrieval: Optional[bool] = None,
         deep_research: bool = False,
+        agentic_retrieval: Optional[bool] = None,
+        max_agentic_rounds: Optional[int] = None,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -1604,6 +1784,7 @@ class RAGChain:
             "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
             "visual_retrieval": int(stage_budget_overrides.get("visual_retrieval", RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS)),
             "deep_research": int(stage_budget_overrides.get("deep_research", RAG_STAGE_BUDGET_DEEP_RESEARCH_MS)),
+            "agentic_retrieval": int(stage_budget_overrides.get("agentic_retrieval", RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS)),
         }
         tp = TimingPool(
             overall_budget_ms=float(overall_timeout_ms),
@@ -1913,7 +2094,22 @@ class RAGChain:
             search_results: list = []
             reranked: list[RankedResult] = []
             dr_result: Optional[DeepResearchResult] = None
+            ag_result = None
             _dr_active = bool(deep_research)
+            # Agentic retrieval shares the deep-research seam: it is an alternate
+            # orchestrator that REPLACES the linear stages 2-5, populating
+            # `reranked` + `graph_context` directly. Mutually exclusive with
+            # deep_research (enforced at the request schema); resolved defensively
+            # here too so deep_research always wins if both somehow arrive.
+            _agentic_resolved = (
+                agentic_retrieval
+                if isinstance(agentic_retrieval, bool)
+                else RAG_AGENTIC_RETRIEVAL_ENABLED
+            )
+            _agentic_active = bool(_agentic_resolved) and not _dr_active
+            # When EITHER alternate orchestrator owns retrieval, the linear
+            # stage-2..5 guards (`not _alt_active`) skip their work.
+            _alt_active = _dr_active or _agentic_active
 
             if _dr_active:
                 t0 = time.perf_counter()
@@ -1953,10 +2149,49 @@ class RAGChain:
                 if tp.check_stage_budget("deep_research"):
                     tp.mark_budget_exhausted("deep_research")
 
+            if _agentic_active:
+                t0 = time.perf_counter()
+                with self.tracer.span("retrieval.agentic", parent=root_span) as ag_span:
+                    try:
+                        ag_result = self._run_agentic_retrieval(
+                            original_question=query,
+                            processed_query=processed_query,
+                            ignored_doc_ids=ignored_doc_ids,
+                            source_filter=source_filter,
+                            heading_filter=heading_filter,
+                            tenant_id=tenant_id,
+                            alpha=alpha,
+                            search_limit=search_limit,
+                            rerank_top_k=rerank_top_k,
+                            max_agentic_rounds=max_agentic_rounds,
+                            fast_path=(
+                                RAG_DEFAULT_FAST_PATH if fast_path is None
+                                else bool(fast_path)
+                            ),
+                        )
+                        reranked = ag_result.reranked
+                        graph_context = ag_result.graph_context or ""
+                        ag_span.set_attribute("ag_rounds_run", ag_result.rounds_run)
+                        ag_span.set_attribute("ag_llm_calls", ag_result.llm_calls)
+                        ag_span.set_attribute("ag_judge_calls", ag_result.judge_calls)
+                        ag_span.set_attribute("ag_kept_count", ag_result.kept_count)
+                        ag_span.set_attribute("ag_stop_reason", ag_result.stop_reason)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("agentic_retrieval branch failed: %s", exc)
+                        ag_span.set_attribute("ag_error", str(exc))
+                        # Fall back to empty pool — generation will see no context
+                        # and emit the standard "no evidence" response.
+                        reranked = []
+                        graph_context = ""
+                        ag_result = None
+                tp.record("agentic_retrieval", "retrieval", started_at=t0)
+                if tp.check_stage_budget("agentic_retrieval"):
+                    tp.mark_budget_exhausted("agentic_retrieval")
+
             # Stage 2: KG expansion
             t0 = time.perf_counter()
             with self.tracer.span("retrieval.kg_expand", parent=root_span) as kg_span:
-                if not _dr_active and self._kg_expander:
+                if not _alt_active and self._kg_expander:
                     expansion_result = self._kg_expander.expand(processed_query, depth=1)
                     kg_expanded_terms = (
                         expansion_result.terms
@@ -1967,12 +2202,12 @@ class RAGChain:
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
                 kg_span.set_attribute("kg_graph_context_len", len(graph_context))
             tp.record("kg_expansion", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("kg_expansion"):
+            if not _alt_active and tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
             # When deep research is active it already consumed the retrieval
             # budget by design; stages 2-5 are skipped, so don't let their
             # passive budget checks trip the chain to ask_user.
-            if tp.budget_exhausted and not _dr_active:
+            if tp.budget_exhausted and not _alt_active:
                 outcomes.append(
                     StageOutcome("kg_expansion", StageStatus.BUDGET_EXHAUSTED)
                 )
@@ -1997,7 +2232,7 @@ class RAGChain:
                         **_decision_to_action_fields(decision),
                     )
 
-            if not _dr_active:
+            if not _alt_active:
                 if kg_expanded_terms:
                     bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:RAG_KG_BM25_APPEND_TERMS])
                 else:
@@ -2006,7 +2241,7 @@ class RAGChain:
             # Stage 3: Query embedding (with LRU cache for exact repeats)
             t0 = time.perf_counter()
             with self.tracer.span("retrieval.embed_query", parent=root_span) as embed_span:
-                if not _dr_active:
+                if not _alt_active:
                     cache_hit = processed_query in self._embedding_cache
                     if cache_hit:
                         query_embedding = self._embedding_cache[processed_query]
@@ -2021,9 +2256,9 @@ class RAGChain:
                 else:
                     embed_span.set_attribute("skipped_for_deep_research", True)
             tp.record("embedding", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("embedding"):
+            if not _alt_active and tp.check_stage_budget("embedding"):
                 tp.mark_budget_exhausted("embedding")
-            if tp.budget_exhausted and not _dr_active:
+            if tp.budget_exhausted and not _alt_active:
                 outcomes.append(
                     StageOutcome("embedding", StageStatus.BUDGET_EXHAUSTED)
                 )
@@ -2060,7 +2295,7 @@ class RAGChain:
             # flat: when disabled, low-confidence, or on ANY failure here,
             # routed_doc_ids stays None and Stage 4 runs the byte-identical flat path.
             routed_doc_ids: Optional[list[str]] = None
-            if RAG_DOCUMENT_ROUTING_ENABLED and not _dr_active:
+            if RAG_DOCUMENT_ROUTING_ENABLED and not _alt_active:
                 with self.tracer.span(
                     "retrieval.route_documents", parent=root_span
                 ) as route_span:
@@ -2073,7 +2308,7 @@ class RAGChain:
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
             filters = []
-            if not _dr_active:
+            if not _alt_active:
                 if ignored_doc_ids:
                     filters.append(
                         SearchFilter(
@@ -2096,7 +2331,7 @@ class RAGChain:
                 else bool(tree_retrieval)
             )
             with self.tracer.span("retrieval.search.hybrid", parent=root_span) as search_span:
-                if not _dr_active:
+                if not _alt_active:
                     search_results = self.retry_provider.execute(
                         operation_name="weaviate_hybrid_search",
                         fn=lambda: self._collect_candidates(
@@ -2130,9 +2365,9 @@ class RAGChain:
                 else:
                     search_span.set_attribute("skipped_for_deep_research", True)
             tp.record("hybrid_search", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("hybrid_search"):
+            if not _alt_active and tp.check_stage_budget("hybrid_search"):
                 tp.mark_budget_exhausted("hybrid_search")
-            if tp.budget_exhausted and not _dr_active:
+            if tp.budget_exhausted and not _alt_active:
                 outcomes.append(
                     StageOutcome("hybrid_search", StageStatus.BUDGET_EXHAUSTED)
                 )
@@ -2169,7 +2404,7 @@ class RAGChain:
             # looser top-k. Only if THAT also returns 0 do we route to
             # ``decide_terminal`` for the NO_RESULTS ask_user.
             degraded_attempted = False
-            if not _dr_active and not search_results:
+            if not _alt_active and not search_results:
                 degraded_attempted = True
                 try:
                     degraded_results = self._do_search(
@@ -2187,7 +2422,7 @@ class RAGChain:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("degraded BM25-only fallback failed: %s", exc)
 
-            if not _dr_active and not search_results:
+            if not _alt_active and not search_results:
                 outcomes.append(StageOutcome("hybrid_search", StageStatus.EMPTY))
                 decision = decide_terminal(
                     outcomes=outcomes,
@@ -2222,7 +2457,7 @@ class RAGChain:
             # description of ..." front-matter) that win dense similarity *and*
             # the cross-encoder reranker but carry no answer content, before they
             # consume rerank slots. Floor keeps the candidate pool from collapsing.
-            if not _dr_active and search_results:
+            if not _alt_active and search_results:
                 _n_before = len(search_results)
                 search_results = _filter_thin_candidates(
                     search_results,
@@ -2242,7 +2477,7 @@ class RAGChain:
             # Stage 5: Reranking (cross-encoder + fusion R1)
             t0 = time.perf_counter()
             with self.tracer.span("retrieval.rerank", parent=root_span) as rerank_span:
-                if not _dr_active:
+                if not _alt_active:
                     # 5a. BM25-only rank lookup, used by the RRF fusion component.
                     #     Run in parallel-style alongside CE scoring; if fusion is
                     #     disabled at config level, skip the extra round-trip.
@@ -2282,9 +2517,9 @@ class RAGChain:
                 if _dr_active:
                     rerank_span.set_attribute("from_deep_research", True)
             tp.record("reranking", "retrieval", started_at=t0)
-            if not _dr_active and tp.check_stage_budget("reranking"):
+            if not _alt_active and tp.check_stage_budget("reranking"):
                 tp.mark_budget_exhausted("reranking")
-            if tp.budget_exhausted and not _dr_active:
+            if tp.budget_exhausted and not _alt_active:
                 outcomes.append(
                     StageOutcome("reranking", StageStatus.BUDGET_EXHAUSTED)
                 )
@@ -2341,7 +2576,7 @@ class RAGChain:
             # alternative formulations exhaustively, so a single-shot fallback
             # adds no signal and burns budget.
             if (
-                not _dr_active
+                not _alt_active
                 and retrieval_quality in ("weak", "insufficient")
                 and not query_result.suppress_memory
                 and query_result.standalone_query
@@ -2679,6 +2914,10 @@ class RAGChain:
                 and generated_answer
                 and (reranked or generation_source == "memory")
                 and not tp.budget_exhausted
+                # The agentic loop's kept pool is already judge-curated; a
+                # confidence-driven RE_RETRIEVE would re-run the linear path and
+                # clobber it, so suppress Stage 7.5 routing on the agentic branch.
+                and not _agentic_active
             ):
                 t0 = time.perf_counter()
                 with self.tracer.span("retrieval.confidence.routing", parent=root_span) as conf_span:
@@ -2903,7 +3142,7 @@ class RAGChain:
             # already active the user opted in; suggesting it again would just
             # be noise (and risks a re-run loop on the UI side).
             dr_suggestion_payload: Optional[dict[str, Any]] = None
-            if not _dr_active:
+            if not _alt_active:
                 try:
                     suggest, reason = should_suggest_deep_research(query, reranked)
                     dr_suggestion_payload = {"suggest": bool(suggest), "reason": reason}
@@ -2941,6 +3180,25 @@ class RAGChain:
                         "is_unified": True,
                         "budget_exhausted": False,
                         "budget_exhausted_reason": None,
+                        "elapsed_ms": 0.0,
+                    }
+            if _agentic_active:
+                # Free-form telemetry; the metadata dict crosses the Temporal
+                # boundary via asdict() with no wire-schema change (mirrors how
+                # the deep-research branch writes metadata['deep_research']).
+                if ag_result is not None:
+                    response_metadata["agentic_retrieval"] = ag_result.telemetry()
+                else:
+                    response_metadata["agentic_retrieval"] = {
+                        "rounds_run": 0,
+                        "hyde_variants_tried": 0,
+                        "kept_count": 0,
+                        "llm_calls": 0,
+                        "judge_calls": 0,
+                        "ranker": RAG_AGENTIC_RANKER,
+                        "ranker_calls": 0,
+                        "backfilled": 0,
+                        "stop_reason": "error",
                         "elapsed_ms": 0.0,
                     }
 

@@ -21,7 +21,9 @@ from litellm import Router
 from config.settings import (
     LLM_API_BASE,
     LLM_API_KEY,
+    LLM_CONTROLLER_MODEL,
     LLM_FALLBACK_MODELS,
+    LLM_JUDGE_MODEL,
     LLM_MAX_TOKENS,
     LLM_MODEL,
     LLM_NUM_RETRIES,
@@ -127,6 +129,23 @@ def _build_router_from_env(config: LLMConfig) -> Router:
             },
         })
 
+    # Agentic-loop aliases ("controller", "judge"). Each resolves to its own
+    # model when one is configured, otherwise it is aliased to the default model
+    # so the agentic loop works with zero new deployment (controller/judge fall
+    # back to the default model). Mirrors the "query" alias handling above.
+    for alias_name, alias_model in (
+        ("controller", config.controller_model),
+        ("judge", config.judge_model),
+    ):
+        model_list.append({
+            "model_name": alias_name,
+            "litellm_params": {
+                "model": alias_model or config.model,
+                **({"api_base": config.api_base} if config.api_base else {}),
+                **({"api_key": config.api_key} if config.api_key else {}),
+            },
+        })
+
     return Router(
         model_list=model_list,
         num_retries=config.num_retries,
@@ -171,6 +190,8 @@ class LLMProvider:
             fallback_models=LLM_FALLBACK_MODELS,
             vision_model=LLM_VISION_MODEL or None,
             query_model=LLM_QUERY_MODEL or None,
+            controller_model=LLM_CONTROLLER_MODEL or None,
+            judge_model=LLM_JUDGE_MODEL or None,
         )
 
         if router:

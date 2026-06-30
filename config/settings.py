@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -237,6 +237,14 @@ LLM_QUERY_MODEL = os.environ.get(
     "RAG_LLM_QUERY_MODEL",
     f"ollama/{_legacy_query_model}" if _legacy_query_model else LLM_MODEL,
 )
+
+# Agentic-loop model aliases. Empty (default) => the router aliases
+# ``controller``/``judge`` to the primary model so the loop works with zero new
+# deployment (the controller/judge fall back to the default/qwopus model). Set a
+# dedicated instruct model here later (e.g. a small JSON-reliable instruct model)
+# to upgrade judge quality without any code change. See AGENTIC_RETRIEVAL_DESIGN.md.
+LLM_CONTROLLER_MODEL = os.environ.get("RAG_LLM_CONTROLLER_MODEL", "")
+LLM_JUDGE_MODEL = os.environ.get("RAG_LLM_JUDGE_MODEL", "")
 
 # --- Reliability / Retry ---
 RETRY_PROVIDER = os.environ.get("RAG_RETRY_PROVIDER", "local")
@@ -1191,6 +1199,202 @@ RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K", "3")
 )
 
+# ─── Agentic retrieval (AGENTIC_RETRIEVAL_DESIGN.md) ──────────────────────
+# A controller LLM drives retrieval as a *tool*: it writes a hypothetical
+# answer (HyDE), the host retrieves with it, a separate LLM judge scores each
+# chunk for relevance + faithfulness + set-sufficiency, judge-approved chunks
+# accumulate across rounds, and the controller retries a DIFFERENT HyDE until
+# the kept set is sufficient or a budget caps the loop. Like deep_research it
+# REPLACES the linear kg_expand → embed → hybrid_search → rerank stages with
+# its own orchestrator. Single-document queries converge in round 1; multi-doc
+# (QFS) queries iterate. All judging is a generic, model-driven property — no
+# regex / vendor / phrase matching (CLAUDE.md §0).
+RAG_AGENTIC_RETRIEVAL_ENABLED: bool = os.environ.get(
+    "RAG_AGENTIC_RETRIEVAL_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master gate for the agentic HyDE/controller/judge retrieval loop. When
+False (default) the branch never runs; the per-request ``agentic_retrieval``
+override may still force it on/off for a single request."""
+
+RAG_AGENTIC_MAX_ROUNDS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MAX_ROUNDS", "3")
+))
+"""Hard cap on HyDE-retry rounds (= max distinct HyDE variants tried). A
+single-document query converges in 1; QFS uses up to this."""
+
+RAG_AGENTIC_MAX_LLM_CALLS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MAX_LLM_CALLS", "10")
+))
+"""Combined controller + judge + diversity-reprompt call budget across the
+whole request (the DeepResearchBudget.max_llm_calls analog)."""
+
+RAG_AGENTIC_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_AGENTIC_WALL_CLOCK_MS", "45000")
+)
+"""Loop wall-clock budget in ms. Must stay strictly below the activity
+start_to_close timeout so Temporal never retries the whole nondeterministic
+loop; also enforced via the TimingPool agentic_retrieval stage budget."""
+
+RAG_AGENTIC_KEEP_TOP_K_PER_ROUND: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_KEEP_TOP_K_PER_ROUND", "8")
+))
+"""Cross-encoder pre-narrow cap: how many reranked-to-anchor candidates per
+round are shown to the LLM judge (judge-input token guard)."""
+
+RAG_AGENTIC_FINAL_MAX_CHUNKS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_FINAL_MAX_CHUNKS", "8")
+))
+"""Hard upper bound on accumulated kept chunks fed to Stage-6 generation — the
+generation context-window guard."""
+
+RAG_AGENTIC_MIN_KEPT_CHUNKS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MIN_KEPT_CHUNKS", "3")
+))
+"""Kept-chunk floor before a 'sufficient' verdict may stop the loop, AND the
+anti-refusal fallback floor (sibling of RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS)."""
+
+RAG_AGENTIC_MIN_SOURCES: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MIN_SOURCES", "1")
+))
+"""Distinct-source-document floor for a 'sufficient' stop. QFS auto-raises it;
+1 permits single-document convergence."""
+
+RAG_AGENTIC_RELEVANCE_THRESHOLD: float = float(
+    os.environ.get("RAG_AGENTIC_RELEVANCE_THRESHOLD", "0.5")
+)
+"""Min judge relevance [0,1] to keep a chunk. A measurable property, not a
+pattern list. Permissive default to avoid over-filter refusals."""
+
+RAG_AGENTIC_FAITHFULNESS_THRESHOLD: float = float(
+    os.environ.get("RAG_AGENTIC_FAITHFULNESS_THRESHOLD", "0.5")
+)
+"""Min judge faithfulness/groundedness [0,1] to keep a chunk."""
+
+RAG_AGENTIC_SUFFICIENCY_TARGET: float = float(
+    os.environ.get("RAG_AGENTIC_SUFFICIENCY_TARGET", "0.7")
+)
+"""Min pool-level judge confidence (with is_sufficient=True) required to stop
+the loop as 'satisfied'."""
+
+RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE: float = float(
+    os.environ.get("RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE", "0.92")
+)
+"""Embedding-cosine ceiling between a new HyDE variant and any prior one; above
+it the controller would be re-prompted once to diversify. An information-theoretic
+redundancy guard (class-level), not phrase matching.
+
+RESERVED / DORMANT: the cosine re-prompt is intentionally NOT wired in the first
+INC-2 landing. HyDE repetition is already handled twice — the controller prompt
+diversifies on ``prior_hyde_answers`` + the named gap, and a recycled HyDE that
+retrieves only already-seen chunks ends the loop cleanly via the ``no_progress``
+stop. This key is kept for a later increment that adds the embedding-cosine
+re-prompt once telemetry shows frequent high-cosine-yet-still-fresh recycling."""
+
+RAG_AGENTIC_HYDE_MAX_TOKENS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_HYDE_MAX_TOKENS", "256")
+))
+"""Max tokens per generated HyDE hypothetical answer — it is embedded, never
+shown to the user, so it is kept short and cheap."""
+
+RAG_AGENTIC_HYDE_TEMPERATURE: float = float(
+    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.4")
+)
+"""Controller sampling temperature; higher = more diverse HyDE across rounds."""
+
+RAG_AGENTIC_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
+    "RAG_AGENTIC_CONTROLLER_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the controller (next-HyDE / finalize). Falls
+back to 'query' → 'default' when the alias model env is unset."""
+
+RAG_AGENTIC_JUDGE_MODEL_ALIAS: str = os.environ.get(
+    "RAG_AGENTIC_JUDGE_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias for the per-chunk judge. Distinct from the
+controller to avoid correlated over-optimism; falls back to 'query' → 'default'."""
+
+RAG_AGENTIC_QFS_AUTO: bool = os.environ.get(
+    "RAG_AGENTIC_QFS_AUTO", "true"
+).lower() in ("true", "1", "yes")
+"""When the master gate is on, auto-engage the multi-round path for QFS-shaped
+(compound) queries and let single-document-shaped queries converge in round 1,
+even without an explicit per-request round override. The judge's sufficiency
+gate remains the real convergence authority regardless of this classifier."""
+
+RAG_AGENTIC_RANKER: str = os.environ.get(
+    "RAG_AGENTIC_RANKER", "judge"
+).strip().lower()
+"""Which component ORDERS the agentic candidate pool (INC-2 reframe).
+
+- ``"judge"`` (default): bypass the cross-encoder and let the LLM judge rank the
+  RAW hybrid pool directly (a listwise best->worst ordering), keeping pointwise
+  relevance/faithfulness only as the keep/drop gate. This reflects the measured
+  finding that the cross-encoder is net-negative (nDCG@12 0.408) while an LLM
+  ranking the raw pool is near-ideal (0.958). With a flaky judge the ordering
+  fails open to RAW-HYBRID order (~0.671), which still beats the cross-encoder
+  in aggregate — so enabling the loop never silently underperforms hybrid.
+- ``"cross_encoder"``: the INC-1 path — the cross-encoder narrows + orders the
+  pool. Kept for A/B and for the narrow query class (broad cross-protocol
+  comparison) where the cross-encoder measured net-positive.
+
+NOTE: ``"judge"`` only realises the near-ideal ordering with a JSON-reliable
+judge behind ``RAG_AGENTIC_JUDGE_MODEL_ALIAS``; the default reasoning model
+fails JSON often and falls open to hybrid order (see the design guide)."""
+
+RAG_AGENTIC_JUDGE_POOL_MAX: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_JUDGE_POOL_MAX", "40")
+))
+"""Max raw-hybrid candidates shown to the judge per round when
+``RAG_AGENTIC_RANKER="judge"`` (token guard). Defaults to the typical
+``search_limit`` so the whole retrieved pool is judged and no candidate is
+truncated. Only the chunks actually judged are marked 'seen' — a truncated tail
+is NOT burned, so a gold chunk buried deep in the hybrid pool can still surface
+in a later round (guards the deep-rank-burial recall regression)."""
+
+RAG_AGENTIC_FILL_MODE: str = os.environ.get(
+    "RAG_AGENTIC_FILL_MODE", "hybrid"
+).strip().lower()
+"""How the judge-as-ranker finalize fills the generation top-K (the promote-vs-drop
+decision). MEASURED: a cautious judge (e.g. a 7B) keeps too few chunks, so
+*dropping* the rest loses recall (nDCG 0.37) while *promoting its picks and filling
+the remainder from the hybrid order* recovers it (0.77).
+
+- ``"hybrid"`` (default): always fill the top-K from the hybrid reservoir with the
+  judge's picks on top — the safety net for a low-recall judge.
+- ``"none"``: trust the judge; only the anti-refusal floor backfills. Right for a
+  strong, high-recall judge whose set is already complete (a cleaner, more precise
+  context).
+- ``"adaptive"``: per query, behave as ``none`` when the judge says the kept set is
+  sufficient AND its confidence ≥ the sufficiency target (trust it), else ``hybrid``
+  (fill). Needs a model with *calibrated* confidence — use only with a stronger
+  judge, not the default 7B which under-claims confidence."""
+
+RAG_AGENTIC_JUDGE_VERBOSE: bool = os.environ.get(
+    "RAG_AGENTIC_JUDGE_VERBOSE", "false"
+).lower() in ("true", "1", "yes")
+"""When False (default) the judge uses the CONCISE output: it reasons then emits
+only a ranked id-list (+ sufficiency), collapsing the keep-gate and rank into one
+short output. Measured: the judge's latency is output-token-bound, so the concise
+list is ~3x faster than the verbose per-chunk-scored-with-reasons output for the
+same ranking. Set True for the verbose judge (per-chunk relevance/faithfulness +
+reason strings) when you need that observability for debugging."""
+
+RAG_AGENTIC_LLM_JSON_MODE: bool = os.environ.get(
+    "RAG_AGENTIC_LLM_JSON_MODE", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the controller (HyDE) and judge calls request guided ``json_object``
+output. Default **false**: a reasoning model (qwopus) frequently emits ``{}`` /
+malformed output under the hard JSON constraint, so the loop instead lets it
+generate freely — reason then emit JSON — and recovers the object with a
+``<think>``-stripping salvage parser (mirroring why ``RAG_GENERATION_STRUCTURED_OUTPUT``
+is off for generation). Set **true** only when the ``judge``/``controller`` alias
+points at a JSON-reliable instruct model that benefits from the constraint."""
+
+RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS", "45000")
+)
+"""TimingPool per-stage budget for the agentic_retrieval stage (ms)."""
+
 # --- Ingest: Embedding pipeline ---
 RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES: int = int(
     os.environ.get("RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES", "3")
@@ -1796,6 +2000,72 @@ def validate_document_routing_config() -> None:
             "must be >= RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES="
             f"{RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES} (the union bound cannot be "
             "smaller than the per-document leaf fetch)"
+        )
+
+
+def validate_agentic_retrieval_config() -> None:
+    """Validate agentic-retrieval-loop configuration.
+
+    Checks for contradictory or out-of-range settings and raises ``ValueError``
+    with a descriptive message naming the offending key(s). Invoked lazily by
+    the agentic orchestrator when the loop activates (fail-fast-at-use), so
+    importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If any threshold/target is outside ``[0.0, 1.0]``; if any
+            count budget is < 1; if ``RAG_AGENTIC_MIN_KEPT_CHUNKS`` exceeds
+            ``RAG_AGENTIC_FINAL_MAX_CHUNKS`` (the kept floor cannot exceed the
+            hard cap); or if ``RAG_AGENTIC_WALL_CLOCK_MS`` is not positive.
+    """
+    errors: list[str] = []
+    for name, val in [
+        ("RAG_AGENTIC_RELEVANCE_THRESHOLD", RAG_AGENTIC_RELEVANCE_THRESHOLD),
+        ("RAG_AGENTIC_FAITHFULNESS_THRESHOLD", RAG_AGENTIC_FAITHFULNESS_THRESHOLD),
+        ("RAG_AGENTIC_SUFFICIENCY_TARGET", RAG_AGENTIC_SUFFICIENCY_TARGET),
+        ("RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE", RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE),
+    ]:
+        if not (0.0 <= val <= 1.0):
+            errors.append(f"{name}={val} must be in [0.0, 1.0]")
+    for name, val in [
+        ("RAG_AGENTIC_MAX_ROUNDS", RAG_AGENTIC_MAX_ROUNDS),
+        ("RAG_AGENTIC_MAX_LLM_CALLS", RAG_AGENTIC_MAX_LLM_CALLS),
+        ("RAG_AGENTIC_KEEP_TOP_K_PER_ROUND", RAG_AGENTIC_KEEP_TOP_K_PER_ROUND),
+        ("RAG_AGENTIC_FINAL_MAX_CHUNKS", RAG_AGENTIC_FINAL_MAX_CHUNKS),
+        ("RAG_AGENTIC_MIN_KEPT_CHUNKS", RAG_AGENTIC_MIN_KEPT_CHUNKS),
+        ("RAG_AGENTIC_MIN_SOURCES", RAG_AGENTIC_MIN_SOURCES),
+        ("RAG_AGENTIC_HYDE_MAX_TOKENS", RAG_AGENTIC_HYDE_MAX_TOKENS),
+        ("RAG_AGENTIC_JUDGE_POOL_MAX", RAG_AGENTIC_JUDGE_POOL_MAX),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+    # Fail-fast on a mistyped ranker selector (a typo like "ce"/"Judge" would
+    # otherwise silently fall through to the cross-encoder branch).
+    _valid_rankers = ("judge", "cross_encoder")
+    if RAG_AGENTIC_RANKER not in _valid_rankers:
+        errors.append(
+            f"RAG_AGENTIC_RANKER={RAG_AGENTIC_RANKER!r} must be one of "
+            f"{_valid_rankers}"
+        )
+    _valid_fill = ("hybrid", "none", "adaptive")
+    if RAG_AGENTIC_FILL_MODE not in _valid_fill:
+        errors.append(
+            f"RAG_AGENTIC_FILL_MODE={RAG_AGENTIC_FILL_MODE!r} must be one of "
+            f"{_valid_fill}"
+        )
+    if RAG_AGENTIC_MIN_KEPT_CHUNKS > RAG_AGENTIC_FINAL_MAX_CHUNKS:
+        errors.append(
+            f"RAG_AGENTIC_MIN_KEPT_CHUNKS={RAG_AGENTIC_MIN_KEPT_CHUNKS} must be "
+            f"<= RAG_AGENTIC_FINAL_MAX_CHUNKS={RAG_AGENTIC_FINAL_MAX_CHUNKS} "
+            "(the kept floor cannot exceed the hard cap fed to generation)"
+        )
+    if RAG_AGENTIC_WALL_CLOCK_MS <= 0:
+        errors.append(
+            f"RAG_AGENTIC_WALL_CLOCK_MS={RAG_AGENTIC_WALL_CLOCK_MS} must be > 0"
+        )
+    if errors:
+        raise ValueError(
+            "Agentic-retrieval configuration validation failed:\n  "
+            + "\n  ".join(errors)
         )
 
 
