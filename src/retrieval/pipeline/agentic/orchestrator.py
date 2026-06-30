@@ -449,13 +449,21 @@ class AgenticRetrieval:
         if not ordered:
             return []
 
-        # Stamp strictly-decreasing ordinal scores so (a) the kept block outranks
-        # the backfill block and (b) _apply_doc_diversity's score-sort preserves
-        # THIS order rather than collapsing ties back to hybrid order. The real
-        # judge relevance stays in metadata['agentic_relevance'].
+        # Stamp strictly-decreasing scores in (0, 1] so (a) the kept block
+        # outranks the backfill block, (b) _apply_doc_diversity's score-sort
+        # preserves THIS order rather than collapsing ties back to hybrid order,
+        # and (c) .score stays inside the [0,1] relevance contract every consumer
+        # assumes — the cross-encoder emits sigmoid(logit) in (0,1), the console
+        # renders score*100 as a relevance %, and retrieval-quality gates compare
+        # the top score against [0,1] thresholds. Normalizing by the list length
+        # is order-preserving (monotonic) so the diversity sort is unchanged,
+        # while an un-normalized ordinal (total-pos) would render as e.g. 700%
+        # and peg every quality gate to "strong". The judge's pointwise relevance
+        # stays in metadata['agentic_relevance'] for callers that want the raw
+        # signal.
         total = len(ordered)
         for pos, c in enumerate(ordered):
-            c.score = float(total - pos)
+            c.score = (total - pos) / total
 
         return self._doc_diversity(ordered, self._final_top_k)
 

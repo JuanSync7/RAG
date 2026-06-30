@@ -5,6 +5,7 @@
 // @end-summary
 
 import { escHtml } from "./dom";
+import { pct } from "./format";
 import { parseMarkdown } from "./markdown";
 import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
@@ -87,7 +88,7 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
         const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
         const filename = escHtml(filenameRaw);
         const section = escHtml(String(meta.section ?? meta.heading ?? ""));
-        const score = Math.round(r.score * 100);
+        const score = pct(r.score);
         const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
         const chunkHtml = parseMarkdown(r.text || "");
         const sourceUri = String(meta.source_uri ?? "").trim();

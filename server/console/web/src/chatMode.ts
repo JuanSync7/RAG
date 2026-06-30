@@ -9,6 +9,7 @@
 // @end-summary
 
 import { byId, escHtml, fmtTime } from "./dom";
+import { pct } from "./format";
 import { parseMarkdown } from "./markdown";
 import { api } from "./api";
 import { openSourceDocument } from "./citations";
@@ -348,7 +349,7 @@ export function appendSourcesTurn(thread: HTMLElement, sources: SourceRef[]): HT
 }
 
 function renderCardHtml(d: DocGroup): string {
-    const score = Math.round(d.bestScore * 100);
+    const score = pct(d.bestScore);
     const chunkCount = d.refs.length;
     const synthetic = d.docKey.startsWith("__synth_");
     const viewBtn = !synthetic
@@ -364,7 +365,7 @@ function renderCardHtml(d: DocGroup): string {
     const orderedRefs = [...d.refs].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const chunksHtml = orderedRefs
         .map((ref, idx) => {
-            const refScore = Math.round((ref.score ?? 0) * 100);
+            const refScore = pct(ref.score);
             const text = ref.text ?? "";
             const sectionLabel = ref.section ? escHtml(String(ref.section)) : "";
             const sectionHtml = sectionLabel

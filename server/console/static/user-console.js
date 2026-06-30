@@ -100,6 +100,19 @@ function initToast() {
   });
 }
 
+// src/format.ts
+function pct(score) {
+  const v = typeof score === "number" && Number.isFinite(score) ? score : 0;
+  return Math.max(0, Math.min(100, Math.round(v * 100)));
+}
+function fmtSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 // src/markdown.ts
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -507,7 +520,7 @@ function appendSourcesTurn(thread, sources) {
   return group;
 }
 function renderCardHtml(d) {
-  const score = Math.round(d.bestScore * 100);
+  const score = pct(d.bestScore);
   const chunkCount = d.refs.length;
   const synthetic = d.docKey.startsWith("__synth_");
   const viewBtn = !synthetic ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
@@ -519,7 +532,7 @@ function renderCardHtml(d) {
   const hideLabel = isHidden ? "Hidden" : "Hide";
   const orderedRefs = [...d.refs].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const chunksHtml = orderedRefs.map((ref, idx) => {
-    const refScore = Math.round((ref.score ?? 0) * 100);
+    const refScore = pct(ref.score);
     const text = ref.text ?? "";
     const sectionLabel = ref.section ? escHtml(String(ref.section)) : "";
     const sectionHtml = sectionLabel ? `<span class="sources-chunk-section">${sectionLabel}</span>` : "";
@@ -867,7 +880,7 @@ function buildCitationsHtml(results, answerText) {
     const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
     const filename = escHtml(filenameRaw);
     const section = escHtml(String(meta.section ?? meta.heading ?? ""));
-    const score = Math.round(r.score * 100);
+    const score = pct(r.score);
     const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
     const chunkHtml = parseMarkdown(r.text || "");
     const sourceUri = String(meta.source_uri ?? "").trim();
@@ -978,16 +991,16 @@ function updateContextIndicator(tb, stats) {
   const total = Number(tb?.context_length ?? 0);
   const reserved = Number(tb?.output_reservation ?? 0);
   const pctRaw = Number(tb?.usage_percent ?? 0);
-  const pct = pctRaw > 1.5 ? pctRaw : pctRaw * 100;
-  byId("ctxBarFill").style.width = Math.min(pct, 100) + "%";
+  const pct2 = pctRaw > 1.5 ? pctRaw : pctRaw * 100;
+  byId("ctxBarFill").style.width = Math.min(pct2, 100) + "%";
   if (total > 0) {
     byId("ctxPct").textContent = `${fmtTokens(used)} / ${fmtTokens(total)}`;
   } else {
-    byId("ctxPct").textContent = pct > 0 ? "~" + Math.round(pct) + "%" : "\u2014";
+    byId("ctxPct").textContent = pct2 > 0 ? "~" + Math.round(pct2) + "%" : "\u2014";
   }
   chip.classList.remove("warn", "crit");
-  if (pct >= 85) chip.classList.add("crit");
-  else if (pct >= 60) chip.classList.add("warn");
+  if (pct2 >= 85) chip.classList.add("crit");
+  else if (pct2 >= 60) chip.classList.add("warn");
   byId("ttModel").textContent = String(tb?.model_name || "\u2014");
   byId("ttUsed").textContent = total > 0 ? `${fmtTokens(used)} / ${fmtTokens(total)} tok` : `${fmtTokens(used)} tok`;
   byId("ttReserved").textContent = reserved > 0 ? `${fmtTokens(reserved)} tok` : "\u2014";
@@ -1003,7 +1016,7 @@ function updateContextIndicator(tb, stats) {
       costRow.style.display = "none";
     }
   }
-  byId("ctxCompactBtn").style.display = pct >= 60 ? "block" : "none";
+  byId("ctxCompactBtn").style.display = pct2 >= 60 ? "block" : "none";
 }
 function clearLastTurnStats() {
   byId("ttPrompt").textContent = "\u2014";
@@ -2522,15 +2535,6 @@ function initInput() {
       document.getElementById("ctxChip")?.classList.remove("tooltip-open");
     }
   });
-}
-
-// src/format.ts
-function fmtSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 // src/ingest-stream.ts

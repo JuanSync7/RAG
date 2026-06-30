@@ -377,6 +377,36 @@ def test_judge_listwise_ranking_orders_output():
     assert [r.text for r in result.reranked] == ["chunk 2", "chunk 0", "chunk 3", "chunk 1"]
 
 
+def test_finalize_scores_obey_unit_relevance_contract():
+    """Regression (class: a result `.score` rendered as a relevance % must stay in
+    [0,1]). `_finalize` stamps a strictly-decreasing ORDER key onto `.score`; that
+    key must be normalized into (0,1] — an un-normalized ordinal (total-pos) made
+    the console render rank-7 as '700%' and pegged the retrieval-quality gate to
+    'strong'. The cross-encoder emits sigmoid(logit) in (0,1), so the judge path
+    must honor the same contract. Six kept chunks (> the typical bad %) so the
+    bug, if reintroduced, shows as scores of 6.0, 5.0, ... = 600%, 500%."""
+    async def retrieve(hyde_answer, search_terms):
+        return [_sr(i, f"chunk {i}") for i in range(6)]
+
+    provider = RoutingProvider(
+        hyde={"hypothetical_answer": "h", "search_terms": []},
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(6)],
+               "ranking": [0, 1, 2, 3, 4, 5],
+               "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1), final_top_k=6)
+    result = asyncio.run(orch.run())
+
+    scores = [r.score for r in result.reranked]
+    assert scores, "expected a non-empty curated set"
+    # Bounded into the [0,1] relevance contract (so score*100 <= 100%).
+    assert all(0.0 < s <= 1.0 for s in scores), scores
+    assert scores[0] == pytest.approx(1.0)        # top result = full relevance
+    # Strictly decreasing: the order key the diversity sort relies on is intact.
+    assert all(a > b for a, b in zip(scores, scores[1:])), scores
+
+
 def test_judge_fail_open_preserves_hybrid_order_not_flat():
     """Inv-3 pin: when the judge fails open (no parseable scores/ranking), the
     order MUST be the raw-hybrid input order — never a flat-1.0 collapse. Hybrid
