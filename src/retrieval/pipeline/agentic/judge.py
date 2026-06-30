@@ -82,10 +82,15 @@ def _keep_all(candidates: list[RankedResult]) -> list[ChunkVerdict]:
     ]
 
 
-def _build_chunk_block(candidates: list[RankedResult]) -> str:
+def _build_chunk_block(candidates: list[RankedResult], max_chars: int = 800) -> str:
+    """Render the chunk block, capping each chunk's text so a deep pool of large
+    chunks cannot blow the judge model's context window (relevance/ranking needs a
+    representative excerpt, not the full chunk)."""
     lines: list[str] = []
     for i, c in enumerate(candidates):
         text = (c.text or "").replace("\n", " ").strip()
+        if max_chars > 0 and len(text) > max_chars:
+            text = text[:max_chars]
         lines.append(f"[{i}] {text}")
     return "\n".join(lines)
 
@@ -146,6 +151,8 @@ async def judge_chunks(
     json_mode: bool = True,
     concise: bool = False,
     max_keep: Optional[int] = None,
+    max_output_tokens: int = 1024,
+    max_chars_per_chunk: int = 800,
 ) -> tuple[list[ChunkVerdict], Optional[PoolVerdict]]:
     """Judge ``candidates`` against ``original_question``.
 
@@ -164,22 +171,24 @@ async def judge_chunks(
     if not candidates:
         return [], None
 
+    chunk_block = _build_chunk_block(candidates, max_chars=max_chars_per_chunk)
     if concise:
         prompt = _render(
             _load_prompt(_JUDGE_CONCISE_PROMPT_FILE),
             original_question=original_question,
-            chunks=_build_chunk_block(candidates),
+            chunks=chunk_block,
             max_keep=str(max_keep if max_keep is not None else len(candidates)),
         )
     else:
         prompt = _render(
             _load_prompt(),
             original_question=original_question,
-            chunks=_build_chunk_block(candidates),
+            chunks=chunk_block,
         )
     kwargs: dict[str, Any] = dict(
         model_alias=model_alias,
         timeout=timeout_s,
+        max_tokens=max(1, max_output_tokens),
         temperature=0.0,
     )
     if json_mode:

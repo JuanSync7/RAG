@@ -122,6 +122,9 @@ async def generate_hyde(
         model_alias=model_alias,
         timeout=timeout_s,
         temperature=temperature,
+        # Cap output to the HyDE budget so the controller can't ramble up to the
+        # default gen max_tokens (it is embedded, never shown).
+        max_tokens=max(1, max_tokens),
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
