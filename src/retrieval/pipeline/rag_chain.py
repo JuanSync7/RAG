@@ -208,6 +208,7 @@ from config.settings import (
     RAG_RERANK_ANCHOR_K,
     RAG_RERANK_DIVERSITY_ENABLED,
     RAG_RERANK_MAX_DOC_FRACTION,
+    RAG_TABLE_GROUP_DEDUP_ENABLED,
 )
 from src.retrieval.query.nodes.rerank_fusion import (
     anchor_confidence,
@@ -1372,11 +1373,56 @@ class RAGChain:
             for i, r in enumerate(reranked)
         ]
         rescored.sort(key=lambda r: r.score, reverse=True)
+        # Collapse different renderings of the SAME table (shared table_group_id)
+        # to one best-scoring rep before capping, so two facets of one table
+        # cannot both occupy the top-K (they have different text, so no hash/fuzzy
+        # dedup catches them).
+        rescored = self._collapse_table_groups(rescored)
         # Diversity cap: stop one document from monopolising the top-K (e.g. a
         # spreadsheet split into many near-duplicate rows). ``rescored`` is the
         # FULL candidate pool here, so capping then slicing promotes the next-best
         # chunks from other documents into the freed slots.
         return self._apply_doc_diversity(rescored, rerank_top_k)
+
+    @staticmethod
+    def _collapse_table_groups(ranked: list) -> list:
+        """Collapse chunks that are different renderings of the SAME table.
+
+        A table is chunked into multiple representations (a markdown-grid summary
+        and/or per-row-block chunks) that all share one ``table_group_id``.
+        Because those renderings are different text, no content-hash/fuzzy dedup
+        equates them, so two facets of one table can both land in the top-K and
+        read as a duplicate. Keep only the single highest-scoring chunk per
+        ``table_group_id`` (``ranked`` is already score-sorted), carrying the
+        dropped rep's ``table_markdown`` onto the survivor so the full grid stays
+        available for display/reconstruction. Chunks without a ``table_group_id``
+        pass through untouched. No-op when disabled.
+        """
+        if not RAG_TABLE_GROUP_DEDUP_ENABLED:
+            return ranked
+        kept_by_group: dict = {}
+        out: list = []
+        for r in ranked:
+            meta = getattr(r, "metadata", None) or {}
+            gid = str(meta.get("table_group_id") or "").strip()
+            if not gid:
+                out.append(r)
+                continue
+            survivor = kept_by_group.get(gid)
+            if survivor is None:
+                kept_by_group[gid] = r
+                out.append(r)
+            else:
+                # Same table already represented — drop this rep, but preserve its
+                # full-table markdown on the survivor if the survivor lacks it.
+                smeta = getattr(survivor, "metadata", None)
+                if isinstance(smeta, dict) and not str(
+                    smeta.get("table_markdown") or ""
+                ).strip():
+                    md = str(meta.get("table_markdown") or "").strip()
+                    if md:
+                        smeta["table_markdown"] = md
+        return out
 
     @staticmethod
     def _apply_doc_diversity(ranked: list, top_k: int) -> list:

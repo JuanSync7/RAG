@@ -1957,6 +1957,18 @@ doc) while still letting a strongly-relevant document supply most of the
 context (a tighter 0.6 starved depth-heavy comparison answers). Set to 1.0 to
 disable the cap without touching the master switch."""
 
+RAG_TABLE_GROUP_DEDUP_ENABLED: bool = os.environ.get(
+    "RAG_TABLE_GROUP_DEDUP_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Collapse chunks that are different renderings of the SAME table (they share a
+``table_group_id``) to a single best-scoring hit in the reranked result set. A
+table is chunked into multiple representations — a markdown-grid summary and/or
+per-row-block chunks — whose text differs, so content-hash/fuzzy dedup never
+equates them, letting two facets of one table both occupy the top-K and read as
+a duplicate. Keeps the highest-scoring rep and carries the dropped rep's
+``table_markdown`` onto it so the full grid is still available for display. Keys
+on the structural ``table_group_id`` so it works for any table in any document."""
+
 RAG_RERANK_RRF_K: int = max(1, int(
     os.environ.get("RAG_RERANK_RRF_K", "60")
 ))
