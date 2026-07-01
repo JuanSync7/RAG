@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import orjson
 import logging
+import time
 import uuid
 from dataclasses import asdict
 from typing import Any
@@ -1020,6 +1021,13 @@ class RedisConversationMemory(ConversationMemoryProvider):
 
 _MEMORY: ConversationMemoryProvider | None = None
 
+# Redis-reconnect backstop. When Redis is unreachable we serve an *uncached*
+# no-op and retry Redis at most once per this interval, so history recovers
+# automatically once Redis returns — without a process restart, and without
+# adding the ~1s connect-timeout to every request during an outage.
+_REDIS_RETRY_INTERVAL_S = 5.0
+_last_redis_attempt_at: float | None = None
+
 
 def get_conversation_memory() -> ConversationMemoryProvider:
     """Resolve the configured conversation memory provider singleton.
@@ -1028,7 +1036,7 @@ def get_conversation_memory() -> ConversationMemoryProvider:
         The configured `ConversationMemoryProvider`.
     """
 
-    global _MEMORY
+    global _MEMORY, _last_redis_attempt_at
     if _MEMORY is not None:
         return _MEMORY
     if not MEMORY_ENABLED:
@@ -1036,18 +1044,38 @@ def get_conversation_memory() -> ConversationMemoryProvider:
         return _MEMORY
     provider = MEMORY_PROVIDER.strip().lower()
     if provider == "redis":
+        # Rate-limit reconnect attempts so a prolonged outage doesn't add the
+        # connect-timeout to every request; between attempts serve a transient
+        # no-op immediately.
+        now = time.monotonic()
+        if (
+            _last_redis_attempt_at is not None
+            and (now - _last_redis_attempt_at) < _REDIS_RETRY_INTERVAL_S
+        ):
+            return NoopConversationMemory()
+        _last_redis_attempt_at = now
         try:
             candidate = RedisConversationMemory(MEMORY_REDIS_URL, MEMORY_REDIS_PREFIX)
             # `redis.from_url()` is lazy — connection errors only surface on
-            # first command. Eagerly ping so we can fall back to the no-op
-            # provider here rather than 500ing later inside a request handler.
+            # first command. Eagerly ping to detect a dead Redis here.
             candidate._client.ping()
             _MEMORY = candidate
+            logger.info("Conversation memory connected to Redis.")
             return _MEMORY
         except Exception as exc:
-            logger.warning("Memory Redis unavailable, falling back to no-op memory: %s", exc)
-            _MEMORY = NoopConversationMemory()
-            return _MEMORY
+            # Do NOT cache the no-op. get_conversation_memory() is called per
+            # request, so returning an *uncached* no-op means the next attempt
+            # retries Redis; history recovers automatically once Redis is back,
+            # with no restart. (The previous behaviour latched to no-op for the
+            # whole process lifetime, silently hiding ALL history whenever the
+            # API started during a Redis outage.)
+            logger.warning(
+                "Conversation memory Redis unavailable; serving no-op and "
+                "retrying every %.0fs (auto-recovers, no restart needed): %s",
+                _REDIS_RETRY_INTERVAL_S,
+                exc,
+            )
+            return NoopConversationMemory()
     logger.warning("Unsupported memory provider '%s'; using no-op.", provider)
     _MEMORY = NoopConversationMemory()
     return _MEMORY

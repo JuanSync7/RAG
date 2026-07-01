@@ -430,3 +430,76 @@ def test_append_turn_preserves_markdown_newlines(monkeypatch):
         conversation_id=meta.conversation_id,
     )
     assert turns and turns[-1].content == md  # newlines survive the round-trip
+
+
+# ---------------------------------------------------------------------------
+# Factory resilience: Redis-down must NOT permanently latch to no-op
+# ---------------------------------------------------------------------------
+
+
+class _PingRedis:
+    """A redis client stub whose ``ping()`` succeeds or raises on demand."""
+
+    def __init__(self, ok):
+        self._ok = ok
+        self.ping_calls = 0
+
+    def ping(self):
+        self.ping_calls += 1
+        if not self._ok:
+            raise ConnectionError("redis down")
+        return True
+
+
+class _TogglableRedisModule:
+    """A fake ``redis`` module whose next client's ping is controlled by ``ok``.
+    Records how many times ``from_url`` was called so the retry-throttle can be
+    asserted."""
+
+    def __init__(self):
+        self.ok = True
+        self.from_url_calls = 0
+
+    def from_url(self, _url, decode_responses=True, **_kw):
+        self.from_url_calls += 1
+        return _PingRedis(self.ok)
+
+
+def test_get_conversation_memory_recovers_when_redis_returns(monkeypatch):
+    """Redis down at the first call must NOT latch to no-op for the process
+    lifetime: the no-op is uncached, so once Redis is reachable again the next
+    call reconnects and caches the Redis provider — no restart required."""
+    from src.platform.memory import provider as pmod
+
+    monkeypatch.setattr(pmod, "_MEMORY", None)
+    monkeypatch.setattr(pmod, "_last_redis_attempt_at", None)
+    monkeypatch.setattr(pmod, "MEMORY_ENABLED", True)
+    monkeypatch.setattr(pmod, "MEMORY_PROVIDER", "redis")
+
+    mod = _TogglableRedisModule()
+    monkeypatch.setitem(__import__("sys").modules, "redis", mod)
+
+    # 1) Redis DOWN -> uncached no-op (singleton not latched).
+    mod.ok = False
+    m1 = pmod.get_conversation_memory()
+    assert isinstance(m1, NoopConversationMemory)
+    assert pmod._MEMORY is None  # crucial: NOT cached, so it will retry
+
+    # 2) Throttle: an immediate retry must skip the (blocking) connect attempt.
+    calls = mod.from_url_calls
+    m2 = pmod.get_conversation_memory()
+    assert isinstance(m2, NoopConversationMemory)
+    assert mod.from_url_calls == calls  # skipped by the retry interval
+
+    # 3) Redis BACK and the throttle window has elapsed -> reconnect + cache.
+    mod.ok = True
+    monkeypatch.setattr(pmod, "_last_redis_attempt_at", None)
+    m3 = pmod.get_conversation_memory()
+    assert isinstance(m3, RedisConversationMemory)
+    assert pmod._MEMORY is m3  # cached only on success
+
+    # 4) Once connected it is the cached singleton (no further reconnects).
+    calls = mod.from_url_calls
+    m4 = pmod.get_conversation_memory()
+    assert m4 is m3
+    assert mod.from_url_calls == calls
