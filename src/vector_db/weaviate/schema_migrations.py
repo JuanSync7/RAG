@@ -96,7 +96,13 @@ def format_missing_diff(missing: list[Property]) -> list[str]:
     """Render a one-line-per-property diff: ``[MISSING] name (TYPE, flags)``."""
     lines: list[str] = []
     for prop in missing:
-        dtype = getattr(prop.data_type, "name", str(prop.data_type)).upper()
+        # weaviate-client exposes the type as ``data_type`` (config Property) or
+        # ``dataType`` (introspected schema) across versions; tolerate both, and
+        # both shapes (a DataType enum with ``.name`` or a raw list of strings).
+        dt = getattr(prop, "data_type", None)
+        if dt is None:
+            dt = getattr(prop, "dataType", None)
+        dtype = getattr(dt, "name", str(dt)).upper()
         lines.append(f"[MISSING] {prop.name} ({dtype}, {_format_flags(prop)})")
     return lines
 
