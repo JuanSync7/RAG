@@ -11,7 +11,7 @@ import { refs } from "./refs";
 import { state, setActiveConversation } from "./state";
 import { showToast, copyMsg } from "./toast";
 import { appendUserMsg, appendErrorMsg, setEmptyState } from "./thread";
-import { buildCitationsHtml, buildSourcesLineHtml } from "./citations";
+import { buildCitationsHtml, buildSourcesLineHtml, clearViewPayloads } from "./citations";
 import { sourceRefToChunkResult } from "./user-types";
 import { isSourcesTurn, appendSourcesTurn, cacheDocsFromSources, wireCitationActions } from "./chatMode";
 import type { ConversationMeta, SourceRef } from "./user-types";
@@ -99,6 +99,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
             conversation_id: string;
             turns: Array<{ role: string; content: string; timestamp_ms?: number; sources?: SourceRef[] }>;
         }>("GET", `/console/conversations/${convId}/history?limit=100`);
+        clearViewPayloads();
         refs.thread.innerHTML = "";
         if (!data.turns || !data.turns.length) {
             refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">Empty conversation</div><div class="thread-empty-sub">Send a message to start the conversation.</div></div>`;
@@ -156,6 +157,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
 
 export function createNewConversation(): void {
     setActiveConversation(null);
+    clearViewPayloads();
     refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
     byId("convTitle").textContent = "New conversation";
     byId("convList").querySelectorAll<HTMLElement>(".conv-item").forEach((el) => {

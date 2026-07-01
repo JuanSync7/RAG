@@ -837,11 +837,36 @@ function isSourcesTurn(turn) {
   return !turn.content.trim() && !!turn.sources && turn.sources.length > 0;
 }
 
-// src/citations.ts
-async function openSourceDocument(payload) {
-  const url = apiBase() + "/console/source-document/view";
+// src/docViewer.ts
+var _blobUrl = null;
+function _revoke() {
+  if (_blobUrl) {
+    URL.revokeObjectURL(_blobUrl);
+    _blobUrl = null;
+  }
+}
+function _panel() {
+  return byId("docViewer");
+}
+function _chatBody() {
+  return document.querySelector(".chat-body");
+}
+function _titleFor(p) {
+  const raw = String(p.source ?? p.source_uri ?? p.source_key ?? "").trim();
+  if (!raw) return "Source document";
+  return raw.split(/[\\/]/).pop() || raw;
+}
+async function openDocViewer(payload) {
+  const panel = _panel();
+  const frame = byId("docViewerFrame");
+  const status = byId("docViewerStatus");
+  byId("docViewerTitle").textContent = _titleFor(payload);
+  panel.classList.remove("is-loaded", "is-error");
+  status.textContent = "Loading\u2026";
+  panel.setAttribute("aria-hidden", "false");
+  _chatBody()?.classList.add("doc-open");
   try {
-    const res = await fetch(url, {
+    const res = await fetch(apiBase() + "/console/source-document/view", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify(payload)
@@ -850,20 +875,43 @@ async function openSourceDocument(payload) {
     const contentType = (res.headers.get("Content-Type") ?? "text/html").split(";")[0].trim();
     const buf = await res.arrayBuffer();
     const blob = new Blob([buf], { type: contentType });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank");
-    if (!win) {
-      showToast("Pop-up blocked. Allow pop-ups to view sources.");
-      URL.revokeObjectURL(blobUrl);
-      return;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 6e4);
+    _revoke();
+    _blobUrl = URL.createObjectURL(blob);
+    frame.src = _blobUrl;
+    byId("docViewerPopout").href = _blobUrl;
+    panel.classList.add("is-loaded");
   } catch (err) {
-    showToast("Could not open source: " + String(err));
+    panel.classList.add("is-error");
+    status.textContent = "Could not open source: " + String(err);
+    showToast("Could not open source document");
   }
+}
+function closeDocViewer() {
+  const panel = _panel();
+  _chatBody()?.classList.remove("doc-open");
+  panel.setAttribute("aria-hidden", "true");
+  byId("docViewerFrame").removeAttribute("src");
+  panel.classList.remove("is-loaded", "is-error");
+}
+function initDocViewer() {
+  byId("docViewerClose").addEventListener("click", closeDocViewer);
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape" && _panel().getAttribute("aria-hidden") === "false") {
+      closeDocViewer();
+    }
+  });
+}
+
+// src/citations.ts
+async function openSourceDocument(payload) {
+  await openDocViewer(payload);
 }
 var _viewPayloads = /* @__PURE__ */ new Map();
 var _viewCounter = 0;
+function clearViewPayloads() {
+  _viewPayloads.clear();
+}
 function buildCitationsHtml(results, answerText) {
   if (!results.length) return "";
   const citedNums = parseCitedNums(results, answerText);
@@ -881,21 +929,7 @@ function buildCitationsHtml(results, answerText) {
     const docKey = docKeyFromMeta(meta);
     const cardAttrs = docKey ? ` data-doc-key="${escHtml(docKey)}" data-doc-name="${escHtml(filenameRaw)}"` + (source ? ` data-source="${escHtml(source)}"` : "") + (sourceUri ? ` data-source-uri="${escHtml(sourceUri)}"` : "") + (sourceKey ? ` data-source-key="${escHtml(sourceKey)}"` : "") : "";
     const actionsHtml = docKey ? `<div class="citation-card-actions" onclick="event.stopPropagation()"><button class="citation-card-action" data-action="relevant">Mark relevant</button><button class="citation-card-action" data-action="hide">Hide</button><button class="citation-card-action" data-action="reset" disabled>Reset</button></div>` : "";
-    let viewKey = "";
-    if (sourceKey || sourceUri || source) {
-      viewKey = `view-${++_viewCounter}`;
-      _viewPayloads.set(viewKey, {
-        source: source || void 0,
-        source_uri: sourceUri || void 0,
-        source_key: sourceKey || void 0,
-        chunk_text: r.text || void 0,
-        original_start: numOrUndef(meta.original_char_start),
-        original_end: numOrUndef(meta.original_char_end),
-        refactored_start: numOrUndef(meta.refactored_char_start),
-        refactored_end: numOrUndef(meta.refactored_char_end),
-        provenance_confidence: numOrUndef(meta.provenance_confidence)
-      });
-    }
+    const viewKey = registerViewPayload(r);
     return `
           <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
@@ -942,6 +976,26 @@ function numOrUndef(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
 }
+function registerViewPayload(r) {
+  const meta = r.metadata || {};
+  const source = String(meta.source ?? "").trim();
+  const sourceUri = String(meta.source_uri ?? "").trim();
+  const sourceKey = String(meta.source_key ?? "").trim();
+  if (!(source || sourceUri || sourceKey)) return "";
+  const viewKey = `view-${++_viewCounter}`;
+  _viewPayloads.set(viewKey, {
+    source: source || void 0,
+    source_uri: sourceUri || void 0,
+    source_key: sourceKey || void 0,
+    chunk_text: r.text || void 0,
+    original_start: numOrUndef(meta.original_char_start),
+    original_end: numOrUndef(meta.original_char_end),
+    refactored_start: numOrUndef(meta.refactored_char_start),
+    refactored_end: numOrUndef(meta.refactored_char_end),
+    provenance_confidence: numOrUndef(meta.provenance_confidence)
+  });
+  return viewKey;
+}
 function parseCitedNums(results, answerText) {
   const citedNums = /* @__PURE__ */ new Set();
   if (answerText) {
@@ -961,7 +1015,7 @@ function buildSourcesLineHtml(results, answerText) {
 function sourcesUsed(results, citedNums) {
   const pick = citedNums.size ? results.filter((_, i) => citedNums.has(i + 1)) : results;
   const seen = /* @__PURE__ */ new Set();
-  const names = [];
+  const docs = [];
   for (const r of pick) {
     const meta = r.metadata || {};
     const raw = String(meta.source ?? meta.filename ?? "").trim();
@@ -969,14 +1023,18 @@ function sourcesUsed(results, citedNums) {
     const name = raw.split("/").pop() || raw;
     if (!seen.has(name)) {
       seen.add(name);
-      names.push(name);
+      docs.push({ name, result: r });
     }
   }
-  return names;
+  return docs;
 }
-function sourcesUsedHtml(names) {
-  if (!names.length) return "";
-  const list = names.map((n) => `<span class="sources-used-doc">${escHtml(n)}</span>`).join(", ");
+function sourcesUsedHtml(docs) {
+  if (!docs.length) return "";
+  const list = docs.map((d) => {
+    const label = escHtml(d.name);
+    const viewKey = registerViewPayload(d.result);
+    return viewKey ? `<a href="#" class="sources-used-doc" onclick="event.preventDefault();openSourceView(event,'${viewKey}')">${label}</a>` : `<span class="sources-used-doc">${label}</span>`;
+  }).join(", ");
   return `<div class="sources-used"><span class="sources-used-label">Sources:</span> ${list}</div>`;
 }
 async function openSourceView(e, viewKey) {
@@ -1449,6 +1507,7 @@ async function loadConversationHistory(id) {
   if (!convId) return;
   try {
     const data = await api("GET", `/console/conversations/${convId}/history?limit=100`);
+    clearViewPayloads();
     refs.thread.innerHTML = "";
     if (!data.turns || !data.turns.length) {
       refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">Empty conversation</div><div class="thread-empty-sub">Send a message to start the conversation.</div></div>`;
@@ -1502,6 +1561,7 @@ async function loadConversationHistory(id) {
 }
 function createNewConversation() {
   setActiveConversation(null);
+  clearViewPayloads();
   refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
   byId("convTitle").textContent = "New conversation";
   byId("convList").querySelectorAll(".conv-item").forEach((el) => {
@@ -2997,6 +3057,7 @@ document.addEventListener("DOMContentLoaded", () => {
   populateRefs();
   initToast();
   initCitations();
+  initDocViewer();
   initContextIndicator();
   initScrollFab();
   initSidebar();

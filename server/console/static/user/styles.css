@@ -368,6 +368,9 @@
     }
     .bubble .sources-used-label { font-weight: 600; color: var(--text); margin-right: 4px; }
     .bubble .sources-used-doc { color: var(--text-2); }
+    /* Clickable source links open the document in the side-panel viewer. */
+    .bubble a.sources-used-doc { color: var(--accent); text-decoration: none; cursor: pointer; }
+    .bubble a.sources-used-doc:hover { text-decoration: underline; }
 
     /* Task 4.5 — wider bubble on mobile */
     @media (max-width: 600px) {
@@ -1300,6 +1303,51 @@
       border: none; padding: 2px 4px; text-decoration: none;
     }
     .chat-rail-item-view:hover, .chat-rail-item-action:hover { text-decoration: underline; }
+
+    /* Source-document viewer — a side panel that splits the chat area 50/50
+       instead of opening a new browser tab. Closed: zero grow (width 0). Open
+       (.chat-body.doc-open): equal flex share with .chat-main, so the chat
+       "slides left" to make room. The rail is hidden while a doc is open to keep
+       a clean two-pane split; both panes flex, so they stay equal at any width. */
+    .doc-viewer {
+      flex: 0 1 0; min-width: 0; overflow: hidden; height: 100%;
+      display: flex; flex-direction: column;
+      background: var(--bg-surface); border-left: 1px solid var(--border);
+      opacity: 0;
+      transition: flex-grow 0.22s ease, opacity 0.18s ease;
+    }
+    .chat-body.doc-open .doc-viewer { flex: 1 1 0; opacity: 1; }
+    .chat-body.doc-open .chat-rail { display: none; }
+    .doc-viewer-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 8px 12px; min-height: 38px;
+      border-bottom: 1px solid var(--border);
+    }
+    .doc-viewer-title {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .doc-viewer-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .doc-viewer-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 6px;
+      background: none; border: none; color: var(--text-2);
+      cursor: pointer; font-size: 14px; text-decoration: none;
+    }
+    .doc-viewer-btn:hover { background: var(--bg-card); color: var(--text); }
+    .doc-viewer-body { position: relative; flex: 1; min-height: 0; }
+    .doc-viewer-frame { width: 100%; height: 100%; border: none; background: #fff; display: block; }
+    .doc-viewer-status {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center; padding: 16px; text-align: center;
+      color: var(--text-3); font-size: 13px; background: var(--bg-app); pointer-events: none;
+    }
+    .doc-viewer.is-loaded .doc-viewer-status { display: none; }
+    .doc-viewer.is-error .doc-viewer-status { color: var(--danger, #e5534b); pointer-events: auto; }
+    /* Narrow windows: the doc takes over the whole pane rather than cramping. */
+    @media (max-width: 760px) {
+      .chat-body.doc-open .chat-main { display: none; }
+    }
 
     /* Card actions row */
     .sources-card-actions {

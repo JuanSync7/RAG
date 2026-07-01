@@ -9,6 +9,7 @@ import { populateRefs, refs } from "./refs";
 import { state } from "./state";
 import { initToast } from "./toast";
 import { initCitations } from "./citations";
+import { initDocViewer } from "./docViewer";
 import { initContextIndicator } from "./contextWindow";
 import { initScrollFab } from "./scrollFab";
 import { initSidebar } from "./sidebar";
@@ -28,6 +29,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // then input (which depends on slash + attachments closeCmdPicker bridge).
     initToast();
     initCitations();
+    initDocViewer();
     initContextIndicator();
     initScrollFab();
     initSidebar();

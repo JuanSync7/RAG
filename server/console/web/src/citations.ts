@@ -7,9 +7,9 @@
 import { escHtml } from "./dom";
 import { pct } from "./format";
 import { parseMarkdown } from "./markdown";
-import { apiBase, authHeaders } from "./api";
 import { showToast } from "./toast";
 import { docKeyFromMeta } from "./chatMode";
+import { openDocViewer } from "./docViewer";
 import type { ChunkResult } from "./user-types";
 
 export interface ViewPayload {
@@ -24,33 +24,26 @@ export interface ViewPayload {
     provenance_confidence?: number;
 }
 
+/**
+ * Open a source document. Delegates to the in-page side-panel viewer
+ * (``docViewer``), which splits the chat 50/50 and renders the document in an
+ * iframe instead of opening a new browser tab. Kept as the shared entry point so
+ * citation cards, the bubble "Sources:" links, and the chat-rail all open
+ * documents the same way.
+ */
 export async function openSourceDocument(payload: ViewPayload): Promise<void> {
-    const url = apiBase() + "/console/source-document/view";
-    try {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: authHeaders(),
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const contentType = (res.headers.get("Content-Type") ?? "text/html").split(";")[0].trim();
-        const buf = await res.arrayBuffer();
-        const blob = new Blob([buf], { type: contentType });
-        const blobUrl = URL.createObjectURL(blob);
-        const win = window.open(blobUrl, "_blank");
-        if (!win) {
-            showToast("Pop-up blocked. Allow pop-ups to view sources.");
-            URL.revokeObjectURL(blobUrl);
-            return;
-        }
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    } catch (err) {
-        showToast("Could not open source: " + String(err));
-    }
+    await openDocViewer(payload);
 }
 
 const _viewPayloads = new Map<string, ViewPayload>();
 let _viewCounter = 0;
+
+/** Drop all registered source-view payloads. Called when the thread is reset
+ *  (conversation switch / new chat) so the map can't grow unbounded across a
+ *  long session — the `viewKey`s in the discarded HTML are unreachable anyway. */
+export function clearViewPayloads(): void {
+    _viewPayloads.clear();
+}
 
 /**
  * Render the references panel.
@@ -100,21 +93,7 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
                 + `<button class="citation-card-action" data-action="reset" disabled>Reset</button>`
                 + `</div>`
             : "";
-        let viewKey = "";
-        if (sourceKey || sourceUri || source) {
-            viewKey = `view-${++_viewCounter}`;
-            _viewPayloads.set(viewKey, {
-                source: source || undefined,
-                source_uri: sourceUri || undefined,
-                source_key: sourceKey || undefined,
-                chunk_text: r.text || undefined,
-                original_start: numOrUndef(meta.original_char_start),
-                original_end: numOrUndef(meta.original_char_end),
-                refactored_start: numOrUndef(meta.refactored_char_start),
-                refactored_end: numOrUndef(meta.refactored_char_end),
-                provenance_confidence: numOrUndef(meta.provenance_confidence),
-            });
-        }
+        const viewKey = registerViewPayload(r);
         return `
           <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
@@ -170,6 +149,30 @@ function numOrUndef(v: unknown): number | undefined {
     return Number.isFinite(n) ? n : undefined;
 }
 
+/** Register a chunk's source identity as a view payload and return its key (or
+ *  "" when the chunk has no openable source). Shared by the citation cards and
+ *  the bubble "Sources:" links so both open a document through the one viewer. */
+function registerViewPayload(r: ChunkResult): string {
+    const meta = r.metadata || {};
+    const source = String(meta.source ?? "").trim();
+    const sourceUri = String(meta.source_uri ?? "").trim();
+    const sourceKey = String(meta.source_key ?? "").trim();
+    if (!(source || sourceUri || sourceKey)) return "";
+    const viewKey = `view-${++_viewCounter}`;
+    _viewPayloads.set(viewKey, {
+        source: source || undefined,
+        source_uri: sourceUri || undefined,
+        source_key: sourceKey || undefined,
+        chunk_text: r.text || undefined,
+        original_start: numOrUndef(meta.original_char_start),
+        original_end: numOrUndef(meta.original_char_end),
+        refactored_start: numOrUndef(meta.refactored_char_start),
+        refactored_end: numOrUndef(meta.refactored_char_end),
+        provenance_confidence: numOrUndef(meta.provenance_confidence),
+    });
+    return viewKey;
+}
+
 /** Parse the `[N]` citation markers out of the answer into the set of result
  *  indices (1-based) the answer actually cited. Shared by the references panel
  *  and the bubble "Sources:" line so both agree on what was used. */
@@ -194,16 +197,22 @@ export function buildSourcesLineHtml(results: ChunkResult[], answerText?: string
     return sourcesUsedHtml(sourcesUsed(results, parseCitedNums(results, answerText)));
 }
 
-/** Distinct document names that fed the answer, basename-only, in first-seen
- *  order. When the answer dropped `[N]` citations we list only the cited
- *  documents (the ones it actually used); otherwise we list every retrieved
- *  document. Shared shape with the CLI's "Sources:" line (CLI/UI parity). */
-function sourcesUsed(results: ChunkResult[], citedNums: Set<number>): string[] {
+/** One distinct document per basename (first-seen order), each paired with a
+ *  representative chunk so the "Sources:" line can link straight to the document.
+ *  When the answer dropped `[N]` citations we list only the cited documents (the
+ *  ones it actually used); otherwise we list every retrieved document. Shared
+ *  shape with the CLI's "Sources:" line (CLI/UI parity). */
+interface SourceUsedDoc {
+    name: string;
+    result: ChunkResult;
+}
+
+function sourcesUsed(results: ChunkResult[], citedNums: Set<number>): SourceUsedDoc[] {
     const pick = citedNums.size
         ? results.filter((_, i) => citedNums.has(i + 1))
         : results;
     const seen = new Set<string>();
-    const names: string[] = [];
+    const docs: SourceUsedDoc[] = [];
     for (const r of pick) {
         const meta = r.metadata || {};
         const raw = String(meta.source ?? meta.filename ?? "").trim();
@@ -211,15 +220,26 @@ function sourcesUsed(results: ChunkResult[], citedNums: Set<number>): string[] {
         const name = raw.split("/").pop() || raw;
         if (!seen.has(name)) {
             seen.add(name);
-            names.push(name);
+            docs.push({ name, result: r });
         }
     }
-    return names;
+    return docs;
 }
 
-function sourcesUsedHtml(names: string[]): string {
-    if (!names.length) return "";
-    const list = names.map((n) => `<span class="sources-used-doc">${escHtml(n)}</span>`).join(", ");
+/** The "Sources:" line: each document is a link that opens it in the side-panel
+ *  viewer (same `openSourceView` path as the citation cards' [view]). Documents
+ *  without an openable source fall back to plain text. */
+function sourcesUsedHtml(docs: SourceUsedDoc[]): string {
+    if (!docs.length) return "";
+    const list = docs
+        .map((d) => {
+            const label = escHtml(d.name);
+            const viewKey = registerViewPayload(d.result);
+            return viewKey
+                ? `<a href="#" class="sources-used-doc" onclick="event.preventDefault();openSourceView(event,'${viewKey}')">${label}</a>`
+                : `<span class="sources-used-doc">${label}</span>`;
+        })
+        .join(", ");
     return `<div class="sources-used"><span class="sources-used-label">Sources:</span> ${list}</div>`;
 }
 

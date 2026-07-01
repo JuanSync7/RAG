@@ -215,6 +215,21 @@
       <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; Esc&nbsp;Esc&nbsp;to&nbsp;clear &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
     </div>
     </div>
+    <!-- Source-document viewer: a side panel that splits the chat 50/50 instead
+         of opening a new browser tab. Hidden until a [view] / source link fires. -->
+    <section class="doc-viewer" id="docViewer" aria-hidden="true" aria-label="Source document viewer">
+      <header class="doc-viewer-header">
+        <span class="doc-viewer-title" id="docViewerTitle">Source document</span>
+        <div class="doc-viewer-actions">
+          <a class="doc-viewer-btn" id="docViewerPopout" href="#" target="_blank" rel="noopener" title="Open in new tab" aria-label="Open in new tab">&#8599;</a>
+          <button class="doc-viewer-btn" id="docViewerClose" title="Close (Esc)" aria-label="Close source viewer">&#10005;</button>
+        </div>
+      </header>
+      <div class="doc-viewer-body">
+        <iframe class="doc-viewer-frame" id="docViewerFrame" title="Source document" referrerpolicy="no-referrer"></iframe>
+        <div class="doc-viewer-status" id="docViewerStatus">Loading…</div>
+      </div>
+    </section>
     <aside class="chat-rail" id="chatRail" aria-label="Document state">
       <div class="chat-rail-header">
         <button class="chat-rail-toggle" id="chatRailToggle" title="Collapse" aria-expanded="true" aria-controls="chatRailBody">&#9654;</button>
