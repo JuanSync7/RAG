@@ -73,7 +73,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg-app);
       color: var(--text);
       height: 100vh;
@@ -346,7 +346,7 @@
 
     .bubble {
       padding: 10px 14px; border-radius: 14px;
-      font-size: 14px; line-height: 1.6; max-width: 680px; position: relative;
+      font-size: 15.5px; line-height: 1.7; max-width: 680px; position: relative;
       overflow-wrap: anywhere; word-break: break-word;
     }
     .bubble.streaming { min-height: 1.6em; }
@@ -380,7 +380,7 @@
 
     /* Task 4.5 — wider bubble on mobile */
     @media (max-width: 600px) {
-      .bubble { max-width: calc(100vw - 80px); font-size: 13px; }
+      .bubble { max-width: calc(100vw - 80px); font-size: 14.5px; }
     }
 
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
@@ -408,6 +408,10 @@
     /* markdown */
     .bubble strong { color: var(--accent-2); }
     .bubble em { color: var(--text-2); font-style: italic; }
+    /* Light mode: bold "highlight" reads as high-contrast near-black rather than
+       the olive accent, which sits poorly on the light background. */
+    [data-theme="light"] .bubble strong,
+    [data-theme="light"] .sources-chunk-text strong { color: var(--text); }
     .bubble ul, .bubble ol { padding-left: 18px; margin: 6px 0; }
     .bubble li { margin: 2px 0; }
     .bubble p { margin: 4px 0; }
@@ -605,7 +609,7 @@
     .input-wrap:focus-within { border-color: var(--accent); }
     .input-textarea {
       flex: 1; background: none; border: none; outline: none;
-      color: var(--text); font-size: 14px; resize: none; line-height: 1.5;
+      color: var(--text); font-size: 15px; resize: none; line-height: 1.5;
       max-height: 220px; min-height: 44px; overflow-y: auto; font-family: inherit;
     }
     .input-textarea::placeholder { color: var(--text-3); }
