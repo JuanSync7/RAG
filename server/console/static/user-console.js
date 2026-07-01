@@ -931,11 +931,12 @@ function buildCitationsHtml(results, answerText) {
     const n = i + 1;
     (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
   });
+  const usedHtml = sourcesUsedHtml(sourcesUsed(results, citedNums));
   if (!cited.length) {
     const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
-    return label + uncited.join("");
+    return usedHtml + label + uncited.join("");
   }
-  let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+  let html = usedHtml + `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
   html += cited.join("");
   if (uncited.length) {
     html += `
@@ -949,6 +950,27 @@ function buildCitationsHtml(results, answerText) {
 function numOrUndef(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
+}
+function sourcesUsed(results, citedNums) {
+  const pick = citedNums.size ? results.filter((_, i) => citedNums.has(i + 1)) : results;
+  const seen = /* @__PURE__ */ new Set();
+  const names = [];
+  for (const r of pick) {
+    const meta = r.metadata || {};
+    const raw = String(meta.source ?? meta.filename ?? "").trim();
+    if (!raw) continue;
+    const name = raw.split("/").pop() || raw;
+    if (!seen.has(name)) {
+      seen.add(name);
+      names.push(name);
+    }
+  }
+  return names;
+}
+function sourcesUsedHtml(names) {
+  if (!names.length) return "";
+  const list = names.map((n) => `<span class="sources-used-doc">${escHtml(n)}</span>`).join(", ");
+  return `<div class="sources-used"><span class="sources-used-label">Sources:</span> ${list}</div>`;
 }
 async function openSourceView(e, viewKey) {
   e.preventDefault();

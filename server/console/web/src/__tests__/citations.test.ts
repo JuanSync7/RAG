@@ -64,3 +64,40 @@ describe("buildCitationsHtml — cited-only filtering", () => {
         expect(html).toContain("Show 1 more retrieved source");
     });
 });
+
+describe("buildCitationsHtml — Sources header", () => {
+    // The header slice is everything before the first citation-label (the Sources
+    // line is prepended); the per-chunk cards come after, so checking the slice
+    // isolates which documents the "Sources:" line names.
+    const header = (html: string) => html.slice(0, html.indexOf("citation-label"));
+
+    it("lists only the CITED documents (deduped) in the Sources header", () => {
+        const results = [chunk("a.pdf"), chunk("b.pdf"), chunk("a.pdf"), chunk("c.pdf")];
+        const html = buildCitationsHtml(results, "See [1] and [4]."); // cite a.pdf, c.pdf
+        const h = header(html);
+        expect(h).toContain('class="sources-used"');
+        expect(h).toContain("Sources:");
+        expect(h).toContain("a.pdf");
+        expect(h).toContain("c.pdf");
+        expect(h).not.toContain("b.pdf");          // uncited doc is not a "source used"
+        expect(h.match(/a\.pdf/g)?.length).toBe(1); // deduped
+    });
+
+    it("falls back to ALL distinct documents when the answer has no citations", () => {
+        const html = buildCitationsHtml([chunk("a.pdf"), chunk("b.pdf"), chunk("a.pdf")]);
+        const h = header(html);
+        expect(h).toContain("a.pdf");
+        expect(h).toContain("b.pdf");
+        expect(h.match(/a\.pdf/g)?.length).toBe(1);
+    });
+
+    it("shows basename only, stripping any path", () => {
+        const h = header(buildCitationsHtml([chunk("specs/amba/CHI.pdf")], "Per [1]."));
+        expect(h).toContain("CHI.pdf");
+        expect(h).not.toContain("specs/amba");
+    });
+
+    it("emits no Sources header when there are no results", () => {
+        expect(buildCitationsHtml([])).toBe("");
+    });
+});

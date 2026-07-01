@@ -380,6 +380,19 @@ def display_retrieval(response: dict) -> None:
         print(f"\n  {B_YELLOW}⚠{RESET} No results found.\n")
         return
 
+    # Concise "Sources:" summary — the distinct documents that fed the answer
+    # (CLI/UI parity with the web references panel's Sources header). Basename
+    # only, deduped, in first-seen order.
+    _seen: set[str] = set()
+    _used: list[str] = []
+    for r in results:
+        name = str((r.get("metadata", {}) or {}).get("source") or "unknown").split("/")[-1]
+        if name not in _seen:
+            _seen.add(name)
+            _used.append(name)
+    if _used:
+        print(f"\n  {B_GREEN}Sources:{RESET} {B_MAGENTA}{', '.join(_used)}{RESET}")
+
     print(f"\n  {B_WHITE}Top {len(results)} retrieved chunks{RESET}\n")
     for i, r in enumerate(results, 1):
         score = r["score"]

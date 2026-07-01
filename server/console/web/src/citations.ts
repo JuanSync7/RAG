@@ -152,13 +152,17 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
         (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
     });
 
+    // Concise "Sources:" header — the distinct documents that fed the answer
+    // (cited docs when the answer dropped [N] markers, else everything retrieved).
+    const usedHtml = sourcesUsedHtml(sourcesUsed(results, citedNums));
+
     // Fallback: no detectable citations — show everything as "retrieved".
     if (!cited.length) {
         const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
-        return label + uncited.join("");
+        return usedHtml + label + uncited.join("");
     }
 
-    let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+    let html = usedHtml + `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
     html += cited.join("");
     if (uncited.length) {
         html += `
@@ -173,6 +177,35 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
 function numOrUndef(v: unknown): number | undefined {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
+}
+
+/** Distinct document names that fed the answer, basename-only, in first-seen
+ *  order. When the answer dropped `[N]` citations we list only the cited
+ *  documents (the ones it actually used); otherwise we list every retrieved
+ *  document. Shared shape with the CLI's "Sources:" line (CLI/UI parity). */
+function sourcesUsed(results: ChunkResult[], citedNums: Set<number>): string[] {
+    const pick = citedNums.size
+        ? results.filter((_, i) => citedNums.has(i + 1))
+        : results;
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const r of pick) {
+        const meta = r.metadata || {};
+        const raw = String(meta.source ?? meta.filename ?? "").trim();
+        if (!raw) continue;
+        const name = raw.split("/").pop() || raw;
+        if (!seen.has(name)) {
+            seen.add(name);
+            names.push(name);
+        }
+    }
+    return names;
+}
+
+function sourcesUsedHtml(names: string[]): string {
+    if (!names.length) return "";
+    const list = names.map((n) => `<span class="sources-used-doc">${escHtml(n)}</span>`).join(", ");
+    return `<div class="sources-used"><span class="sources-used-label">Sources:</span> ${list}</div>`;
 }
 
 async function openSourceView(e: Event, viewKey: string): Promise<void> {
