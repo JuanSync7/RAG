@@ -22,6 +22,7 @@ from src.ingest.embedding.nodes.chunking import _drop_navigational_chunks
     "text",
     [
         "A1.3 AXI Architecture .................... A1-22",          # ToC dotted leader
+        "A1.3 AXI Architecture . . . . . . . . . . . . A1-22",        # space-separated leader
         "This specification describes the AMBA AXI protocol.",        # widened phrase
         "This document describes the register map.",                  # widened phrase
         "This appendix contains the signal list.",                    # widened phrase
@@ -64,7 +65,45 @@ def test_long_cross_reference_body_not_navigational():
 
 def test_toc_leader_ratio_dense_vs_prose():
     assert toc_leader_ratio("Foo ........ 12\nBar ........ 18") >= 0.08
+    # Space-separated leaders (PDF extraction artifact) must score the same way —
+    # the contiguous-only regex used to score these at 0.0 and let the page through.
+    assert toc_leader_ratio("Foo . . . . . . . 12\nBar . . . . . . . 18") >= 0.08
     assert toc_leader_ratio("A normal sentence with no dotted leaders at all.") == 0.0
+    # A lone prose ellipsis (3 dots) is not a leader and must not register.
+    assert toc_leader_ratio("Well... it depends on the configuration.") == 0.0
+
+
+def test_space_separated_toc_is_navigational():
+    """The exact class that slipped through: a spec ToC linearised by the PDF
+    parser into "<label> <title> . . . . <page>" with space-separated leaders.
+    A *different* instance of the navigational class than the contiguous-dot
+    fixtures above (per the project's generic-fix rule)."""
+    linearised_toc = (
+        "AMBA CHI Architecture Specification , 1 = B2.9.1 . , 2 = Data size "
+        ". . . . . . . . . . . . . . . 162 , 1 = B2.10.3 . , 2 = Transaction "
+        "Retry flow . . . . . . . . . . . . 181 , 1 = B11.3 Data . , 2 = Target "
+        ". . . . . . . . . . . 415 , 1 = B12.3 . , 2 = Tag coherency "
+        ". . . . . . . . . . . . . . . . 432 , 1 = B13.4 . , 2 = Channel mapping "
+        ". . . . . . . . . . . 458 , 1 = B15.2 . , 2 = Request Node rules "
+        ". . . . . . . . . . . . . . 503 , 1 = B16.1 . , 2 = Enhanced Features "
+        ". . . . . . . . . . . 564"
+    )
+    assert len(linearised_toc) > 320  # long chunk; only the leader-density gate can catch it
+    assert is_navigational(linearised_toc, 320) is True
+
+
+def test_numeric_data_table_not_navigational():
+    """False-positive guard: a real numeric data table is dense with integers but
+    has NO dotted leaders, so it must be kept. (An earlier page-pointer-density
+    heuristic wrongly flagged exactly this kind of table — keep the gate keyed on
+    leaders, which real tables do not contain.)"""
+    data_table = (
+        "B2.8.4 Transaction attribute combinations Table B2.11: Legal combinations "
+        "of MemAttr, SnpAttr, and Order. | MemAttr | SnpAttr | Order | Allowed | "
+        "| Device | 0 | 00 | Yes | | Normal | 1 | 01 | Yes | | Device | 1 | 11 | No | "
+        "| Normal | 0 | 10 | Yes |"
+    )
+    assert is_navigational(data_table, 320) is False
 
 
 # ---------------------------------------------------------------------------

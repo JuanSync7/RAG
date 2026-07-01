@@ -335,9 +335,20 @@ def chunk_body_text(text: str, heading_path: Optional[list] = None) -> str:
 # ingest never depends on retrieval (the dependency only ever runs the other way).
 # ---------------------------------------------------------------------------
 
-# Dotted-leader runs (>=4 dots) — the fingerprint of a table-of-contents / index
-# entry ("A1.3 AXI Architecture ............ A1-22"). Scored by density, not length.
-_TOC_LEADER_RE = re.compile(r"\.{4,}")
+# Dotted-leader runs — the fingerprint of a table-of-contents / index entry
+# ("A1.3 AXI Architecture ............ A1-22"). Scored by density, not length.
+#
+# Match a leader even when PDF text extraction renders it as *space-separated*
+# dots (". . . . ."): a dotted leader is a leader regardless of whether the
+# extractor preserved the dots as one run. Several specs linearise their ToC that
+# way — e.g. the AMBA CHI architecture spec, whose ~38 ToC/index pages came out as
+# "B11.3 Data . . . . . . . 415" — and the original contiguous-only ``\.{4,}``
+# scored those at zero leader-density, silently passing every one of them through
+# the navigational drop and into the index. Tolerating inter-dot whitespace fixes
+# the detector for the whole class (any spec, any extractor that spaces its
+# leaders), not just this corpus. Still requires >=4 dots so prose ellipses ("…")
+# never register.
+_TOC_LEADER_RE = re.compile(r"\.(?:[ \t]*\.){3,}")
 # Front-matter / navigation pointer idioms used by spec chapter & part intros
 # ("Read this chapter for a description of ...", "This specification describes ...").
 # High precision: these phrases point AT content elsewhere, never state content.
