@@ -866,15 +866,7 @@ var _viewPayloads = /* @__PURE__ */ new Map();
 var _viewCounter = 0;
 function buildCitationsHtml(results, answerText) {
   if (!results.length) return "";
-  const citedNums = /* @__PURE__ */ new Set();
-  if (answerText) {
-    const re = /\[(\d+)\]/g;
-    let m;
-    while ((m = re.exec(answerText)) !== null) {
-      const n = Number(m[1]);
-      if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
-    }
-  }
+  const citedNums = parseCitedNums(results, answerText);
   const renderCard = (r, n) => {
     const meta = r.metadata || {};
     const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
@@ -931,12 +923,11 @@ function buildCitationsHtml(results, answerText) {
     const n = i + 1;
     (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
   });
-  const usedHtml = sourcesUsedHtml(sourcesUsed(results, citedNums));
   if (!cited.length) {
     const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
-    return usedHtml + label + uncited.join("");
+    return label + uncited.join("");
   }
-  let html = usedHtml + `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+  let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
   html += cited.join("");
   if (uncited.length) {
     html += `
@@ -950,6 +941,22 @@ function buildCitationsHtml(results, answerText) {
 function numOrUndef(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
+}
+function parseCitedNums(results, answerText) {
+  const citedNums = /* @__PURE__ */ new Set();
+  if (answerText) {
+    const re = /\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(answerText)) !== null) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
+    }
+  }
+  return citedNums;
+}
+function buildSourcesLineHtml(results, answerText) {
+  if (!results.length) return "";
+  return sourcesUsedHtml(sourcesUsed(results, parseCitedNums(results, answerText)));
 }
 function sourcesUsed(results, citedNums) {
   const pick = citedNums.size ? results.filter((_, i) => citedNums.has(i + 1)) : results;
@@ -1465,7 +1472,7 @@ async function loadConversationHistory(id) {
                     <div class="msg-row assistant">
                       <div class="avatar ai-av">AI</div>
                       <div class="bubble-wrap">
-                        <div class="bubble">${parseMarkdown(turn.content)}</div>
+                        <div class="bubble">${parseMarkdown(turn.content)}${sources.length ? buildSourcesLineHtml(sources.map(sourceRefToChunkResult), turn.content) : ""}</div>
                         ${citationsHtml}
                         <div class="msg-actions">
                           <button class="msg-action-btn">&#128203; Copy</button>
@@ -2007,7 +2014,7 @@ async function streamQuery(queryText) {
               bubbleEl.innerHTML = parseMarkdown(msg);
               bubbleEl.style.display = "block";
             } else {
-              bubbleEl.innerHTML = parseMarkdown(answer);
+              bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(lastResults, answer);
               bubbleEl.style.display = "block";
             }
           }
@@ -2087,7 +2094,7 @@ async function nonStreamQuery(queryText) {
     });
     typingEl.style.display = "none";
     const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
-    bubbleEl.innerHTML = parseMarkdown(answer);
+    bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
     bubbleEl.style.display = "block";
     const tb = data.token_budget;
     if (tb) {

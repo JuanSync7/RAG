@@ -73,15 +73,7 @@ let _viewCounter = 0;
 export function buildCitationsHtml(results: ChunkResult[], answerText?: string): string {
     if (!results.length) return "";
 
-    const citedNums = new Set<number>();
-    if (answerText) {
-        const re = /\[(\d+)\]/g;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(answerText)) !== null) {
-            const n = Number(m[1]);
-            if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
-        }
-    }
+    const citedNums = parseCitedNums(results, answerText);
 
     const renderCard = (r: ChunkResult, n: number): string => {
         const meta = r.metadata || {};
@@ -152,17 +144,16 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
         (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
     });
 
-    // Concise "Sources:" header — the distinct documents that fed the answer
-    // (cited docs when the answer dropped [N] markers, else everything retrieved).
-    const usedHtml = sourcesUsedHtml(sourcesUsed(results, citedNums));
+    // The concise "Sources:" line is rendered inside the assistant bubble
+    // (see buildSourcesLineHtml), not here — this panel is the detailed evidence.
 
     // Fallback: no detectable citations — show everything as "retrieved".
     if (!cited.length) {
         const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
-        return usedHtml + label + uncited.join("");
+        return label + uncited.join("");
     }
 
-    let html = usedHtml + `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+    let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
     html += cited.join("");
     if (uncited.length) {
         html += `
@@ -177,6 +168,30 @@ export function buildCitationsHtml(results: ChunkResult[], answerText?: string):
 function numOrUndef(v: unknown): number | undefined {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
+}
+
+/** Parse the `[N]` citation markers out of the answer into the set of result
+ *  indices (1-based) the answer actually cited. Shared by the references panel
+ *  and the bubble "Sources:" line so both agree on what was used. */
+function parseCitedNums(results: ChunkResult[], answerText?: string): Set<number> {
+    const citedNums = new Set<number>();
+    if (answerText) {
+        const re = /\[(\d+)\]/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(answerText)) !== null) {
+            const n = Number(m[1]);
+            if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
+        }
+    }
+    return citedNums;
+}
+
+/** The concise "Sources: <docs>" line shown INSIDE the assistant answer bubble.
+ *  Same document-set logic as the references panel (cited docs first, else all
+ *  retrieved), basename, deduped. Returns "" when there are no results. */
+export function buildSourcesLineHtml(results: ChunkResult[], answerText?: string): string {
+    if (!results.length) return "";
+    return sourcesUsedHtml(sourcesUsed(results, parseCitedNums(results, answerText)));
 }
 
 /** Distinct document names that fed the answer, basename-only, in first-seen

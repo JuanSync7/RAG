@@ -11,7 +11,7 @@ import { state, setActiveConversation } from "./state";
 import { refs } from "./refs";
 import { appendUserMsg, appendErrorMsg, appendPendingAssistant } from "./thread";
 import { scrollToBottom } from "./scrollFab";
-import { buildCitationsHtml, revealCitations } from "./citations";
+import { buildCitationsHtml, buildSourcesLineHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
@@ -368,7 +368,7 @@ export async function streamQuery(queryText: string): Promise<void> {
                             bubbleEl.innerHTML = parseMarkdown(msg);
                             bubbleEl.style.display = "block";
                         } else {
-                            bubbleEl.innerHTML = parseMarkdown(answer);
+                            bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(lastResults, answer);
                             bubbleEl.style.display = "block";
                         }
                     }
@@ -471,7 +471,7 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 
         typingEl.style.display = "none";
         const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
-        bubbleEl.innerHTML = parseMarkdown(answer);
+        bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
         bubbleEl.style.display = "block";
 
         const tb = data.token_budget;

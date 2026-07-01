@@ -360,6 +360,15 @@
       border-bottom-left-radius: 4px; border: 1px solid var(--border);
     }
 
+    /* "Sources:" attribution line rendered INSIDE the assistant answer bubble
+       (the detailed citation cards live in the separate references panel). */
+    .bubble .sources-used {
+      margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+      font-size: 12px; line-height: 1.5; color: var(--text-2);
+    }
+    .bubble .sources-used-label { font-weight: 600; color: var(--text); margin-right: 4px; }
+    .bubble .sources-used-doc { color: var(--text-2); }
+
     /* Task 4.5 — wider bubble on mobile */
     @media (max-width: 600px) {
       .bubble { max-width: calc(100vw - 80px); font-size: 13px; }

@@ -11,7 +11,7 @@ import { refs } from "./refs";
 import { state, setActiveConversation } from "./state";
 import { showToast, copyMsg } from "./toast";
 import { appendUserMsg, appendErrorMsg, setEmptyState } from "./thread";
-import { buildCitationsHtml } from "./citations";
+import { buildCitationsHtml, buildSourcesLineHtml } from "./citations";
 import { sourceRefToChunkResult } from "./user-types";
 import { isSourcesTurn, appendSourcesTurn, cacheDocsFromSources, wireCitationActions } from "./chatMode";
 import type { ConversationMeta, SourceRef } from "./user-types";
@@ -124,7 +124,7 @@ export async function loadConversationHistory(id?: string): Promise<void> {
                     <div class="msg-row assistant">
                       <div class="avatar ai-av">AI</div>
                       <div class="bubble-wrap">
-                        <div class="bubble">${parseMarkdown(turn.content)}</div>
+                        <div class="bubble">${parseMarkdown(turn.content)}${sources.length ? buildSourcesLineHtml(sources.map(sourceRefToChunkResult), turn.content) : ""}</div>
                         ${citationsHtml}
                         <div class="msg-actions">
                           <button class="msg-action-btn">&#128203; Copy</button>

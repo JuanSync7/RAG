@@ -143,7 +143,7 @@ def _decode_page_bbox(raw: Any) -> dict | None:
 
 
 def _source_refs(results: list) -> list[dict]:
-    """Extract lightweight source references from RAG results (no full chunk text)."""
+    """Extract source references from RAG results (full chunk text for the citations panel)."""
     refs = []
     for r in results:
         meta: dict = r.get("metadata", {}) if isinstance(r, dict) else getattr(r, "metadata", {}) or {}
@@ -156,7 +156,7 @@ def _source_refs(results: list) -> list[dict]:
             "document_id": meta.get("document_id", ""),
             "section": meta.get("section") or meta.get("heading", ""),
             "score": score,
-            "text": text[:400] if text else "",
+            "text": text or "",
         }
         start = meta.get("original_char_start")
         end = meta.get("original_char_end")
