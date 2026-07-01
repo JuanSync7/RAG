@@ -10,9 +10,11 @@
 # with a flaky judge it falls open to raw-hybrid order (still > the cross-encoder).
 # The cross-encoder is bypassed by default (ranker="judge"); ranker="cross_encoder"
 # restores the INC-1 ordering. Anti-refusal backfill draws from a CROSS-ROUND
-# reservoir so a terminal empty round never yields empty context. Instantiated per
-# request (no shared state); reuses the chain's retrieve/rerank/filter helpers via
-# injected callables (no rag_chain import — avoids a cycle).
+# reservoir so a terminal empty round never yields empty context. A run-time role
+# backstop (metadata fast-path, no LLM) drops a chunk TAGGED nav/boilerplate that
+# slipped the query filter, BEFORE judging; fail-open (only an explicit excluded
+# role drops). Instantiated per request (no shared state); reuses the chain's
+# retrieve/rerank/filter helpers via injected callables (no rag_chain import — avoids a cycle).
 # Exports: AgenticRetrieval
 # Deps: asyncio, time, src.retrieval.pipeline.agentic.{state,hyde,judge}, deep_research (_chunk_id)
 # @end-summary
@@ -79,6 +81,8 @@ class AgenticRetrieval:
         json_mode: bool = False,
         judge_concise: bool = False,
         fill_mode: str = "hybrid",
+        role_backstop: bool = False,
+        excluded_roles: Optional[list] = None,
         graph_context: str = "",
     ) -> None:
         self._provider = provider
@@ -97,6 +101,12 @@ class AgenticRetrieval:
         self._json_mode = json_mode
         self._judge_concise = judge_concise
         self._fill_mode = fill_mode
+        # Run-time metadata fast-path backstop: drop a retrieved chunk TAGGED with
+        # an excluded role BEFORE judging (defense for a tagged-nav chunk that
+        # slipped the query-time role filter). Fail-open: only an explicitly
+        # excluded role drops — NULL/legacy/"content"/unknown roles are always kept.
+        self._role_backstop = role_backstop
+        self._excluded_roles = frozenset(excluded_roles or [])
         self._graph_context = graph_context
         self._state = AgenticState(
             original_question=original_question,
@@ -261,6 +271,15 @@ class AgenticRetrieval:
             self._mark_unproductive()
             return
 
+        # 4b. Run-time role backstop (metadata fast-path, no LLM): drop any chunk
+        #     already TAGGED with an excluded role that slipped the query filter.
+        #     Fail-open — only an explicit excluded role drops; NULL/legacy/unknown
+        #     roles pass through to the judge unchanged.
+        filtered = self._apply_role_backstop(filtered)
+        if not filtered:
+            self._mark_unproductive()
+            return
+
         # 5. Build the round's candidate RankedResults.
         if self._ranker == "cross_encoder":
             # INC-1 path: the cross-encoder narrows + scores against the ORIGINAL
@@ -349,6 +368,33 @@ class AgenticRetrieval:
             s.coverage_aspects = (
                 [pool.missing_information] if pool.missing_information else []
             )
+
+    def _apply_role_backstop(self, items: list) -> list:
+        """Drop chunks whose metadata ``chunk_role`` is an excluded role.
+
+        Cheap, no-LLM defense for a chunk that was TAGGED navigation/boilerplate at
+        ingest but reached the loop anyway (the query-time role filter was off, the
+        schema flag was off, or the chunk arrived via a path that did not apply it).
+
+        FAIL-OPEN: a chunk is dropped ONLY when its role is present AND in the
+        excluded set; a missing role (NULL/legacy), an unknown role, "content", or
+        any non-string value is KEPT (invariant #4 — never drop on missing/unknown).
+        The LLM judge remains the authoritative gate for an untagged leaked nav
+        chunk (caught by the judge-prompt awareness line).
+        """
+        if not self._role_backstop or not self._excluded_roles:
+            return items
+        kept: list = []
+        for sr in items:
+            md = getattr(sr, "metadata", None) or {}
+            role = md.get("chunk_role")
+            if isinstance(role, str) and role in self._excluded_roles:
+                logger.debug(
+                    "agentic role backstop dropped a chunk tagged %r", role
+                )
+                continue
+            kept.append(sr)
+        return kept
 
     def _mark_unproductive(self) -> None:
         """Reset the per-round signals for a round that judged nothing."""
@@ -455,18 +501,13 @@ class AgenticRetrieval:
         if not ordered:
             return []
 
-        # Stamp strictly-decreasing scores in (0, 1] so (a) the kept block
-        # outranks the backfill block, (b) _apply_doc_diversity's score-sort
-        # preserves THIS order rather than collapsing ties back to hybrid order,
-        # and (c) .score stays inside the [0,1] relevance contract every consumer
-        # assumes — the cross-encoder emits sigmoid(logit) in (0,1), the console
-        # renders score*100 as a relevance %, and retrieval-quality gates compare
-        # the top score against [0,1] thresholds. Normalizing by the list length
-        # is order-preserving (monotonic) so the diversity sort is unchanged,
-        # while an un-normalized ordinal (total-pos) would render as e.g. 700%
-        # and peg every quality gate to "strong". The judge's pointwise relevance
-        # stays in metadata['agentic_relevance'] for callers that want the raw
-        # signal.
+        # Stamp strictly-decreasing scores in (0, 1] so the kept block outranks
+        # the backfill block and _doc_diversity's score-sort preserves THIS order
+        # (not a collapse back to hybrid order). Normalizing by the list length is
+        # order-preserving, so the sort is unchanged, but keeps .score inside the
+        # [0,1] relevance contract every consumer assumes (console %, CLI, the
+        # retrieval-quality gate) — a raw ordinal (total-pos) would render as e.g.
+        # 700%. The judge's pointwise relevance stays in metadata['agentic_relevance'].
         total = len(ordered)
         for pos, c in enumerate(ordered):
             c.score = (total - pos) / total

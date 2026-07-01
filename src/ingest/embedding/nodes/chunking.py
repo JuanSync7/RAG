@@ -4,9 +4,10 @@
 #   chunk_with_markdown() depending on config.chunker override.
 # Legacy fallback: when no parse_result is in state, falls back to markdown chunking
 #   on cleaned_text (pre-Phase 3.2 behaviour).
-# Exports: chunking_node, _normalize_chunk_text
+# Exports: chunking_node, _normalize_chunk_text, _tag_chunk_roles
 # Deps: unicodedata, re, src.ingest.embedding.state, src.ingest.common.schemas,
-#       src.ingest.common.shared, src.ingest.support.parser_base,
+#       src.ingest.common.shared, src.ingest.common.role_classify,
+#       src.platform.llm, src.ingest.support.parser_base,
 #       src.ingest.support.document, src.ingest.support.markdown
 # @end-summary
 
@@ -36,8 +37,10 @@ from src.ingest.support import (
     normalize_headings_to_markdown,
 )
 from src.ingest.common import append_processing_log, is_navigational
+from src.ingest.common.role_classify import classify_roles_sync
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.common.observability import node_span
+from src.platform.llm import get_llm_provider
 
 logger = logging.getLogger("rag.ingest.pipeline.chunking")
 
@@ -99,6 +102,78 @@ def _drop_navigational_chunks(
         )
         return kept, n_dropped
     return chunks, 0
+
+
+def _tag_chunk_roles(
+    chunks: list[Any],
+    source_name: str = "",
+    *,
+    default_role: str = "content",
+    provider: Any = None,
+    classify_fn: Any = None,
+) -> list[Any]:
+    """TAG each chunk's retrieval role in-place; DROP NOTHING (Slice B).
+
+    This is the model-driven replacement for ``_drop_navigational_chunks``. It
+    calls the shared LLM classifier (the SAME prompt/parser the backfill script
+    uses) to label each chunk ``content|navigation|boilerplate`` and writes the
+    label to ``chunk.metadata["chunk_role"]``. The query side later *filters* by
+    role; ingest never removes a chunk, so a mis-classification can only be
+    recovered (re-tag) — never silently lose content.
+
+    FAIL-OPEN is absolute: any classifier error, a length mismatch between the
+    returned roles and the chunks, or an unreadable metadata container resolves
+    every affected position to ``default_role`` ("content"). The function never
+    raises and always returns the SAME list object with every chunk tagged.
+
+    Args:
+        chunks: ProcessedChunk-like objects (``.text`` + ``.metadata`` dict).
+        source_name: For log attribution only.
+        default_role: Fail-open role; must be the answer-bearing role.
+        provider: Optional LLM provider; defaults to ``get_llm_provider()``.
+            Injectable so tests run without a live router.
+        classify_fn: Optional ``(provider, chunks) -> list[str]`` override;
+            defaults to the config-driven synchronous classifier. Injectable for
+            tests.
+
+    Returns:
+        The same ``chunks`` list, each with ``metadata["chunk_role"]`` set.
+    """
+    if not chunks:
+        return chunks
+
+    fn = classify_fn if classify_fn is not None else classify_roles_sync
+    try:
+        prov = provider if provider is not None else get_llm_provider()
+        roles = fn(prov, chunks)
+    except Exception as exc:  # noqa: BLE001 — fail open, never drop a chunk
+        logger.warning(
+            "chunk-role tagging failed (source=%s): %s — defaulting %d chunk(s) "
+            "to %r",
+            source_name, exc, len(chunks), default_role,
+        )
+        roles = None
+
+    # Length mismatch (or a failed call) -> fail open: tag everything default.
+    if not isinstance(roles, list) or len(roles) != len(chunks):
+        if roles is not None:
+            logger.warning(
+                "chunk-role tagging length mismatch (source=%s): got %s roles "
+                "for %d chunk(s) — defaulting all to %r",
+                source_name,
+                len(roles) if isinstance(roles, list) else "non-list",
+                len(chunks), default_role,
+            )
+        roles = [default_role] * len(chunks)
+
+    for chunk, role in zip(chunks, roles):
+        meta = getattr(chunk, "metadata", None)
+        if not isinstance(meta, dict):
+            # Unreadable metadata container: skip silently (cannot tag), but the
+            # chunk is still kept — fail-open never drops.
+            continue
+        meta["chunk_role"] = role if isinstance(role, str) and role else default_role
+    return chunks
 
 
 def _normalize_chunk_text(text: str) -> str:
@@ -253,11 +328,23 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             chunks = _chunk_with_markdown_legacy(state, config, base_metadata)
             processing_log = append_processing_log(state, "chunking:legacy_markdown")
 
-        # Strip navigational ToC/front-matter chunks at ingest (both paths). The
-        # query-time rerank filter stays as defense-in-depth; doing it here is the
-        # single-source-of-truth fix that shrinks the index and protects consumers
-        # that bypass the query filter. Per-document over-prune guard inside.
-        if getattr(config, "drop_navigational", True):
+        # Chunk-role handling (both paths). Default behaviour: TAG every chunk's
+        # retrieval role via the LLM classifier and DROP NOTHING — the query side
+        # filters by role, so a mis-tag is recoverable but a dropped chunk is not.
+        # The legacy regex DROP remains reachable ONLY as a back-compat escape
+        # hatch: nav_classify off AND drop_navigational on. The tag step takes
+        # precedence whenever nav_classify is on. Both branches are individually
+        # fail-open (tag step → "content"; drop step → over-prune guard).
+        if getattr(config, "nav_classify", True):
+            chunks = _tag_chunk_roles(
+                chunks,
+                source_name=state.get("source_name", ""),
+                default_role=str(getattr(config, "nav_role_default", "content")),
+            )
+            processing_log = append_processing_log(
+                state, f"chunking:role_tagged:{len(chunks)}"
+            )
+        elif getattr(config, "drop_navigational", False):
             chunks, n_nav = _drop_navigational_chunks(
                 chunks,
                 int(getattr(config, "nav_max_chars", 320)),

@@ -10,6 +10,8 @@ Do **not** rely on, match, or mention any specific document name, vendor, produc
 - **faithfulness** (0.0–1.0): is this chunk **substantive, internally consistent, self-contained source evidence** — as opposed to a dangling fragment, a mangled table, navigational filler, or internally contradictory text? This measures whether an answer *grounded in this chunk* could be trusted, independent of relevance.
 - **keep** (bool): should this chunk be passed to the answer generator? Keep it when it is both relevant and faithful enough to help.
 
+Judge by FUNCTION, never by document name or wording: a chunk whose function is a **table of contents / index** (section titles mapped to page numbers), a **cross-reference pointer** ("see chapter X"), a **copyright / proprietary / legal notice**, or a **title page / document-metadata front-matter** is NON-answer-bearing — score it low on both relevance and faithfulness, do NOT keep it, and do NOT rank it. (A data table of values, register fields, or measurements is the opposite — that IS content.)
+
 ## Ranking (the order that matters)
 
 After scoring, produce a **ranking**: an ordered list of the chunk indices you would **keep**, from the **single most useful** chunk for answering the question to the least, breaking ties by how directly and completely each chunk answers the question. This is a **relative ordering**, not independent scores — decide, for any two chunks, which one you would want the answer-writer to read first. Include every chunk you marked `keep: true`, each index exactly once; omit chunks you would not keep.

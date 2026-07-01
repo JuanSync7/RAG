@@ -54,6 +54,12 @@ services:
       - RAG_LLM_JUDGE_API_BASE=http://rag-vllm-tunnel:18005/v1
       - RAG_AGENTIC_CONTROLLER_MODEL_ALIAS=judge
       - RAG_AGENTIC_LLM_JSON_MODE=true
+      # Final context width for the agentic path: match the linear reranker's
+      # RAG_RERANK_TOP_K (12) so both paths hand the same number of chunks to
+      # generation; keep the per-round judge-keep width equal so the extra slots
+      # are judge-vetted, not just hybrid backfill.
+      - RAG_AGENTIC_FINAL_MAX_CHUNKS=12
+      - RAG_AGENTIC_KEEP_TOP_K_PER_ROUND=12
     volumes:
       - ./.runtime-dev:/app/.runtime
   rag-worker:

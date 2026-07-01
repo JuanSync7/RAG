@@ -144,6 +144,7 @@ from config.settings import (
     RAG_AGENTIC_FILL_MODE,
     RAG_AGENTIC_JUDGE_VERBOSE,
     RAG_AGENTIC_LLM_JSON_MODE,
+    RAG_AGENTIC_ROLE_BACKSTOP,
     RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS,
     QUERY_PROCESSING_TIMEOUT,
     validate_agentic_retrieval_config,
@@ -219,6 +220,16 @@ import os as _os
 RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
     "RAG_TREE_SCHEMA_PRESENT", "true"
 ).lower() in ("true", "1", "yes")
+
+# Query-time chunk_role exclusion filter (Slice C). Imported into the module
+# namespace — mirroring RAG_TREE_SCHEMA_PRESENT above — so the single _do_search
+# choke point can read them and tests can patch them here. The comma-parsing for
+# the excluded-role list is single-sourced in config.settings (no re-parse here).
+from config.settings import (  # noqa: E402
+    RAG_RETRIEVAL_ROLE_FILTER,
+    RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT,
+    RAG_RETRIEVAL_EXCLUDED_ROLES,
+)
 
 logger = logging.getLogger("rag.rag_chain")
 
@@ -703,7 +714,18 @@ class RAGChain:
             return reranked
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
-        """Run hybrid search against the database layer (persistent or transient client)."""
+        """Run hybrid search against the database layer (persistent or transient client).
+
+        This is the single seam every retrieval mode flows through (standard
+        retrieval, the deep-research ``kb_retrieve`` closure, and the agentic
+        ``retrieve`` closure all delegate here), so the gated query-time
+        chunk_role exclusion (Slice C) is injected once, right here. It is purely
+        additive (AND) and never mutates the caller's own ``filters`` list.
+        """
+        role_clauses = self._build_role_exclusion_clauses()
+        if role_clauses:
+            # Copy first — never mutate the caller's filter list in place.
+            filters = list(filters or []) + role_clauses
         _t0 = time.perf_counter()
         with self.tracer.span(
             "retrieval.search.weaviate",
@@ -744,6 +766,29 @@ class RAGChain:
                     (time.perf_counter() - _t0) * 1000, exc,
                 )
                 raise
+
+    @staticmethod
+    def _build_role_exclusion_clauses() -> list:
+        """Return the default query-time chunk_role exclusion clauses (Slice C).
+
+        Mirrors ``_build_leaf_only_filter_clauses``: returns an empty list (a
+        no-op) unless BOTH gates are set — ``RAG_RETRIEVAL_ROLE_FILTER`` (the
+        feature toggle) and ``RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT`` (the migration
+        gate, like ``RAG_TREE_SCHEMA_PRESENT`` for ``node_kind``). The second
+        gate prevents referencing ``chunk_role`` on a collection that has not
+        yet been migrated/backfilled (which would fail with "no such property").
+
+        Uses ``ne`` per excluded role — deliberately fail-open: a clause
+        ``chunk_role != "navigation"`` keeps every chunk whose role is NULL
+        (legacy / un-backfilled) or "content", so no real content is ever
+        dropped. Reads the module-level settings (patchable in tests).
+        """
+        if not (RAG_RETRIEVAL_ROLE_FILTER and RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT):
+            return []
+        return [
+            SearchFilter(property="chunk_role", operator="ne", value=role)
+            for role in RAG_RETRIEVAL_EXCLUDED_ROLES
+        ]
 
     # ─── Tree retrieval helpers (TREE_RETRIEVAL_DESIGN.md §4) ────────────
     @staticmethod
@@ -1715,6 +1760,8 @@ class RAGChain:
             json_mode=RAG_AGENTIC_LLM_JSON_MODE,
             judge_concise=not RAG_AGENTIC_JUDGE_VERBOSE,
             fill_mode=RAG_AGENTIC_FILL_MODE,
+            role_backstop=RAG_AGENTIC_ROLE_BACKSTOP,
+            excluded_roles=RAG_RETRIEVAL_EXCLUDED_ROLES,
         )
         return _asyncio.run(orchestrator.run())
 

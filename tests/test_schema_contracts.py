@@ -64,6 +64,8 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "enable_adaptive_table_chunking",
     "drop_navigational",
     "nav_max_chars",
+    "nav_classify",
+    "nav_role_default",
     # Storage / infra paths
     "clean_store_dir",
     "store_documents",

@@ -127,6 +127,18 @@ TABLE_AWARE_PROPERTIES: list[Property] = [
         index_filterable=True,
         index_searchable=False,
     ),
+    # Model-driven chunk ROLE ("content"|"navigation"|"boilerplate"), stamped at
+    # ingest by the LLM classifier (src.ingest.common.role_classify). Filterable
+    # (the query-time role filter excludes navigation/boilerplate via ``ne``) but
+    # not searchable — it is a categorical tag, never query text. NULL on legacy /
+    # un-backfilled chunks, which the fail-open ``ne`` filter keeps.
+    Property(
+        name="chunk_role",
+        data_type=DataType.TEXT,
+        description='Retrieval role ("content"|"navigation"|"boilerplate"); content is answer-bearing',
+        index_filterable=True,
+        index_searchable=False,
+    ),
     Property(
         name="caption_label",
         data_type=DataType.TEXT,
@@ -911,6 +923,7 @@ def fetch_chunks_by_document_id(
     document_id: str,
     page_size: int = 500,
     collection: str = WEAVIATE_COLLECTION_NAME,
+    include_text: bool = False,
 ) -> list[dict]:
     """Fetch ALL chunks for one ``document_id`` (cursor-paginated).
 
@@ -932,22 +945,37 @@ def fetch_chunks_by_document_id(
         document_id: The document whose chunks to fetch.
         page_size: Max objects per cursor page.
         collection: Source chunk collection.
+        include_text: When False (default — the document-card use case) the
+            (large) chunk ``text`` is NOT requested and ``"text"`` is ``""``,
+            keeping the payload tiny. When True, request and populate the chunk
+            ``text`` and the current ``chunk_role`` (``metadata["chunk_role"]``)
+            so a caller that classifies/tags chunks (e.g. the role backfill) sees
+            the real text and can skip already-tagged chunks idempotently.
 
     Returns:
         All chunk dicts for the document (possibly empty).
     """
     span = tracer.span(
         "vector_store.fetch_chunks_by_document_id",
-        {"document_id": document_id, "page_size": page_size, "collection": collection},
+        {
+            "document_id": document_id,
+            "page_size": page_size,
+            "collection": collection,
+            "include_text": include_text,
+        },
     )
     col = client.collections.get(collection)
     flt = Filter.by_property("document_id").equal(document_id)
     # Only the fields a routing card needs — NOT the (large) chunk `text`. Keeps
     # the payload tiny so big docs page quickly even over a slow/tunneled link.
+    # The role backfill opts into the text (and existing role) via include_text.
     card_props = [
         "document_id", "title", "source", "source_key",
         "heading_path", "heading", "section_path", "node_kind",
     ]
+    fetch_props = list(card_props)
+    if include_text:
+        fetch_props += ["text", "chunk_role"]
     documents: list[dict] = []
     # Offset pagination (NOT the cursor `after`): Weaviate forbids combining the
     # cursor with a `where` filter ("cursor api: where cannot be set with after").
@@ -956,23 +984,28 @@ def fetch_chunks_by_document_id(
     offset = 0
     while True:
         response = col.query.fetch_objects(
-            filters=flt, limit=page_size, offset=offset, return_properties=card_props
+            filters=flt, limit=page_size, offset=offset, return_properties=fetch_props
         )
         objects = list(getattr(response, "objects", []) or [])
         for obj in objects:
             props = obj.properties or {}
+            metadata = {
+                "document_id": props.get("document_id", ""),
+                "title": props.get("title", ""),
+                "source": props.get("source", ""),
+                "source_key": props.get("source_key", ""),
+                "heading_path": props.get("heading_path", []) or [],
+                "heading": props.get("heading", ""),
+                "section_path": props.get("section_path", ""),
+                "node_kind": props.get("node_kind", "chunk"),
+            }
+            if include_text:
+                # Surface the existing role so the backfill can stay idempotent
+                # (skip already-tagged chunks) without re-fetching.
+                metadata["chunk_role"] = props.get("chunk_role") or ""
             documents.append({
-                "text": "",
-                "metadata": {
-                    "document_id": props.get("document_id", ""),
-                    "title": props.get("title", ""),
-                    "source": props.get("source", ""),
-                    "source_key": props.get("source_key", ""),
-                    "heading_path": props.get("heading_path", []) or [],
-                    "heading": props.get("heading", ""),
-                    "section_path": props.get("section_path", ""),
-                    "node_kind": props.get("node_kind", "chunk"),
-                },
+                "text": str(props.get("text") or "") if include_text else "",
+                "metadata": metadata,
                 "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",
             })
         if len(objects) < page_size:
@@ -1189,3 +1222,41 @@ def update_chunk_content(
         )
         span.end(status="error")
         return False
+
+
+def update_chunk_role(
+    client: weaviate.WeaviateClient,
+    chunk_uuid: str,
+    *,
+    role: str,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> None:
+    """Set ``chunk_role`` on an existing chunk in place (role backfill).
+
+    Single-property partial update via the same ``col.data.update(uuid=...,
+    properties=...)`` idiom as :func:`update_chunk_content`. Only ``chunk_role``
+    is written, so re-running the backfill is idempotent (it just re-stamps the
+    same role) and no other field is disturbed.
+
+    Unlike :func:`update_chunk_content`, this does NOT swallow errors: the role
+    backfill needs to know which chunks failed so it can record them and remain
+    resumable. The caller isolates per-chunk failures; letting the exception
+    propagate keeps the fail/skip accounting honest at that layer.
+
+    Args:
+        client: Weaviate client handle.
+        chunk_uuid: UUID of the chunk to tag.
+        role: The role string to store in ``chunk_role``.
+        collection: Target collection name.
+    """
+    span = tracer.span(
+        "vector_store.update_chunk_role",
+        {"collection": collection, "chunk_uuid": chunk_uuid, "role": role},
+    )
+    try:
+        col = client.collections.get(collection)
+        col.data.update(uuid=chunk_uuid, properties={"chunk_role": role})
+        span.end(status="ok")
+    except Exception:
+        span.end(status="error")
+        raise

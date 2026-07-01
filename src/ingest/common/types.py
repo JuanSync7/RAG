@@ -81,6 +81,8 @@ from config.settings import (
     RAG_INGESTION_LOSSLESS_STRICT,
     RAG_INGESTION_DROP_NAVIGATIONAL,
     RAG_INGESTION_NAV_MAX_CHARS,
+    RAG_INGESTION_NAV_CLASSIFY,
+    RAG_NAV_ROLE_DEFAULT,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
     RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
@@ -234,11 +236,24 @@ class IngestionConfig:
     table_row/figure chunks (mirrors prose contextualize()), so structured chunks
     are not heading-blind at dense + rerank time. table_markdown metadata is
     untouched. Env: RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH."""
+    nav_classify: bool = RAG_INGESTION_NAV_CLASSIFY
+    """If True (default), TAG every chunk's retrieval role at ingest via the LLM
+    classifier (``src.ingest.common.role_classify``) and write it to
+    ``metadata["chunk_role"]`` — NOTHING is dropped. This replaces the legacy
+    regex DROP (``drop_navigational``), which is now reachable only as a
+    back-compat escape hatch when ``nav_classify`` is False AND
+    ``drop_navigational`` is True. Env: RAG_INGESTION_NAV_CLASSIFY."""
+    nav_role_default: str = RAG_NAV_ROLE_DEFAULT
+    """Role assigned to a chunk on ANY classifier failure/ambiguity (fail-open).
+    MUST be the answer-bearing role ("content") so a failure never silently drops
+    real content. Env: RAG_NAV_ROLE_DEFAULT."""
     drop_navigational: bool = RAG_INGESTION_DROP_NAVIGATIONAL
-    """If True (default), drop ToC/index/front-matter pointer chunks at ingest using
-    the shared ``is_navigational`` predicate, with a per-document over-prune guard.
-    Env: RAG_INGESTION_DROP_NAVIGATIONAL. Query-time rerank filter stays as
-    defense-in-depth."""
+    """Legacy regex DROP of ToC/front-matter chunks at ingest (the shared
+    ``is_navigational`` predicate, with a per-document over-prune guard). Now an
+    OFF-by-default-effect escape hatch: it only fires when ``nav_classify`` is
+    False. When ``nav_classify`` is True the classifier TAGS instead (drops
+    nothing) and this flag is ignored. Env: RAG_INGESTION_DROP_NAVIGATIONAL.
+    Query-time role filter stays as defense-in-depth."""
     nav_max_chars: int = RAG_INGESTION_NAV_MAX_CHARS
     """Length cap for the front-matter pointer-phrase branch of the ingest-time
     navigational test (mirrors query-side RERANK_NAV_MAX_CHARS). Env:

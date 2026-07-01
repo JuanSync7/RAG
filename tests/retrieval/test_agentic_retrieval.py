@@ -90,6 +90,17 @@ def _sr(idx: int, text: str, source: str = "doc.md") -> SearchResult:
     )
 
 
+def _sr_role(idx: int, text: str, role: Optional[str], source: str = "doc.md") -> SearchResult:
+    """A SearchResult carrying a ``chunk_role`` in metadata (None = untagged/legacy)."""
+    md = {"source": source, "heading": "h", "chunk_index": idx, "document_id": source}
+    if role is not None:
+        md["chunk_role"] = role
+    return SearchResult(
+        text=text, score=0.5, metadata=md,
+        object_id=f"oid-{idx}", collection="RagDocuments",
+    )
+
+
 def _budget(**over: Any) -> AgenticBudget:
     base = dict(
         max_rounds=1, max_llm_calls=10, wall_clock_ms=45000,
@@ -103,7 +114,9 @@ def _budget(**over: Any) -> AgenticBudget:
 
 def _orch(provider, retrieve, *, budget: AgenticBudget, reranker=None,
           thin_filter=None, final_top_k: int = 5,
-          judge_concise: bool = False, fill_mode: str = "hybrid") -> AgenticRetrieval:
+          judge_concise: bool = False, fill_mode: str = "hybrid",
+          role_backstop: bool = False,
+          excluded_roles=("navigation", "boilerplate")) -> AgenticRetrieval:
     return AgenticRetrieval(
         provider=provider,
         retrieve=retrieve,
@@ -121,6 +134,8 @@ def _orch(provider, retrieve, *, budget: AgenticBudget, reranker=None,
         final_top_k=final_top_k,
         judge_concise=judge_concise,
         fill_mode=fill_mode,
+        role_backstop=role_backstop,
+        excluded_roles=list(excluded_roles),
     )
 
 
@@ -785,3 +800,166 @@ def test_cross_encoder_mode_does_not_burn_reranker_tail():
     result = asyncio.run(orch.run())
     assert result.rounds_run == 2
     assert "chunk 2" in {r.text for r in result.reranked}   # tail survived to round 2
+
+
+# ---------------------------------------------------------------------------
+# Run-time role backstop (Slice E) — metadata fast-path + judge-prompt awareness
+# ---------------------------------------------------------------------------
+
+
+def _nav_backstop_provider() -> RoutingProvider:
+    """Keep-all judge so the ONLY thing that can drop a chunk is the metadata
+    backstop (the judge never drops here)."""
+    return RoutingProvider(
+        hyde={"hypothetical_answer": "h", "search_terms": []},
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(8)],
+               "ranking": [0, 1, 2, 3, 4, 5, 6, 7],
+               "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+
+
+def test_role_backstop_drops_nav_chunk_pre_judge_when_on():
+    """A retrieved candidate TAGGED chunk_role='navigation' is dropped BEFORE the
+    judge when the metadata backstop is on — even though the (keep-all) judge would
+    have kept it. Defense for a tagged-nav chunk that slipped the query filter.
+    The chunk never reaches the judge prompt, and never reaches generation."""
+    async def retrieve(hyde_answer, search_terms):
+        return [
+            _sr_role(0, "real content chunk", role="content"),
+            _sr_role(1, "TOC navigation chunk", role="navigation"),
+            _sr_role(2, "another content chunk", role="content"),
+        ]
+
+    provider = _nav_backstop_provider()
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1),
+                 final_top_k=5, fill_mode="none", role_backstop=True)
+    result = asyncio.run(orch.run())
+
+    texts = {r.text for r in result.reranked}
+    assert texts == {"real content chunk", "another content chunk"}
+    assert "TOC navigation chunk" not in texts
+    # The dropped chunk never reached the judge (not in the rendered judge prompt).
+    assert provider.judge_prompts, "judge should still run on the surviving chunks"
+    assert "TOC navigation chunk" not in provider.judge_prompts[0]
+    assert "real content chunk" in provider.judge_prompts[0]
+
+
+def test_role_backstop_keeps_nav_chunk_when_off():
+    """With the backstop OFF, a tagged-nav chunk is NOT dropped pre-judge — the
+    config flag genuinely gates the behavior (so default-off is a no-op and the
+    feature is fully toggleable, CLAUDE.md §3)."""
+    async def retrieve(hyde_answer, search_terms):
+        return [
+            _sr_role(0, "real content chunk", role="content"),
+            _sr_role(1, "TOC navigation chunk", role="navigation"),
+            _sr_role(2, "another content chunk", role="content"),
+        ]
+
+    provider = _nav_backstop_provider()
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1),
+                 final_top_k=5, fill_mode="none", role_backstop=False)
+    result = asyncio.run(orch.run())
+
+    texts = {r.text for r in result.reranked}
+    assert "TOC navigation chunk" in texts          # NOT dropped when off
+    assert provider.judge_prompts
+    assert "TOC navigation chunk" in provider.judge_prompts[0]   # it reached the judge
+
+
+def test_role_backstop_drops_boilerplate_too():
+    """The backstop excludes EVERY role in excluded_roles, not just navigation —
+    a boilerplate-tagged chunk is dropped as well."""
+    async def retrieve(hyde_answer, search_terms):
+        return [
+            _sr_role(0, "real content chunk", role="content"),
+            _sr_role(1, "copyright notice chunk", role="boilerplate"),
+        ]
+
+    provider = _nav_backstop_provider()
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1),
+                 final_top_k=5, fill_mode="none", role_backstop=True,
+                 excluded_roles=("navigation", "boilerplate"))
+    result = asyncio.run(orch.run())
+    texts = {r.text for r in result.reranked}
+    assert texts == {"real content chunk"}
+
+
+def test_role_backstop_fail_open_keeps_untagged_and_content():
+    """FAIL-OPEN: a chunk with NO chunk_role (NULL/legacy) and a chunk tagged
+    'content' are both KEPT by the backstop — only an explicitly EXCLUDED role is
+    dropped. Never drop a chunk on a missing/unknown role (invariant #4)."""
+    async def retrieve(hyde_answer, search_terms):
+        return [
+            _sr_role(0, "untagged legacy chunk", role=None),       # no chunk_role key
+            _sr_role(1, "content-tagged chunk", role="content"),
+            _sr_role(2, "unknown-role chunk", role="mystery"),     # not in excluded set
+            _sr_role(3, "nav chunk", role="navigation"),
+        ]
+
+    provider = _nav_backstop_provider()
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1),
+                 final_top_k=5, fill_mode="none", role_backstop=True)
+    result = asyncio.run(orch.run())
+    texts = {r.text for r in result.reranked}
+    assert "untagged legacy chunk" in texts
+    assert "content-tagged chunk" in texts
+    assert "unknown-role chunk" in texts          # unknown role is not excluded → kept
+    assert "nav chunk" not in texts               # only the explicit excluded role drops
+
+
+def test_role_backstop_all_nav_does_not_yield_empty():
+    """Anti-refusal: if the backstop would drop every retrieved chunk (all tagged
+    nav), the round simply judges nothing — never crashes — and the loop returns
+    without context for that round rather than raising."""
+    async def retrieve(hyde_answer, search_terms):
+        return [
+            _sr_role(0, "nav a", role="navigation"),
+            _sr_role(1, "nav b", role="navigation"),
+        ]
+
+    provider = _nav_backstop_provider()
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1),
+                 final_top_k=5, fill_mode="none", role_backstop=True)
+    result = asyncio.run(orch.run())          # must not raise
+    assert result.rounds_run == 1
+    texts = {r.text for r in result.reranked}
+    assert "nav a" not in texts and "nav b" not in texts
+
+
+def test_concise_judge_prompt_has_nav_awareness_line():
+    """The concise judge prompt must instruct the model — by FUNCTION, no
+    regex/keywords — to treat a table-of-contents / index / cross-reference /
+    copyright / title-page chunk as NON-answer-bearing and not rank it. This is the
+    LLM backstop for a leaked nav chunk that lacks the metadata tag."""
+    from pathlib import Path
+    import config.settings as cfg
+
+    prompt = (Path(cfg.PROMPTS_DIR) / "agentic_chunk_judge_concise.md").read_text(
+        encoding="utf-8"
+    ).lower()
+    # Function-based fingerprints the judge must be told to NOT rank.
+    assert "table of contents" in prompt or "table-of-contents" in prompt
+    assert "index" in prompt
+    assert "cross-reference" in prompt or "cross reference" in prompt
+    assert "copyright" in prompt
+    assert "title page" in prompt or "title-page" in prompt
+    # And the instruction is to NOT rank / treat as non-answer-bearing.
+    assert "not rank" in prompt or "do not rank" in prompt or "non-answer-bearing" in prompt
+
+
+def test_verbose_judge_prompt_has_nav_awareness_line():
+    """Parity: the verbose judge prompt carries the same FUNCTION-based nav
+    awareness instruction (both clients of one judging contract)."""
+    from pathlib import Path
+    import config.settings as cfg
+
+    prompt = (Path(cfg.PROMPTS_DIR) / "agentic_chunk_judge.md").read_text(
+        encoding="utf-8"
+    ).lower()
+    assert "table of contents" in prompt or "table-of-contents" in prompt
+    assert "index" in prompt
+    assert "cross-reference" in prompt or "cross reference" in prompt
+    assert "copyright" in prompt
+    assert "title page" in prompt or "title-page" in prompt
+    assert "not rank" in prompt or "do not rank" in prompt or "non-answer-bearing" in prompt

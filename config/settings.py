@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -1405,10 +1405,110 @@ generate freely — reason then emit JSON — and recovers the object with a
 is off for generation). Set **true** only when the ``judge``/``controller`` alias
 points at a JSON-reliable instruct model that benefits from the constraint."""
 
+RAG_AGENTIC_ROLE_BACKSTOP: bool = os.environ.get(
+    "RAG_AGENTIC_ROLE_BACKSTOP", "true"
+).lower() in ("true", "1", "yes")
+"""Run-time metadata fast-path backstop in the agentic loop: drop any retrieved
+chunk whose metadata ``chunk_role`` is in ``RAG_RETRIEVAL_EXCLUDED_ROLES`` BEFORE
+it reaches the judge. This is a cheap (no-LLM) defense for a chunk that was TAGGED
+navigation/boilerplate at ingest but slipped the query-time role filter (e.g. the
+filter was off, the schema flag was off, or the chunk was retrieved by a path that
+did not apply it). Fail-open: a chunk with no/unknown role (NULL, legacy, or
+"content") is always kept — only an explicit excluded role is dropped. The LLM
+judge remains the authoritative gate (a leaked nav chunk that lacks the tag is
+still caught by the judge-prompt awareness line)."""
+
 RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS: int = int(
     os.environ.get("RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS", "45000")
 )
 """TimingPool per-stage budget for the agentic_retrieval stage (ms)."""
+
+# --- Chunk-role classification (model-driven nav/boilerplate tagging) ---
+# Replaces the legacy regex DROP of navigational chunks with an LLM that TAGS
+# every chunk's role at ingest (content|navigation|boilerplate); retrieval then
+# *filters* by role at query time. Role is decided ONLY by the classifier — no
+# regex/keyword matching (CLAUDE.md §0/§2). The whole subsystem fails OPEN to
+# RAG_NAV_ROLE_DEFAULT ("content") so a flaky model never silently drops real
+# content. Shared by both the ingest tagger and the backfill script.
+
+RAG_INGESTION_NAV_CLASSIFY: bool = os.environ.get(
+    "RAG_INGESTION_NAV_CLASSIFY", "true"
+).lower() in ("true", "1", "yes")
+"""Enable LLM role-tagging at ingest (replaces the regex DROP in the chunking
+node). When True, each chunk is labelled with ``metadata["chunk_role"]`` and
+NOTHING is dropped; when False, the chunking node leaves roles untagged (and the
+legacy off-by-default regex fallback, if any, governs)."""
+
+RAG_NAV_CLASSIFY_MODEL_ALIAS: str = os.environ.get(
+    "RAG_NAV_CLASSIFY_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias used to classify chunk roles. Should resolve to a
+fast, JSON-reliable instruct model (the same class as the agentic judge)."""
+
+RAG_NAV_CLASSIFY_BATCH_SIZE: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_BATCH_SIZE", "40")
+)
+"""Number of chunks sent per classification call (>= 1). Larger batches cut call
+count but raise per-call output size; a failing batch fails open in isolation."""
+
+RAG_NAV_CLASSIFY_PREFIX_CHARS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_PREFIX_CHARS", "350")
+)
+"""Only the first N chars of each chunk's text are sent to the classifier
+(>= 1). A chunk's role (ToC vs data table vs body) is determined by its head, so
+capping bounds token cost without losing the role signal."""
+
+RAG_NAV_CLASSIFY_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_TIMEOUT_SECONDS", "120")
+)
+"""Per-call timeout (seconds, >= 1) forwarded to the provider for each
+classification batch."""
+
+RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS", "1500")
+)
+"""Max output tokens per classification call (>= 1). Must comfortably fit one
+JSON entry per chunk in a full batch."""
+
+RAG_NAV_CLASSIFY_JSON_MODE: bool = os.environ.get(
+    "RAG_NAV_CLASSIFY_JSON_MODE", "true"
+).lower() in ("true", "1", "yes")
+"""Whether to request guided ``json_object`` output from the classifier. Keep
+True for a JSON-reliable instruct model; set False when the alias points at a
+reasoning model that emits malformed JSON under the constraint (the salvage
+parser recovers the object either way)."""
+
+RAG_NAV_ROLE_DEFAULT: str = os.environ.get("RAG_NAV_ROLE_DEFAULT", "content")
+"""Role assigned to a chunk on ANY classifier failure/ambiguity (parse failure,
+missing index, unknown role, provider exception). MUST be the answer-bearing
+role so a failure never silently drops real content — defaulting to a filtered
+role would be the exact regression this subsystem prevents."""
+
+# --- Retrieval: query-time role filter ---
+RAG_RETRIEVAL_ROLE_FILTER: bool = os.environ.get(
+    "RAG_RETRIEVAL_ROLE_FILTER", "true"
+).lower() in ("true", "1", "yes")
+"""Inject the query-time role exclusion filter into every retrieval mode. Only
+takes effect when RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT is also True (so it is a
+no-op against a collection that has not yet been migrated/backfilled)."""
+
+RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT: bool = os.environ.get(
+    "RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT", "false"
+).lower() in ("true", "1", "yes")
+"""Gate (mirrors RAG_TREE_SCHEMA_PRESENT): only inject the role filter when the
+active collection actually has the ``chunk_role`` property. Set True after the
+schema migration + backfill so the filter never references a missing field."""
+
+RAG_RETRIEVAL_EXCLUDED_ROLES: list[str] = [
+    r.strip()
+    for r in os.environ.get(
+        "RAG_RETRIEVAL_EXCLUDED_ROLES", "navigation,boilerplate"
+    ).split(",")
+    if r.strip()
+]
+"""Comma-separated roles excluded at query time. The filter uses ``ne`` per
+role (fail-open: NULL/legacy chunks and any role not listed — notably
+"content" — are kept), so an un-backfilled chunk is never dropped."""
 
 # --- Ingest: Embedding pipeline ---
 RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES: int = int(
@@ -2084,6 +2184,70 @@ def validate_agentic_retrieval_config() -> None:
         )
 
 
+def validate_nav_role_config() -> None:
+    """Validate chunk-role classification + role-filter configuration.
+
+    Checks for contradictory or out-of-range settings and raises ``ValueError``
+    naming the offending key(s). Wired into :func:`validate_all_config` so a
+    mis-set default role (which would silently drop content) or a non-positive
+    batch/prefix/timeout budget fails fast at startup rather than at first ingest.
+
+    Raises:
+        ValueError: If any of ``RAG_NAV_CLASSIFY_BATCH_SIZE``,
+            ``RAG_NAV_CLASSIFY_PREFIX_CHARS``, ``RAG_NAV_CLASSIFY_TIMEOUT_SECONDS``
+            or ``RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS`` is < 1; if
+            ``RAG_NAV_ROLE_DEFAULT`` is empty or not one of the valid roles
+            (``content``/``navigation``/``boilerplate``); if any role in
+            ``RAG_RETRIEVAL_EXCLUDED_ROLES`` is not a valid role; or if the
+            default role is itself excluded by the query filter (which would drop
+            every fail-open chunk — the inverse of the intended safety net).
+    """
+    valid_roles = ("content", "navigation", "boilerplate")
+    errors: list[str] = []
+
+    for name, val in [
+        ("RAG_NAV_CLASSIFY_BATCH_SIZE", RAG_NAV_CLASSIFY_BATCH_SIZE),
+        ("RAG_NAV_CLASSIFY_PREFIX_CHARS", RAG_NAV_CLASSIFY_PREFIX_CHARS),
+        ("RAG_NAV_CLASSIFY_TIMEOUT_SECONDS", RAG_NAV_CLASSIFY_TIMEOUT_SECONDS),
+        ("RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS", RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+
+    if not RAG_NAV_ROLE_DEFAULT:
+        errors.append("RAG_NAV_ROLE_DEFAULT must be a non-empty role")
+    elif RAG_NAV_ROLE_DEFAULT not in valid_roles:
+        errors.append(
+            f"RAG_NAV_ROLE_DEFAULT={RAG_NAV_ROLE_DEFAULT!r} must be one of "
+            f"{valid_roles}"
+        )
+
+    for role in RAG_RETRIEVAL_EXCLUDED_ROLES:
+        if role not in valid_roles:
+            errors.append(
+                f"RAG_RETRIEVAL_EXCLUDED_ROLES contains {role!r}, "
+                f"not one of {valid_roles}"
+            )
+
+    # The fail-open default must never be in the excluded set, else the query
+    # filter would drop exactly the chunks the classifier defaulted to keep.
+    if (
+        RAG_NAV_ROLE_DEFAULT in valid_roles
+        and RAG_NAV_ROLE_DEFAULT in RAG_RETRIEVAL_EXCLUDED_ROLES
+    ):
+        errors.append(
+            f"RAG_NAV_ROLE_DEFAULT={RAG_NAV_ROLE_DEFAULT!r} must NOT appear in "
+            f"RAG_RETRIEVAL_EXCLUDED_ROLES={RAG_RETRIEVAL_EXCLUDED_ROLES} "
+            "(the fail-open role cannot be the one filtered out)"
+        )
+
+    if errors:
+        raise ValueError(
+            "Chunk-role configuration validation failed:\n  "
+            + "\n  ".join(errors)
+        )
+
+
 def validate_visual_retrieval_config() -> None:
     """Validate visual retrieval configuration at startup.
 
@@ -2196,6 +2360,14 @@ def validate_all_config() -> None:
                 "RAG_INGESTION_VISION_ENABLED=true requires "
                 "RAG_INGESTION_VISION_MODEL to be set"
             )
+
+    # --- Chunk-role classification / role-filter contradictions ---
+    # Delegate to the dedicated validator and fold its message in (defaults are
+    # all valid, so this never trips on a default-env import).
+    try:
+        validate_nav_role_config()
+    except ValueError as exc:
+        errors.append(str(exc))
 
     if errors:
         raise ValueError(

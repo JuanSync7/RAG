@@ -4,6 +4,8 @@ You select and rank retrieved document chunks for answering a user question. Jud
 
 Think carefully about which chunks actually help answer the question, comparing them against each other. A chunk helps when it carries facts, definitions, values, or explanations that bear on the question and is substantive, self-contained evidence (not pure navigation, boilerplate, a bare title, or a mangled fragment).
 
+Judge by FUNCTION, never by document name or wording: a chunk whose function is a **table of contents / index** (section titles mapped to page numbers), a **cross-reference pointer** ("see chapter X"), a **copyright / proprietary / legal notice**, or a **title page / document-metadata front-matter** is NON-answer-bearing — it carries no facts to answer with. Do NOT rank such a chunk; leave it out of the ranking. (A data table of values, register fields, or measurements is the opposite — that IS content; rank it.)
+
 Then output your decision compactly:
 
 - **ranking**: an ordered list of chunk indices, **best first** — rank up to {{ max_keep }} chunks from most useful for answering the question down to least useful, breaking ties by how directly and completely each chunk answers it. **Include every chunk that contributes any relevant fact, value, definition, or context** — a chunk that is only partially useful still belongs in the ranking, just lower down. The answer generator reads all the chunks you list, so prefer to include a plausibly-relevant chunk (ranked low) over dropping it. Only omit chunks that are **clearly irrelevant or pure noise** (navigation, boilerplate, a bare title, an unrelated topic). If genuinely nothing in the pool relates to the question, use `[]`.
