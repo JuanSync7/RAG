@@ -292,3 +292,42 @@ def test_model_alias_and_timeout_forwarded():
     _run(classify_roles(provider, chunks, **{**_KW, "model_alias": "judge", "timeout_s": 99}))
     assert provider.calls[0].get("model_alias") == "judge"
     assert provider.calls[0].get("timeout") == 99
+
+
+# ---------------------------------------------------------------------------
+# (g) vocabulary is config-driven — single source of truth is RAG_CHUNK_ROLES
+# ---------------------------------------------------------------------------
+
+
+def test_default_vocabulary_resolves_from_config(monkeypatch):
+    """With no explicit ``valid_roles`` the accepted set is ``RAG_CHUNK_ROLES``.
+
+    Proves the classifier keeps NO hardcoded role list: adding a role to the
+    config alone makes the classifier accept it (nothing to edit in this
+    module). This is the consolidation contract — one source of truth.
+    """
+    import config.settings as settings
+
+    monkeypatch.setattr(
+        settings, "RAG_CHUNK_ROLES", ("content", "navigation", "boilerplate", "example")
+    )
+    chunks = [_Chunk("Worked example: compute the CRC step by step."), _Chunk("Bus has 5 channels.")]
+    provider = FakeProvider(_roles_payload(["example", "content"]))
+    roles = _run(classify_roles(provider, chunks, **_KW))  # no valid_roles -> config
+    assert roles == ["example", "content"]
+
+
+def test_role_absent_from_config_is_out_of_vocab_and_fails_open(monkeypatch):
+    """A label not in ``RAG_CHUNK_ROLES`` is out-of-vocabulary -> fail-open.
+
+    The mirror of the above: shrinking the configured vocabulary makes a
+    previously-valid label ('navigation') fail open to the default role, again
+    with no literal to change in the classifier.
+    """
+    import config.settings as settings
+
+    monkeypatch.setattr(settings, "RAG_CHUNK_ROLES", ("content", "boilerplate"))
+    chunks = [_Chunk("A1.3 AXI Architecture ............ A1-22")]
+    provider = FakeProvider(_roles_payload(["navigation"]))
+    roles = _run(classify_roles(provider, chunks, **_KW))
+    assert roles == ["content"]

@@ -24,6 +24,7 @@ Engineering documentation for the AION RAG retrieval pipeline. The pipeline is s
 | `DOCUMENT_ROUTING_DESIGN.md` | RAPTOR-lite document-routing design / rationale (implemented, gated OFF by default) |
 | `DOCUMENT_ROUTING_ENGINEERING_GUIDE.md` | As-built document-routing guide: architecture, flow, config keys, how-to-enable, extension, troubleshooting |
 | `DOCUMENT_ROUTING_IMPLEMENTATION_PLAN.md` | The slice plan the routing feature was built from |
+| `CHUNK_ROLE_AND_METADATA.md` | Chunk-role taxonomy (`content`/`navigation`/`boilerplate`), the single-source vocabulary (`RAG_CHUNK_ROLES`), the ingest→store→query→backfill mechanism, which chunk metadata drives retrieval, and the metadata roadmap |
 
 ## Key Starting Points
 

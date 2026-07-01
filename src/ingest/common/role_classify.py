@@ -39,10 +39,16 @@ logger = logging.getLogger(__name__)
 # Repo root: this file is at src/ingest/common/role_classify.py -> parents[3].
 _PROMPT_FILE = Path(__file__).resolve().parents[3] / "prompts" / "chunk_role_classify.md"
 
-# Default role vocabulary. Mirrors the prompt's three roles. Kept as a module
-# constant so callers that do not pass an explicit set still agree with the
-# prompt; the param-based fn always takes the authoritative set from its caller.
-_DEFAULT_VALID_ROLES = ("content", "navigation", "boilerplate")
+def _resolve_valid_roles() -> tuple[str, ...]:
+    """Authoritative chunk-role vocabulary — always the config value.
+
+    Single source of truth is ``config.settings.RAG_CHUNK_ROLES``; this module
+    holds no literal copy. Imported lazily (not at module import) so the
+    param-based classifier stays import-light for tests that drive it directly.
+    """
+    from config import settings
+
+    return tuple(settings.RAG_CHUNK_ROLES)
 
 
 def _load_prompt() -> str:
@@ -140,7 +146,7 @@ async def classify_roles(
     timeout_s: int,
     max_output_tokens: int,
     json_mode: bool = True,
-    valid_roles: tuple[str, ...] = _DEFAULT_VALID_ROLES,
+    valid_roles: Optional[tuple[str, ...]] = None,
     default_role: str = "content",
 ) -> list[str]:
     """Classify each chunk's role via the LLM router; return one role per chunk.
@@ -161,6 +167,8 @@ async def classify_roles(
             alias points at a JSON-unreliable reasoning model, pass False and
             rely on the salvage parser.
         valid_roles: Accepted role vocabulary; anything else is fail-open.
+            Defaults to the canonical set (``config.settings.RAG_CHUNK_ROLES``)
+            when ``None`` — resolved lazily so this module stays import-light.
         default_role: Role assigned on any failure/ambiguity (must be in
             ``valid_roles``); the project default is ``"content"``.
 
@@ -170,6 +178,8 @@ async def classify_roles(
         ``default_role`` — a failing batch never poisons a healthy one, and a
         provider/parse error never raises out of this function.
     """
+    if valid_roles is None:
+        valid_roles = _resolve_valid_roles()
     chunks = list(chunks)
     if not chunks:
         return []
@@ -243,7 +253,7 @@ async def classify_roles_from_config(provider, chunks: Sequence[Any]) -> list[st
         timeout_s=settings.RAG_NAV_CLASSIFY_TIMEOUT_SECONDS,
         max_output_tokens=settings.RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS,
         json_mode=settings.RAG_NAV_CLASSIFY_JSON_MODE,
-        valid_roles=_DEFAULT_VALID_ROLES,
+        valid_roles=tuple(settings.RAG_CHUNK_ROLES),
         default_role=settings.RAG_NAV_ROLE_DEFAULT,
     )
 
