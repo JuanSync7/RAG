@@ -2,7 +2,7 @@
        TASK 4.4 — CSS Custom Properties (Themes)
     ═══════════════════════════════════════════ */
     :root {
-      --bg-app:      #0f0f13;
+      --bg-app:      #000000;
       --bg-surface:  #18181f;
       --bg-elevated: #1e1e28;
       --bg-card:     #131320;
