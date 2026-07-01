@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -1423,6 +1423,173 @@ RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS: int = int(
 )
 """TimingPool per-stage budget for the agentic_retrieval stage (ms)."""
 
+# ─── Turn-level conversation loop (TURN_LOOP_DESIGN.md) ──────────────────
+# One controller LLM per turn iterates RETRIEVE / DEEP_STUDY / CLARIFY /
+# ANSWER actions in the API process until a final-answer confidence gate
+# passes, composing the agentic primitives (HyDE/judge) under its OWN single
+# budget ledger. Mutually exclusive with deep_research / agentic_retrieval /
+# tree_retrieval per request. Validated lazily by
+# validate_turn_loop_config() when the loop activates.
+
+RAG_TURN_LOOP_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master gate for the turn-level agentic conversation loop. When False
+(default) the loop never runs; the per-request ``turn_loop`` override
+(server/schemas.py QueryRequest) may still force it on/off for a single
+request. Consulted by the query route (server/routes/query.py) when resolving
+whether a turn runs the loop."""
+
+RAG_TURN_LOOP_MAX_ACTIONS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_ACTIONS", "6")
+))
+"""Hard cap on controller iterations (actions dispatched) per turn. Consumed
+via ``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py
+and enforced by the loop orchestrator (turn_loop/orchestrator.py)."""
+
+RAG_TURN_LOOP_MAX_LLM_CALLS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_LLM_CALLS", "16")
+))
+"""Combined LLM-call budget for the whole turn — controller decisions, HyDE,
+judge, deep-study reads, clarify authoring, answer drafts and self-scores all
+charge ONE ledger (no double-budgeting with RAG_AGENTIC_MAX_LLM_CALLS; the
+loop composes agentic primitives under its own budget). Consumed via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_TURN_LOOP_WALL_CLOCK_MS", "90000")
+)
+"""Turn wall-clock budget in ms. Must stay strictly below
+``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS`` (enforced by validate_turn_loop_config())
+so the per-activity timeout hierarchy holds: TurnBudget > activity timeout.
+Consumed via ``TurnBudget.from_settings()`` in
+src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD: float = float(
+    os.environ.get("RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD", "0.62")
+)
+"""Answer-gate pass threshold in (0, 1]: an ANSWER draft whose weighted
+composite (judge pool confidence / LLM self-score / citation coverage) falls
+below this is rejected and its GateFeedback returned to the controller.
+Consumed by the answer gate (turn_loop/answer.py) via
+``TurnBudget.from_settings()``. NOTE: the loop deliberately does NOT reuse
+``compute_composite_confidence`` — see TURN_LOOP_DESIGN.md §5 confidence
+semantics."""
+
+RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS: tuple[float, ...] = tuple(
+    float(w.strip())
+    for w in os.environ.get(
+        "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", "0.5,0.3,0.2"
+    ).split(",")
+    if w.strip()
+)
+"""Answer-gate component weights as ``judge,self,citation`` (comma-separated;
+must be exactly 3 non-negative floats summing to 1.0 — enforced by
+validate_turn_loop_config()). Order: judge pool confidence, LLM self-score,
+citation coverage. Consumed by the answer gate (turn_loop/answer.py) via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS", "2")
+))
+"""How many gated ANSWER drafts a turn may attempt before the loop exits
+best-effort (low-confidence warning appended, never an empty response).
+Consumed via ``TurnBudget.from_settings()`` in
+src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
+    "RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the loop controller (action decisions, HyDE,
+deep-study reads, clarify authoring). Falls back 'query' → 'default' when the
+alias model env is unset; should resolve to a fast, JSON-reliable INSTRUCT
+model (same rationale as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS). Consumed by the
+controller module (turn_loop/controller.py)."""
+
+RAG_TURN_LOOP_JUDGE_MODEL_ALIAS: str = os.environ.get(
+    "RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias for the loop's judge calls (retrieved-chunk
+keep/rank + answer self-score). Distinct from the controller alias to avoid
+correlated over-optimism (same rationale as RAG_AGENTIC_JUDGE_MODEL_ALIAS).
+Consumed by turn_loop/retrieve.py and turn_loop/answer.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", "2")
+))
+"""Max distinct documents a single turn may DEEP_STUDY (each study is a
+windowed full-document read — the most expensive action). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS", "6000")
+))
+"""Character size of each deep-study read window over the full refactored
+markdown. Must be strictly greater than the window overlap (enforced by
+validate_turn_loop_config()). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS: int = int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS", "400")
+)
+"""Character overlap between consecutive deep-study windows so an answer
+spanning a window boundary is not cut in half. Consumed via
+``TurnBudget.from_settings()`` by turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS", "8")
+))
+"""Max windows read per studied document (caps LLM read calls for very long
+documents). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_CLARIFY_MAX_HINTS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_CLARIFY_MAX_HINTS", "3")
+))
+"""Max clickable hint chips a CLARIFY response may carry (console renders them
+as resubmit chips). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/clarify.py."""
+
+RAG_TURN_LOOP_STREAM_EVENTS: bool = os.environ.get(
+    "RAG_TURN_LOOP_STREAM_EVENTS", "true"
+).lower() in ("true", "1", "yes")
+"""When True (default) every typed loop event (turn_action, hyde_query,
+retrieve_result, judge_verdict, deep_study, llm_call, draft, gate, clarify) is
+emitted live on the SSE stream; when False events are only collected into the
+result trace (metadata.turn_loop.trace). Consumed by the event emitter bridge
+(turn_loop/events.py and server/routes/query.py)."""
+
+RAG_TURN_LOOP_RETRIEVE_TOP_K: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_RETRIEVE_TOP_K", "12")
+))
+"""Ranked-chunk count requested from each ``retrieve_ranked`` activity call
+(per RETRIEVE action, before pool dedup/judge). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/retrieve.py."""
+
+RAG_TURN_CONTEXT_MAX_CHUNK_REFS: int = max(1, int(
+    os.environ.get("RAG_TURN_CONTEXT_MAX_CHUNK_REFS", "24")
+))
+"""Cap on served-chunk references carried in the cross-turn TurnContext
+(newest first) — bounds both the Redis record and the controller-prompt
+digest. Consumed by the TurnContext assembly (turn_loop/context.py) and the
+memory persistence layer."""
+
+RAG_TURN_CONTEXT_PREVIEW_CHARS: int = max(1, int(
+    os.environ.get("RAG_TURN_CONTEXT_PREVIEW_CHARS", "320")
+))
+"""Character cap for the per-chunk ``preview`` stored on a turn's chunk refs
+(replaces uncapped full chunk text — the 8dfb367 memory-growth fix; full text
+stays recoverable by chunk uuid). Consumed by turn_loop/context.py and the
+memory persistence layer."""
+
+RAG_TURN_CONTEXT_STORE_FULL_TEXT: bool = os.environ.get(
+    "RAG_TURN_CONTEXT_STORE_FULL_TEXT", "false"
+).lower() in ("true", "1", "yes")
+"""When False (default) turn chunk refs persist only the capped ``preview``
+(RAG_TURN_CONTEXT_PREVIEW_CHARS); True restores full-chunk-text storage for
+debugging at the cost of unbounded Redis growth. Consumed by
+turn_loop/context.py and the memory persistence layer."""
+
 # --- Chunk-role classification (model-driven nav/boilerplate tagging) ---
 # Replaces the legacy regex DROP of navigational chunks with an LLM that TAGS
 # every chunk's role at ingest (content|navigation|boilerplate); retrieval then
@@ -2220,6 +2387,120 @@ def validate_agentic_retrieval_config() -> None:
     if errors:
         raise ValueError(
             "Agentic-retrieval configuration validation failed:\n  "
+            + "\n  ".join(errors)
+        )
+
+
+def validate_turn_loop_config() -> None:
+    """Validate turn-level conversation-loop configuration.
+
+    Checks for contradictory or out-of-range ``RAG_TURN_LOOP_*`` /
+    ``RAG_TURN_CONTEXT_*`` settings and raises ``ValueError`` with a
+    descriptive message naming the offending key(s). Invoked lazily when the
+    loop activates (fail-fast-at-use, the validate_agentic_retrieval_config
+    pattern), so importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If the answer threshold is outside ``(0.0, 1.0]``; if the
+            gate weights are not exactly 3 non-negative floats summing to 1.0
+            (tolerance 1e-6); if the deep-study window is not strictly larger
+            than its overlap (or the overlap is negative); if any count budget
+            is < 1; if ``RAG_TURN_LOOP_WALL_CLOCK_MS`` < 1000; if the wall
+            clock is not strictly below ``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS``
+            (the budget hierarchy TurnBudget < workflow timeout must hold); or
+            if a model alias is empty.
+    """
+    errors: list[str] = []
+    threshold = RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD
+    if not (0.0 < threshold <= 1.0):
+        errors.append(
+            f"RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD={threshold} must be "
+            "in (0.0, 1.0]"
+        )
+    weights = RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS
+    if len(weights) != 3:
+        errors.append(
+            f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must contain exactly "
+            "3 comma-separated floats (judge,self,citation)"
+        )
+    else:
+        if any(w < 0.0 for w in weights):
+            errors.append(
+                f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must all be >= 0"
+            )
+        if abs(sum(weights) - 1.0) > 1e-6:
+            errors.append(
+                f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must sum to 1.0 "
+                f"(got {sum(weights)})"
+            )
+    for name, val in [
+        ("RAG_TURN_LOOP_MAX_ACTIONS", RAG_TURN_LOOP_MAX_ACTIONS),
+        ("RAG_TURN_LOOP_MAX_LLM_CALLS", RAG_TURN_LOOP_MAX_LLM_CALLS),
+        ("RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS", RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS),
+        ("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS),
+        (
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS",
+            RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS,
+        ),
+        (
+            "RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS",
+            RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS,
+        ),
+        ("RAG_TURN_LOOP_CLARIFY_MAX_HINTS", RAG_TURN_LOOP_CLARIFY_MAX_HINTS),
+        ("RAG_TURN_LOOP_RETRIEVE_TOP_K", RAG_TURN_LOOP_RETRIEVE_TOP_K),
+        ("RAG_TURN_CONTEXT_MAX_CHUNK_REFS", RAG_TURN_CONTEXT_MAX_CHUNK_REFS),
+        ("RAG_TURN_CONTEXT_PREVIEW_CHARS", RAG_TURN_CONTEXT_PREVIEW_CHARS),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+    if RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS < 0:
+        errors.append(
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS} must be >= 0"
+        )
+    if (
+        RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS
+        <= RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS
+    ):
+        errors.append(
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS} must be strictly greater "
+            "than RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS} "
+            "(a window must advance past its overlap)"
+        )
+    if RAG_TURN_LOOP_WALL_CLOCK_MS < 1000:
+        errors.append(
+            f"RAG_TURN_LOOP_WALL_CLOCK_MS={RAG_TURN_LOOP_WALL_CLOCK_MS} must "
+            "be >= 1000"
+        )
+    # Budget hierarchy: the loop's wall clock must sit strictly inside the
+    # workflow default timeout so a retrieve_ranked activity can never outlive
+    # the turn budget that scheduled it. Guarded lookup: tolerate the key being
+    # absent (e.g. a trimmed settings build) rather than NameError-ing here.
+    workflow_timeout_ms = globals().get("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS")
+    if (
+        workflow_timeout_ms is not None
+        and RAG_TURN_LOOP_WALL_CLOCK_MS >= int(workflow_timeout_ms)
+    ):
+        errors.append(
+            f"RAG_TURN_LOOP_WALL_CLOCK_MS={RAG_TURN_LOOP_WALL_CLOCK_MS} must "
+            "be strictly less than RAG_WORKFLOW_DEFAULT_TIMEOUT_MS="
+            f"{workflow_timeout_ms} (TurnBudget must sit inside the workflow "
+            "timeout)"
+        )
+    for name, val in [
+        (
+            "RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS",
+            RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS,
+        ),
+        ("RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", RAG_TURN_LOOP_JUDGE_MODEL_ALIAS),
+    ]:
+        if not val.strip():
+            errors.append(f"{name} must not be empty")
+    if errors:
+        raise ValueError(
+            "Turn-loop configuration validation failed:\n  "
             + "\n  ".join(errors)
         )
 

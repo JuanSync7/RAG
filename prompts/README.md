@@ -22,6 +22,10 @@ prompt templates for compatibility and experimentation.
 | `retrieval_query_rewriter.md` | Retrieval-mode query rewriter. |
 | `deep_research_multi_queries_gen.md` | Deep-research sub-query generation. |
 | `deep_research_sufficiency_check.md` | Deep-research stopping/sufficiency check. |
+| `turn_controller_decide.md` | Turn-loop controller: choose the next action (RETRIEVE / DEEP_STUDY / CLARIFY / ANSWER) from typed turn state (loaded via `src/common/prompts.py` by `src/retrieval/pipeline/turn_loop/`). |
+| `turn_deep_study_read.md` | Turn-loop deep-study: extract question-relevant notes from one full-document read window. |
+| `turn_clarify_generate.md` | Turn-loop clarification authoring: question + clickable hints + scoping questions. |
+| `turn_answer_selfscore.md` | Turn-loop answer gate: self-score a draft's grounding + list unsupported claims. |
 
 ## Design notes
 

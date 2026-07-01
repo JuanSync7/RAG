@@ -148,6 +148,19 @@ class QueryRequest(BaseModel):
             "runtime. Only consulted when the agentic loop is active."
         ),
     )
+    turn_loop: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Per-request override of ``RAG_TURN_LOOP_ENABLED`` (the "
+            "turn-level agentic conversation loop). ``None`` (default) uses "
+            "the config setting; ``true``/``false`` force on/off for this "
+            "request only. The loop iterates RETRIEVE / DEEP_STUDY / CLARIFY "
+            "/ ANSWER actions until a final-answer confidence gate passes. "
+            "Mutually exclusive with ``deep_research``, ``agentic_retrieval`` "
+            "and ``tree_retrieval`` — the loop owns query design and composes "
+            "the retrieval primitives itself. See TURN_LOOP_DESIGN.md."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_agentic_retrieval(self) -> "QueryRequest":
@@ -164,6 +177,13 @@ class QueryRequest(BaseModel):
                     "forced on — the agentic loop replaces the linear "
                     "hybrid-search stage that tree retrieval extends"
                 )
+            if self.turn_loop is True:
+                raise ValueError(
+                    "agentic_retrieval and turn_loop cannot both be forced on "
+                    "— the turn loop composes the agentic primitives under "
+                    "its own budget and must not run the standalone agentic "
+                    "loop alongside"
+                )
             if (
                 self.fast_path is True
                 and self.max_agentic_rounds is not None
@@ -172,6 +192,31 @@ class QueryRequest(BaseModel):
                 raise ValueError(
                     "fast_path forces a single agentic round; "
                     "max_agentic_rounds>1 contradicts it"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_turn_loop(self) -> "QueryRequest":
+        if self.turn_loop is True:
+            if self.deep_research:
+                raise ValueError(
+                    "turn_loop and deep_research cannot both be enabled — "
+                    "they are competing per-turn orchestrators; the turn loop "
+                    "owns query design and retrieval composition for the turn"
+                )
+            if self.agentic_retrieval is True:
+                raise ValueError(
+                    "turn_loop and agentic_retrieval cannot both be forced on "
+                    "— the turn loop composes the agentic primitives under "
+                    "its own budget and must not run the standalone agentic "
+                    "loop alongside"
+                )
+            if self.tree_retrieval is True:
+                raise ValueError(
+                    "turn_loop and tree_retrieval cannot both be forced on — "
+                    "the turn loop drives its own retrieve_ranked rounds and "
+                    "replaces the linear hybrid-search stage that tree "
+                    "retrieval extends"
                 )
         return self
 
