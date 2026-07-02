@@ -124,7 +124,27 @@ async def _judge_round(
         if verdict.keep and 0 <= verdict.index < len(fresh)
     ]
     kept_pairs.sort()
-    return [fresh[index] for _, index in kept_pairs], pool_verdict
+    kept = [fresh[index] for _, index in kept_pairs]
+    # A judge that keeps chunks but reports no usable pool confidence (field
+    # omitted / 0.0 — observed live) would pin the answer gate's judge
+    # component at 0 and make the threshold unreachable. Derive the pool
+    # confidence from its own per-chunk relevance judgments instead: any
+    # unusable set-level score falls back to the mean kept relevance.
+    if pool_verdict is not None and pool_verdict.confidence <= 0.0 and kept_pairs:
+        kept_relevance = [
+            verdict.relevance
+            for verdict in verdicts
+            if verdict.keep and 0 <= verdict.index < len(fresh)
+        ]
+        if kept_relevance and max(kept_relevance) > 0.0:
+            pool_verdict.confidence = min(
+                1.0, sum(kept_relevance) / len(kept_relevance)
+            )
+            logger.debug(
+                "turn loop judge pool confidence derived from kept relevance: %.2f",
+                pool_verdict.confidence,
+            )
+    return kept, pool_verdict
 
 
 async def run_retrieve(

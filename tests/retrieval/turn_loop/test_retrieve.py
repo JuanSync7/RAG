@@ -184,3 +184,52 @@ async def test_retrieve_seam_failure_degrades_to_empty_round():
     assert state.pool == []
     result = events_of(emitted, TurnEventType.RETRIEVE_RESULT)[0]
     assert result["added"] == 0
+
+
+async def test_pool_confidence_derived_from_kept_relevance_when_unusable():
+    """A zero/omitted set-level confidence must not deaden the answer gate.
+
+    Class: judge emits per-chunk keep/relevance but an unusable pool
+    confidence (omitted -> clamped 0.0, observed live) — derive the pool
+    confidence from the mean kept relevance instead of pinning the gate's
+    judge component at 0.
+    """
+    import src.retrieval.pipeline.turn_loop.retrieve as retrieve_mod
+
+    chunks = [make_chunk(i) for i in range(2)]
+    provider = FakeProvider()
+    deps, _ = make_deps(provider, retrieve_batches=[chunks])
+    state, budget = TurnState(), make_budget()
+    state.iteration = 1
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+
+    class _Verdict:
+        def __init__(self, index, relevance):
+            self.index = index
+            self.relevance = relevance
+            self.faithfulness = 1.0
+            self.keep = True
+            self.rank = index
+
+    class _Pool:
+        sufficient = False
+        confidence = 0.0
+        missing_information = ""
+
+    async def fake_judge_chunks(_provider, **_kwargs):
+        return [_Verdict(0, 0.9), _Verdict(1, 0.7)], _Pool()
+
+    import src.retrieval.pipeline.agentic.judge as judge_mod
+    original = judge_mod.judge_chunks
+    judge_mod.judge_chunks = fake_judge_chunks
+    try:
+        kept, pool_verdict = await retrieve_mod._judge_round(
+            query="q", fresh=chunks, state=state, budget=budget, deps=deps,
+            emitter=emitter,
+        )
+    finally:
+        judge_mod.judge_chunks = original
+
+    assert len(kept) == 2
+    assert pool_verdict is not None
+    assert abs(pool_verdict.confidence - 0.8) < 1e-6
