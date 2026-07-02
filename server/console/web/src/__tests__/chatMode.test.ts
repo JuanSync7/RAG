@@ -109,3 +109,30 @@ describe("groupSources", () => {
         expect(groups.every((g) => g.docKey.startsWith("__synth_"))).toBe(true);
     });
 });
+
+// The toolbar toggles are mutually exclusive competing orchestrators
+// (TURN_LOOP_DESIGN.md §5): the request-schema validator hard-422s
+// turn_loop together with deep_research, so the UI must never let both be
+// active at once (buildQueryBody additionally suppresses the
+// tree_retrieval settings override while the turn loop is on).
+describe("turn-loop / deep-research toggle mutual exclusion", () => {
+    it("activating the turn loop deactivates deep research", async () => {
+        const { getDeepResearch, getTurnLoop, setDeepResearch, setTurnLoop } =
+            await import("../chatMode");
+        setDeepResearch(true);
+        expect(getDeepResearch()).toBe(true);
+        setTurnLoop(true);
+        expect(getTurnLoop()).toBe(true);
+        expect(getDeepResearch()).toBe(false);
+    });
+
+    it("activating deep research deactivates the turn loop", async () => {
+        const { getDeepResearch, getTurnLoop, setDeepResearch, setTurnLoop } =
+            await import("../chatMode");
+        setTurnLoop(true);
+        expect(getTurnLoop()).toBe(true);
+        setDeepResearch(true);
+        expect(getDeepResearch()).toBe(true);
+        expect(getTurnLoop()).toBe(false);
+    });
+});

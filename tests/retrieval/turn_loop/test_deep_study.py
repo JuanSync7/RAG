@@ -220,6 +220,7 @@ async def test_missing_document_ref_degrades_to_noop():
 
     await run_deep_study(
         DeepStudyArgs(question="q?"),  # controller gave no ref at all
+        context=_ctx(),
         state=state,
         budget=budget,
         deps=deps,

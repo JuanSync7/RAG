@@ -1378,11 +1378,15 @@ function appendUserMsg(text) {
           <div class="bubble-wrap">
             <div class="bubble">${escHtml(text)}</div>
             <div class="msg-actions">
-              <button class="msg-action-btn" onclick="copyMsg(this,'${escHtml(text)}')" >&#128203; Copy</button>
+              <button class="msg-action-btn">&#128203; Copy</button>
             </div>
             <div class="msg-meta">${ts}</div>
           </div>
         </div>`;
+  const copyBtn = group.querySelector(".msg-action-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => copyMsg(copyBtn, text));
+  }
   refs.thread.appendChild(group);
   scrollToBottom();
   return group;
@@ -2047,7 +2051,8 @@ function buildQueryBody(queryText) {
     memory_enabled: s.memory_enabled !== false,
     conversation_id: state.activeConversationId ?? void 0
   };
-  if (s.tree_retrieval !== void 0) {
+  const turnLoopActive = getTurnLoop() && getChatMode() !== "sources";
+  if (s.tree_retrieval !== void 0 && !turnLoopActive) {
     body.tree_retrieval = Boolean(s.tree_retrieval);
   }
   if (getChatMode() === "sources") {
@@ -2060,7 +2065,7 @@ function buildQueryBody(queryText) {
   if (getDeepResearch()) {
     body.deep_research = true;
   }
-  if (getTurnLoop()) {
+  if (turnLoopActive) {
     body.turn_loop = true;
   }
   return body;

@@ -1,10 +1,15 @@
 # @summary
 # Endpoint + wiring tests for the turn-loop branch of the query routes
 # (server/routes/query.py + server/turn_loop_runner.py): flag resolution
-# precedence, SSE event ordering (loop events before token replay, done
-# last), the clarify terminal shape, the non-stream metadata.turn_loop.trace,
-# memory write-back kwargs (preview-capped chunk refs, action records,
-# record_doc_studied), and non-loop path untouchedness when the flag is off.
+# precedence (request override > explicit competing orchestrator > env
+# default), SSE event ordering (loop events before token replay, done last),
+# the clarify terminal shape, the non-stream metadata.turn_loop.trace, memory
+# write-back kwargs (preview-capped chunk refs, action records,
+# record_doc_studied), non-loop path untouchedness when the flag is off,
+# validate_turn_loop_config fail-fast at activation, build_retrieve_ranked
+# remaining-wall-clock bounds (timeout_ms / execution_timeout / wait_for),
+# output-rail application + draft suppression/redaction, the conversation-
+# scoped fetch_document cache, and /console/query loop-parity unwrapping.
 # Exports: (tests)
 # Deps: pytest, fastapi.testclient, server.routes.query,
 #       server.turn_loop_runner, src.retrieval.pipeline.turn_loop
@@ -749,3 +754,546 @@ def test_validate_event_payload_fills_defaults_and_keeps_extras():
     # Unknown event types pass through untouched.
     raw = {"whatever": 1}
     assert runner_mod.validate_event_payload("future_event", raw) is raw
+
+
+# ===========================================================================
+# Flag resolution — env default yields to explicit competing orchestrators
+# (design §5 "config-default bypass": the schema validator only fires when
+# turn_loop is True, so the resolver must protect the turn_loop=None + env
+# default direction).
+# ===========================================================================
+COMPETING_REQUESTS = [
+    {"deep_research": True},
+    {"agentic_retrieval": True},
+    {"tree_retrieval": True},
+    {"mode": "retrieval"},
+]
+
+
+@pytest.mark.parametrize("extra", COMPETING_REQUESTS)
+def test_resolver_env_default_yields_to_explicit_competing_flag(monkeypatch, extra):
+    """turn_loop=None + env True must NOT hijack an explicit competing request."""
+    import config.settings as settings_mod
+
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    request = QueryRequest(query="q", **extra)
+
+    assert runner_mod.resolve_turn_loop_enabled(None, request=request) is False
+
+
+def test_resolver_env_default_applies_to_plain_request(monkeypatch):
+    """No competing flag on the request: the env default still activates."""
+    import config.settings as settings_mod
+
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+
+    assert runner_mod.resolve_turn_loop_enabled(None, request=QueryRequest(query="q")) is True
+
+
+@pytest.mark.parametrize("extra", COMPETING_REQUESTS)
+def test_env_default_yields_to_competing_request_on_endpoint(loop_env, monkeypatch, extra):
+    """/query with env True + an explicit competing flag takes the workflow
+    path — deep research / agentic / tree / retrieval-only mode all run their
+    own orchestration, never the loop."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query", json={"query": "hello", **extra})
+
+    assert resp.status_code == 200
+    assert env["loop"].calls == []
+    assert len(env["temporal"].calls) == 1
+    # The competing request rides to the workflow payload unmodified.
+    payload = env["temporal"].calls[0]["payload"]
+    for key, value in extra.items():
+        assert payload.get(key) == value
+
+
+def test_env_default_yields_to_deep_research_on_stream_endpoint(loop_env, monkeypatch):
+    """The /query/stream branch applies the same precedence rule."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query/stream", json={"query": "hello", "deep_research": True})
+
+    assert resp.status_code == 200
+    frames = _parse_sse(resp.text)
+    assert not any(e in TurnEventType.ALL for e, _ in frames)
+    assert env["loop"].calls == []
+    assert len(env["temporal"].calls) == 1
+
+
+# ===========================================================================
+# Config validation — validate_turn_loop_config runs at loop activation
+# (fail-fast, CLAUDE.md §3; the validate_agentic_retrieval_config precedent)
+# ===========================================================================
+def test_validate_turn_loop_config_rejects_weights_not_summing_to_one(monkeypatch):
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", [0.5, 0.4, 0.4], raising=False
+    )
+    with pytest.raises(ValueError, match="RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS"):
+        settings_mod.validate_turn_loop_config()
+
+
+@pytest.mark.parametrize("threshold", [0.0, -0.2, 1.5])
+def test_validate_turn_loop_config_rejects_out_of_range_threshold(monkeypatch, threshold):
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(
+        settings_mod,
+        "RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD",
+        threshold,
+        raising=False,
+    )
+    with pytest.raises(ValueError, match="RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD"):
+        settings_mod.validate_turn_loop_config()
+
+
+def test_validate_turn_loop_config_rejects_window_not_above_overlap(monkeypatch):
+    """window <= overlap would degrade deep-study to a stride-1 crawl."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS", 100, raising=False
+    )
+    monkeypatch.setattr(
+        settings_mod,
+        "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS",
+        100,
+        raising=False,
+    )
+    with pytest.raises(ValueError, match="RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS"):
+        settings_mod.validate_turn_loop_config()
+
+
+def test_validate_turn_loop_config_rejects_wall_clock_at_or_above_workflow_timeout(
+    monkeypatch,
+):
+    """Budget hierarchy: the turn wall clock must sit inside the workflow timeout."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(
+        settings_mod,
+        "RAG_TURN_LOOP_WALL_CLOCK_MS",
+        int(settings_mod.RAG_WORKFLOW_DEFAULT_TIMEOUT_MS),
+        raising=False,
+    )
+    with pytest.raises(ValueError, match="RAG_WORKFLOW_DEFAULT_TIMEOUT_MS"):
+        settings_mod.validate_turn_loop_config()
+
+
+def test_resolver_activation_fails_fast_on_contradictory_config(monkeypatch):
+    """resolve_turn_loop_enabled(True) surfaces bad config as a clear 500."""
+    from fastapi import HTTPException
+
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", [0.5, 0.4, 0.4], raising=False
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        runner_mod.resolve_turn_loop_enabled(True)
+    assert excinfo.value.status_code == 500
+    assert "Turn-loop configuration invalid" in str(excinfo.value.detail)
+    assert "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS" in str(excinfo.value.detail)
+
+
+def test_contradictory_config_fails_fast_on_endpoint_activation(loop_env, monkeypatch):
+    """Env-enabled loop + contradictory config: the request 500s BEFORE the
+    loop runs — no silent misbehavior (skewed gate weights)."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", [0.5, 0.4, 0.4], raising=False
+    )
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query", json={"query": "hello"})
+
+    assert resp.status_code == 500
+    assert "Turn-loop configuration invalid" in resp.json()["detail"]
+    assert env["loop"].calls == []
+
+
+def test_contradictory_config_is_inert_while_loop_is_off(loop_env, monkeypatch):
+    """Lazy validation: bad RAG_TURN_LOOP_* config never breaks non-loop
+    requests (the validator runs only at activation)."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", False, raising=False)
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", [0.5, 0.4, 0.4], raising=False
+    )
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query", json={"query": "hello"})
+
+    assert resp.status_code == 200
+    assert len(env["temporal"].calls) == 1
+
+
+# ===========================================================================
+# build_retrieve_ranked — budget hierarchy (design §3): remaining wall clock,
+# not the full budget, bounds every retrieve; hard client-side wait_for.
+# ===========================================================================
+class CapturingRetrieveClient:
+    """execute_workflow double for the TurnRetrieveWorkflow seam."""
+
+    def __init__(self, *, hang_s: float = 0.0):
+        self.calls: list[dict] = []
+        self._hang_s = hang_s
+
+    async def execute_workflow(
+        self, workflow_run, payload, *, id, task_queue, execution_timeout=None
+    ):
+        self.calls.append(
+            {
+                "payload": payload,
+                "task_queue": task_queue,
+                "execution_timeout": execution_timeout,
+            }
+        )
+        if self._hang_s:
+            import asyncio
+
+            await asyncio.sleep(self._hang_s)
+        return {"chunks": []}
+
+
+async def test_retrieve_timeout_is_strictly_below_the_wall_clock(monkeypatch):
+    """The first retrieve already carries a bound < RAG_TURN_LOOP_WALL_CLOCK_MS
+    (never the FULL budget), threaded to both the activity timeout_ms and the
+    workflow execution_timeout."""
+    from datetime import timedelta
+
+    import config.settings as settings_mod
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_WALL_CLOCK_MS", 90000, raising=False)
+    client = CapturingRetrieveClient()
+    retrieve = runner_mod.build_retrieve_ranked(client, QueryRequest(query="q"))
+
+    await retrieve("q", None, 5)
+
+    call = client.calls[0]
+    timeout_ms = call["payload"]["timeout_ms"]
+    assert timeout_ms < 90000
+    assert call["execution_timeout"] == timedelta(milliseconds=timeout_ms)
+
+
+async def test_retrieve_timeout_shrinks_with_elapsed_turn_time(monkeypatch):
+    """A retrieve dispatched mid-turn gets only the REMAINING budget — a hung
+    late retrieve can no longer double the turn's wall clock."""
+    import time as time_mod
+
+    import config.settings as settings_mod
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_WALL_CLOCK_MS", 90000, raising=False)
+    real_monotonic = time_mod.monotonic
+    now = {"value": real_monotonic()}
+    monkeypatch.setattr(runner_mod.time, "monotonic", lambda: now["value"])
+    client = CapturingRetrieveClient()
+    retrieve = runner_mod.build_retrieve_ranked(client, QueryRequest(query="q"))
+
+    now["value"] += 50.0  # 50s of the 90s budget already spent
+    await retrieve("q", None, 5)
+
+    assert client.calls[0]["payload"]["timeout_ms"] == 40000
+
+
+async def test_retrieve_timeout_floors_near_budget_exhaustion(monkeypatch):
+    """At wall-clock-minus-epsilon the bound floors (schedulable, ~1s) instead
+    of going zero/negative; the loop's between-action check then ends the turn."""
+    import time as time_mod
+
+    import config.settings as settings_mod
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_WALL_CLOCK_MS", 90000, raising=False)
+    real_monotonic = time_mod.monotonic
+    now = {"value": real_monotonic()}
+    monkeypatch.setattr(runner_mod.time, "monotonic", lambda: now["value"])
+    client = CapturingRetrieveClient()
+    retrieve = runner_mod.build_retrieve_ranked(client, QueryRequest(query="q"))
+
+    now["value"] += 89.9
+    await retrieve("q", None, 5)
+
+    assert client.calls[0]["payload"]["timeout_ms"] == runner_mod._RETRIEVE_MIN_TIMEOUT_MS
+
+
+async def test_retrieve_wait_for_bounds_a_worker_that_never_answers(monkeypatch):
+    """A down/backlogged worker (execute_workflow never returns) cannot park
+    the request past the remaining budget: the client-side wait_for trips."""
+    import asyncio
+
+    import config.settings as settings_mod
+    from server.schemas import QueryRequest
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_WALL_CLOCK_MS", 200, raising=False)
+    monkeypatch.setattr(runner_mod, "_RETRIEVE_MIN_TIMEOUT_MS", 50)
+    client = CapturingRetrieveClient(hang_s=30.0)
+    retrieve = runner_mod.build_retrieve_ranked(client, QueryRequest(query="q"))
+
+    with pytest.raises(asyncio.TimeoutError):
+        await retrieve("q", None, 5)
+
+
+# ===========================================================================
+# Output rails — REFUSE-parity with the non-loop /query path (rag_chain
+# Stage 7): the terminal answer is railed; pre-rail draft frames are
+# suppressed live and redacted from the persisted trace.
+# ===========================================================================
+class _RailResult:
+    def __init__(self, final_answer: str):
+        self.final_answer = final_answer
+
+
+def _install_output_rails(monkeypatch, fake):
+    import src.guardrails as guardrails_mod
+
+    monkeypatch.setattr(guardrails_mod, "run_output_rails", fake, raising=False)
+
+
+def test_output_rails_replace_answer_and_suppress_live_drafts(loop_env, monkeypatch):
+    """GUARDRAIL_BACKEND configured: the railed answer is what streams, and
+    pre-rail draft frames never reach the client."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "GUARDRAIL_BACKEND", "nemoguardrails", raising=False)
+    rail_calls: list[dict] = []
+
+    def fake_rails(*, answer, context_chunks):
+        rail_calls.append({"answer": answer, "context_chunks": list(context_chunks)})
+        return _RailResult("railed answer")
+
+    _install_output_rails(monkeypatch, fake_rails)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query/stream", json={"query": "hello", "turn_loop": True})
+
+    assert resp.status_code == 200
+    frames = _parse_sse(resp.text)
+    events = [e for e, _ in frames]
+    # Draft frames (pre-rail model output) are suppressed from the stream;
+    # the rest of the loop event vocabulary still streams.
+    assert "draft" not in events
+    assert "turn_action" in events and "gate" in events
+    # The replayed tokens carry the RAILED answer, not the raw draft.
+    answer = "".join(d["token"] for e, d in frames if e == "token")
+    assert answer == "railed answer"
+    # The rail saw the pre-rail terminal answer + the pool texts.
+    assert rail_calls[0]["answer"] == "final answer here"
+    assert rail_calls[0]["context_chunks"] == ["evidence text"]
+
+
+def test_output_rails_redact_draft_text_in_nonstream_trace(loop_env, monkeypatch):
+    """Non-stream: metadata.turn_loop.trace keeps draft event structure but
+    empties text_delta (redacted marker) — failed pre-rail drafts must not
+    ship verbatim to a railed client."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "GUARDRAIL_BACKEND", "nemoguardrails", raising=False)
+    _install_output_rails(
+        monkeypatch, lambda *, answer, context_chunks: _RailResult("railed answer")
+    )
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query", json={"query": "hello", "turn_loop": True})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["generated_answer"] == "railed answer"
+    drafts = [
+        r for r in body["metadata"]["turn_loop"]["trace"] if r["type"] == "draft"
+    ]
+    assert drafts  # structure preserved for trace consumers
+    for record in drafts:
+        assert record["payload"]["text_delta"] == ""
+        assert record["payload"]["redacted"] is True
+
+
+def test_output_rails_fail_open_on_infrastructure_error(loop_env, monkeypatch):
+    """A broken rail backend degrades (logged) — it must not kill the turn
+    (rag_chain Stage-7 fail-open parity)."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "GUARDRAIL_BACKEND", "nemoguardrails", raising=False)
+
+    def broken_rails(*, answer, context_chunks):
+        raise RuntimeError("rail backend down")
+
+    _install_output_rails(monkeypatch, broken_rails)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query", json={"query": "hello", "turn_loop": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["generated_answer"] == "final answer here"
+
+
+def test_no_guardrail_backend_streams_drafts_and_skips_rails(loop_env, monkeypatch):
+    """Without a backend, drafts stream live (design §8 visibility contract)
+    and no rail call happens."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "GUARDRAIL_BACKEND", "", raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/query/stream", json={"query": "hello", "turn_loop": True})
+
+    frames = _parse_sse(resp.text)
+    events = [e for e, _ in frames]
+    assert "draft" in events
+    answer = "".join(d["token"] for e, d in frames if e == "token")
+    assert answer == "final answer here"
+
+
+# ===========================================================================
+# build_fetch_document — conversation-scoped cache (the TurnLoopDeps
+# "conversation-cached by the injector" contract)
+# ===========================================================================
+async def test_fetch_document_caches_successful_resolutions_per_conversation(monkeypatch):
+    """Same conversation + same ref: ONE MinIO round-trip; a different
+    conversation re-resolves (scope isolation)."""
+    from types import SimpleNamespace
+
+    import src.db as db_mod
+
+    runner_mod._DOC_FETCH_CACHE.clear()
+    document = SimpleNamespace(content="full markdown", title="Doc")
+    resolve_calls: list[tuple] = []
+
+    def fake_resolve(client, *, document_id=None, source_key=None):
+        resolve_calls.append((document_id, source_key))
+        return document
+
+    monkeypatch.setattr(db_mod, "resolve_clean_document", fake_resolve, raising=False)
+
+    fetch = runner_mod.build_fetch_document(object(), "conv-cache-a")
+    first = await fetch("doc-1", "key-1")
+    second = await fetch("doc-1", "key-1")
+
+    assert first is document and second is document
+    assert len(resolve_calls) == 1  # in-conversation resume: cached
+
+    other = runner_mod.build_fetch_document(object(), "conv-cache-b")
+    await other("doc-1", "key-1")
+    assert len(resolve_calls) == 2  # different conversation: fresh resolve
+
+    runner_mod._DOC_FETCH_CACHE.clear()
+
+
+async def test_fetch_document_does_not_cache_misses(monkeypatch):
+    """Unresolvable refs are retried (only successful resolutions cache)."""
+    import src.db as db_mod
+
+    runner_mod._DOC_FETCH_CACHE.clear()
+    resolve_calls: list[tuple] = []
+
+    def fake_resolve(client, *, document_id=None, source_key=None):
+        resolve_calls.append((document_id, source_key))
+        return None
+
+    monkeypatch.setattr(db_mod, "resolve_clean_document", fake_resolve, raising=False)
+    fetch = runner_mod.build_fetch_document(object(), "conv-cache-miss")
+
+    assert await fetch("doc-x", None) is None
+    assert await fetch("doc-x", None) is None
+    assert len(resolve_calls) == 2
+
+    runner_mod._DOC_FETCH_CACHE.clear()
+
+
+# ===========================================================================
+# Console parity — /console/query must work (and opt in/out) whenever the
+# loop is active: the JSONResponse loop return unwraps into the envelope.
+# ===========================================================================
+def _build_console_app(*, temporal_client):
+    from server.common.utils import console_ok
+    from server.console.routes import create_console_router
+
+    app = FastAPI()
+    router = create_console_router(
+        get_temporal_client=lambda: temporal_client,
+        logger=LOGGER,
+        enforce_rate_limit=Recorder(),
+        acquire_request_slot=AsyncSlot(),
+        release_request_slot=Recorder(),
+        console_ok=console_ok,
+    )
+    app.include_router(router)
+    app.dependency_overrides[authenticate_request] = _principal
+    return app
+
+
+def test_console_query_unwraps_loop_json_response_under_env_default(loop_env, monkeypatch):
+    """RAG_TURN_LOOP_ENABLED=true (the rollout config): /console/query returns
+    the envelope-wrapped loop body — never an AttributeError 500."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_console_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/console/query", json={"query": "hello"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["data"]["generated_answer"] == "final answer here"
+    assert body["data"]["metadata"]["turn_loop"]["terminal"] == "answered"
+    assert len(env["loop"].calls) == 1
+
+
+def test_console_query_honors_per_request_turn_loop_override(loop_env, monkeypatch):
+    """Parity: the console surface can opt IN per request (turn_loop=true
+    with the env default off), like the API surface."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", False, raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_console_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/console/query", json={"query": "hello", "turn_loop": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["metadata"]["turn_loop"]["terminal"] == "answered"
+    assert len(env["loop"].calls) == 1
+    assert env["temporal"].calls == []
+
+
+def test_console_query_can_opt_out_under_env_default(loop_env, monkeypatch):
+    """Parity: turn_loop=false from the console wins over the env default."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", True, raising=False)
+    env = loop_env(ANSWER_EVENTS, _answered_result())
+    client = TestClient(_build_console_app(temporal_client=env["temporal"]))
+
+    resp = client.post("/console/query", json={"query": "hello", "turn_loop": False})
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert env["loop"].calls == []
+    assert len(env["temporal"].calls) == 1
