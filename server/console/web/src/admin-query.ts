@@ -1,10 +1,13 @@
 /**
  * @summary
  * Query tab handlers, SSE stream consumer, and slash-command dispatcher for the
- * admin/operator console.
+ * admin/operator console. Renders the same turn-loop ACTIVITY LOG and clarify
+ * chips as the user console (parity, TURN_LOOP_DESIGN.md §8) via the shared
+ * `activityLog.ts` renderer; chips resubmit by refilling the query box and
+ * re-running the stream.
  * Exports: queryStatusSnapshot, bindQuery
  * Deps: admin-types, admin-state, admin-api, admin-render, admin-conversations,
- *   admin-health
+ *   admin-health, activityLog
  * @end-summary
  */
 
@@ -39,6 +42,8 @@ import {
     setActiveConversation,
 } from "./admin-conversations.js";
 import { refreshHealth } from "./admin-health.js";
+import { createActivityLog, isTurnLoopEvent, renderClarifyChips } from "./activityLog.js";
+import type { ActivityLog } from "./activityLog.js";
 
 export function queryStatusSnapshot(): JsonObject {
     return {
@@ -84,8 +89,12 @@ export function bindQuery(): void {
 
     byId("runStreamBtn").addEventListener("click", async () => {
         byId("rerankDocsOut").innerHTML = "";
-        // Drop any reasoning block left over from a previous run.
-        byId("queryMarkdown").parentElement?.querySelector(".reasoning-block")?.remove();
+        // Drop any reasoning block / activity log / clarify chips left over
+        // from a previous run.
+        const mdHost = byId("queryMarkdown").parentElement;
+        mdHost?.querySelector(".reasoning-block")?.remove();
+        mdHost?.querySelector(".activity-log")?.remove();
+        mdHost?.querySelector(".clarify-chips")?.remove();
         renderTiming(null);
         const body = {
             query: byId<HTMLTextAreaElement>("queryText").value,
@@ -108,6 +117,29 @@ export function bindQuery(): void {
         let chunkBuffer = "";
         let answer = "";
         let reasoningText = "";
+        let sawToken = false;
+        // Turn-loop activity log (shared renderer; parity with the user
+        // console). Created lazily on the first turn-loop event; collapsed
+        // when the accepted answer starts streaming. Ref object (not a bare
+        // closure-mutated `let`) to sidestep the TS `never`-narrowing pitfall.
+        const activity: { current: ActivityLog | null } = { current: null };
+        const activityLog = (): ActivityLog => {
+            if (!activity.current) {
+                activity.current = createActivityLog();
+                const md = byId("queryMarkdown");
+                const anchor =
+                    md.parentElement?.querySelector<HTMLElement>(".reasoning-block") ?? md;
+                md.parentElement?.insertBefore(activity.current.root, anchor);
+            }
+            return activity.current;
+        };
+        // Clarify chips resubmit by refilling the query box and re-running
+        // the stream — the admin-console analogue of the user console's
+        // registered sendQuery resubmit sink.
+        const resubmit = (text: string): void => {
+            byId<HTMLTextAreaElement>("queryText").value = text;
+            byId("runStreamBtn").click();
+        };
         // Returns the reasoning-body element, lazily creating the collapsible block
         // above #queryMarkdown. DOM-queried (not a closure-cached var) to avoid a TS
         // `never`-narrowing pitfall. Static markup only; the model's raw reasoning
@@ -148,11 +180,26 @@ export function bindQuery(): void {
                 }
 
                 if (eventType === "token") {
+                    if (!sawToken) {
+                        sawToken = true;
+                        // Accepted-answer replay begins — collapse the log.
+                        activity.current?.finalize(true);
+                    }
                     answer += data.token || "";
                     renderMarkdown("queryMarkdown", answer);
                 } else if (eventType === "reasoning") {
                     reasoningText += String(data.text ?? "");
                     reasoningBody().textContent = reasoningText;
+                } else if (isTurnLoopEvent(eventType)) {
+                    // Typed turn-loop activity events (TURN_LOOP_DESIGN.md §8);
+                    // textContent-only rendering inside the shared module.
+                    activityLog().handle(eventType, data);
+                    if (eventType === "clarify") {
+                        const chips = renderClarifyChips(data, resubmit);
+                        // After the markdown pane so chips survive the log
+                        // collapsing (parity with the user console).
+                        if (chips) byId("queryMarkdown").insertAdjacentElement("afterend", chips);
+                    }
                 } else if (eventType === "retrieval") {
                     const cid = typeof data.conversation_id === "string" ? data.conversation_id : "";
                     if (cid) {
@@ -168,6 +215,9 @@ export function bindQuery(): void {
                     }
                     const rb = byId("queryMarkdown").parentElement?.querySelector<HTMLDetailsElement>(".reasoning-block");
                     if (rb) rb.open = false;
+                    // No answer replay (e.g. terminal clarify): leave the
+                    // activity log open, relabeled with its step count.
+                    if (!sawToken) activity.current?.finalize(false);
                     renderMarkdown("queryMarkdown", answer);
                     renderTiming({
                         latency_ms: asOptionalNumber(data.latency_ms),

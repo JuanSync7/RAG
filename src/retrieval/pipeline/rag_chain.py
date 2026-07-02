@@ -28,6 +28,12 @@
 # (today's flat path exactly). RAG_DOCUMENT_ROUTING_BOOST (default 0.0) is a
 # reserved tiny tie-break only — pool composition is the mechanism (no
 # post-rerank override).
+# retrieve_primitive() is the turn-loop worker primitive (TURN_LOOP_DESIGN.md §3):
+# embed (hyde_text else query_text, shared LRU keyed on the embedded text) →
+# hybrid search via the same _do_search choke point → cross-encoder rerank
+# anchored to query_text → thin/nav filter → top_k dicts shaped like
+# turn_loop.schemas.EvidenceChunk minus provenance/round_added. No Stage 1, no
+# LLM calls, no ignored_doc_ids suppression; idempotent under Temporal retries.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -1810,6 +1816,186 @@ class RAGChain:
             excluded_roles=RAG_RETRIEVAL_EXCLUDED_ROLES,
         )
         return _asyncio.run(orchestrator.run())
+
+    # ------------------------------------------------------------------
+    # Turn-loop retrieval primitive (TURN_LOOP_DESIGN.md §3)
+    # ------------------------------------------------------------------
+
+    def retrieve_primitive(
+        self,
+        query_text: str,
+        hyde_text: Optional[str] = None,
+        *,
+        top_k: int,
+        source_filter: Optional[str] = None,
+        heading_filter: Optional[str] = None,
+    ) -> list[dict]:
+        """One idempotent embed -> hybrid-search -> rerank -> filter round.
+
+        The worker-side primitive behind the ``retrieve_ranked`` Temporal
+        activity (turn-level conversation loop). Deliberately minimal: no
+        Stage 1 / LangGraph query processing, no LLM calls, no KG expansion
+        and — by loop-level rule — **no** ``ignored_doc_ids`` suppression
+        (deepening into a previously served document is a first-class move;
+        design §5). Safe under Temporal retries.
+
+        HyDE asymmetry (same contract as the agentic ``retrieve`` closure):
+        the dense vector follows ``hyde_text`` when given, while the
+        BM25/lexical side stays anchored to ``query_text``. The embedding
+        reuses the chain's query-embedding LRU, keyed on the text actually
+        embedded so a hypothetical-answer vector can never be served for the
+        plain query (or vice versa). The cross-encoder rerank is always
+        anchored to ``query_text`` — never the hypothetical answer.
+
+        Args:
+            query_text: The controller's literal search query (BM25 anchor
+                and rerank anchor).
+            hyde_text: Optional hypothetical answer; when given it is the
+                text embedded for the dense side.
+            top_k: Ranked-chunk count to return (> 0).
+            source_filter: Optional exact-match ``source`` filter.
+            heading_filter: Optional exact-match ``heading`` filter.
+
+        Returns:
+            Up to ``top_k`` dicts shaped exactly like
+            ``turn_loop.schemas.EvidenceChunk`` minus ``provenance`` /
+            ``round_added``: ``{chunk_id, document_id, source_key, source,
+            heading, text, score, refactored_char_start,
+            refactored_char_end}``. ``chunk_id`` is the stable Weaviate
+            object uuid (plumbed through search-result metadata by the store
+            layer), with the same deterministic metadata fallback the
+            deep-research/agentic dedup uses when it is absent.
+
+        Raises:
+            ValueError: On empty ``query_text``, non-positive ``top_k`` or
+                unsafe filter values (non-retryable at the activity layer).
+        """
+        if not isinstance(query_text, str) or not query_text.strip():
+            raise ValueError("query_text must be a non-empty string")
+        query_text = query_text.strip()
+        validate_positive_int("top_k", int(top_k))
+        source_filter = validate_filter_value("source_filter", source_filter)
+        heading_filter = validate_filter_value("heading_filter", heading_filter)
+        hyde_text = (hyde_text or "").strip() or None
+
+        _t_start = time.perf_counter()
+        with self.tracer.span(
+            "retrieval.turn_retrieve",
+            {"top_k": int(top_k), "hyde": bool(hyde_text)},
+        ) as span:
+            # Embed the dense-side text through the shared LRU, keyed on the
+            # text actually embedded (never cross-keyed, so no cache poisoning).
+            embed_text = hyde_text if hyde_text else query_text
+            t0 = time.perf_counter()
+            cache_hit = embed_text in self._embedding_cache
+            if cache_hit:
+                embedding = self._embedding_cache[embed_text]
+                self._embedding_cache.move_to_end(embed_text)
+            else:
+                embedding = self.embeddings.embed_query(embed_text)
+                self._embedding_cache[embed_text] = embedding
+                if len(self._embedding_cache) > self._embedding_cache_max:
+                    self._embedding_cache.popitem(last=False)
+            span.set_attribute("embed_cache_hit", cache_hit)
+            embed_ms = (time.perf_counter() - t0) * 1000
+
+            # Optional scoping filters only — never document suppression.
+            filters: list[SearchFilter] = []
+            if source_filter:
+                filters.append(
+                    SearchFilter(property="source", operator="eq", value=source_filter)
+                )
+            if heading_filter:
+                filters.append(
+                    SearchFilter(property="heading", operator="eq", value=heading_filter)
+                )
+
+            # Hybrid search through the single _do_search choke point (config
+            # alpha; candidate pool at least the configured search limit).
+            search_limit = max(SEARCH_LIMIT, int(top_k))
+            t0 = time.perf_counter()
+            search_results = self.retry_provider.execute(
+                operation_name="weaviate_hybrid_search_turn",
+                fn=lambda: self._do_search(
+                    query_text, embedding, HYBRID_SEARCH_ALPHA, search_limit,
+                    filters or None,
+                ),
+                policy=self.retry_policy,
+                idempotency_key=(
+                    f"turn_search:{embed_text}:{source_filter}:"
+                    f"{heading_filter}:{search_limit}"
+                ),
+            )
+            search_results = list(search_results or [])
+            search_ms = (time.perf_counter() - t0) * 1000
+            span.set_attribute("search_result_count", len(search_results))
+
+            # Thin/nav filter (same pre-rerank placement + floor as Stage 4->5).
+            search_results = _filter_thin_candidates(
+                search_results,
+                min_chars=RERANK_MIN_CHARS,
+                floor=int(top_k),
+                drop_nav=RERANK_DROP_NAVIGATIONAL,
+                nav_max_chars=RERANK_NAV_MAX_CHARS,
+            )
+
+            # Cross-encoder rerank, anchored to the user's query text.
+            t0 = time.perf_counter()
+            reranked = []
+            if search_results:
+                reranked = self.reranker.rerank(
+                    query=query_text,
+                    documents=search_results,
+                    top_k=int(top_k),
+                )
+            rerank_ms = (time.perf_counter() - t0) * 1000
+            span.set_attribute("result_count", len(reranked))
+
+            chunks = [self._to_evidence_dict(r) for r in reranked[: int(top_k)]]
+            logger.debug(
+                "retrieve_primitive: %d chunks in %.1fms "
+                "(embed=%.1fms search=%.1fms rerank=%.1fms, hyde=%s)",
+                len(chunks), (time.perf_counter() - _t_start) * 1000,
+                embed_ms, search_ms, rerank_ms, bool(hyde_text),
+            )
+            return chunks
+
+    @staticmethod
+    def _to_evidence_dict(result) -> dict:
+        """Map one ranked hit to the turn-loop evidence-chunk dict shape.
+
+        Shape contract: ``turn_loop.schemas.EvidenceChunk`` minus
+        ``provenance``/``round_added``. ``chunk_id`` prefers the stable
+        Weaviate object uuid carried in metadata by the store layer; the
+        fallback is the same deterministic (source|heading|chunk_index)
+        composite the deep-research/agentic dedup uses, so the id stays
+        stable for any result shape.
+        """
+        md = getattr(result, "metadata", None) or {}
+        chunk_id = str(md.get("chunk_id") or "").strip()
+        if not chunk_id:
+            chunk_id = (
+                f"meta:{md.get('source') or md.get('document_id') or 'unknown'}"
+                f"|{md.get('heading', '')}|{md.get('chunk_index', '')}"
+            )
+
+        def _as_int(value, default: int = -1) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "chunk_id": chunk_id,
+            "document_id": str(md.get("document_id") or ""),
+            "source_key": str(md.get("source_key") or ""),
+            "source": str(md.get("source") or ""),
+            "heading": str(md.get("heading") or ""),
+            "text": getattr(result, "text", "") or "",
+            "score": float(getattr(result, "score", 0.0) or 0.0),
+            "refactored_char_start": _as_int(md.get("refactored_char_start", -1)),
+            "refactored_char_end": _as_int(md.get("refactored_char_end", -1)),
+        }
 
     def run(
         self,

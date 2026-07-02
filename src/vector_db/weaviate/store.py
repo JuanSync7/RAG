@@ -693,6 +693,13 @@ def hybrid_search(
                 "parent_section_id": obj.properties.get("parent_section_id", ""),
                 "child_count": obj.properties.get("child_count", 0),
                 "document_id": obj.properties.get("document_id", ""),
+                # Stable Weaviate object uuid, duplicated INTO metadata so it
+                # survives the SearchResult -> RankedResult mapping (which
+                # carries metadata only). Purely additive — the top-level
+                # "uuid" key below is unchanged for existing consumers.
+                # Consumed by RAGChain.retrieve_primitive (turn-loop chunk_id)
+                # and the turn-context chunk refs (TURN_LOOP_DESIGN.md §7).
+                "chunk_id": str(obj.uuid) if getattr(obj, "uuid", None) else "",
             },
             "score": obj.metadata.score if obj.metadata else 0.0,
             "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",

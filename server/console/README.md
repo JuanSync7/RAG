@@ -68,6 +68,41 @@ Command intent dispatch for web console now uses:
 This allows the frontend to remain a renderer/adapter while command semantics
 stay centralized in backend logic.
 
+## Turn-Loop Activity Log & Clarify Chips
+
+Both consoles render the turn-level agentic conversation loop's stream
+observability (see `docs/retrieval/TURN_LOOP_DESIGN.md` §8) through one shared
+renderer, `web/src/activityLog.ts`:
+
+- **Request flag.** The user console's `buildQueryBody` (`web/src/streaming.ts`)
+  sends `turn_loop: true` only while the "Turn loop" toolbar toggle
+  (`#chatTurnLoop`, owned by `web/src/chatMode.ts`, persisted in
+  `localStorage["rw_turn_loop"]`) is active — absent means the server config
+  default (`RAG_TURN_LOOP_ENABLED`) applies. The toggle is mutually exclusive
+  with the Deep research toggle, matching the request-schema validator
+  (design §5).
+- **Activity log.** A lazy collapsible `<details class="activity-log">` block
+  is inserted into the assistant bubble wrap **before** the reasoning block on
+  the first turn-loop SSE event, and auto-collapses when the first answer
+  token arrives (expandable afterwards). It renders the nine typed events —
+  `turn_action`, `hyde_query` (the hypothetical answer verbatim, collapsed
+  when long), `retrieve_result`, `judge_verdict`, `deep_study`, `llm_call`
+  (dim telemetry one-liner), `draft` (live draft text, replaced per attempt),
+  `gate`, `clarify` — as compact lines.
+- **Clarify chips.** A terminal `clarify` event renders the question plus one
+  clickable chip per `hints[]` / `scoping_questions[]` entry OUTSIDE the
+  collapsible log; clicking a chip resubmits the chip text as the next user
+  query through the shared resubmit sink (`registerQueryResubmit` /
+  `resubmitQuery` in `chatMode.ts` — the same mechanism as the deep-research
+  suggestion chip). The admin console resubmits by refilling the query box and
+  re-running the stream.
+- **XSS discipline.** Every event-derived string (LLM/document content) is
+  written via `textContent`, never `innerHTML`.
+- **Contracts.** The nine payload shapes live in `web/src/shared-types.ts`
+  (re-exported by `user-types.ts` / `admin-types.ts`), mirroring
+  `TurnEventType` in `src/retrieval/pipeline/turn_loop/schemas.py`; SSE
+  `event:` names must match 1:1.
+
 ## Conversation UX
 
 The Query tab includes a left chat pane with:

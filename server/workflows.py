@@ -1,7 +1,9 @@
 # @summary
-# Temporal workflow for RAG query orchestration. Each user query becomes a
-# workflow execution with durable timeout and retry semantics.
-# Exports: RAGQueryWorkflow
+# Temporal workflows for RAG orchestration. RAGQueryWorkflow wraps each user
+# query in durable timeout/retry semantics; TurnRetrieveWorkflow wraps the
+# turn-loop retrieve_ranked activity (idempotent, no-LLM retrieval primitive,
+# caller-supplied timeout_ms; TURN_LOOP_DESIGN.md §3).
+# Exports: RAGQueryWorkflow, TurnRetrieveWorkflow, RAG_QUERY_TASK_QUEUE
 # Deps: temporalio, server.activities
 # @end-summary
 """Temporal workflow definitions for RAG query processing."""
@@ -14,7 +16,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
-    from server.activities import execute_rag_query
+    from server.activities import execute_rag_query, retrieve_ranked
     from server.search_attributes import (
         DR_EARLY_STOPPED,
         DR_ENABLED,
@@ -117,3 +119,49 @@ class RAGQueryWorkflow:
         #       workflow.logger.exception("Failed to upsert DR search attributes")
 
         return result
+
+
+@workflow.defn
+class TurnRetrieveWorkflow:
+    """One turn-loop retrieval round as a durable Temporal execution.
+
+    Thin wrapper over the single ``retrieve_ranked`` activity — the
+    API-process turn loop calls this once per RETRIEVE action
+    (TURN_LOOP_DESIGN.md §3). The loop itself (controller, HyDE, judge,
+    drafting) lives in the API process; only this retrieval primitive is
+    durable.
+
+    Idempotency contract: ``retrieve_ranked`` contains no LLM calls and no
+    writes — it is a pure embed -> hybrid-search -> rerank -> filter read, so
+    re-executing it on a transient failure returns an equivalent result and
+    ``maximum_attempts=3`` retries are safe (design §11 risk 2). Validation
+    failures raise ``ValueError``, which is non-retryable per the shared
+    retry-policy convention.
+
+    Timeout contract: the caller supplies ``request["timeout_ms"]`` — the
+    turn-loop injector (``server/turn_loop_runner.build_retrieve_ranked``)
+    passes the turn's REMAINING wall-clock budget per call, so the
+    per-activity timeout is always strictly below
+    ``RAG_TURN_LOOP_WALL_CLOCK_MS``; ``validate_turn_loop_config()`` enforces
+    the outer hierarchy ``RAG_TURN_LOOP_WALL_CLOCK_MS`` <
+    ``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS``. Absent, it falls back to
+    ``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS``.
+    """
+
+    @workflow.run
+    async def run(self, request: dict) -> dict:
+        timeout_ms = int(request.get("timeout_ms", RAG_WORKFLOW_DEFAULT_TIMEOUT_MS))
+        # Honor client timeout budgets by rounding up milliseconds to seconds.
+        timeout_seconds = max(1, math.ceil(timeout_ms / 1000))
+        return await workflow.execute_activity(
+            retrieve_ranked,
+            request,
+            start_to_close_timeout=timedelta(seconds=timeout_seconds),
+            schedule_to_close_timeout=timedelta(seconds=timeout_seconds),
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(seconds=1),
+                maximum_interval=timedelta(seconds=10),
+                maximum_attempts=3,
+                non_retryable_error_types=["ValueError"],
+            ),
+        )

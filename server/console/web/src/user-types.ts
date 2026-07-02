@@ -1,10 +1,28 @@
 // @summary
 // User-console-specific type definitions.
-// Cross-console shapes (`ConversationMeta`, `SlashCommand`) are re-exported
-// from `./shared-types` so both consoles share one contract.
+// Cross-console shapes (`ConversationMeta`, `SlashCommand`, and the nine
+// turn-loop SSE event payloads) are re-exported from `./shared-types` so both
+// consoles share one contract; `StreamEventData` extends the turn-loop fields
+// so event handlers get typed payload access (TURN_LOOP_DESIGN.md §8).
 // @end-summary
 
 export { ConversationMeta, SlashCommand } from "./shared-types";
+export type {
+    TurnActionEventData,
+    HydeQueryEventData,
+    RetrieveResultTopDoc,
+    RetrieveResultEventData,
+    JudgeVerdictEventData,
+    DeepStudyEventData,
+    LlmCallEventData,
+    DraftEventData,
+    GateEventData,
+    ClarifyEventData,
+    TurnLoopEventDataMap,
+    TurnLoopEventName,
+    TurnLoopStreamEventFields,
+} from "./shared-types";
+import type { TurnLoopStreamEventFields } from "./shared-types";
 
 export type ThemeValue = "dark" | "light" | "system";
 
@@ -58,7 +76,14 @@ export interface LastTurnStats {
     costUsd: number;
 }
 
-export interface StreamEventData {
+/**
+ * Data object of one SSE frame. Extends the turn-loop payload fields
+ * (TURN_LOOP_DESIGN.md §8) so handlers for `turn_action` / `hyde_query` /
+ * `retrieve_result` / `judge_verdict` / `deep_study` / `llm_call` / `draft` /
+ * `gate` / `clarify` events read typed fields instead of index-signature
+ * lookups. Which fields are populated depends on the frame's `event:` name.
+ */
+export interface StreamEventData extends TurnLoopStreamEventFields {
     token?: string;
     text?: string;
     message?: string;

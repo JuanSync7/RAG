@@ -74,6 +74,15 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         intent="cycle_tree_retrieval",
     ),
     CommandSpec(
+        name="turn-loop",
+        description="Cycle turn-loop agentic conversation: default → on → off",
+        # Server-CLI only: the user console's parity surface is its toolbar
+        # toggle (chatMode.ts), not a slash command.
+        modes=(MODE_SERVER_CLI,),
+        args_hint="[on|off|auto]",
+        intent="cycle_turn_loop",
+    ),
+    CommandSpec(
         name="quit",
         description="Exit current interactive session",
         modes=(MODE_QUERY_CLI, MODE_INGEST_CLI, MODE_SERVER_CLI),

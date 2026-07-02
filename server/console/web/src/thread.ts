@@ -26,11 +26,21 @@ export function appendUserMsg(text: string): HTMLElement {
           <div class="bubble-wrap">
             <div class="bubble">${escHtml(text)}</div>
             <div class="msg-actions">
-              <button class="msg-action-btn" onclick="copyMsg(this,'${escHtml(text)}')" >&#128203; Copy</button>
+              <button class="msg-action-btn">&#128203; Copy</button>
             </div>
             <div class="msg-meta">${ts}</div>
           </div>
         </div>`;
+    // The Copy handler closes over the raw text via addEventListener — NEVER
+    // interpolate message text into an inline event-handler attribute:
+    // attribute values are HTML-entity-decoded before the JS is parsed, so
+    // escHtml cannot neutralize quotes there (JS injection). Message text is
+    // untrusted — clarify-chip resubmits carry LLM/document-derived strings.
+    // Same pattern as appendPendingAssistant / conversations.ts.
+    const copyBtn = group.querySelector<HTMLElement>(".msg-action-btn");
+    if (copyBtn) {
+        copyBtn.addEventListener("click", () => copyMsg(copyBtn, text));
+    }
     refs.thread.appendChild(group);
     scrollToBottom();
     return group;

@@ -2,8 +2,13 @@
 # @summary
 # Thin CLI client that connects to the RAG API server. Same REPL experience
 # as cli.py, but no model loading — queries go over HTTP to the server.
+# Renders the turn-loop SSE activity log (turn_action/hyde_query/
+# retrieve_result/judge_verdict/deep_study/llm_call/draft/gate/clarify) as
+# compact one-liners with dimmed draft streaming, and carries the tri-state
+# turn_loop request override (RAG_CLI_TURN_LOOP env / /turn-loop toggle).
 # Exports: main
-# Deps: urllib.request, json, sys
+# Deps: urllib.request, orjson, sys, src.platform (command runtime),
+#       src.retrieval.pipeline.turn_loop (event-name constants only)
 # @end-summary
 """CLI client for the RAG API server.
 
@@ -38,6 +43,9 @@ from src.platform import (
     list_command_specs,
 )
 from src.platform import dispatch_slash_command
+# Single source of truth for the turn-loop SSE event vocabulary (schema-only
+# import, no side effects) — keeps the CLI renderer 1:1 with the server.
+from src.retrieval.pipeline.turn_loop import TurnEventType
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
@@ -79,6 +87,23 @@ _verbose_mode = False
 _ALLOW_LOCAL_ADMIN_COMMANDS = False
 _CURRENT_CONVERSATION_ID: str | None = None
 _MEMORY_ENABLED = True
+
+
+def _parse_tristate_env(raw: str) -> bool | None:
+    """Parse an env override into a tri-state flag (''/unset -> None)."""
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+# Tri-state per-request override of RAG_TURN_LOOP_ENABLED (CLI side of the
+# buildQueryBody parity contract): None = server default, True/False = force.
+_TURN_LOOP_MODE: bool | None = _parse_tristate_env(
+    os.environ.get("RAG_CLI_TURN_LOOP", "")
+)
 
 # Command registry for parity with cli.py UX
 # tuple layout: (handler, description, hidden, admin_only)
@@ -183,6 +208,8 @@ def send_query_stream(server: str, query: str, filters: dict):
         "conversation_id": _CURRENT_CONVERSATION_ID,
         "memory_enabled": _MEMORY_ENABLED,
     }
+    if _TURN_LOOP_MODE is not None:
+        payload["turn_loop"] = _TURN_LOOP_MODE
     data = orjson.dumps(payload)
     headers = {
         "Content-Type": "application/json",
@@ -413,6 +440,117 @@ def display_retrieval(response: dict) -> None:
             print(f"      {DIM}section:{RESET} {section}")
         print(f"      {DIM}{_truncate(r['text'], 200)}{RESET}")
         print()
+
+
+def _close_turn_draft(state: dict) -> None:
+    """Close an open dimmed draft run so subsequent output renders normally."""
+    if state.get("draft_open"):
+        sys.stdout.write(f"{RESET}\n")
+        sys.stdout.flush()
+        state["draft_open"] = False
+
+
+def _render_turn_activity(event_type: str, data: dict, state: dict) -> None:
+    """Render one turn-loop SSE event as a compact activity-log line.
+
+    CLI side of the console activity-log parity contract (design §8): every
+    typed loop event gets a dimmed one-liner; draft deltas stream dimmed under
+    a per-attempt header; clarify renders the question with its hint /
+    scoping-question lists.
+    """
+    if not state.get("started"):
+        # Clear the "Querying server..." spinner and open the activity log.
+        print(f"\r  {B_CYAN}⟳ Turn loop{RESET}                              ")
+        state["started"] = True
+
+    if event_type == TurnEventType.DRAFT:
+        attempt = data.get("attempt", 0)
+        delta = str(data.get("text_delta") or data.get("reasoning_delta") or "")
+        if not state.get("draft_open") or state.get("draft_attempt") != attempt:
+            _close_turn_draft(state)
+            print(f"    {DIM}✍ draft {attempt}{RESET}")
+            sys.stdout.write(f"    {DIM}")
+            state["draft_open"] = True
+            state["draft_attempt"] = attempt
+        sys.stdout.write(delta.replace("\n", "\n    "))
+        sys.stdout.flush()
+        return
+
+    _close_turn_draft(state)
+
+    if event_type == TurnEventType.TURN_ACTION:
+        line = (
+            f"[turn {data.get('index', 0)}] {data.get('action', '?')}"
+            f" — {_truncate(str(data.get('reason', '')), 80)}"
+            f" (confidence {float(data.get('confidence', 0.0)):.2f})"
+        )
+    elif event_type == TurnEventType.HYDE_QUERY:
+        aspect = data.get("target_aspect")
+        line = (
+            f"[round {data.get('round', 0)}] hyde: "
+            f"\"{_truncate(str(data.get('hypothetical_answer', '')), 70)}\""
+            + (f" (aspect: {aspect})" if aspect else "")
+        )
+    elif event_type == TurnEventType.RETRIEVE_RESULT:
+        line = (
+            f"[round {data.get('round', 0)}] retrieve → "
+            f"+{data.get('added', 0)} chunks "
+            f"({data.get('dup', 0)} dup, pool {data.get('pool_size', 0)})"
+        )
+    elif event_type == TurnEventType.JUDGE_VERDICT:
+        # missing_information is free text on the wire (JudgeVerdictEvent);
+        # tolerate a legacy list shape by joining it.
+        missing = data.get("missing_information") or ""
+        if isinstance(missing, (list, tuple)):
+            missing = "; ".join(str(gap) for gap in missing)
+        line = (
+            f"[round {data.get('round', 0)}] judge: kept {data.get('kept', 0)}, "
+            f"confidence {float(data.get('confidence', 0.0)):.2f}, "
+            + ("sufficient" if data.get("sufficient") else "insufficient")
+            + (f" — missing: {_truncate(str(missing), 60)}" if missing else "")
+        )
+    elif event_type == TurnEventType.DEEP_STUDY:
+        line = (
+            f"deep-study {data.get('title') or data.get('document_id', '?')} "
+            f"window {data.get('window', 0)}/{data.get('of_windows', 0)}: "
+            f"{_truncate(str(data.get('notes_preview', '')), 60)}"
+        )
+    elif event_type == TurnEventType.LLM_CALL:
+        tokens = ""
+        if data.get("prompt_tokens") or data.get("completion_tokens"):
+            tokens = f" ({data.get('prompt_tokens', 0)}+{data.get('completion_tokens', 0)} tok)"
+        line = f"llm {data.get('purpose', '?')} [{data.get('alias', '?')}] {data.get('ms', 0)}ms{tokens}"
+    elif event_type == TurnEventType.GATE:
+        verdict = "PASS" if data.get("passed") else "RETRY"
+        weakest = data.get("weakest")
+        line = (
+            f"gate attempt {data.get('attempt', 0)}: "
+            f"{float(data.get('score', 0.0)):.2f} vs {float(data.get('threshold', 0.0)):.2f}"
+            f" → {verdict}" + (f" (weakest: {weakest})" if weakest else "")
+        )
+    elif event_type == TurnEventType.CLARIFY:
+        print(f"    {B_YELLOW}? {data.get('question', '')}{RESET}")
+        for i, hint in enumerate(data.get("hints") or [], start=1):
+            print(f"      {DIM}{i}) {hint}{RESET}")
+        for sq in data.get("scoping_questions") or []:
+            print(f"      {DIM}or ask: {sq}{RESET}")
+        return
+    else:
+        line = f"{event_type}: {_truncate(str(data), 80)}"
+    print(f"    {DIM}{line}{RESET}")
+
+
+def _display_turn_loop_summary(done_data: dict | None) -> None:
+    """Print the compact turn-loop summary carried in done.metadata.turn_loop."""
+    tl = ((done_data or {}).get("metadata") or {}).get("turn_loop")
+    if not isinstance(tl, dict):
+        return
+    print(
+        f"  {DIM}turn loop: {tl.get('actions', 0)} actions │ "
+        f"{tl.get('llm_calls', 0)} llm calls │ "
+        f"confidence {float(tl.get('confidence', 0.0)):.2f} │ "
+        f"stop: {tl.get('stop_reason', '?')}{RESET}"
+    )
 
 
 def _display_stage_timings(done_data: dict | None, retrieval_data: dict | None) -> None:
@@ -657,9 +795,44 @@ def _cmd_quit(_: str = ""):
 def _cmd_status(_: str = ""):
     conv = _CURRENT_CONVERSATION_ID or "(auto/new on first query)"
     mem = "on" if _MEMORY_ENABLED else "off"
+    loop = "server default" if _TURN_LOOP_MODE is None else ("on" if _TURN_LOOP_MODE else "off")
     print(f"  {B_WHITE}Server:{RESET} {_CURRENT_SERVER}")
     print(f"  {B_WHITE}Conversation:{RESET} {conv}")
-    print(f"  {B_WHITE}Memory:{RESET} {mem}\n")
+    print(f"  {B_WHITE}Memory:{RESET} {mem}")
+    print(f"  {B_WHITE}Turn loop:{RESET} {loop}\n")
+
+
+def _cmd_turn_loop(arg: str = ""):
+    """Toggle the per-request turn-loop override (on / off / auto)."""
+    global _TURN_LOOP_MODE
+    value = arg.strip().lower()
+    if value in {"on", "true", "1"}:
+        _TURN_LOOP_MODE = True
+    elif value in {"off", "false", "0"}:
+        _TURN_LOOP_MODE = False
+    elif value in {"auto", "default", ""}:
+        # Bare /turn-loop cycles: default -> on -> off -> default.
+        if not value:
+            _TURN_LOOP_MODE = {None: True, True: False, False: None}[_TURN_LOOP_MODE]
+        else:
+            _TURN_LOOP_MODE = None
+    else:
+        print(f"  {B_YELLOW}⚠{RESET} Usage: /turn-loop [on|off|auto]\n")
+        return
+    state = (
+        f"{DIM}server default{RESET}"
+        if _TURN_LOOP_MODE is None
+        else (f"{B_GREEN}ON{RESET}" if _TURN_LOOP_MODE else f"{DIM}OFF{RESET}")
+    )
+    print(f"  {B_CYAN}⟳{RESET} Turn loop: {state}")
+    print()
+
+
+# The shared command catalog (src/platform/command_catalog.py) is the single
+# source of truth for slash commands across CLI/console; register the handler
+# only once the "turn-loop" spec exists there so the dispatcher accepts it.
+if "turn-loop" in _SERVER_SPECS:
+    _register_command("turn-loop", _SERVER_SPECS["turn-loop"].description)(_cmd_turn_loop)
 
 
 @_register_command("new-chat", _SERVER_SPECS["new-chat"].description)
@@ -879,9 +1052,15 @@ def main() -> None:
             done_data = None
             answer_started = False
             thinking_started = False
+            turn_ui: dict = {"started": False, "draft_open": False, "draft_attempt": None}
 
             for event_type, data in send_query_stream(_CURRENT_SERVER, query_text, filters):
-                if event_type == "retrieval":
+                if event_type in TurnEventType.ALL:
+                    # Turn-loop activity log — compact one-liners / dimmed drafts.
+                    _render_turn_activity(event_type, data or {}, turn_ui)
+
+                elif event_type == "retrieval":
+                    _close_turn_draft(turn_ui)
                     retrieval_data = data
                     conv_id = data.get("conversation_id")
                     if isinstance(conv_id, str) and conv_id.strip():
@@ -895,6 +1074,7 @@ def main() -> None:
                 elif event_type == "reasoning":
                     # Live chain-of-thought from a reasoning model — shown dimmed
                     # under a "Thinking…" header, before the answer. Not the answer.
+                    _close_turn_draft(turn_ui)
                     text = data.get("text", "")
                     if not thinking_started:
                         print(f"\n  {DIM}💭 Thinking…{RESET}\n")
@@ -904,6 +1084,7 @@ def main() -> None:
                     sys.stdout.flush()
 
                 elif event_type == "token":
+                    _close_turn_draft(turn_ui)
                     token = data.get("token", "")
                     if not answer_started:
                         if thinking_started:
@@ -922,12 +1103,14 @@ def main() -> None:
                     done_data = data
 
                 elif event_type == "error":
+                    _close_turn_draft(turn_ui)
                     if thinking_started and not answer_started:
                         sys.stdout.write(f"{RESET}\n")
                     print(f"\n  {B_RED}✗{RESET} {data.get('message', 'Unknown error')}")
 
             # Reasoning streamed but no answer followed (e.g. model spent its whole
             # budget thinking) — close the dim run so the prompt isn't left dimmed.
+            _close_turn_draft(turn_ui)
             if thinking_started and not answer_started:
                 sys.stdout.write(f"{RESET}\n")
                 sys.stdout.flush()
@@ -940,9 +1123,11 @@ def main() -> None:
                 tok_count = done_data.get("token_count", len(generated_tokens)) if done_data else len(generated_tokens)
                 print()
                 print(f"  {DIM}retrieval: {ret_ms:.0f}ms │ generation: {gen_ms:.0f}ms ({tok_count} tokens) │ total: {total:.0f}ms{RESET}")
+                _display_turn_loop_summary(done_data)
                 _display_stage_timings(done_data, retrieval_data)
             elif retrieval_data:
                 # ask_user / no-generation path
+                _display_turn_loop_summary(done_data)
                 _display_stage_timings(done_data, retrieval_data)
 
             if retrieval_data and retrieval_data.get("action") == "ask_user":

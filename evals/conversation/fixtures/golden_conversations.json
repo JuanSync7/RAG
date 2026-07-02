@@ -1,0 +1,443 @@
+{
+  "version": 1,
+  "domain": "asic",
+  "description": "Golden multi-turn conversations for the turn-loop eval harness (design section 10). Each turn carries expectations (expect) plus the scripted fake responses (script) that make the OFFLINE drive mode fully deterministic. Conversation 1 is the verification-environment example from the live 2026-06-30 session.",
+  "conversations": [
+    {
+      "id": "verif-env-deepen",
+      "description": "Turn 1 answers the verification-environment question; turn 2 'tell me more' must deepen while retaining the turn-1 anchor document.",
+      "turns": [
+        {
+          "query": "How do I create a verification environment for a new project?",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "ANSWER"],
+            "terminal": "answer",
+            "chunks": [
+              {
+                "source": "verification/verif_env_setup.md",
+                "heading_contains": "Verification Environment"
+              }
+            ]
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "No evidence gathered yet for the environment-creation question; start with the user's own terminology plus a hypothetical answer to steer into answer-space.",
+                "confidence": 0.8,
+                "args": {
+                  "query_text": "create verification environment new project setup steps",
+                  "hypothetical_answer": "To create a verification environment for a new project, generate the environment skeleton from the template generator, configure the project manifest, connect the interface agents, and run the bring-up checks.",
+                  "target_aspect": "environment creation steps"
+                }
+              },
+              {
+                "action": "ANSWER",
+                "reason": "The pool covers skeleton generation, manifest configuration and bring-up checks — every claim the answer needs is grounded.",
+                "confidence": 0.85,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": true,
+                "confidence": 0.9,
+                "missing_information": "",
+                "covered_aspects": ["environment creation steps", "bring-up checks"]
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-verif-env-001",
+                  "document_id": "doc-verif-env-setup",
+                  "source_key": "docs/verification/verif_env_setup.md",
+                  "source": "verification/verif_env_setup.md",
+                  "heading": "Creating a Verification Environment",
+                  "text": "To create a verification environment for a new project, generate the environment skeleton with the template generator, then configure the project manifest with the block's interfaces and clock domains. Connect one interface agent per port listed in the manifest and register the environment with the project build system before writing any tests.",
+                  "score": 0.91,
+                  "refactored_char_start": 1200,
+                  "refactored_char_end": 1620
+                },
+                {
+                  "chunk_id": "ch-verif-env-002",
+                  "document_id": "doc-verif-env-setup",
+                  "source_key": "docs/verification/verif_env_setup.md",
+                  "source": "verification/verif_env_setup.md",
+                  "heading": "Environment Bring-up Checks",
+                  "text": "After the skeleton compiles, run the bring-up checks in order: the smoke compile, the connectivity test that toggles every connected interface once, and the sanity sequence that drives a minimal transaction through the environment. All three must pass before the environment is considered created.",
+                  "score": 0.84,
+                  "refactored_char_start": 2100,
+                  "refactored_char_end": 2480
+                }
+              ]
+            ],
+            "answer_draft": "To create a verification environment for a new project: (1) generate the environment skeleton with the template generator, (2) configure the project manifest with the block's interfaces and clock domains, (3) connect one interface agent per manifest port and register the environment with the project build system, then (4) run the bring-up checks — smoke compile, connectivity test, and the sanity sequence — all of which must pass before the environment is considered created. [1][2]",
+            "self_score": {
+              "self_score": 0.9,
+              "unsupported_claims": []
+            }
+          }
+        },
+        {
+          "query": "tell me more",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "DEEP_STUDY", "ANSWER"],
+            "terminal": "answer",
+            "anchor_docs_retained": true
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "The previous turn served verification/verif_env_setup.md through the creation steps; 'tell me more' deepens into the same document's regression-integration aspect the answer stopped short of.",
+                "confidence": 0.75,
+                "args": {
+                  "query_text": "verification environment regression hookup nightly runs after bring-up",
+                  "hypothetical_answer": null,
+                  "target_aspect": "regression integration after environment bring-up"
+                }
+              },
+              {
+                "action": "ANSWER",
+                "reason": "The pool now grounds the regression hookup and nightly-run follow-on steps that extend the previous turn's answer.",
+                "confidence": 0.85,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": true,
+                "confidence": 0.88,
+                "missing_information": "",
+                "covered_aspects": ["regression hookup", "nightly runs"]
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-verif-env-003",
+                  "document_id": "doc-verif-env-setup",
+                  "source_key": "docs/verification/verif_env_setup.md",
+                  "source": "verification/verif_env_setup.md",
+                  "heading": "Hooking the Environment into Regression",
+                  "text": "Once the bring-up checks pass, add the environment to the project regression list so the sanity sequence runs in every nightly. Tag the environment's tests with the block name so regression reports group failures per environment, and set the nightly seed rotation policy in the regression config.",
+                  "score": 0.89,
+                  "refactored_char_start": 3050,
+                  "refactored_char_end": 3410
+                },
+                {
+                  "chunk_id": "ch-regr-flow-001",
+                  "document_id": "doc-regression-flow",
+                  "source_key": "docs/verification/regression_flow.md",
+                  "source": "verification/regression_flow.md",
+                  "heading": "Regression Flow Overview",
+                  "text": "The regression flow schedules every registered environment nightly, rotating seeds per the policy in the regression config, and publishes grouped pass/fail reports per environment tag the next morning.",
+                  "score": 0.77,
+                  "refactored_char_start": 400,
+                  "refactored_char_end": 640
+                }
+              ]
+            ],
+            "answer_draft": "Going further: once the bring-up checks pass, hook the environment into regression — add it to the project regression list so the sanity sequence runs in every nightly, tag its tests with the block name so reports group failures per environment, and set the nightly seed rotation policy in the regression config. The regression flow then schedules the environment nightly and publishes grouped pass/fail reports per tag. [1][2]",
+            "self_score": {
+              "self_score": 0.88,
+              "unsupported_claims": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clarify-underspecified",
+      "description": "Turn 1 is an underspecified query whose retrieved evidence splits between two readings — the loop must end in a clarification with clickable hints; turn 2 picks a hint and must answer.",
+      "turns": [
+        {
+          "query": "How do I set it up?",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "CLARIFY"],
+            "terminal": "clarify",
+            "min_hints": 1
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "The referent of 'it' is unresolved and there is no conversation context to resolve it from — one retrieval round will show whether the ambiguity actually matters.",
+                "confidence": 0.6,
+                "args": {
+                  "query_text": "set up setup steps configuration new project",
+                  "hypothetical_answer": null,
+                  "target_aspect": "what the user wants to set up"
+                }
+              },
+              {
+                "action": "CLARIFY",
+                "reason": "Retrieval split between the block-level simulation environment setup and the lint flow setup — the two readings lead to different documents, so the ambiguity blocks the answer.",
+                "confidence": 0.75,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": false,
+                "confidence": 0.35,
+                "missing_information": "which system or flow the user means by 'it'",
+                "covered_aspects": []
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-sim-env-001",
+                  "document_id": "doc-sim-env",
+                  "source_key": "docs/verification/sim_env_setup.md",
+                  "source": "verification/sim_env_setup.md",
+                  "heading": "Block-Level Simulation Environment Setup",
+                  "text": "Setting up the block-level simulation environment starts from the environment template: instantiate the block wrapper, bind the interface agents, and point the compile file list at the block's RTL filelist.",
+                  "score": 0.62,
+                  "refactored_char_start": 800,
+                  "refactored_char_end": 1080
+                },
+                {
+                  "chunk_id": "ch-lint-flow-001",
+                  "document_id": "doc-lint-flow",
+                  "source_key": "docs/quality/lint_flow_setup.md",
+                  "source": "quality/lint_flow_setup.md",
+                  "heading": "Lint Flow Setup",
+                  "text": "Setting up the lint flow requires the block filelist, the project waiver file, and the rule deck selection in the lint config; run the bootstrap target once to generate the per-block lint workspace.",
+                  "score": 0.6,
+                  "refactored_char_start": 300,
+                  "refactored_char_end": 540
+                }
+              ]
+            ],
+            "clarify_response": {
+              "question": "Which setup do you mean: the block-level simulation environment or the lint flow?",
+              "hints": [
+                "Block-level simulation environment",
+                "Lint flow"
+              ],
+              "scoping_questions": [
+                "How do I set up a block-level simulation environment for a new project?",
+                "How do I set up the lint flow for a new block?"
+              ]
+            }
+          }
+        },
+        {
+          "query": "Block-level simulation environment",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "ANSWER"],
+            "terminal": "answer"
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "The user picked the 'Block-level simulation environment' hint from the pending clarification — retrieve the simulation-environment setup steps that reading needs.",
+                "confidence": 0.85,
+                "args": {
+                  "query_text": "block-level simulation environment setup steps instantiate wrapper bind agents",
+                  "hypothetical_answer": "Setting up the block-level simulation environment involves instantiating the block wrapper from the template, binding the interface agents, and pointing the compile file list at the block's RTL filelist.",
+                  "target_aspect": "block-level simulation environment setup"
+                }
+              },
+              {
+                "action": "ANSWER",
+                "reason": "The pool grounds the full setup sequence for the clarified reading: wrapper instantiation, agent binding, filelist wiring and prerequisites.",
+                "confidence": 0.85,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": true,
+                "confidence": 0.9,
+                "missing_information": "",
+                "covered_aspects": ["environment setup steps", "prerequisites"]
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-sim-env-001",
+                  "document_id": "doc-sim-env",
+                  "source_key": "docs/verification/sim_env_setup.md",
+                  "source": "verification/sim_env_setup.md",
+                  "heading": "Block-Level Simulation Environment Setup",
+                  "text": "Setting up the block-level simulation environment starts from the environment template: instantiate the block wrapper, bind the interface agents, and point the compile file list at the block's RTL filelist.",
+                  "score": 0.9,
+                  "refactored_char_start": 800,
+                  "refactored_char_end": 1080
+                },
+                {
+                  "chunk_id": "ch-sim-env-002",
+                  "document_id": "doc-sim-env",
+                  "source_key": "docs/verification/sim_env_setup.md",
+                  "source": "verification/sim_env_setup.md",
+                  "heading": "Simulation Environment Prerequisites",
+                  "text": "Before setup, ensure the block's RTL filelist elaborates standalone and the interface definitions for every port are released; the template generator refuses to run against an unreleased interface package.",
+                  "score": 0.82,
+                  "refactored_char_start": 200,
+                  "refactored_char_end": 460
+                }
+              ]
+            ],
+            "answer_draft": "To set up the block-level simulation environment: first confirm the prerequisites — the block's RTL filelist elaborates standalone and every port's interface definitions are released (the template generator refuses unreleased interface packages). Then start from the environment template: instantiate the block wrapper, bind the interface agents, and point the compile file list at the block's RTL filelist. [1][2]",
+            "self_score": {
+              "self_score": 0.9,
+              "unsupported_claims": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "refine-with-anchor",
+      "description": "Turn 1 answers a broad question; turn 2 rejects the framing and narrows — the loop must run a FRESH retrieve for the narrower reading while retaining the named anchor document from turn 1.",
+      "turns": [
+        {
+          "query": "What does the design sign-off flow involve?",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "ANSWER"],
+            "terminal": "answer"
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "No evidence yet for the sign-off flow overview question; a single broad retrieval round should surface the flow-overview material.",
+                "confidence": 0.8,
+                "args": {
+                  "query_text": "design sign-off flow stages overview deliverables",
+                  "hypothetical_answer": "The design sign-off flow involves timing sign-off, power sign-off, physical verification, and formal equivalence checking, each producing a signed deliverable.",
+                  "target_aspect": "sign-off flow stages"
+                }
+              },
+              {
+                "action": "ANSWER",
+                "reason": "The pool covers the sign-off stages and the deliverables each stage produces — enough to ground the overview answer.",
+                "confidence": 0.85,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": true,
+                "confidence": 0.9,
+                "missing_information": "",
+                "covered_aspects": ["sign-off stages", "deliverables"]
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-signoff-001",
+                  "document_id": "doc-signoff-overview",
+                  "source_key": "docs/signoff/signoff_overview.md",
+                  "source": "signoff/signoff_overview.md",
+                  "heading": "Sign-off Flow Overview",
+                  "text": "The design sign-off flow runs four gated stages in order: timing sign-off, power sign-off, physical verification, and formal equivalence checking. A stage may not start until the previous stage's deliverable is signed by the block owner and the sign-off lead.",
+                  "score": 0.9,
+                  "refactored_char_start": 500,
+                  "refactored_char_end": 820
+                },
+                {
+                  "chunk_id": "ch-signoff-002",
+                  "document_id": "doc-signoff-overview",
+                  "source_key": "docs/signoff/signoff_overview.md",
+                  "source": "signoff/signoff_overview.md",
+                  "heading": "Sign-off Deliverables",
+                  "text": "Each sign-off stage produces one deliverable: the timing sign-off report, the power sign-off report, the physical verification clean report, and the equivalence check log. All four are archived with the release tag.",
+                  "score": 0.83,
+                  "refactored_char_start": 1400,
+                  "refactored_char_end": 1680
+                }
+              ]
+            ],
+            "answer_draft": "The design sign-off flow runs four gated stages in order — timing sign-off, power sign-off, physical verification, and formal equivalence checking — where each stage may only start once the previous stage's deliverable is signed by the block owner and the sign-off lead. Each stage produces one archived deliverable: the timing sign-off report, the power sign-off report, the physical verification clean report, and the equivalence check log. [1][2]",
+            "self_score": {
+              "self_score": 0.9,
+              "unsupported_claims": []
+            }
+          }
+        },
+        {
+          "query": "That is not what I want — I specifically mean the timing sign-off checks.",
+          "expect": {
+            "actions_allowed": ["RETRIEVE", "ANSWER"],
+            "terminal": "answer",
+            "anchor_docs_retained": true,
+            "anchor_docs": ["doc-signoff-overview"]
+          },
+          "script": {
+            "controller_decisions": [
+              {
+                "action": "RETRIEVE",
+                "reason": "The user narrowed the previous overview question to the timing sign-off checks specifically — run a fresh retrieval for that aspect, keeping the served signoff_overview.md document in scope since its timing section is the anchor.",
+                "confidence": 0.8,
+                "args": {
+                  "query_text": "timing sign-off checks required analysis corners setup hold",
+                  "hypothetical_answer": "Timing sign-off checks include setup and hold analysis across all signed-off corners, max-transition and max-capacitance checks, and clock quality checks.",
+                  "target_aspect": "timing sign-off checks"
+                }
+              },
+              {
+                "action": "ANSWER",
+                "reason": "The pool now grounds the specific timing checks and the corner requirements the narrowed question asks for.",
+                "confidence": 0.85,
+                "args": {}
+              }
+            ],
+            "judge_verdicts": [
+              {
+                "ranking": [0, 1],
+                "sufficient": true,
+                "confidence": 0.9,
+                "missing_information": "",
+                "covered_aspects": ["timing checks", "corner requirements"]
+              }
+            ],
+            "retrieve_chunks": [
+              [
+                {
+                  "chunk_id": "ch-signoff-003",
+                  "document_id": "doc-signoff-overview",
+                  "source_key": "docs/signoff/signoff_overview.md",
+                  "source": "signoff/signoff_overview.md",
+                  "heading": "Timing Sign-off Checks",
+                  "text": "Timing sign-off checks setup and hold across every corner in the sign-off corner list, plus max-transition, max-capacitance, and the clock quality checks (skew, duty cycle, and minimum pulse width). A corner failing any check blocks the timing sign-off report.",
+                  "score": 0.92,
+                  "refactored_char_start": 900,
+                  "refactored_char_end": 1220
+                },
+                {
+                  "chunk_id": "ch-timing-001",
+                  "document_id": "doc-timing-signoff",
+                  "source_key": "docs/signoff/timing_signoff.md",
+                  "source": "signoff/timing_signoff.md",
+                  "heading": "Timing Sign-off Corner Requirements",
+                  "text": "The sign-off corner list must include the worst-case slow corner, the best-case fast corner, and every functional-mode corner named in the constraints; derates are applied per the project derate table.",
+                  "score": 0.85,
+                  "refactored_char_start": 250,
+                  "refactored_char_end": 500
+                }
+              ]
+            ],
+            "answer_draft": "For timing sign-off specifically: the checks cover setup and hold across every corner in the sign-off corner list, plus max-transition, max-capacitance, and the clock quality checks (skew, duty cycle, minimum pulse width) — any corner failing any check blocks the timing sign-off report. The corner list must include the worst-case slow corner, the best-case fast corner, and every functional-mode corner named in the constraints, with derates applied per the project derate table. [1][2]",
+            "self_score": {
+              "self_score": 0.9,
+              "unsupported_claims": []
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

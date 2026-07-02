@@ -1460,10 +1460,12 @@ RAG_TURN_LOOP_WALL_CLOCK_MS: int = int(
     os.environ.get("RAG_TURN_LOOP_WALL_CLOCK_MS", "90000")
 )
 """Turn wall-clock budget in ms. Must stay strictly below
-``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS`` (enforced by validate_turn_loop_config())
-so the per-activity timeout hierarchy holds: TurnBudget > activity timeout.
-Consumed via ``TurnBudget.from_settings()`` in
-src/retrieval/pipeline/turn_loop/schemas.py."""
+``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS`` (enforced by validate_turn_loop_config(),
+invoked fail-fast whenever the loop activates — server/turn_loop_runner.py).
+The per-retrieve activity timeout is derived per call as the REMAINING turn
+budget by ``build_retrieve_ranked`` (server/turn_loop_runner.py), so it is
+always strictly below this wall clock. Consumed via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
 
 RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD: float = float(
     os.environ.get("RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD", "0.62")

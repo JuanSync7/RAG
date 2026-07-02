@@ -184,6 +184,7 @@ markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
     "smoke: end-to-end stack smoke tests requiring docker compose up (run with '-m smoke')",
     "eval_deep_research: A/B retrieval eval for deep_research mode (run with '-m eval_deep_research')",
+    "eval_conversation: multi-turn conversation eval for the turn loop (run with '-m eval_conversation')",
     "slow: slow tests (real models, network, or heavy compute; deselect with '-m \"not slow\"')",
     "integration: integration tests exercising real external libraries/models end-to-end",
 ]

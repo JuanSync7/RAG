@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from html import escape
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
 from config.settings import RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD
@@ -641,6 +642,12 @@ def create_console_router(
             release_request_slot=release_request_slot,
             logger=logger,
         )
+        # Turn-loop requests return a JSONResponse (QueryResponse-shaped body
+        # plus metadata.turn_loop) instead of the QueryResponse model —
+        # unwrap it into the console envelope so the admin surface works
+        # whenever the loop is active (per-request or env default).
+        if isinstance(result, JSONResponse):
+            return console_ok(request, json.loads(bytes(result.body)))
         return console_ok(request, result.model_dump())
 
     @router.get(

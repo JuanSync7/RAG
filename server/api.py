@@ -334,6 +334,9 @@ app.include_router(
         release_request_slot=_release_request_slot,
         emit_stream_observability=_emit_stream_observability_async,
         logger=logger,
+        # Same MinIO-backed handle the documents router uses — the turn
+        # loop's DEEP_STUDY action fetches clean documents through it.
+        db_client=_db_client,
     )
 )
 app.include_router(create_admin_router())

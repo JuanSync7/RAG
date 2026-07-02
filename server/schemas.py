@@ -4,8 +4,11 @@
 #          DocumentSummary, DocumentListResponse, DocumentDetailResponse,
 #          DocumentUrlResponse, SourceSummary, SourceListResponse,
 #          CollectionItem, CollectionStatsResponse, CollectionListResponse,
-#          VisualPageResultResponse
-# Deps: pydantic
+#          VisualPageResultResponse, TurnActionEvent, HydeQueryEvent,
+#          RetrieveResultEvent, JudgeVerdictEvent, DeepStudyEvent,
+#          LlmCallEvent, DraftEvent, GateEvent, ClarifyEvent,
+#          TURN_EVENT_PAYLOAD_MODELS
+# Deps: pydantic, src.retrieval.pipeline.turn_loop (event-name constants only)
 # @end-summary
 """Pydantic models for RAG API request/response serialization."""
 
@@ -156,9 +159,12 @@ class QueryRequest(BaseModel):
             "the config setting; ``true``/``false`` force on/off for this "
             "request only. The loop iterates RETRIEVE / DEEP_STUDY / CLARIFY "
             "/ ANSWER actions until a final-answer confidence gate passes. "
-            "Mutually exclusive with ``deep_research``, ``agentic_retrieval`` "
-            "and ``tree_retrieval`` — the loop owns query design and composes "
-            "the retrieval primitives itself. See TURN_LOOP_DESIGN.md."
+            "Mutually exclusive with ``deep_research``, ``agentic_retrieval``, "
+            "``tree_retrieval`` and ``mode='retrieval'`` — the loop owns query "
+            "design, composes the retrieval primitives itself, and always "
+            "generates. When this override is None, explicitly enabling any "
+            "of those on the request also wins over the "
+            "``RAG_TURN_LOOP_ENABLED`` env default. See TURN_LOOP_DESIGN.md."
         ),
     )
 
@@ -217,6 +223,12 @@ class QueryRequest(BaseModel):
                     "the turn loop drives its own retrieve_ranked rounds and "
                     "replaces the linear hybrid-search stage that tree "
                     "retrieval extends"
+                )
+            if self.mode == "retrieval":
+                raise ValueError(
+                    "turn_loop cannot be combined with mode='retrieval' — "
+                    "retrieval mode skips generation entirely while the turn "
+                    "loop's terminal action IS generation"
                 )
         return self
 
@@ -451,6 +463,44 @@ class ConsoleQueryRequest(BaseModel):
     deep_research: bool = Field(default=False)
     agentic_retrieval: Optional[bool] = Field(default=None)
     max_agentic_rounds: Optional[int] = Field(default=None, ge=1, le=20)
+    turn_loop: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Per-request override of RAG_TURN_LOOP_ENABLED (turn-level "
+            "agentic conversation loop). Mirrors QueryRequest.turn_loop for "
+            "CLI/UI parity: the admin console can opt in/out per request; "
+            "None uses the config default. Mutually exclusive with "
+            "deep_research/agentic_retrieval/tree_retrieval and "
+            "mode='retrieval'."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_turn_loop(self) -> "ConsoleQueryRequest":
+        # Same mutual-exclusion contract as QueryRequest._validate_turn_loop
+        # (the console request is mapped 1:1 onto a QueryRequest) — rejecting
+        # here gives the console client a field-accurate 422.
+        if self.turn_loop is True:
+            if self.deep_research:
+                raise ValueError(
+                    "turn_loop and deep_research cannot both be enabled — "
+                    "they are competing per-turn orchestrators"
+                )
+            if self.agentic_retrieval is True:
+                raise ValueError(
+                    "turn_loop and agentic_retrieval cannot both be forced on"
+                )
+            if self.tree_retrieval is True:
+                raise ValueError(
+                    "turn_loop and tree_retrieval cannot both be forced on"
+                )
+            if self.mode == "retrieval":
+                raise ValueError(
+                    "turn_loop cannot be combined with mode='retrieval' — "
+                    "retrieval mode skips generation entirely while the turn "
+                    "loop's terminal action IS generation"
+                )
+        return self
 
     @model_validator(mode="after")
     def _validate_agentic_retrieval(self) -> "ConsoleQueryRequest":
@@ -759,3 +809,147 @@ class CollectionListResponse(BaseModel):
     """List of all vector collections (FR-3067)."""
 
     collections: list[CollectionItem]
+
+
+# ---------------------------------------------------------------------------
+# Turn-loop SSE payload models (TURN_LOOP_DESIGN.md §8)
+#
+# One pydantic model per typed turn-loop stream event. The API-process runner
+# (``server/turn_loop_runner.py``) validates every loop event payload against
+# these before it is serialized into an SSE frame, so the stream vocabulary is
+# a typed contract rather than a convention. Event names are single-sourced
+# from ``TurnEventType`` (the frozen turn-loop contract module) via
+# ``TURN_EVENT_PAYLOAD_MODELS``. All models tolerate extra keys
+# (``extra="allow"``) so an upstream loop stage can enrich a payload without a
+# lockstep schema change — unknown fields pass through to clients verbatim.
+# ---------------------------------------------------------------------------
+
+from src.retrieval.pipeline.turn_loop import TurnEventType
+
+
+class TurnActionEvent(BaseModel):
+    """Payload of the ``turn_action`` SSE event: one controller decision."""
+
+    model_config = ConfigDict(extra="allow")
+
+    index: int = 0
+    action: str = ""
+    reason: str = ""
+    confidence: float = 0.0
+
+
+class HydeQueryEvent(BaseModel):
+    """Payload of the ``hyde_query`` SSE event: one HyDE generation round."""
+
+    model_config = ConfigDict(extra="allow")
+
+    round: int = 0
+    hypothetical_answer: str = ""
+    search_terms: list[str] = Field(default_factory=list)
+    target_aspect: Optional[str] = None
+
+
+class RetrieveResultEvent(BaseModel):
+    """Payload of the ``retrieve_result`` SSE event: one retrieval round's
+    pool delta. ``top`` carries abridged ``{doc, heading, score}`` dicts."""
+
+    model_config = ConfigDict(extra="allow")
+
+    round: int = 0
+    added: int = 0
+    dup: int = 0
+    pool_size: int = 0
+    top: list[dict] = Field(default_factory=list)
+
+
+class JudgeVerdictEvent(BaseModel):
+    """Payload of the ``judge_verdict`` SSE event: the evidence judge's
+    keep/sufficiency verdict for one retrieval round.
+
+    ``missing_information`` is free text (possibly empty) — the agentic judge
+    names its gaps as one prose string and the loop forwards it verbatim.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    round: int = 0
+    kept: int = 0
+    sufficient: bool = False
+    confidence: float = 0.0
+    missing_information: str = ""
+
+
+class DeepStudyEvent(BaseModel):
+    """Payload of the ``deep_study`` SSE event: one windowed document read."""
+
+    model_config = ConfigDict(extra="allow")
+
+    document_id: str = ""
+    title: str = ""
+    window: int = 0
+    of_windows: int = 0
+    notes_preview: str = ""
+
+
+class LlmCallEvent(BaseModel):
+    """Payload of the ``llm_call`` SSE event: one charged provider call."""
+
+    model_config = ConfigDict(extra="allow")
+
+    alias: str = ""
+    purpose: str = ""
+    ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+class DraftEvent(BaseModel):
+    """Payload of the ``draft`` SSE event: a live answer-draft delta.
+
+    ``kind`` distinguishes ``content`` deltas (answer text) from
+    ``reasoning`` deltas (chain-of-thought from reasoning models); the route
+    replays the accepted attempt's reasoning deltas as a ``reasoning`` frame
+    before the answer's token replay.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    attempt: int = 0
+    kind: str = "content"
+    text_delta: str = ""
+
+
+class GateEvent(BaseModel):
+    """Payload of the ``gate`` SSE event: one answer-confidence gate verdict."""
+
+    model_config = ConfigDict(extra="allow")
+
+    attempt: int = 0
+    score: float = 0.0
+    threshold: float = 0.0
+    passed: bool = False
+    weakest: str = ""
+
+
+class ClarifyEvent(BaseModel):
+    """Payload of the ``clarify`` SSE event: the LLM-authored clarification."""
+
+    model_config = ConfigDict(extra="allow")
+
+    question: str = ""
+    hints: list[str] = Field(default_factory=list)
+    scoping_questions: list[str] = Field(default_factory=list)
+
+
+TURN_EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
+    TurnEventType.TURN_ACTION: TurnActionEvent,
+    TurnEventType.HYDE_QUERY: HydeQueryEvent,
+    TurnEventType.RETRIEVE_RESULT: RetrieveResultEvent,
+    TurnEventType.JUDGE_VERDICT: JudgeVerdictEvent,
+    TurnEventType.DEEP_STUDY: DeepStudyEvent,
+    TurnEventType.LLM_CALL: LlmCallEvent,
+    TurnEventType.DRAFT: DraftEvent,
+    TurnEventType.GATE: GateEvent,
+    TurnEventType.CLARIFY: ClarifyEvent,
+}
+"""Event-name → payload-model registry (names 1:1 with ``TurnEventType``)."""
