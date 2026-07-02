@@ -385,3 +385,36 @@ def test_activity_empty_optional_strings_normalize_to_none(stub_chain):
     assert call["hyde_text"] is None
     assert call["source_filter"] is None
     assert call["heading_filter"] is None
+
+
+# ---------------------------------------------------------------------------
+# retrieve_primitive — rerank-backend degradation
+# ---------------------------------------------------------------------------
+
+
+class _BrokenReranker:
+    """Simulates an unavailable rerank backend (e.g. remote endpoint 404/down)."""
+
+    def rerank(self, *, query: str, documents: list, top_k: int):
+        raise RuntimeError("rerank backend unavailable")
+
+
+def test_rerank_failure_degrades_to_search_order_not_empty():
+    """An unavailable rerank backend must not zero out retrieval.
+
+    Class under test: any rerank-backend failure (network, 404, model missing)
+    — the primitive falls back to hybrid-search order so the loop's judge
+    still receives evidence. Regression from live dev: RAG_TEI_RERANK_URL
+    pointed at an LLM endpoint with no /rerank route and every loop round
+    returned zero chunks.
+    """
+    hits = [_hit(1), _hit(2), _hit(3)]
+    chain, _ = _make_chain(hits)
+    chain.reranker = _BrokenReranker()
+
+    chunks = chain.retrieve_primitive(query_text="q", hyde_text=None, top_k=2)
+
+    assert len(chunks) == 2
+    # Hybrid-search order preserved on degradation.
+    assert [c["text"] for c in chunks] == [hits[0].text, hits[1].text]
+    assert all(c["chunk_id"] for c in chunks)

@@ -1939,17 +1939,32 @@ class RAGChain:
                 nav_max_chars=RERANK_NAV_MAX_CHARS,
             )
 
-            # Cross-encoder rerank, anchored to the user's query text.
+            # Cross-encoder rerank, anchored to the user's query text. An
+            # unavailable rerank backend (remote endpoint down/missing) must
+            # degrade to hybrid-search order, not zero out retrieval — the
+            # loop's judge re-ranks the pool anyway, so search-order results
+            # remain useful evidence.
             t0 = time.perf_counter()
             reranked = []
+            rerank_degraded = False
             if search_results:
-                reranked = self.reranker.rerank(
-                    query=query_text,
-                    documents=search_results,
-                    top_k=int(top_k),
-                )
+                try:
+                    reranked = self.reranker.rerank(
+                        query=query_text,
+                        documents=search_results,
+                        top_k=int(top_k),
+                    )
+                except Exception as exc:
+                    rerank_degraded = True
+                    logger.warning(
+                        "retrieve_primitive: rerank backend failed (%s) — "
+                        "degrading to hybrid-search order",
+                        exc,
+                    )
+                    reranked = list(search_results)[: int(top_k)]
             rerank_ms = (time.perf_counter() - t0) * 1000
             span.set_attribute("result_count", len(reranked))
+            span.set_attribute("rerank_degraded", rerank_degraded)
 
             chunks = [self._to_evidence_dict(r) for r in reranked[: int(top_k)]]
             logger.debug(
