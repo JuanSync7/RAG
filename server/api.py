@@ -169,9 +169,11 @@ async def lifespan(app: FastAPI):
             await sweeper_task
         except (asyncio.CancelledError, Exception):
             pass
-        if _temporal_client is not None:
-            await _temporal_client.close()
-            _temporal_client = None
+        # temporalio.client.Client has no close(); the underlying gRPC channel
+        # is torn down with the process. Dropping the reference is the correct
+        # shutdown behavior (calling a nonexistent close() fails the whole
+        # FastAPI shutdown sequence).
+        _temporal_client = None
         logger.info("API server shutting down")
 
 
