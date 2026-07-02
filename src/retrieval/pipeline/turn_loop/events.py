@@ -163,6 +163,17 @@ class TurnEventEmitter:
         remaining_ms = self._budget.wall_clock_ms - self._state.elapsed_ms()
         return max(1, int(remaining_ms / 1000))
 
+    def has_call_budget(self) -> bool:
+        """Whether enough wall clock remains for one more meaningful LLM call.
+
+        Below ``TurnBudget.min_call_budget_ms`` a call would run with a
+        near-zero timeout and is guaranteed to fail (observed live: doomed
+        1-2s controller/judge calls at the tail of the budget) — callers
+        should go to their fail-open/best-effort path instead.
+        """
+        remaining_ms = self._budget.wall_clock_ms - self._state.elapsed_ms()
+        return remaining_ms >= self._budget.min_call_budget_ms
+
     async def charged_call(
         self,
         *,
@@ -201,14 +212,25 @@ class TurnEventEmitter:
                 purpose,
             )
             return None
+        if not self.has_call_budget():
+            logger.warning(
+                "turn loop wall clock nearly exhausted — skipping %s call",
+                purpose,
+            )
+            return None
         self._state.charge_llm_call()
+        # Always cap completion tokens: an uncapped request makes litellm ask
+        # the endpoint for its full context as output (observed live: vLLM 400
+        # ContextWindowExceededError on every self-score call).
         kwargs: dict = {
             "model_alias": alias,
             "temperature": temperature,
             "timeout": self.remaining_timeout_s(),
+            "max_tokens": (
+                max_tokens if max_tokens is not None
+                else self._budget.llm_max_tokens
+            ),
         }
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
         started = time.perf_counter()
         response: Optional[Any] = None
         try:

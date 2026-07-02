@@ -123,3 +123,53 @@ async def test_charged_call_exhausted_ledger_skips_provider():
     assert response is None
     assert state.llm_calls == 2  # unchanged
     assert provider.calls == []
+
+
+async def test_charged_call_applies_default_completion_cap():
+    """Uncapped calls must send the budget's default max_tokens.
+
+    Class: unbounded completion requests — litellm turns max_tokens=None into
+    "request the model's full context as output", which vLLM rejects with a
+    400 ContextWindowExceededError (observed live on every self-score call).
+    """
+    provider = FakeProvider(responses=["{}"])
+    deps, _ = make_deps(provider)
+    state, budget = TurnState(), make_budget(llm_max_tokens=333)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+
+    await emitter.charged_call(alias="judge", purpose="self_score", prompt="p")
+
+    _, _, kwargs = provider.calls[-1]
+    assert kwargs["max_tokens"] == 333
+
+
+async def test_charged_call_explicit_cap_wins_over_default():
+    provider = FakeProvider(responses=["{}"])
+    deps, _ = make_deps(provider)
+    state, budget = TurnState(), make_budget(llm_max_tokens=333)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+
+    await emitter.charged_call(
+        alias="judge", purpose="self_score", prompt="p", max_tokens=64
+    )
+
+    _, _, kwargs = provider.calls[-1]
+    assert kwargs["max_tokens"] == 64
+
+
+async def test_charged_call_skips_below_min_call_budget(monkeypatch):
+    """Near-exhausted wall clock must skip the call, not fire a doomed one."""
+    provider = FakeProvider(responses=["{}"])
+    deps, _ = make_deps(provider)
+    state = TurnState()
+    budget = make_budget(wall_clock_ms=10_000, min_call_budget_ms=8_000)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+    monkeypatch.setattr(state, "elapsed_ms", lambda: 5_000)
+
+    resp = await emitter.charged_call(
+        alias="controller", purpose="controller", prompt="p"
+    )
+
+    assert resp is None
+    assert not provider.calls
+    assert state.llm_calls == 0  # skipped calls are not charged

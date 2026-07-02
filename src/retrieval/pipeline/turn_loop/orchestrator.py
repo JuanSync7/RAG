@@ -67,8 +67,15 @@ STOP_ERROR = "error"
 
 
 def _budget_stop_reason(state: TurnState, budget: TurnBudget) -> Optional[str]:
-    """Name the first exhausted loop budget, or ``None`` while all hold."""
-    if state.elapsed_ms() >= budget.wall_clock_ms:
+    """Name the first exhausted loop budget, or ``None`` while all hold.
+
+    The wall clock stops the loop while ``min_call_budget_ms`` still remains
+    (not at zero): every action needs at least one meaningful LLM call, so
+    once the remainder can only fund near-zero-timeout calls the loop must go
+    to its best-effort exit instead of firing doomed requests (observed live:
+    1-2s controller/judge timeouts at the budget tail).
+    """
+    if state.elapsed_ms() >= budget.wall_clock_ms - budget.min_call_budget_ms:
         return STOP_WALL_CLOCK
     if state.iteration >= budget.max_actions:
         return STOP_MAX_ACTIONS

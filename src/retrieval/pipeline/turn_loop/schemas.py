@@ -270,6 +270,16 @@ class TurnBudget:
     gate_weight_citation: float
     """Answer-gate weight for the citation-coverage component."""
 
+    llm_max_tokens: int = 512
+    """Default completion-token cap for loop LLM calls that set no explicit
+    cap. An uncapped request makes litellm ask the endpoint for its full
+    context as output tokens (vLLM rejects it with a 400)."""
+
+    min_call_budget_ms: int = 8000
+    """Minimum remaining wall clock required to start another LLM call or
+    loop action; below it the loop goes straight to its best-effort exit
+    instead of firing calls with near-zero timeouts."""
+
     @classmethod
     def from_settings(cls) -> "TurnBudget":
         """Build a budget from the ``RAG_TURN_LOOP_*`` settings block.
@@ -299,6 +309,8 @@ class TurnBudget:
             gate_weight_judge=weights[0],
             gate_weight_self=weights[1],
             gate_weight_citation=weights[2],
+            llm_max_tokens=settings.RAG_TURN_LOOP_LLM_MAX_TOKENS,
+            min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
         )
 
 

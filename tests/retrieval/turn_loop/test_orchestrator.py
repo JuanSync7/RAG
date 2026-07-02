@@ -283,3 +283,23 @@ async def test_unexpected_error_exits_best_effort_not_raise(empty_context):
 
     assert isinstance(result, TurnLoopResult)
     assert result.answer  # never empty
+
+
+async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):
+    """The loop must exit to best-effort while one meaningful call still fits.
+
+    Class: budget-tail thrash — actions started with < min_call_budget_ms of
+    wall clock left can only fire near-zero-timeout LLM calls (observed live
+    as cascading 1-2s controller/judge timeouts).
+    """
+    from src.retrieval.pipeline.turn_loop.orchestrator import (
+        STOP_WALL_CLOCK,
+        _budget_stop_reason,
+    )
+    from src.retrieval.pipeline.turn_loop.schemas import TurnState
+
+    state = TurnState()
+    budget = make_budget(wall_clock_ms=60_000, min_call_budget_ms=8_000)
+    monkeypatch.setattr(state, "elapsed_ms", lambda: 53_000)  # 7s left < 8s floor
+
+    assert _budget_stop_reason(state, budget) == STOP_WALL_CLOCK
