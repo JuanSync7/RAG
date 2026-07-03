@@ -3,7 +3,7 @@
 # (a) flag a baseline query as "would benefit from Deep Research" for the
 # advisory chip and (b) hint adaptive DR depth from raw text. Pure function,
 # no LLM calls, no extra retrieval.
-# Exports: should_suggest_deep_research, COMPOUND_MARKERS,
+# Exports: should_suggest_deep_research, has_compound_marker, COMPOUND_MARKERS,
 #          MAX_UNIQUE_SOURCES_FOR_SUGGESTION
 # Deps: src.retrieval.common.schemas.RankedResult
 # @end-summary
@@ -49,7 +49,16 @@ MAX_UNIQUE_SOURCES_FOR_SUGGESTION: int = RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES
 _SOURCE_KEYS: tuple[str, ...] = ("source", "source_key", "source_uri", "document_id")
 
 
-def _has_compound_marker(query: str) -> bool:
+def has_compound_marker(query: str) -> bool:
+    """True when the query names several facets at once.
+
+    Fires on a multi-topic lexical cue (an ``" and "`` / ``" vs "`` /
+    ``" compare "`` marker) or two or more ``"?"`` characters. LLM-free, pure,
+    sub-millisecond. Shared signal: the Deep-Research suggestion chip
+    (:func:`should_suggest_deep_research`) and the turn-loop pre-flight router
+    (``turn_loop.router`` via ``turn_loop_runner.build_route_signals``) both
+    read it.
+    """
     if not query:
         return False
     padded = f" {query.lower()} "
@@ -58,6 +67,10 @@ def _has_compound_marker(query: str) -> bool:
     if query.count("?") >= 2:
         return True
     return False
+
+
+# Back-compat private alias (the in-module caller below + existing imports).
+_has_compound_marker = has_compound_marker
 
 
 def _unique_source_count(results: Iterable[RankedResult]) -> int:

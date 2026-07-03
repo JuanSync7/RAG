@@ -42,7 +42,9 @@ from src.retrieval.pipeline.turn_loop.decompose import run_decompose
 from src.retrieval.pipeline.turn_loop.deep_study import run_deep_study
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.retrieve import run_retrieve
+from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
+    AnswerArgs,
     DecomposeArgs,
     DeepStudyArgs,
     RetrieveArgs,
@@ -208,11 +210,51 @@ async def _best_effort_result(
     )
 
 
+def _seed_decision(
+    route_hint: Optional[RouteHint], state: TurnState, query: str
+) -> Optional[TurnDecision]:
+    """The fast-lane's deterministic opening decision, or ``None``.
+
+    When the router took the fast lane, the first two iterations are fixed —
+    a RETRIEVE (iteration 0) then, once it yielded a pool, an ANSWER (iteration
+    1) — with NO controller LLM call between them (the ~2-round-trip latency
+    win). Deliberately narrow so the fast lane always degrades to the
+    controller (fail-open): a later iteration, an empty pool, or a prior gate
+    failure returns ``None`` here, handing the turn to :func:`decide`. A
+    non-fast-lane hint also returns ``None`` — that seed is advisory-only and
+    reaches the controller through the prompt, never as a forced decision.
+    """
+    if route_hint is None or not route_hint.fast_lane:
+        return None
+    if state.iteration == 0:
+        return TurnDecision(
+            action=TurnAction.RETRIEVE,
+            reason=(
+                "router fast-lane: high-confidence self-contained factoid — "
+                "retrieving directly (controller skipped)"
+            ),
+            confidence=0.0,
+            args=RetrieveArgs(query_text=query),
+        )
+    if state.iteration == 1 and state.pool and state.last_gate is None:
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=(
+                "router fast-lane: pool covers the factoid — answering directly "
+                "(controller skipped)"
+            ),
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
 async def run_turn_loop(
     query: str,
     context: TurnContext,
     deps: TurnLoopDeps,
     budget: TurnBudget,
+    route_hint: Optional[RouteHint] = None,
 ) -> TurnLoopResult:
     """Run one full conversation turn through the agentic loop.
 
@@ -233,6 +275,12 @@ async def run_turn_loop(
             provider, event sink).
         budget: The frozen per-turn budget (``TurnBudget.from_settings()`` at
             the endpoint; hand-built in tests).
+        route_hint: The pre-flight router's advisory verdict (``None`` = no
+            router / neutral, the pre-router baseline). A non-fast-lane hint
+            biases only the first controller prompt; a fast-lane hint drives
+            the deterministic RETRIEVE->ANSWER opening (see
+            :func:`_seed_decision`). Always fail-open — a wrong hint degrades
+            to the controller's own judgment.
 
     Returns:
         The :class:`TurnLoopResult` for the route layer — answer or
@@ -257,13 +305,21 @@ async def run_turn_loop(
                     emitter=emitter,
                 )
 
-            decision: TurnDecision = await decide(
-                query=query,
-                context=context,
-                state=state,
-                budget=budget,
-                emitter=emitter,
+            # Fast lane: the router's deterministic opening decision skips the
+            # controller LLM call (fail-open — returns None to re-engage it).
+            decision: Optional[TurnDecision] = _seed_decision(
+                route_hint, state, query
             )
+            seeded = decision is not None
+            if decision is None:
+                decision = await decide(
+                    query=query,
+                    context=context,
+                    state=state,
+                    budget=budget,
+                    emitter=emitter,
+                    route_hint=route_hint,
+                )
             await emitter.emit(
                 TurnEventType.TURN_ACTION,
                 {
@@ -273,6 +329,9 @@ async def run_turn_loop(
                     "action": decision.action,
                     "reason": decision.reason,
                     "confidence": decision.confidence,
+                    # Who chose this action: the fast-lane router (deterministic,
+                    # no LLM) or the controller.
+                    "source": "router" if seeded else "controller",
                 },
             )
             state.iteration += 1

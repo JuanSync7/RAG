@@ -6,7 +6,8 @@
 # mutable per-turn state accumulator, the clarification/final results, the
 # injected-dependency seam (DI for testability), and the cross-turn TurnContext
 # digest.
-# Exports: TurnAction, RetrieveArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs,
+# Exports: TurnAction, RouteEffort, RetrieveArgs, DecomposeArgs, DeepStudyArgs,
+#          ClarifyArgs, AnswerArgs,
 #          TurnActionArgs, TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
 #          TurnEventType, TurnEvent, StudiedDoc, TurnState, ClarificationOut,
 #          TurnLoopResult, TurnLoopDeps, TurnContext
@@ -51,6 +52,23 @@ class TurnAction:
     ANSWER: str = "ANSWER"
 
     ALL: frozenset[str] = frozenset({RETRIEVE, DECOMPOSE, DEEP_STUDY, CLARIFY, ANSWER})
+
+
+class RouteEffort:
+    """Str-valued effort levels selecting a :class:`TurnBudget` scale.
+
+    The canonical home (CLAUDE.md §2: shared contracts in one module) for the
+    effort levels the pre-flight router (:mod:`turn_loop.router`) picks and
+    :meth:`TurnBudget.from_settings` consumes — kept here (not in ``router.py``)
+    so ``TurnBudget`` can reference the constants without importing the router
+    (which would be a cycle: the router imports this module). ``BALANCED`` is
+    the neutral level whose budget is byte-for-byte ``from_settings()`` at
+    scale 1.0. Plain ``str`` constants so a hint serializes without adapters.
+    """
+
+    FAST: str = "fast"
+    BALANCED: str = "balanced"
+    THOROUGH: str = "thorough"
 
 
 # ---------------------------------------------------------------------------
@@ -302,19 +320,44 @@ class TurnBudget:
     loop action; below it the loop goes straight to its best-effort exit
     instead of firing calls with near-zero timeouts."""
 
+    @staticmethod
+    def _effort_scale(effort: str, settings: Any) -> float:
+        """Multiplier the router's ``effort`` applies to the work budgets.
+
+        ``balanced`` (and any unknown level) → 1.0, so the default budget is
+        byte-for-byte today's. ``fast`` shrinks and ``thorough`` grows the
+        action/LLM-call ceilings via ``RAG_TURN_LOOP_EFFORT_*_SCALE`` (the
+        wall clock is deliberately NOT scaled — it is a fixed safety ceiling
+        the retrieve timeout is derived from, not a work target)."""
+        if effort == RouteEffort.FAST:
+            return float(getattr(settings, "RAG_TURN_LOOP_EFFORT_FAST_SCALE", 0.5))
+        if effort == RouteEffort.THOROUGH:
+            return float(
+                getattr(settings, "RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", 1.5)
+            )
+        return 1.0
+
     @classmethod
-    def from_settings(cls) -> "TurnBudget":
+    def from_settings(cls, effort: str = "balanced") -> "TurnBudget":
         """Build a budget from the ``RAG_TURN_LOOP_*`` settings block.
 
         Imports ``config.settings`` lazily so this module stays config-free at
         import time (pure contract surface; tests construct budgets directly).
+
+        Args:
+            effort: The router-selected effort level (``fast``/``balanced``/
+                ``thorough``). Scales ``max_actions`` and ``max_llm_calls``
+                only; ``balanced`` (default) leaves every field at its setting.
         """
         from config import settings
 
         weights = settings.RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS
+        scale = cls._effort_scale(effort, settings)
         return cls(
-            max_actions=settings.RAG_TURN_LOOP_MAX_ACTIONS,
-            max_llm_calls=settings.RAG_TURN_LOOP_MAX_LLM_CALLS,
+            max_actions=max(1, round(settings.RAG_TURN_LOOP_MAX_ACTIONS * scale)),
+            max_llm_calls=max(
+                2, round(settings.RAG_TURN_LOOP_MAX_LLM_CALLS * scale)
+            ),
             wall_clock_ms=settings.RAG_TURN_LOOP_WALL_CLOCK_MS,
             max_answer_attempts=settings.RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS,
             deep_study_max_docs=settings.RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS,
@@ -779,6 +822,7 @@ class TurnContext:
 
 __all__ = [
     "TurnAction",
+    "RouteEffort",
     "RetrieveArgs",
     "DeepStudyArgs",
     "ClarifyArgs",

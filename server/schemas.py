@@ -828,7 +828,12 @@ from src.retrieval.pipeline.turn_loop import TurnEventType
 
 
 class TurnActionEvent(BaseModel):
-    """Payload of the ``turn_action`` SSE event: one controller decision."""
+    """Payload of the ``turn_action`` SSE event: one action decision.
+
+    ``source`` names who chose the action: ``controller`` (the controller LLM)
+    or ``router`` (the pre-flight fast lane, chosen deterministically with no
+    LLM call). Defaults ``controller`` for pre-router traces.
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -836,6 +841,7 @@ class TurnActionEvent(BaseModel):
     action: str = ""
     reason: str = ""
     confidence: float = 0.0
+    source: str = "controller"
 
 
 class HydeQueryEvent(BaseModel):

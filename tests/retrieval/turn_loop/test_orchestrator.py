@@ -17,7 +17,7 @@ import types
 import pytest
 
 import src.retrieval.pipeline.turn_loop.schemas as turn_schemas
-from src.retrieval.pipeline.turn_loop import run_turn_loop
+from src.retrieval.pipeline.turn_loop import RouteHint, TurnAction, run_turn_loop
 from src.retrieval.pipeline.turn_loop.orchestrator import (
     STOP_CLARIFY,
     STOP_GATE_PASSED,
@@ -30,6 +30,15 @@ from src.retrieval.pipeline.turn_loop.schemas import (
     TurnEventType,
     TurnLoopResult,
 )
+
+
+def _fast_lane_hint() -> RouteHint:
+    return RouteHint(
+        initial_action=TurnAction.RETRIEVE,
+        effort="fast",
+        fast_lane=True,
+        reason="high-confidence factoid",
+    )
 
 from tests.retrieval.turn_loop.conftest import (
     FakeProvider,
@@ -283,6 +292,105 @@ async def test_unexpected_error_exits_best_effort_not_raise(empty_context):
 
     assert isinstance(result, TurnLoopResult)
     assert result.answer  # never empty
+
+
+async def test_fast_lane_skips_controller_retrieve_then_answer(empty_context):
+    """Router fast lane: iteration 0 RETRIEVE and iteration 1 ANSWER are both
+    seeded deterministically — NO controller LLM call is made (the ~2-round-trip
+    latency win), and both turn_action events are sourced 'router'."""
+    provider = FakeProvider(
+        responses=[
+            judge_json([0], 1, confidence=0.9),  # RETRIEVE round judge
+            selfscore_json(0.95),  # ANSWER self-score
+        ],
+        streams=[[("content", "The answer is [1].")]],
+    )
+    deps, emitted = make_deps(provider, retrieve_batches=[[make_chunk("c1")]])
+    budget = make_budget()
+
+    result = await run_turn_loop(
+        "what is the reset value?", empty_context, deps, budget,
+        route_hint=_fast_lane_hint(),
+    )
+
+    assert result.action == TurnLoopResult.ACTION_ANSWERED
+    assert result.stop_reason == STOP_GATE_PASSED
+    # No controller call: the two decisions were seeded by the router.
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes == ["judge", "draft", "self_score"]
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "ANSWER"]
+    assert [a["source"] for a in action_events] == ["router", "router"]
+
+
+async def test_fast_lane_gate_failure_reengages_controller(empty_context):
+    """A fast-lane ANSWER that fails the gate must hand control back to the
+    controller (fail-open escalation): iteration 2 is a real controller call."""
+    provider = FakeProvider(
+        responses=[
+            judge_json([0], 1, confidence=0.9),  # RETRIEVE judge
+            selfscore_json(0.1, ["invented"]),  # weak ANSWER -> gate fails
+            decision_json("CLARIFY"),  # controller re-engages
+            clarify_json("Which subsystem?", ["A", "B"]),
+        ],
+        streams=[[("content", "weak uncited draft")]],
+    )
+    deps, emitted = make_deps(provider, retrieve_batches=[[make_chunk("c1")]])
+    budget = make_budget()
+
+    result = await run_turn_loop(
+        "q", empty_context, deps, budget, route_hint=_fast_lane_hint()
+    )
+
+    assert result.action == TurnLoopResult.ACTION_ASK_USER
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "ANSWER", "CLARIFY"]
+    assert [a["source"] for a in action_events] == ["router", "router", "controller"]
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert "controller" in purposes  # the re-engaged controller call
+
+
+async def test_fast_lane_empty_pool_hands_answer_to_controller(empty_context):
+    """When the fast-lane RETRIEVE returns nothing, iteration 1 must NOT force
+    an ANSWER on an empty pool — the controller decides instead."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("CLARIFY"),  # controller opens iteration 1
+            clarify_json("Can you specify?", ["X"]),
+        ],
+    )
+    deps, emitted = make_deps(provider, retrieve_batches=[[]])  # empty retrieve
+    budget = make_budget()
+
+    result = await run_turn_loop(
+        "q", empty_context, deps, budget, route_hint=_fast_lane_hint()
+    )
+
+    assert result.action == TurnLoopResult.ACTION_ASK_USER
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "CLARIFY"]
+    # iteration 0 seeded by the router; iteration 1 fell through to the controller.
+    assert [a["source"] for a in action_events] == ["router", "controller"]
+
+
+async def test_non_fast_lane_hint_still_calls_controller(empty_context):
+    """A DECOMPOSE seed (fast_lane=False) is advisory only: the controller is
+    still called on iteration 0 (source 'controller')."""
+    hint = RouteHint(
+        initial_action=TurnAction.DECOMPOSE,
+        effort="balanced",
+        fast_lane=False,
+        reason="compound query",
+    )
+    provider = FakeProvider(responses=[decision_json("CLARIFY"), clarify_json("?", ["a"])])
+    deps, emitted = make_deps(provider)
+    budget = make_budget()
+
+    result = await run_turn_loop("a and b", empty_context, deps, budget, route_hint=hint)
+
+    assert result.action == TurnLoopResult.ACTION_ASK_USER
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert action_events[0]["source"] == "controller"
 
 
 async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):

@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import logging
 
+from typing import Optional
+
 from src.common.prompts import load_prompt, render, strip_reasoning
 from src.common.utils import parse_json_object
 from src.retrieval.pipeline.turn_loop.events import (
     TurnEventEmitter,
     latest_event_payload,
 )
+from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
     AnswerArgs,
     RetrieveArgs,
@@ -181,6 +184,25 @@ def _render_gate_feedback(state: TurnState) -> str:
     return "\n".join(lines)
 
 
+def _render_router_hint(route_hint: Optional[RouteHint], state: TurnState) -> str:
+    """Render the pre-flight router's advisory hint for the controller prompt.
+
+    Only the FIRST controller decision (``iteration == 0``) is seeded — the
+    hint is a suggestion for how to *open* the turn; once the loop is under way
+    the controller reasons from the actual evidence/gate state, so later
+    iterations render ``(none)``. The fast-lane hint is handled by the
+    orchestrator (it skips this call entirely), so a hint reaching here is
+    always advisory: the controller may follow or ignore it (fail-open).
+    """
+    if route_hint is None or state.iteration != 0 or not route_hint.initial_action:
+        return "(none)"
+    return (
+        f"A cheap pre-flight classifier suggests opening with "
+        f"{route_hint.initial_action} because: {route_hint.reason}. Treat this "
+        "as advice — choose the action the state above actually warrants."
+    )
+
+
 def _fail_open_decision(query: str, state: TurnState) -> TurnDecision:
     """The design-§6 fail-open default when no usable decision was parsed.
 
@@ -217,6 +239,7 @@ async def decide(
     state: TurnState,
     budget: TurnBudget,
     emitter: TurnEventEmitter,
+    route_hint: Optional[RouteHint] = None,
 ) -> TurnDecision:
     """Run one controller iteration: choose the turn's next action.
 
@@ -246,6 +269,7 @@ async def decide(
         evidence_digest=build_evidence_digest(state),
         budgets=_render_budgets(state, budget),
         gate_feedback=_render_gate_feedback(state),
+        router_hint=_render_router_hint(route_hint, state),
     )
     response = await emitter.charged_call(
         alias=controller_model_alias(),

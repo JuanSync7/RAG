@@ -443,7 +443,9 @@ async def _run_turn_loop_query(
     body = QueryResponse.model_validate(base).model_dump(mode="json")
     body["metadata"] = {
         "turn_loop": {
-            **turn_loop_runner.turn_loop_metadata(result),
+            **turn_loop_runner.turn_loop_metadata(
+                result, route_hint=outcome.route_hint
+            ),
             "trace": turn_loop_runner.trace_records(result.trace),
         }
     }
@@ -516,7 +518,9 @@ async def _turn_loop_event_stream(
         if outcome is None:  # defensive: the runner always yields a terminal
             raise RuntimeError("turn loop produced no result")
         result = outcome.result
-        loop_meta = turn_loop_runner.turn_loop_metadata(result)
+        loop_meta = turn_loop_runner.turn_loop_metadata(
+            result, route_hint=outcome.route_hint
+        )
         retrieval_payload = _turn_loop_base_response(
             request=request,
             outcome=outcome,

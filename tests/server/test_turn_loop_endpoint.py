@@ -199,8 +199,11 @@ def _events_to_trace(events: list[tuple[str, dict]]) -> list[TurnEvent]:
 def _make_fake_loop(events: list[tuple[str, dict]], result: TurnLoopResult):
     """Async run_turn_loop double: emits events through deps, returns result."""
 
-    async def fake_loop(query, context, deps, budget):
-        fake_loop.calls.append({"query": query, "context": context, "budget": budget})
+    async def fake_loop(query, context, deps, budget, route_hint=None):
+        fake_loop.calls.append(
+            {"query": query, "context": context, "budget": budget,
+             "route_hint": route_hint}
+        )
         for etype, payload in events:
             await deps.emit(TurnEvent.now(etype, dict(payload)))
         return result
@@ -723,11 +726,84 @@ def test_iter_answer_tokens_roundtrips_text():
     assert list(runner_mod.iter_answer_tokens("")) == []
 
 
+# ---------------------------------------------------------------------------
+# Pre-flight router wiring (build_route_signals / resolve_route_hint / metadata)
+# ---------------------------------------------------------------------------
+
+
+def test_build_route_signals_reads_real_classifiers():
+    """The runner gathers the codebase's own classifiers into RouteSignals."""
+    sig = runner_mod.build_route_signals("Compare AXI and CHI ordering")
+    assert sig.is_compound is True  # "and" + "compare"
+    assert sig.word_count == 5
+    assert sig.has_backward_reference is False
+
+
+def test_build_route_signals_flags_backward_reference():
+    sig = runner_mod.build_route_signals("how does it compare to that one")
+    assert sig.has_backward_reference is True  # pronoun-dense / back-reference
+
+
+def test_resolve_route_hint_none_when_router_disabled(monkeypatch):
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ROUTER_ENABLED", False, raising=False)
+    assert runner_mod.resolve_route_hint("q") is None
+
+
+def test_resolve_route_hint_seeds_decompose_for_compound(monkeypatch):
+    import config.settings as settings_mod
+    from src.retrieval.pipeline.turn_loop import TurnAction
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ROUTER_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        settings_mod, "RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND", True, raising=False
+    )
+    hint = runner_mod.resolve_route_hint("compare A and B")
+    assert hint is not None
+    assert hint.initial_action == TurnAction.DECOMPOSE
+
+
+def test_resolve_route_hint_fail_open_on_signal_error(monkeypatch):
+    """A classifier error must degrade to no hint, never break the turn."""
+    import config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ROUTER_ENABLED", True, raising=False)
+
+    def _boom(*a, **k):
+        raise RuntimeError("classifier down")
+
+    monkeypatch.setattr(runner_mod, "build_route_signals", _boom)
+    assert runner_mod.resolve_route_hint("q") is None
+
+
+def test_turn_loop_metadata_includes_router_block():
+    from src.retrieval.pipeline.turn_loop import RouteHint, TurnAction
+
+    result = TurnLoopResult(answer="a", action=TurnLoopResult.ACTION_ANSWERED)
+    hint = RouteHint(
+        initial_action=TurnAction.RETRIEVE, effort="fast", fast_lane=True,
+        reason="factoid",
+    )
+    meta = runner_mod.turn_loop_metadata(result, route_hint=hint)
+    assert meta["router"] == {
+        "initial_action": "RETRIEVE",
+        "effort": "fast",
+        "fast_lane": True,
+        "reason": "factoid",
+    }
+
+
+def test_turn_loop_metadata_omits_router_when_absent():
+    result = TurnLoopResult(answer="a", action=TurnLoopResult.ACTION_ANSWERED)
+    assert "router" not in runner_mod.turn_loop_metadata(result)
+
+
 def test_loop_crash_degrades_to_explained_ask_user(loop_env, monkeypatch):
     """A crashing loop yields an explained ask_user terminal, never a 500."""
     env = loop_env(ANSWER_EVENTS, _answered_result())
 
-    async def exploding_loop(query, context, deps, budget):
+    async def exploding_loop(query, context, deps, budget, route_hint=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runner_mod, "_get_run_turn_loop", lambda: exploding_loop)

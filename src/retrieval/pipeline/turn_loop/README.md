@@ -35,19 +35,49 @@ self-score — charge ONE `TurnBudget.max_llm_calls` ledger.
 | --- | --- |
 | `__init__.py` | Public facade: `run_turn_loop`, `build_turn_context`, all schema re-exports. Callers import from the package only. |
 | `schemas.py` | The full typed contract surface (see schema ownership below). |
-| `orchestrator.py` | The loop: budget checks (actions / LLM ledger / wall clock), controller dispatch, terminal handling, best-effort exhaustion exit, never-raise containment. |
-| `controller.py` | Per-iteration action selection (controller LLM, salvage-parsed JSON, §6 fail-open ladder); home of the deterministic evidence digest and the model-alias getters. |
+| `orchestrator.py` | The loop: budget checks (actions / LLM ledger / wall clock), controller dispatch, terminal handling, the router fast-lane seed (`_seed_decision`), best-effort exhaustion exit, never-raise containment. |
+| `router.py` | **Pre-flight confidence router** (pure): `route(RouteSignals, RouteConfig) → RouteHint` — seeds the first action + `effort` as an ADVISORY hint (compound → DECOMPOSE; short/confident/self-contained factoid → fast lane; else no seed). Zero heavy imports; the runner gathers the signals. |
+| `controller.py` | Per-iteration action selection (controller LLM, salvage-parsed JSON, §6 fail-open ladder); renders the router hint into the first prompt; home of the deterministic evidence digest and the model-alias getters. |
 | `retrieve.py` | RETRIEVE action — `retrieve_ranked` seam call + chunk-id dedup + agentic `judge_chunks` composition; kept chunks pooled in judge-rank order. |
+| `decompose.py` | DECOMPOSE action — one split LLM call fans a compound question into focused sub-queries retrieved **in parallel** (`asyncio.gather`) into the same flat pool, judged once as a round. |
 | `deep_study.py` | DEEP_STUDY action — `fetch_document` seam + anchored overlapping-window walk (`refactored_char_start >= 0` guard, `-1` sentinel → window 0); window findings enter the pool as `deep_study`-provenance chunks. |
 | `clarify.py` | CLARIFY action (terminal) — LLM-authored question + hint/scoping chips, hints capped at `clarify_max_hints`, deterministic fallback. |
 | `answer.py` | ANSWER action (terminal attempt) — streamed draft (live `draft` events, reasoning + content kinds) + self-score + weighted gate (judge / self / citation coverage). |
 | `events.py` | `TurnEventEmitter`: trace append + gated SSE forward (`RAG_TURN_LOOP_STREAM_EVENTS`), sink errors swallowed; the charged LLM-call wrapper (single ledger + `llm_call` event). |
 | `context.py` | `build_turn_context`: tolerant assembly of the typed `TurnContext` from the memory layer's structured dict. |
 
+## Pre-flight router + fast lane + effort dial (Phase 3)
+
+Before the loop, a cheap LLM-free **router** (`router.py`) runs once at the
+runner seam (`server/turn_loop_runner.py` — `build_route_signals` →
+`resolve_route_hint`) and returns a `RouteHint` that the loop treats as
+**advice**, never a hard override (so the whole path fails open to the
+pre-router baseline). Signals are the classifiers the codebase already owns —
+`query_shape.has_compound_marker`, `query_processor.heuristic_confidence` /
+`has_backward_reference` / `detect_suppress_memory` — so there is no new
+inference on the critical path.
+
+- **Compound query** → seed **DECOMPOSE** (advisory, rendered into the first
+  controller prompt; the controller may override).
+- **Fast lane** (short, high-confidence, self-contained, single-facet) → the
+  loop skips the first controller LLM call and runs a deterministic
+  RETRIEVE→ANSWER (`_seed_decision`), re-engaging the controller only if that
+  answer fails the gate. This is the router's one non-advisory move — hence
+  opt-in (`RAG_TURN_LOOP_FAST_LANE_ENABLED`, default off until the routing
+  eval confirms p50/p95 matches linear).
+- **Effort** (`fast` / `balanced` / `thorough`) selects the `TurnBudget` scale
+  via `TurnBudget.from_settings(effort=...)` (scales `max_actions` /
+  `max_llm_calls`; the wall clock is a fixed ceiling, never scaled). `balanced`
+  is byte-for-byte today's budget.
+
+The routing decision is surfaced verbatim on `metadata.turn_loop.router` and
+each `turn_action` event carries `source: "router" | "controller"`.
+
 ## Control flow (design §5)
 
-Per iteration: budget check → controller decision (`turn_action` event) →
-dispatch. RETRIEVE / DEEP_STUDY grow the evidence pool and loop. CLARIFY ends
+Per iteration: budget check → router seed OR controller decision
+(`turn_action` event) → dispatch. RETRIEVE / DECOMPOSE / DEEP_STUDY grow the
+evidence pool and loop. CLARIFY ends
 the turn as `ask_user`. ANSWER drafts, self-scores, and evaluates
 `gate = w_judge * judge_pool_confidence + w_self * self_score +
 w_citation * citation_coverage` against
@@ -91,10 +121,11 @@ import time; `TurnBudget.from_settings()` is the one (lazy) bridge to the
 
 ## Prompts
 
-`prompts/turn_controller_decide.md`, `turn_deep_study_read.md`,
-`turn_clarify_generate.md`, `turn_answer_selfscore.md` — `{{ var }}`
-convention, loaded/rendered via the shared `src/common/prompts.py` helpers,
-strict-JSON output salvage-parsed with fail-open defaults (design §6).
+`prompts/turn_controller_decide.md` (carries the advisory `{{ router_hint }}`),
+`turn_decompose.md`, `turn_deep_study_read.md`, `turn_clarify_generate.md`,
+`turn_answer_selfscore.md` — `{{ var }}` convention, loaded/rendered via the
+shared `src/common/prompts.py` helpers, strict-JSON output salvage-parsed with
+fail-open defaults (design §6).
 
 ## Tests
 

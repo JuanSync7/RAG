@@ -44,6 +44,9 @@ Budgets remaining (actions, LLM calls, wall clock, answer attempts, deep-study d
 Gate feedback from the last failed answer attempt (empty if none):
 {{ gate_feedback }}
 
+Pre-flight router hint (advisory only — a cheap classifier's suggestion for how to OPEN the turn; follow it only if the state above agrees, ignore it otherwise):
+{{ router_hint }}
+
 ## Output
 
 Return a single JSON object, no prose outside it. `args` depends on `action`:

@@ -14,6 +14,7 @@
 # the query routes.
 # Exports: RESULT_KIND, STOP_REASON_INPUT_REJECTED, STOP_REASON_ERROR,
 #          PreparedTurnInput, TurnStreamOutcome, resolve_turn_loop_enabled,
+#          build_route_signals, resolve_route_hint,
 #          prepare_turn_input, build_turn_context, evidence_from_dicts,
 #          build_retrieve_ranked, build_fetch_document, run_turn_stream,
 #          validate_event_payload, turn_loop_metadata, trace_records,
@@ -60,12 +61,16 @@ from typing import Any, AsyncIterator, Callable, Iterator, Optional
 from src.retrieval.pipeline.turn_loop import (
     ClarificationOut,
     EvidenceChunk,
+    RouteConfig,
+    RouteHint,
+    RouteSignals,
     TurnBudget,
     TurnContext,
     TurnEvent,
     TurnEventType,
     TurnLoopDeps,
     TurnLoopResult,
+    route,
 )
 
 logger = logging.getLogger(__name__)
@@ -317,6 +322,75 @@ def build_turn_context(conversation_id: str, structured: Optional[dict]) -> Turn
     from src.retrieval.pipeline.turn_loop import build_turn_context as _build
 
     return _build(conversation_id, structured if isinstance(structured, dict) else None)
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight router (design §"route itself"): signal-gathering + hint resolve
+# ---------------------------------------------------------------------------
+
+
+def build_route_signals(query: str) -> RouteSignals:
+    """Gather the cheap pre-flight signals the router routes on.
+
+    Calls the pure, LLM-free classifiers the codebase already owns — no new
+    inference, no retrieval, sub-millisecond:
+
+    - ``query_shape.has_compound_marker`` (multi-facet cue),
+    - ``query_processor.heuristic_confidence`` (word-count confidence proxy),
+    - ``query_processor.has_backward_reference`` (needs conversation memory).
+
+    The turn-loop path does NOT run the full query-processing graph (the loop
+    controller owns query design, design §3), so these are computed fresh here;
+    that also sidesteps the ``query_confidence=1.0`` hard-coding on the linear
+    hard-mode path (that graph never runs on this path).
+
+    Args:
+        query: The sanitized turn query.
+
+    Returns:
+        The typed :class:`RouteSignals` for :func:`turn_loop.router.route`.
+    """
+    from src.retrieval.pipeline.query_shape import has_compound_marker
+    from src.retrieval.query.nodes.query_processor import (
+        has_backward_reference,
+        heuristic_confidence,
+    )
+
+    text = query or ""
+    return RouteSignals(
+        query_confidence=heuristic_confidence(text),
+        word_count=len(text.split()),
+        is_compound=has_compound_marker(text),
+        has_backward_reference=has_backward_reference(text),
+    )
+
+
+def resolve_route_hint(query: str) -> Optional[RouteHint]:
+    """Run the pre-flight router for one turn, or ``None`` (no hint).
+
+    Returns ``None`` when the router is disabled (``RAG_TURN_LOOP_ROUTER_ENABLED``
+    off) OR when signal-gathering / routing raises — the router must never break
+    a turn, and ``None`` is exactly the pre-router baseline (the loop then opens
+    with the controller as today). Config is read fresh per turn so an operator
+    can flip the router without a restart.
+
+    Args:
+        query: The sanitized turn query.
+
+    Returns:
+        The :class:`RouteHint` handed to ``run_turn_loop``, or ``None``.
+    """
+    try:
+        cfg = RouteConfig.from_settings()
+        if not cfg.router_enabled:
+            return None
+        return route(build_route_signals(query), cfg)
+    except Exception as exc:  # noqa: BLE001 — the router must never break a turn
+        logger.warning(
+            "turn loop pre-flight router failed (%s) — no hint (controller decides)",
+            exc,
+        )
+        return None
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -666,6 +740,10 @@ class TurnStreamOutcome:
     rails_degraded: bool = False
     """True when input rails were configured but degraded (logged fallback)."""
 
+    route_hint: Optional[RouteHint] = None
+    """The pre-flight router's verdict for this turn (``None`` = router off /
+    rejected before routing). Surfaced in ``metadata.turn_loop.router``."""
+
 
 async def run_turn_stream(
     *,
@@ -739,12 +817,18 @@ async def run_turn_stream(
         emit=_emit,
     )
     context = build_turn_context(conversation_id, memory_structured)
-    budget = TurnBudget.from_settings()
+    # Pre-flight router: seed the first action + effort (advisory, fail-open).
+    route_hint = resolve_route_hint(prepared.query)
+    budget = TurnBudget.from_settings(
+        effort=route_hint.effort if route_hint is not None else "balanced"
+    )
     run_turn_loop = _get_run_turn_loop()
 
     async def _run() -> TurnLoopResult:
         try:
-            return await run_turn_loop(prepared.query, context, deps, budget)
+            return await run_turn_loop(
+                prepared.query, context, deps, budget, route_hint
+            )
         finally:
             await queue.put(_QUEUE_SENTINEL)
 
@@ -782,6 +866,7 @@ async def run_turn_stream(
         effective_query=prepared.query,
         pii_redactions=prepared.pii_redactions,
         rails_degraded=prepared.rails_degraded,
+        route_hint=route_hint,
     )
 
 
@@ -790,8 +875,15 @@ async def run_turn_stream(
 # ---------------------------------------------------------------------------
 
 
-def turn_loop_metadata(result: TurnLoopResult) -> dict:
-    """Build the ``metadata.turn_loop`` block for responses/done frames."""
+def turn_loop_metadata(
+    result: TurnLoopResult, route_hint: Optional[RouteHint] = None
+) -> dict:
+    """Build the ``metadata.turn_loop`` block for responses/done frames.
+
+    When a ``route_hint`` is supplied (the pre-flight router ran), its verdict
+    is surfaced under ``router`` so both ``/query`` and ``/query/stream``
+    expose the routing decision (CLI/UI parity — one metadata surface, both
+    clients)."""
     meta: dict = {
         "enabled": True,
         "terminal": result.action,
@@ -801,6 +893,13 @@ def turn_loop_metadata(result: TurnLoopResult) -> dict:
         "llm_calls": int(result.llm_calls),
         "elapsed_ms": int(result.elapsed_ms),
     }
+    if route_hint is not None:
+        meta["router"] = {
+            "initial_action": route_hint.initial_action or "",
+            "effort": route_hint.effort,
+            "fast_lane": bool(route_hint.fast_lane),
+            "reason": route_hint.reason,
+        }
     if result.clarification is not None:
         meta["hints"] = list(result.clarification.hints)
         meta["scoping_questions"] = list(result.clarification.scoping_questions)
@@ -1042,6 +1141,8 @@ __all__ = [
     "PreparedTurnInput",
     "TurnStreamOutcome",
     "resolve_turn_loop_enabled",
+    "build_route_signals",
+    "resolve_route_hint",
     "prepare_turn_input",
     "build_turn_context",
     "evidence_from_dicts",

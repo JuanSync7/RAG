@@ -15,6 +15,7 @@ from src.retrieval.pipeline.turn_loop.controller import (
     decide,
 )
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
+from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
     DeepStudyArgs,
     RetrieveArgs,
@@ -158,6 +159,54 @@ async def test_prompt_substitutes_every_template_variable(empty_context):
     prompt = messages[0]["content"]
     assert "{{" not in prompt  # every {{ var }} token was rendered
     assert "q" in prompt
+
+
+async def test_route_hint_renders_into_first_controller_prompt(empty_context):
+    """An advisory (non-fast-lane) seed is rendered into the iteration-0 prompt;
+    the controller still decides freely (fail-open)."""
+    provider = FakeProvider(responses=[decision_json("RETRIEVE", query_text="x")])
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+    hint = RouteHint(
+        initial_action=TurnAction.DECOMPOSE,
+        effort="balanced",
+        fast_lane=False,
+        reason="compound query (multiple facets)",
+    )
+
+    await decide(
+        query="a and b",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+        route_hint=hint,
+    )
+
+    prompt = provider.calls[0][1][0]["content"]
+    assert "DECOMPOSE" in prompt
+    assert "compound query (multiple facets)" in prompt
+    assert "advice" in prompt  # framed as advisory, not an instruction
+
+
+async def test_route_hint_not_rendered_after_first_iteration(empty_context):
+    """The hint seeds only the OPENING move — later iterations render (none)."""
+    provider = FakeProvider(responses=[decision_json("ANSWER")])
+    state, budget = TurnState(), make_budget()
+    state.iteration = 2
+    emitter, _ = _emitter(provider, state, budget)
+    hint = RouteHint(
+        initial_action=TurnAction.DECOMPOSE, effort="balanced", reason="x"
+    )
+
+    await decide(
+        query="q", context=empty_context, state=state, budget=budget,
+        emitter=emitter, route_hint=hint,
+    )
+
+    prompt = provider.calls[0][1][0]["content"]
+    assert "DECOMPOSE because" not in prompt  # the hint sentence is absent
+    assert "{{" not in prompt  # router_hint slot still rendered (as "(none)")
 
 
 def test_evidence_digest_carries_verbatim_refs_and_judge_gaps():
