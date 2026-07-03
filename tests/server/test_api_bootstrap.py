@@ -312,12 +312,15 @@ def test_unhandled_exception_handler_returns_generic_500():
 # ---------------------------------------------------------------------------
 
 
-def test_lifespan_connects_and_closes_temporal(monkeypatch):
-    """Lifespan connects Temporal on entry and closes it (plus sweeper) on exit."""
+def test_lifespan_connects_and_drops_temporal(monkeypatch):
+    """Lifespan connects Temporal on entry; on exit it cancels the sweeper and
+    drops the client reference (temporalio.client.Client has no close() — the
+    gRPC channel dies with the process; calling a nonexistent close() failed
+    the whole FastAPI shutdown, observed live)."""
     events: list[str] = []
 
     class _FakeClient:
-        async def close(self):
+        def close(self):  # must never be called
             events.append("client_closed")
 
     async def _fake_connect(target):
@@ -353,7 +356,7 @@ def test_lifespan_connects_and_closes_temporal(monkeypatch):
         f"connected:{api.TEMPORAL_TARGET_HOST}",
         "inside",
         "sweeper_cancelled",
-        "client_closed",
     ]
+    assert "client_closed" not in events  # close() must not be called
     # After exit the module-level client is reset to None.
     assert api._get_temporal_client() is None

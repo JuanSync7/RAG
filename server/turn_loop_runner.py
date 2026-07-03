@@ -531,11 +531,21 @@ def _get_run_turn_loop() -> Callable:
     return run_turn_loop
 
 
-def _guardrail_backend_configured() -> bool:
-    """True when an output-guardrail backend is configured (lazy read)."""
+def guardrail_backend_configured() -> bool:
+    """True when an output-guardrail backend is configured (lazy read).
+
+    Public so the stream route can gate the reasoning replay: the accepted
+    answer is railed, but the captured chain-of-thought is not, so on a railed
+    deployment the reasoning frame must be suppressed rather than replayed
+    verbatim (parity with the live-draft suppression).
+    """
     from config import settings
 
     return bool(getattr(settings, "GUARDRAIL_BACKEND", ""))
+
+
+# Backward-compatible private alias (internal callers).
+_guardrail_backend_configured = guardrail_backend_configured
 
 
 async def _apply_output_rails(result: TurnLoopResult) -> TurnLoopResult:
@@ -549,21 +559,39 @@ async def _apply_output_rails(result: TurnLoopResult) -> TurnLoopResult:
     un-railed answer is returned and the degradation logged — a broken rail
     backend must not kill the turn.
     """
-    answer = (result.answer or "").strip()
-    if not answer or not _guardrail_backend_configured():
+    if not _guardrail_backend_configured():
         return result
+    context_chunks = [chunk.text for chunk in result.pool]
     try:
         from src.guardrails import run_output_rails
 
-        rail_result = await asyncio.to_thread(
-            run_output_rails,
-            answer=result.answer,
-            context_chunks=[chunk.text for chunk in result.pool],
-        )
-        final_answer = getattr(rail_result, "final_answer", "") or ""
-        if final_answer and final_answer != result.answer:
-            logger.info("turn loop output rails replaced the terminal answer")
-            result.answer = final_answer
+        async def _rail(text: str) -> str:
+            """Rail one string; return the rewritten text or the original."""
+            if not (text or "").strip():
+                return text
+            rail_result = await asyncio.to_thread(
+                run_output_rails, answer=text, context_chunks=context_chunks
+            )
+            final = getattr(rail_result, "final_answer", "") or ""
+            return final if final else text
+
+        answer = (result.answer or "").strip()
+        if answer:
+            railed = await _rail(result.answer)
+            if railed != result.answer:
+                logger.info("turn loop output rails replaced the terminal answer")
+                result.answer = railed
+        # ask_user terminals carry no answer but DO carry LLM-authored,
+        # corpus-derived text (question / hints / scoping questions) that must
+        # be railed too — otherwise a railed deployment ships un-railed model
+        # output (and console resubmit chips) on every CLARIFY terminal.
+        clar = result.clarification
+        if clar is not None:
+            clar.question = await _rail(clar.question)
+            clar.hints = [await _rail(h) for h in clar.hints]
+            clar.scoping_questions = [
+                await _rail(q) for q in clar.scoping_questions
+            ]
     except Exception as exc:  # noqa: BLE001 — fail open, Stage-7 parity
         logger.warning(
             "turn loop output rails unavailable (%s) — returning the "

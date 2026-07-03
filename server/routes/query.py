@@ -404,7 +404,11 @@ async def _run_turn_loop_query(
     without touching the non-loop response schema.
     """
     workflow_id = f"rag-turn-{uuid.uuid4().hex[:12]}"
-    structured = _turn_loop_memory_structured(
+    # Memory access is synchronous (Redis round-trips + a possible blocking
+    # LLM summarization inside compaction); run it off the event loop so a
+    # single turn cannot freeze every concurrent SSE stream.
+    structured = await asyncio.to_thread(
+        _turn_loop_memory_structured,
         memory,
         request=request,
         principal=principal,
@@ -443,7 +447,8 @@ async def _run_turn_loop_query(
             "trace": turn_loop_runner.trace_records(result.trace),
         }
     }
-    _write_turn_loop_memory(
+    await asyncio.to_thread(
+        _write_turn_loop_memory,
         memory=memory,
         request=request,
         principal=principal,
@@ -485,7 +490,8 @@ async def _turn_loop_event_stream(
     token_count = 0
     error_message: str | None = None
     try:
-        structured = _turn_loop_memory_structured(
+        structured = await asyncio.to_thread(
+            _turn_loop_memory_structured,
             memory,
             request=request,
             principal=principal,
@@ -521,9 +527,15 @@ async def _turn_loop_event_stream(
         retrieval_payload["metadata"] = {"turn_loop": loop_meta}
         yield _sse("retrieval", retrieval_payload)
         if result.action != TurnLoopResult.ACTION_ASK_USER:
-            reasoning = turn_loop_runner.extract_draft_reasoning(result.trace)
-            if reasoning:
-                yield _sse("reasoning", {"text": reasoning})
+            # The accepted answer is railed (run_turn_stream ->
+            # _apply_output_rails), but the captured chain-of-thought is not;
+            # on a railed deployment it must be suppressed rather than replayed
+            # verbatim (parity with live-draft suppression) so pre-rail model
+            # output never reaches a railed client.
+            if not turn_loop_runner.guardrail_backend_configured():
+                reasoning = turn_loop_runner.extract_draft_reasoning(result.trace)
+                if reasoning:
+                    yield _sse("reasoning", {"text": reasoning})
             for token in turn_loop_runner.iter_answer_tokens(result.answer):
                 token_count += 1
                 yield _sse("token", {"token": token})
@@ -545,7 +557,8 @@ async def _turn_loop_event_stream(
                 "metadata": {"turn_loop": loop_meta},
             },
         )
-        _write_turn_loop_memory(
+        await asyncio.to_thread(
+            _write_turn_loop_memory,
             memory=memory,
             request=request,
             principal=principal,
@@ -843,32 +856,44 @@ def create_query_router(
         require_role(principal, "query")
         enforce_rate_limit(principal, "/query/stream")
         slot_acquired = await acquire_request_slot("/query/stream")
-        memory = get_conversation_memory()
-        tenant_id = resolve_tenant_id(principal, request.tenant_id)
-        mem_start = time.perf_counter()
-        conv = memory.ensure_conversation(
-            tenant_id=tenant_id,
-            subject=principal.subject,
-            project_id=principal.project_id,
-            conversation_id=request.conversation_id,
-        )
-        MEMORY_OP_MS.labels(operation="ensure_conversation").observe(
-            (time.perf_counter() - mem_start) * 1000
-        )
-        conv = _autotitle_if_new(
-            memory,
-            tenant_id=tenant_id,
-            principal=principal,
-            conv=conv,
-            query=request.query,
-        )
+        # Setup between slot acquisition and ownership transfer to a streaming
+        # generator must release the slot if it raises — otherwise a raising
+        # call here (e.g. resolve_turn_loop_enabled -> HTTP 500 on invalid
+        # RAG_TURN_LOOP_* config) permanently leaks an inflight permit and the
+        # server wedges at 503. Each StreamingResponse below hands the slot to
+        # a generator whose finally releases it, so ownership transfer happens
+        # outside this guard.
+        try:
+            memory = get_conversation_memory()
+            tenant_id = resolve_tenant_id(principal, request.tenant_id)
+            mem_start = time.perf_counter()
+            conv = memory.ensure_conversation(
+                tenant_id=tenant_id,
+                subject=principal.subject,
+                project_id=principal.project_id,
+                conversation_id=request.conversation_id,
+            )
+            MEMORY_OP_MS.labels(operation="ensure_conversation").observe(
+                (time.perf_counter() - mem_start) * 1000
+            )
+            conv = _autotitle_if_new(
+                memory,
+                tenant_id=tenant_id,
+                principal=principal,
+                conv=conv,
+                query=request.query,
+            )
+            turn_loop_on = turn_loop_runner.resolve_turn_loop_enabled(
+                request.turn_loop, request=request
+            )
+        except BaseException:
+            release_request_slot(slot_acquired)
+            raise
         # Turn-loop branch: stream the loop's typed events instead of the
         # RAGQueryWorkflow retrieval + in-process generation path below.
         # The full request rides along so the env default yields to
         # explicitly-requested competing orchestrators / retrieval mode.
-        if turn_loop_runner.resolve_turn_loop_enabled(
-            request.turn_loop, request=request
-        ):
+        if turn_loop_on:
             return StreamingResponse(
                 _turn_loop_event_stream(
                     request=request,

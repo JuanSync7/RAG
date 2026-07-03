@@ -681,9 +681,15 @@ class TurnContext:
         """Render the deterministic controller-prompt digest.
 
         Pure string assembly over the typed fields — no LLM, no regex — so the
-        same context always renders the same digest (evalable/cachable). The
-        result is head-truncated to ``max_chars`` (older material is already
-        compacted into the rolling summary, so the head carries the signal).
+        same context always renders the same digest (evalable/cachable).
+
+        Sections are ordered by decision-criticality, most-critical first,
+        because the result is head-truncated to ``max_chars``: the pending
+        clarification (needed to resolve replies like "the second one"), the
+        rolling summary, and the recent turns must survive truncation, so the
+        bulky served-evidence catalogue (up to ``RAG_TURN_CONTEXT_MAX_CHUNK_REFS``
+        ref lines) renders LAST and is the first thing dropped when the digest
+        is over budget.
 
         Args:
             max_chars: Hard character cap for the digest (<= 0 means no cap).
@@ -692,6 +698,15 @@ class TurnContext:
             The prompt-ready digest string.
         """
         lines: list[str] = []
+        # Highest priority: a pending clarification anchors the current reply.
+        if self.pending_clarification:
+            question = _coerce_str(self.pending_clarification.get("question"))
+            hints = self.pending_clarification.get("hints") or []
+            lines.append("Pending clarification from the previous turn:")
+            lines.append(f"Question: {question}")
+            for index, hint in enumerate(hints, start=1):
+                lines.append(f"Hint {index}: {_coerce_str(hint)}")
+            lines.append("")
         if self.rolling_summary:
             lines.append("Conversation summary:")
             lines.append(self.rolling_summary)
@@ -706,6 +721,17 @@ class TurnContext:
                 if answer:
                     lines.append(f"A: {answer}")
             lines.append("")
+        if self.docs_studied:
+            lines.append("Documents already deep-studied:")
+            for doc in self.docs_studied:
+                if not isinstance(doc, dict):
+                    continue
+                document_id = _coerce_str(doc.get("document_id"))
+                conclusion = _coerce_str(doc.get("conclusion"))
+                lines.append(f"- document_id={document_id}: {conclusion}")
+            lines.append("")
+        # Lowest priority (bulky): the served-evidence catalogue renders last
+        # so head-truncation sheds it before the anchor sections above.
         if self.chunk_refs:
             lines.append(
                 "Evidence already served this conversation "
@@ -722,23 +748,6 @@ class TurnContext:
                     f"- document_id={document_id} source_key={source_key} "
                     f"heading={heading}: {preview}"
                 )
-            lines.append("")
-        if self.docs_studied:
-            lines.append("Documents already deep-studied:")
-            for doc in self.docs_studied:
-                if not isinstance(doc, dict):
-                    continue
-                document_id = _coerce_str(doc.get("document_id"))
-                conclusion = _coerce_str(doc.get("conclusion"))
-                lines.append(f"- document_id={document_id}: {conclusion}")
-            lines.append("")
-        if self.pending_clarification:
-            question = _coerce_str(self.pending_clarification.get("question"))
-            hints = self.pending_clarification.get("hints") or []
-            lines.append("Pending clarification from the previous turn:")
-            lines.append(f"Question: {question}")
-            for index, hint in enumerate(hints, start=1):
-                lines.append(f"Hint {index}: {_coerce_str(hint)}")
             lines.append("")
         digest = "\n".join(lines).strip()
         if max_chars > 0 and len(digest) > max_chars:

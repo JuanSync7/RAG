@@ -1297,3 +1297,54 @@ def test_console_query_can_opt_out_under_env_default(loop_env, monkeypatch):
     assert resp.json()["ok"] is True
     assert env["loop"].calls == []
     assert len(env["temporal"].calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Output-rails coverage of terminals (review PR #147 fixes)
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_output_rails_covers_clarify_terminal(monkeypatch):
+    """A railed deployment must rail the CLARIFY question/hints, not just answers.
+
+    Class: guardrail bypass on non-answer terminals — _apply_output_rails
+    previously early-returned on empty result.answer, so the LLM-authored,
+    corpus-derived clarification text (rendered as one-click resubmit chips)
+    shipped un-railed. It must now flow through run_output_rails.
+    """
+    monkeypatch.setattr(
+        runner_mod, "_guardrail_backend_configured", lambda: True
+    )
+    monkeypatch.setattr(
+        runner_mod, "guardrail_backend_configured", lambda: True, raising=False
+    )
+
+    class _Rail:
+        def __init__(self, text):
+            self.final_answer = "[railed] " + text
+
+    def _fake_rails(*, answer, context_chunks):
+        return _Rail(answer)
+
+    import src.guardrails as guardrails_mod
+
+    monkeypatch.setattr(guardrails_mod, "run_output_rails", _fake_rails, raising=False)
+
+    result = _clarify_result()
+    railed = await runner_mod._apply_output_rails(result)
+
+    assert railed.clarification.question.startswith("[railed] ")
+    assert all(h.startswith("[railed] ") for h in railed.clarification.hints)
+    assert all(
+        q.startswith("[railed] ") for q in railed.clarification.scoping_questions
+    )
+
+
+async def test_apply_output_rails_noop_without_backend(monkeypatch):
+    """No guardrail backend configured → answer and clarification untouched."""
+    monkeypatch.setattr(
+        runner_mod, "_guardrail_backend_configured", lambda: False
+    )
+    result = _clarify_result()
+    out = await runner_mod._apply_output_rails(result)
+    assert out.clarification.question == "Which project?"

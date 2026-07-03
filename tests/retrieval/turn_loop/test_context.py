@@ -79,3 +79,44 @@ def test_pending_clarification_and_digest_rendering():
     assert "doc-1" in digest and "docs/d1.md" in digest
     assert "covers flow" in digest
     assert "Which one?" in digest and "Hint 2: B" in digest
+
+
+def test_pending_clarification_survives_head_truncation_over_bulky_refs():
+    """Decision-critical sections must not be truncated away by the ref catalogue.
+
+    Class: head-truncation dropping the tail — a long conversation whose
+    served-evidence catalogue exceeds the digest cap must still surface the
+    pending clarification (needed to resolve replies like "the second one")
+    and the recent turns, because those render before the bulky ref list.
+    """
+    many_refs = [
+        {
+            "chunk_id": f"c{i}",
+            "document_id": f"doc-{i}",
+            "source_key": f"docs/d{i}.md",
+            "heading": f"Heading {i}",
+            "preview": "x" * 300,
+        }
+        for i in range(24)
+    ]
+    context = build_turn_context(
+        "conv-1",
+        {
+            "rolling_summary": "prior discussion",
+            "recent_turns": [{"query": "how do I pick?", "answer": "options A/B"}],
+            "chunk_refs": many_refs,
+            "pending_clarification": {
+                "question": "Did you mean A or B?",
+                "hints": ["A", "B"],
+            },
+        },
+    )
+
+    full = context.render_for_prompt(0)
+    assert len(full) > 8000  # the catalogue alone blows past the default cap
+
+    digest = context.render_for_prompt(8000)
+    assert len(digest) <= 8000
+    # The anchor sections survive; the bulky catalogue is what gets dropped.
+    assert "Did you mean A or B?" in digest
+    assert "how do I pick?" in digest
