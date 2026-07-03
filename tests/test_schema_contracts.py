@@ -215,6 +215,8 @@ QUERY_REQUEST_ONLY_FIELDS = frozenset({
     "memory_turn_window",   # controls how many turns route handler fetches
     "compact_now",          # triggers compaction after response
     "turn_loop",            # API-process turn loop path; never reaches RAGQueryWorkflow
+    "retrieval_strategy",   # API-only orchestrator selector; maps to the legacy
+                            # booleans (which ARE in RAGRequest) — dispatch reads those
 })
 
 # RAGRequest fields that are NOT exposed via QueryRequest
