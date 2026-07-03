@@ -109,6 +109,12 @@ class AgenticState:
     seen_chunk_ids: set[str] = field(default_factory=set)
     # HyDE-variant history (for INC-2 diversification + executed-search dedup).
     tried_hyde: list[str] = field(default_factory=list)
+    # Structured per-round record of the FULL HyDE variant the controller produced
+    # (hypothetical answer + lexical anchor terms + target aspect + whether the
+    # round fell back to literal-query retrieval). tried_hyde keeps only the answer
+    # text for diversification; this is the observability record surfaced to the UI
+    # so the whole query-processing step is inspectable, not just a count.
+    hyde_rounds: list[dict] = field(default_factory=list)
     # The previous round's judge-named gap, steering the next HyDE (INC-2).
     coverage_aspects: list[str] = field(default_factory=list)
     # Cross-round anti-refusal reservoir: EVERY judged candidate from EVERY round,
@@ -143,6 +149,14 @@ class AgenticResult:
     graph_context: str = ""
     rounds_run: int = 0
     hyde_variants_tried: int = 0
+    # The actual per-round HyDE hypothetical texts (INC-2 diversification history).
+    # Carried into telemetry so the generated hypotheticals are observable and can
+    # be judged for quality — a count alone can't reveal an on-topic-but-weak HyDE.
+    tried_hyde: list[str] = field(default_factory=list)
+    # Structured per-round HyDE variant records (hypothetical_answer + search_terms
+    # + target_aspect + fell_back), surfaced to the UI query-processing panel so the
+    # whole HyDE step — not just a count — is visible before generation.
+    hyde_rounds: list[dict] = field(default_factory=list)
     kept_count: int = 0
     llm_calls: int = 0
     judge_calls: int = 0
@@ -167,6 +181,8 @@ class AgenticResult:
             "ranker_calls": int(self.ranker_calls),
             "backfilled": int(self.backfilled),
             "hyde_failures": int(self.hyde_failures),
+            "tried_hyde": list(self.tried_hyde),
+            "hyde_rounds": list(self.hyde_rounds),
             "stop_reason": self.stop_reason,
             "elapsed_ms": float(self.elapsed_ms),
         }

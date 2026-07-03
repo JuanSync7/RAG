@@ -252,6 +252,79 @@ def _truncate(text: str, max_len: int) -> str:
     return text
 
 
+def _display_hyde_round(r: dict, idx: int) -> None:
+    """Print one HyDE round (hypothetical + terms + fallback badge), indented."""
+    rn = r.get("round", idx)
+    aspect = (r.get("target_aspect") or "").strip()
+    fb = f" {B_YELLOW}[literal fallback]{RESET}" if r.get("fell_back") else ""
+    head = f"Round {rn}" + (f" — {aspect}" if aspect else "")
+    print(f"    {DIM}{head}{RESET}{fb}")
+    hyp = (r.get("hypothetical_answer") or "").strip()
+    for line in hyp.split("\n"):
+        if line.strip():
+            print(f"      {DIM}{line}{RESET}")
+    terms = r.get("search_terms") or []
+    if terms:
+        print(f"      {DIM}search terms: {', '.join(str(t) for t in terms)}{RESET}")
+
+
+def _display_query_processing(response) -> None:
+    """CLI parity with the web 'Query processing' panel: show the HyDE / deep-
+    research detail the retriever produced BEFORE generation. Reads the same
+    ``response.metadata`` the web panel consumes. Silent when nothing to show."""
+    md = getattr(response, "metadata", None) or {}
+    agentic = md.get("agentic_retrieval") or {}
+    dr = md.get("deep_research") or {}
+    rounds = agentic.get("hyde_rounds") or []
+    tried = agentic.get("tried_hyde") or []
+    has_agentic = bool(agentic.get("rounds_run") or rounds or tried)
+    has_dr = bool(dr.get("decomposed") or dr.get("topic_count"))
+    if not has_agentic and not has_dr:
+        return
+
+    print(f"\n  {B_WHITE}Query processing{RESET}")
+    if has_agentic:
+        stats = []
+        if agentic.get("rounds_run"):
+            stats.append(f"{agentic['rounds_run']} round(s)")
+        if agentic.get("hyde_variants_tried"):
+            stats.append(f"{agentic['hyde_variants_tried']} variant(s)")
+        if agentic.get("kept_count") is not None:
+            stats.append(f"{agentic['kept_count']} kept")
+        if agentic.get("backfilled"):
+            stats.append(f"{agentic['backfilled']} backfilled")
+        if agentic.get("ranker"):
+            stats.append(f"ranker: {agentic['ranker']}")
+        if agentic.get("stop_reason"):
+            stats.append(f"stop: {agentic['stop_reason']}")
+        if agentic.get("elapsed_ms"):
+            stats.append(f"{agentic['elapsed_ms'] / 1000:.1f}s")
+        print(f"    {B_CYAN}HyDE{RESET} {DIM}{' · '.join(stats)}{RESET}")
+        hf = agentic.get("hyde_failures") or 0
+        if hf:
+            print(
+                f"    {B_YELLOW}⚠ HyDE generation failed on {hf} round(s) — "
+                f"fell back to literal-query retrieval{RESET}"
+            )
+        if rounds:
+            for i, r in enumerate(rounds, 1):
+                _display_hyde_round(r if isinstance(r, dict) else {}, i)
+        elif tried:
+            for i, t in enumerate(tried, 1):
+                _display_hyde_round({"hypothetical_answer": t}, i)
+    if has_dr:
+        stats = ["decomposed" if dr.get("decomposed") else "unified"]
+        if dr.get("topic_count"):
+            stats.append(f"{dr['topic_count']} topic(s)")
+        if dr.get("iteration_count"):
+            stats.append(f"{dr['iteration_count']} iteration(s)")
+        if dr.get("node_count"):
+            stats.append(f"{dr['node_count']} node(s)")
+        if dr.get("llm_call_count"):
+            stats.append(f"{dr['llm_call_count']} LLM call(s)")
+        print(f"    {B_CYAN}Deep research{RESET} {DIM}{' · '.join(stats)}{RESET}")
+
+
 def display_results(response, elapsed: float) -> None:
     """Pretty-print RAG results."""
     print()
@@ -318,6 +391,10 @@ def display_results(response, elapsed: float) -> None:
 
     print(f"  {DIM}{'─' * 72}{RESET}")
 
+    # Query-processing detail (HyDE / deep-research) BEFORE the answer — CLI
+    # parity with the web console's "Query processing" panel.
+    _display_query_processing(response)
+
     if response.action == "ask_user":
         # Per-reason hint badge (CLI parity with the web console). The
         # reason enum is additive to ``action``: legacy code that only
@@ -366,6 +443,14 @@ def display_results(response, elapsed: float) -> None:
                 f"  {B_YELLOW}💡 Multi-topic question detected — "
                 f"try `deep:true` for richer coverage.{RESET}"
             )
+
+        # CLI/UI parity: the same "you might also ask…" follow-up questions the
+        # web console renders as clickable chips.
+        follow_ups = getattr(response, "suggested_questions", None)
+        if follow_ups:
+            print(f"\n  {B_WHITE}You might also ask:{RESET}")
+            for q in follow_ups:
+                print(f"    {B_CYAN}›{RESET} {q}")
 
     if not response.results:
         print(f"\n  {B_YELLOW}⚠{RESET} No results found.\n")

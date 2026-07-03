@@ -163,6 +163,58 @@ def test_deep_research_multi_topic_uses_per_topic_rerank():
     assert texts == {"ver-a", "lint-a"}
 
 
+def test_safe_rerank_falls_back_on_error_for_every_call_site():
+    """_safe_rerank is the single wrapper used at ALL rerank call sites (primary
+    hybrid path, standalone fallback, confidence re-retrieval, deep-research). A
+    reranker outage must degrade to hybrid score order everywhere — never raise
+    (which on the primary path would 500 the query). Regression for the asymmetric
+    fail-open the review caught."""
+    from src.vector_db.common.schemas import SearchResult
+
+    chain = _mk_chain()
+    chain.reranker.rerank = MagicMock(side_effect=RuntimeError("404 /rerank"))
+    docs = [
+        SearchResult(text="hi", score=0.3, metadata={"source": "d"}, object_id="a"),
+        SearchResult(text="lo", score=0.9, metadata={"source": "d"}, object_id="b"),
+    ]
+    out = chain._safe_rerank("q", docs, top_k=2)
+    chain.reranker.rerank.assert_called_once()
+    # Fell back to hybrid score order (0.9 before 0.3), did not raise.
+    assert [r.text for r in out] == ["lo", "hi"]
+
+
+def test_deep_research_rerank_failure_falls_back_to_score_order():
+    """Regression: a reranker outage (e.g. a 404 endpoint) must NOT zero out the
+    deep-research answer. The branch falls back to the pool's hybrid score order
+    instead of throwing — fail-open, mirroring the rest of the pipeline."""
+    chain = _mk_chain()
+
+    # Reranker is down / misrouted → every call raises.
+    chain.reranker.rerank = MagicMock(side_effect=RuntimeError("404 /rerank"))
+
+    canned = _canned_dr_result()  # unified pool, chunks scored 0.9 and 0.7
+    with patch.object(chain, "_run_deep_research", return_value=canned), \
+         patch("src.retrieval.pipeline.rag_chain.process_query") as proc:
+        proc.return_value = MagicMock(
+            processed_query="X Y Z",
+            standalone_query="X Y Z",
+            confidence=0.9,
+            action=MagicMock(value="search"),
+            has_backward_reference=False,
+            suppress_memory=False,
+        )
+        response = chain.run(
+            query="how does X work and how does Y work",
+            deep_research=True,
+            skip_generation=True,
+        )
+
+    # Reranker was attempted but failed; results still returned in score order.
+    chain.reranker.rerank.assert_called()
+    assert len(response.results) == 2
+    assert [r.text for r in response.results] == ["alpha-text", "beta-text"]  # 0.9 before 0.7
+
+
 def test_deep_research_metadata_surfaces_on_response():
     """``response.metadata['deep_research']`` must carry iteration/topic/llm
     counters so Temporal search attributes can index a DR run."""

@@ -83,6 +83,7 @@ async def generate_hyde(
     temperature: float,
     timeout_s: int,
     json_mode: bool = True,
+    domain: str = "",
 ) -> Optional[HydeVariant]:
     """Generate one HyDE variant for ``original_question``.
 
@@ -117,6 +118,7 @@ async def generate_hyde(
         prior_hyde_answers=prior_block,
         uncovered_aspects=gap_block,
         max_tokens=str(max_tokens),
+        domain=(domain or "(no specific domain configured)"),
     )
     kwargs: dict[str, Any] = dict(
         model_alias=model_alias,

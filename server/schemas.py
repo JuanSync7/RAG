@@ -298,6 +298,14 @@ class QueryResponse(BaseModel):
             "DR path (suggesting DR while DR is already on is meaningless)."
         ),
     )
+    suggested_questions: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Clickable 'you might also ask...' follow-up questions proposed after "
+            "the answer. Specific, in-corpus, grounded in the answer + retrieved "
+            "headings. None/empty when disabled or on any generation failure."
+        ),
+    )
     ask_user_reason: Optional[str] = Field(
         default=None,
         description=(
@@ -314,6 +322,18 @@ class QueryResponse(BaseModel):
             "True when the chain took a degraded fallback path (eg. BM25-only "
             "re-search after the primary hybrid call returned 0 hits) but "
             "still produced usable results."
+        ),
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description=(
+            "Free-form retrieval telemetry passed through from RAGResponse.metadata. "
+            "Carries the query-processing detail the UI surfaces: "
+            "metadata['agentic_retrieval'] (HyDE hypotheticals tried, per-round "
+            "hyde_rounds, rounds_run, hyde_failures, stop_reason, kept_count, LLM/"
+            "judge call counts) and metadata['deep_research'] (decomposition stats). "
+            "Empty on the linear (non-agentic, non-DR) path. Already present on the "
+            "stream path's 'retrieval' SSE event; this field exposes it on /query too."
         ),
     )
 

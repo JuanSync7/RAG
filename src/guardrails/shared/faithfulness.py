@@ -30,6 +30,7 @@ from src.guardrails.models import (
 )
 from src.platform.llm import call_oneshot
 from config.settings import (
+    RAG_FAITHFULNESS_MODEL_ALIAS,
     RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS,
     RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
     RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
@@ -112,6 +113,7 @@ class FaithfulnessChecker:
         guardian: Optional[GuardianModel] = None,
         penalty_per_entity: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
         penalty_cap: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
+        model_alias: str = RAG_FAITHFULNESS_MODEL_ALIAS,
     ) -> None:
         """Initialize a faithfulness checker.
 
@@ -128,6 +130,10 @@ class FaithfulnessChecker:
             penalty_per_entity: Score penalty applied per hallucinated entity.
             penalty_cap: Maximum total hallucination penalty applied to the
                 overall score.
+            model_alias: Router alias for the LLM self-check/claim scorer
+                (defaults to the instruct model via
+                ``RAG_FAITHFULNESS_MODEL_ALIAS``). The rail's system prompt is
+                unchanged — this only selects which model runs it.
         """
         self._threshold = threshold
         self._action = action  # "reject" or "flag"
@@ -135,6 +141,7 @@ class FaithfulnessChecker:
         self._guardian = guardian
         self._penalty_per_entity = penalty_per_entity
         self._penalty_cap = penalty_cap
+        self._model_alias = model_alias
 
     def check(
         self,
@@ -292,6 +299,7 @@ class FaithfulnessChecker:
                     "You are a faithfulness evaluator. Output only a number "
                     "between 0.0 and 1.0."
                 ),
+                model_alias=self._model_alias,
             )
             if response:
                 # Try to extract a float from the response
@@ -337,6 +345,7 @@ class FaithfulnessChecker:
             response = call_oneshot(
                 prompt,
                 system="You are a faithfulness evaluator. Output only JSON.",
+                model_alias=self._model_alias,
             )
             if not response:
                 logger.warning("Faithfulness LLM returned empty response")

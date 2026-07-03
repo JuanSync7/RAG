@@ -58,6 +58,53 @@ export interface LastTurnStats {
     costUsd: number;
 }
 
+// -- Query-processing telemetry (surfaced in the "Query processing" panel) --
+// Mirrors metadata['agentic_retrieval'] / metadata['deep_research'] from the
+// backend. All fields optional: older deployments omit hyde_rounds/tried_hyde,
+// and the linear (non-agentic, non-DR) path emits no telemetry at all.
+
+export interface HydeRound {
+    round?: number;
+    hypothetical_answer?: string;
+    search_terms?: string[];
+    target_aspect?: string;
+    fell_back?: boolean;
+}
+
+export interface AgenticTelemetry {
+    rounds_run?: number;
+    hyde_variants_tried?: number;
+    hyde_failures?: number;
+    kept_count?: number;
+    llm_calls?: number;
+    judge_calls?: number;
+    ranker?: string;
+    ranker_calls?: number;
+    backfilled?: number;
+    stop_reason?: string;
+    elapsed_ms?: number;
+    tried_hyde?: string[];
+    hyde_rounds?: HydeRound[];
+}
+
+export interface DeepResearchTelemetry {
+    decomposed?: boolean;
+    topic_count?: number;
+    iteration_count?: number;
+    node_count?: number;
+    llm_call_count?: number;
+    is_unified?: boolean;
+    budget_exhausted?: boolean;
+    budget_exhausted_reason?: string;
+    elapsed_ms?: number;
+}
+
+export interface QueryMetadata {
+    agentic_retrieval?: AgenticTelemetry;
+    deep_research?: DeepResearchTelemetry;
+    [key: string]: unknown;
+}
+
 export interface StreamEventData {
     token?: string;
     text?: string;
@@ -66,6 +113,10 @@ export interface StreamEventData {
     conversation_id?: string;
     token_budget?: TokenBudget;
     summary?: string;
+    processed_query?: string;
+    query_confidence?: number;
+    kg_expanded_terms?: string[] | null;
+    metadata?: QueryMetadata;
     [key: string]: unknown;
 }
 
