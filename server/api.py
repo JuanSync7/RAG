@@ -238,6 +238,27 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
+def _jsonsafe_validation_errors(exc: RequestValidationError) -> list[dict]:
+    """Make ``exc.errors()`` JSON-serializable.
+
+    Pydantic v2 puts the raw raised exception in ``ctx['error']`` for
+    ``model_validator``/field-validator failures (e.g. the orchestrator
+    mutual-exclusion check). A raw ``ValueError`` is not JSON-serializable, so
+    without stringifying it the 422 handler itself raises ``TypeError`` and the
+    catch-all turns a clean client error into a 500. Stringify any non-primitive
+    ``ctx`` value so the 422 payload always renders.
+    """
+    safe: list[dict] = []
+    _prim = (str, int, float, bool, type(None))
+    for err in exc.errors():
+        e = dict(err)
+        ctx = e.get("ctx")
+        if isinstance(ctx, dict):
+            e["ctx"] = {k: (v if isinstance(v, _prim) else str(v)) for k, v in ctx.items()}
+        safe.append(e)
+    return safe
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
@@ -249,7 +270,7 @@ async def request_validation_exception_handler(
             request,
             code="REQUEST_VALIDATION_ERROR",
             message="Request validation failed",
-            details={"errors": exc.errors()},
+            details={"errors": _jsonsafe_validation_errors(exc)},
         ),
     )
 

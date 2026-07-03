@@ -1,6 +1,6 @@
 # @summary
 # Pydantic request/response models for the RAG API server.
-# Exports: QueryRequest, QueryResponse, ChunkResult, HealthResponse,
+# Exports: RetrievalStrategy, QueryRequest, QueryResponse, ChunkResult, HealthResponse,
 #          DocumentSummary, DocumentListResponse, DocumentDetailResponse,
 #          DocumentUrlResponse, SourceSummary, SourceListResponse,
 #          CollectionItem, CollectionStatsResponse, CollectionListResponse,
@@ -28,6 +28,86 @@ from server.common import (
 # Single source of truth for retrieval sizing (env-driven). Request schema
 # defaults derive from these so there is ONE place to change them.
 from config.settings import HYBRID_SEARCH_ALPHA, RERANK_TOP_K, SEARCH_LIMIT
+
+
+# --- Retrieval-strategy selection (single source of truth) --------------------
+# The orchestrator strategies. ``auto`` resolves from the legacy booleans / config;
+# ``linear`` forces the plain pipeline; the rest each name ONE orchestrator that
+# replaces the linear stages. The enum makes the choice STRUCTURAL — you cannot
+# select two — so the former pairwise "X and Y cannot both be forced" validators
+# collapse into the single resolver below (Phase 0b waypoint toward an effort dial).
+RetrievalStrategy = Literal["auto", "linear", "agentic", "deep_research", "tree", "turn_loop"]
+
+# strategy -> the legacy request boolean it drives (the dispatch still reads these,
+# so mapping enum<->boolean keeps behaviour identical whichever the caller sends).
+_STRATEGY_TO_BOOL = {
+    "deep_research": "deep_research",
+    "agentic": "agentic_retrieval",
+    "tree": "tree_retrieval",
+    "turn_loop": "turn_loop",
+}
+
+
+def _forced_orchestrators(model: BaseModel) -> list[str]:
+    """Strategies explicitly forced via a legacy boolean (``True`` — not None/False)."""
+    forced: list[str] = []
+    if getattr(model, "deep_research", False):
+        forced.append("deep_research")
+    if getattr(model, "agentic_retrieval", None) is True:
+        forced.append("agentic")
+    if getattr(model, "tree_retrieval", None) is True:
+        forced.append("tree")
+    if getattr(model, "turn_loop", None) is True:
+        forced.append("turn_loop")
+    return forced
+
+
+def _resolve_retrieval_strategy(model: BaseModel) -> BaseModel:
+    """Reconcile ``retrieval_strategy`` <-> the legacy booleans and enforce the
+    single-orchestrator contract. Shared by QueryRequest and ConsoleQueryRequest so
+    the selection rules live in ONE place (CLI/UI parity)."""
+    forced = _forced_orchestrators(model)
+    strat = getattr(model, "retrieval_strategy", "auto")
+
+    if strat == "auto":
+        if len(forced) > 1:
+            raise ValueError(
+                "only one retrieval orchestrator may be forced at once — got "
+                f"{forced}. deep_research / agentic_retrieval / tree_retrieval / "
+                "turn_loop each replace the linear stages and are mutually exclusive."
+            )
+        if forced:
+            model.retrieval_strategy = forced[0]
+    else:
+        want = None if strat == "linear" else strat
+        conflicting = [f for f in forced if f != want]
+        if conflicting:
+            raise ValueError(
+                f"retrieval_strategy={strat!r} conflicts with forced {conflicting} "
+                "— use one selection mechanism (the enum or the legacy booleans)."
+            )
+        # An explicit strategy overrides the RAG_*_ENABLED config defaults: set the
+        # matching boolean on and the competitors off so the dispatch sees one mode.
+        for s, attr in _STRATEGY_TO_BOOL.items():
+            if hasattr(model, attr):
+                setattr(model, attr, s == strat)
+
+    eff = getattr(model, "retrieval_strategy", "auto")
+    if eff == "turn_loop" and getattr(model, "mode", "query") == "retrieval":
+        raise ValueError(
+            "turn_loop cannot be combined with mode='retrieval' — retrieval mode "
+            "skips generation while the turn loop's terminal action IS generation."
+        )
+    if (
+        eff == "agentic"
+        and getattr(model, "fast_path", None) is True
+        and getattr(model, "max_agentic_rounds", None) is not None
+        and model.max_agentic_rounds > 1
+    ):
+        raise ValueError(
+            "fast_path forces a single agentic round; max_agentic_rounds>1 contradicts it."
+        )
+    return model
 
 
 class QueryRequest(BaseModel):
@@ -167,70 +247,22 @@ class QueryRequest(BaseModel):
             "``RAG_TURN_LOOP_ENABLED`` env default. See TURN_LOOP_DESIGN.md."
         ),
     )
+    retrieval_strategy: RetrievalStrategy = Field(
+        default="auto",
+        description=(
+            "Unified orchestrator selector (Phase 0b waypoint). ``auto`` (default) "
+            "resolves from the legacy booleans / config; ``linear`` forces the plain "
+            "pipeline; ``agentic`` / ``deep_research`` / ``tree`` / ``turn_loop`` each "
+            "select one orchestrator. Mutually exclusive by construction — replaces "
+            "the pairwise 'cannot both' validation. The legacy booleans remain "
+            "accepted and are mapped to/from this field; a future release collapses "
+            "this into an ``effort`` dial."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _validate_agentic_retrieval(self) -> "QueryRequest":
-        if self.agentic_retrieval is True:
-            if self.deep_research:
-                raise ValueError(
-                    "agentic_retrieval and deep_research cannot both be "
-                    "enabled — they are competing retrieval orchestrators that "
-                    "each replace the linear stages 2-5"
-                )
-            if self.tree_retrieval is True:
-                raise ValueError(
-                    "agentic_retrieval and tree_retrieval cannot both be "
-                    "forced on — the agentic loop replaces the linear "
-                    "hybrid-search stage that tree retrieval extends"
-                )
-            if self.turn_loop is True:
-                raise ValueError(
-                    "agentic_retrieval and turn_loop cannot both be forced on "
-                    "— the turn loop composes the agentic primitives under "
-                    "its own budget and must not run the standalone agentic "
-                    "loop alongside"
-                )
-            if (
-                self.fast_path is True
-                and self.max_agentic_rounds is not None
-                and self.max_agentic_rounds > 1
-            ):
-                raise ValueError(
-                    "fast_path forces a single agentic round; "
-                    "max_agentic_rounds>1 contradicts it"
-                )
-        return self
-
-    @model_validator(mode="after")
-    def _validate_turn_loop(self) -> "QueryRequest":
-        if self.turn_loop is True:
-            if self.deep_research:
-                raise ValueError(
-                    "turn_loop and deep_research cannot both be enabled — "
-                    "they are competing per-turn orchestrators; the turn loop "
-                    "owns query design and retrieval composition for the turn"
-                )
-            if self.agentic_retrieval is True:
-                raise ValueError(
-                    "turn_loop and agentic_retrieval cannot both be forced on "
-                    "— the turn loop composes the agentic primitives under "
-                    "its own budget and must not run the standalone agentic "
-                    "loop alongside"
-                )
-            if self.tree_retrieval is True:
-                raise ValueError(
-                    "turn_loop and tree_retrieval cannot both be forced on — "
-                    "the turn loop drives its own retrieve_ranked rounds and "
-                    "replaces the linear hybrid-search stage that tree "
-                    "retrieval extends"
-                )
-            if self.mode == "retrieval":
-                raise ValueError(
-                    "turn_loop cannot be combined with mode='retrieval' — "
-                    "retrieval mode skips generation entirely while the turn "
-                    "loop's terminal action IS generation"
-                )
-        return self
+    def _resolve_strategy(self) -> "QueryRequest":
+        return _resolve_retrieval_strategy(self)
 
     @model_validator(mode="after")
     def _validate_stage_budget_overrides(self) -> "QueryRequest":
@@ -355,6 +387,14 @@ class QueryResponse(BaseModel):
             "DR path (suggesting DR while DR is already on is meaningless)."
         ),
     )
+    suggested_questions: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Clickable 'you might also ask...' follow-up questions proposed after "
+            "the answer. Specific, in-corpus, grounded in the answer + retrieved "
+            "headings. None/empty when disabled or on any generation failure."
+        ),
+    )
     ask_user_reason: Optional[str] = Field(
         default=None,
         description=(
@@ -371,6 +411,18 @@ class QueryResponse(BaseModel):
             "True when the chain took a degraded fallback path (eg. BM25-only "
             "re-search after the primary hybrid call returned 0 hits) but "
             "still produced usable results."
+        ),
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description=(
+            "Free-form retrieval telemetry passed through from RAGResponse.metadata. "
+            "Carries the query-processing detail the UI surfaces: "
+            "metadata['agentic_retrieval'] (HyDE hypotheticals tried, per-round "
+            "hyde_rounds, rounds_run, hyde_failures, stop_reason, kept_count, LLM/"
+            "judge call counts) and metadata['deep_research'] (decomposition stats). "
+            "Empty on the linear (non-agentic, non-DR) path. Already present on the "
+            "stream path's 'retrieval' SSE event; this field exposes it on /query too."
         ),
     )
 
@@ -475,56 +527,19 @@ class ConsoleQueryRequest(BaseModel):
         ),
     )
 
-    @model_validator(mode="after")
-    def _validate_turn_loop(self) -> "ConsoleQueryRequest":
-        # Same mutual-exclusion contract as QueryRequest._validate_turn_loop
-        # (the console request is mapped 1:1 onto a QueryRequest) — rejecting
-        # here gives the console client a field-accurate 422.
-        if self.turn_loop is True:
-            if self.deep_research:
-                raise ValueError(
-                    "turn_loop and deep_research cannot both be enabled — "
-                    "they are competing per-turn orchestrators"
-                )
-            if self.agentic_retrieval is True:
-                raise ValueError(
-                    "turn_loop and agentic_retrieval cannot both be forced on"
-                )
-            if self.tree_retrieval is True:
-                raise ValueError(
-                    "turn_loop and tree_retrieval cannot both be forced on"
-                )
-            if self.mode == "retrieval":
-                raise ValueError(
-                    "turn_loop cannot be combined with mode='retrieval' — "
-                    "retrieval mode skips generation entirely while the turn "
-                    "loop's terminal action IS generation"
-                )
-        return self
+    retrieval_strategy: RetrievalStrategy = Field(
+        default="auto",
+        description=(
+            "Unified orchestrator selector (Phase 0b). Mirrors "
+            "QueryRequest.retrieval_strategy for CLI/UI parity. ``auto`` resolves "
+            "from the legacy booleans / config; ``linear`` forces the plain pipeline; "
+            "the rest select one orchestrator. Mutually exclusive by construction."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _validate_agentic_retrieval(self) -> "ConsoleQueryRequest":
-        if self.agentic_retrieval is True:
-            if self.deep_research:
-                raise ValueError(
-                    "agentic_retrieval and deep_research cannot both be "
-                    "enabled — they are competing retrieval orchestrators"
-                )
-            if self.tree_retrieval is True:
-                raise ValueError(
-                    "agentic_retrieval and tree_retrieval cannot both be "
-                    "forced on"
-                )
-            if (
-                self.fast_path is True
-                and self.max_agentic_rounds is not None
-                and self.max_agentic_rounds > 1
-            ):
-                raise ValueError(
-                    "fast_path forces a single agentic round; "
-                    "max_agentic_rounds>1 contradicts it"
-                )
-        return self
+    def _resolve_strategy(self) -> "ConsoleQueryRequest":
+        return _resolve_retrieval_strategy(self)
 
 
 # Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.

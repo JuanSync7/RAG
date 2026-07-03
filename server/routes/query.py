@@ -31,7 +31,9 @@ from config.settings import (
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
     RAG_MEMORY_TITLE_DERIVE_MAX_CHARS,
+    RAG_SUGGESTED_QUESTIONS_ENABLED,
 )
+from src.retrieval.pipeline.follow_up import generate_follow_ups_from_config
 from server.schemas import ApiErrorResponse, QueryRequest, QueryResponse
 from server.schemas import (
     ConversationCompactRequest,
@@ -149,6 +151,20 @@ def _decode_page_bbox(raw: Any) -> dict | None:
         except (KeyError, TypeError, ValueError):
             return None
     return None
+
+
+def _chunk_headings(chunks: list) -> list[str]:
+    """Section headings from stream-path chunk dicts — the in-corpus topics used to
+    ground follow-up-question suggestions. Prefers the heading_path breadcrumb."""
+    out: list[str] = []
+    for c in chunks:
+        meta = c.get("metadata", {}) if isinstance(c, dict) else {}
+        hp = meta.get("heading_path") or []
+        if isinstance(hp, list) and hp:
+            out.append(" > ".join(str(h) for h in hp if h))
+        elif meta.get("heading"):
+            out.append(str(meta.get("heading")))
+    return out
 
 
 def _source_refs(results: list) -> list[dict]:
@@ -1123,6 +1139,22 @@ def create_query_router(
                     yield _sse("error", {"message": f"Generation error: {exc}"})
 
                 gen_ms = (time.perf_counter() - gen_start) * 1000
+                # Suggested follow-up questions (advisory, fail-open). The answer
+                # has already fully streamed; these chips appear a moment later,
+                # grounded in the answer + retrieved section headings.
+                _assistant_text = "".join(generated_text_parts).strip()
+                suggested_questions: list[str] = []
+                if RAG_SUGGESTED_QUESTIONS_ENABLED and _assistant_text and not stream_error_message:
+                    try:
+                        from src.platform.llm import get_llm_provider
+                        suggested_questions = await generate_follow_ups_from_config(
+                            get_llm_provider(),
+                            question=request.query,
+                            answer=_assistant_text,
+                            headings=_chunk_headings(chunks),
+                        )
+                    except Exception as exc:  # noqa: BLE001 — advisory, never break the stream
+                        logger.warning("stream follow-up generation failed: %s", exc)
                 total_ms = (time.perf_counter() - start) * 1000
                 REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="200").inc()
                 REQUEST_LATENCY_MS.labels(endpoint="/query/stream", method="POST").observe(total_ms)
@@ -1139,6 +1171,7 @@ def create_query_router(
                         "timing_totals": stage_totals,
                         "conversation_id": conv.conversation_id,
                         "token_budget": _stream_token_budget,
+                        "suggested_questions": suggested_questions,
                     },
                 )
                 if request.memory_enabled and request.mode != "retrieval":

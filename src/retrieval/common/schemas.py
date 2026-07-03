@@ -129,6 +129,10 @@ class RAGResponse:
     # try Deep Research?". Populated only on the baseline path; absent (None)
     # when DR was already active. Shape: {"suggest": bool, "reason": str|None}.
     dr_suggestion: Optional[dict[str, Any]] = None
+    # Advisory clickable "you might also ask…" follow-up questions proposed after
+    # the answer (Gemini/Claude-style). In-corpus, grounded in the answer +
+    # retrieved headings. None/empty when disabled or on any generation failure.
+    suggested_questions: Optional[list[str]] = None
     # Typed reason carried whenever ``action == "ask_user"``. One of the
     # ``AskUserReason`` enum string values (sanitizer_reject, injection_blocked,
     # vague_query, budget_exhausted, no_results). Additive — the existing

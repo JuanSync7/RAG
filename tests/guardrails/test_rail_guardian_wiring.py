@@ -245,6 +245,24 @@ def test_faithfulness_falls_back_to_call_oneshot_when_no_guardian():
     assert result.overall_score == pytest.approx(0.9, abs=1e-3)
 
 
+def test_faithfulness_routes_self_check_to_configured_model_alias():
+    """The self-check LLM call runs on the checker's ``model_alias`` (the instruct
+    model by default) — the rail's system prompt is unchanged, only WHICH model
+    scores groundedness. Regression guard for the reasoning-vs-instruct routing."""
+    from src.guardrails.shared import FaithfulnessChecker
+
+    checker = FaithfulnessChecker(
+        threshold=0.5, action="flag", use_self_check=True, guardian=None,
+        model_alias="judge",
+    )
+    with patch("src.guardrails.shared.faithfulness.call_oneshot") as mock_call, \
+         patch.object(checker, "_score_claims", return_value=[]):
+        mock_call.return_value = "0.9"
+        checker.check("answer", ["context"])
+    assert mock_call.called
+    assert mock_call.call_args.kwargs.get("model_alias") == "judge"
+
+
 def test_faithfulness_falls_back_when_guardian_unavailable():
     """Guardian miss → fall through to call_oneshot self-check."""
     from src.guardrails.shared import FaithfulnessChecker

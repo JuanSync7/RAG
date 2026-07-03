@@ -306,6 +306,22 @@ def test_generate_hyde_parses_variant():
     assert v.search_terms == ["coherency", "snoop"]
 
 
+def test_generate_hyde_injects_domain_into_prompt():
+    """The corpus domain is rendered into the HyDE prompt so the controller
+    resolves domain-ambiguous acronyms in-corpus (fixes wrong-domain confabulation,
+    e.g. 'DFT' → Design-for-Test not Density Functional Theory)."""
+    provider = RoutingProvider(hyde={
+        "hypothetical_answer": "x", "search_terms": ["a"], "target_aspect": "t",
+    })
+    asyncio.run(generate_hyde(
+        provider, model_alias="controller", original_question="Describe the DFT flow.",
+        max_tokens=256, temperature=0.4, timeout_s=30,
+        domain="Silicon/SoC design: AMBA protocols, DFT (Design-for-Test), MBIST.",
+    ))
+    assert provider.hyde_prompts, "expected a HyDE prompt to be captured"
+    assert "Design-for-Test" in provider.hyde_prompts[0]  # domain reached the prompt
+
+
 def test_generate_hyde_fail_open_returns_none():
     for bad in ("{}", "", "garbage", {"hypothetical_answer": ""}):
         provider = RoutingProvider(hyde=bad)
@@ -464,6 +480,75 @@ def test_hyde_failure_is_counted_in_telemetry():
     assert result.telemetry()["hyde_failures"] == 1
     # The fallback still retrieved + kept (degraded, never worse than baseline).
     assert result.kept_count == 3
+
+
+def test_tried_hyde_texts_are_exported_in_telemetry():
+    """The actual per-round HyDE hypothetical texts are observable in telemetry —
+    a count alone can't distinguish an on-topic-but-weak HyDE from a strong one, so
+    validating/judging HyDE quality requires the generated text itself."""
+    async def retrieve(hyde_answer, search_terms):
+        return [_sr(i, f"body chunk {i}") for i in range(3)]
+
+    provider = RoutingProvider(
+        hyde={"hypothetical_answer": "ZHYDE answer text", "search_terms": ["zc"]},
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(3)],
+               "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1), final_top_k=3)
+    result = asyncio.run(orch.run())
+
+    tried = result.telemetry()["tried_hyde"]
+    assert isinstance(tried, list)
+    assert "ZHYDE answer text" in tried
+
+
+def test_hyde_rounds_export_full_variant_in_telemetry():
+    """The UI query-processing panel needs the FULL per-round HyDE variant — the
+    hypothetical answer PLUS the lexical anchor terms and target aspect — not just
+    the answer text. telemetry()['hyde_rounds'] carries that structured record."""
+    async def retrieve(hyde_answer, search_terms):
+        return [_sr(i, f"body chunk {i}") for i in range(3)]
+
+    provider = RoutingProvider(
+        hyde={"hypothetical_answer": "ZHYDE answer text",
+              "search_terms": ["zc", "zd"], "target_aspect": "the Z aspect"},
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(3)],
+               "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1), final_top_k=3)
+    result = asyncio.run(orch.run())
+
+    rounds = result.telemetry()["hyde_rounds"]
+    assert isinstance(rounds, list) and len(rounds) == 1
+    r = rounds[0]
+    assert r["round"] == 1
+    assert r["hypothetical_answer"] == "ZHYDE answer text"
+    assert r["search_terms"] == ["zc", "zd"]
+    assert r["target_aspect"] == "the Z aspect"
+    assert r["fell_back"] is False
+
+
+def test_hyde_rounds_mark_literal_fallback():
+    """When HyDE generation fails and the loop embeds the literal query, that
+    round's hyde_rounds record is flagged fell_back=True (the alarm the panel
+    surfaces) — parity with the hyde_failures counter."""
+    async def retrieve(hyde_answer, search_terms):
+        return [_sr(i, f"body chunk {i}") for i in range(3)]
+
+    provider = RoutingProvider(
+        hyde=None,  # controller returns nothing → literal-query fallback
+        judge={"chunks": [{"i": i, "relevance": 0.9, "faithfulness": 0.9, "keep": True}
+                          for i in range(3)],
+               "pool": {"sufficient": True, "confidence": 0.9}},
+    )
+    orch = _orch(provider, retrieve, budget=_budget(min_kept_chunks=1), final_top_k=3)
+    result = asyncio.run(orch.run())
+
+    tel = result.telemetry()
+    assert tel["hyde_failures"] == 1
+    assert tel["hyde_rounds"][0]["fell_back"] is True
 
 
 def test_single_round_drops_unfaithful_chunk():
