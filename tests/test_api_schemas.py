@@ -119,3 +119,51 @@ def test_console_query_request_accepts_long_query_up_to_cap():
 def test_console_query_request_rejects_query_over_cap():
     with pytest.raises(ValidationError):
         ConsoleQueryRequest(query="a" * (QUERY_MAX + 1))
+
+
+# ---------------------------------------------------------------------------
+# Turn-loop mutual exclusion (TURN_LOOP_DESIGN.md §5): a request may carry at
+# most ONE per-turn orchestrator; retrieval-only mode skips the generation the
+# loop's terminal action IS. Enforced identically on both request surfaces
+# (CLI/UI parity contract).
+# ---------------------------------------------------------------------------
+TURN_LOOP_COMPETING_FIELDS = [
+    {"deep_research": True},
+    {"agentic_retrieval": True},
+    {"tree_retrieval": True},
+    {"mode": "retrieval"},
+]
+
+
+@pytest.mark.parametrize("extra", TURN_LOOP_COMPETING_FIELDS)
+def test_query_request_rejects_turn_loop_with_competing_orchestrator(extra):
+    with pytest.raises(ValidationError):
+        QueryRequest(query="q", turn_loop=True, **extra)
+
+
+@pytest.mark.parametrize("extra", TURN_LOOP_COMPETING_FIELDS)
+def test_console_query_request_rejects_turn_loop_with_competing_orchestrator(extra):
+    """The console surface enforces the same contract as the API surface."""
+    with pytest.raises(ValidationError):
+        ConsoleQueryRequest(query="q", turn_loop=True, **extra)
+
+
+@pytest.mark.parametrize("extra", TURN_LOOP_COMPETING_FIELDS)
+def test_query_request_allows_competing_flag_when_turn_loop_not_forced(extra):
+    """turn_loop=None (config default) + an explicit competing flag is VALID
+    at the schema layer — the server-side resolver, not the validator, owns
+    that precedence (the env default yields to the explicit request)."""
+    req = QueryRequest(query="q", **extra)
+    assert req.turn_loop is None
+
+
+def test_query_request_rejects_turn_loop_off_conflicts_nowhere():
+    """turn_loop=False never conflicts (it forces the classic path)."""
+    req = QueryRequest(query="q", turn_loop=False, deep_research=True)
+    assert req.turn_loop is False
+
+
+def test_console_query_request_carries_turn_loop_override():
+    """Parity: the console request model exposes the same tri-state override."""
+    assert ConsoleQueryRequest(query="q").turn_loop is None
+    assert ConsoleQueryRequest(query="q", turn_loop=True).turn_loop is True

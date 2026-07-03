@@ -283,12 +283,17 @@ def test_source_refs_object_shaped_result_uses_attributes():
     assert refs[0]["text"] == "body"
 
 
-def test_source_refs_text_truncated_to_400_chars():
-    """The ref text is truncated to at most 400 characters."""
+def test_source_refs_text_passes_through_untruncated():
+    """The ref text passes through in full — no route-level truncation.
+
+    The 400-char cap was removed (8dfb367) so the citations panel gets the
+    complete grounding span; storage growth is controlled at the memory
+    boundary instead (``RAG_TURN_CONTEXT_PREVIEW_CHARS`` preview capping in
+    the memory provider, TURN_LOOP_DESIGN.md §7).
+    """
     long_text = "z" * 500
     refs = _source_refs([{"metadata": {}, "score": 0.0, "text": long_text}])
-    assert len(refs[0]["text"]) == 400
-    assert refs[0]["text"] == "z" * 400
+    assert refs[0]["text"] == long_text
 
 
 def test_source_refs_char_start_zero_is_included():

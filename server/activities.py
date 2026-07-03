@@ -1,7 +1,10 @@
 # @summary
-# Temporal activity that executes RAG queries against a preloaded RAGChain singleton.
+# Temporal activities that execute RAG work against a preloaded RAGChain singleton.
 # The singleton is initialized once by the worker at startup — not per request.
-# Exports: execute_rag_query, init_rag_chain, shutdown_rag_chain
+# execute_rag_query runs the full pipeline; retrieve_ranked is the turn-loop
+# retrieval primitive (embed -> hybrid search -> rerank -> thin/nav filter, no
+# LLM calls, idempotent under retries; TURN_LOOP_DESIGN.md §3).
+# Exports: execute_rag_query, retrieve_ranked, init_rag_chain, shutdown_rag_chain
 # Deps: temporalio, src.retrieval.pipeline.rag_chain, dataclasses
 # @end-summary
 """Temporal activities for the RAG query pipeline.
@@ -20,6 +23,7 @@ from typing import Optional
 from temporalio import activity
 from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
 from config.settings import RAG_AGENTIC_RETRIEVAL_ENABLED
+from config.settings import RAG_TURN_LOOP_RETRIEVE_TOP_K
 from src.platform.cache import get_cache
 from src.platform import (
     CACHE_HITS,
@@ -206,3 +210,73 @@ def execute_rag_query(request: dict) -> dict:
     if not _agentic_active:
         _cache.set(cache_key, result)
     return result
+
+
+def _require_opt_str(request: dict, key: str) -> Optional[str]:
+    """Read an optional string field from an activity request dict.
+
+    Returns ``None`` for absent/``None``/empty values; raises ``ValueError``
+    (non-retryable per the workflow retry policy) on any non-string type so a
+    malformed request fails fast instead of burning retry attempts.
+    """
+    value = request.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string or null")
+    return value.strip() or None
+
+
+@activity.defn
+def retrieve_ranked(request: dict) -> dict:
+    """Turn-loop retrieval primitive: embed -> hybrid search -> rerank.
+
+    Runs ``RAGChain.retrieve_primitive`` against the preloaded singleton
+    (same worker thread-pool model as ``execute_rag_query``). Contains **no
+    LLM calls** and no mutation, so it is idempotent and safe under Temporal
+    retries (TURN_LOOP_DESIGN.md §3). By loop-level rule it applies no
+    ``ignored_doc_ids`` suppression. Results are never cached: each call
+    belongs to a nondeterministic controller loop whose queries are
+    LLM-authored, so a result cache would only stale-serve.
+
+    Request:
+        ``{query_text, hyde_text?, top_k?, source_filter?, heading_filter?}``
+        — ``top_k`` defaults to ``RAG_TURN_LOOP_RETRIEVE_TOP_K``.
+
+    Returns:
+        ``{"chunks": [<EvidenceChunk-shaped dict>, ...],
+        "timings": {"total_ms": float}}``.
+
+    Raises:
+        ValueError: On a malformed request (non-retryable per the workflow
+            retry policy).
+    """
+    rag = get_rag_chain()
+
+    if not isinstance(request, dict):
+        raise ValueError("retrieve_ranked request must be a dict")
+    query_text = request.get("query_text")
+    if not isinstance(query_text, str) or not query_text.strip():
+        raise ValueError("query_text must be a non-empty string")
+    hyde_text = _require_opt_str(request, "hyde_text")
+    source_filter = _require_opt_str(request, "source_filter")
+    heading_filter = _require_opt_str(request, "heading_filter")
+    top_k = request.get("top_k", RAG_TURN_LOOP_RETRIEVE_TOP_K)
+    # bool is an int subclass — reject it explicitly before the int check.
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise ValueError("top_k must be a positive integer")
+
+    start = time.perf_counter()
+    chunks = rag.retrieve_primitive(
+        query_text.strip(),
+        hyde_text,
+        top_k=top_k,
+        source_filter=source_filter,
+        heading_filter=heading_filter,
+    )
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "retrieve_ranked complete in %.0fms — %d chunks (top_k=%d, hyde=%s)",
+        elapsed_ms, len(chunks), top_k, hyde_text is not None,
+    )
+    return {"chunks": chunks, "timings": {"total_ms": round(elapsed_ms, 1)}}

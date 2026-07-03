@@ -1,7 +1,10 @@
 // @summary
 // Query execution: SSE streaming + non-stream fallback. Owns sendQuery as the
 // canonical entry point for any plain-text user message; slash-command flows
-// reuse streamQuery/nonStreamQuery directly.
+// reuse streamQuery/nonStreamQuery directly. Turn-loop responses additionally
+// render a lazy collapsible ACTIVITY LOG (shared `activityLog.ts` renderer)
+// above the reasoning block, plus clickable clarify chips that resubmit their
+// text as the next query (TURN_LOOP_DESIGN.md §8).
 // @end-summary
 
 import { byId, escHtml, fmtTime } from "./dom";
@@ -15,7 +18,9 @@ import { buildCitationsHtml, buildSourcesLineHtml, revealCitations } from "./cit
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, getDeepResearch, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerDrSuggestionResubmit } from "./chatMode";
+import { getChatMode, getDeepResearch, getTurnLoop, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerQueryResubmit, resubmitQuery } from "./chatMode";
+import { createActivityLog, isTurnLoopEvent, renderClarifyChips } from "./activityLog";
+import type { ActivityLog } from "./activityLog";
 import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
@@ -27,9 +32,20 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
+    // Turn-level agentic loop per-request override (TURN_LOOP_DESIGN.md §8).
+    // Mirrors the deep_research pattern: only sent while the user toggle is
+    // on; absent ⇒ server config default (RAG_TURN_LOOP_ENABLED). Sources
+    // mode wins over the toggle (mode='retrieval' skips generation, which
+    // the loop cannot honor — the server validator rejects the combo).
+    const turnLoopActive = getTurnLoop() && getChatMode() !== "sources";
     // Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
-    // Only set on body when user has explicitly toggled it; absent ⇒ server uses config default.
-    if (s.tree_retrieval !== undefined) {
+    // Only set on body when user has explicitly toggled it; absent ⇒ server
+    // uses config default. Omitted while the turn loop is active: the loop
+    // replaces the linear hybrid-search stage tree retrieval extends, and
+    // the server validator hard-422s the combination. Any future competing
+    // per-request override (e.g. an agentic toggle) must be suppressed here
+    // the same way — a single query body must never carry two orchestrators.
+    if (s.tree_retrieval !== undefined && !turnLoopActive) {
         body.tree_retrieval = Boolean(s.tree_retrieval);
     }
     if (getChatMode() === "sources") {
@@ -39,8 +55,13 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         body.rerank_top_k = topK;
         body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
     }
+    // deep_research <-> turn_loop mutual exclusion is enforced in chatMode
+    // (the toggles reset each other), matching the request-schema validator.
     if (getDeepResearch()) {
         body.deep_research = true;
+    }
+    if (turnLoopActive) {
+        body.turn_loop = true;
     }
     return body;
 }
@@ -184,6 +205,18 @@ export async function streamQuery(queryText: string): Promise<void> {
     let reasoningText = "";
     let reasoningStartAt = 0;
 
+    // Turn-loop ACTIVITY LOG — a collapsible block rendered above the
+    // reasoning block, filled from the nine typed turn-loop SSE events
+    // (TURN_LOOP_DESIGN.md §8). Created lazily on the first activity event so
+    // non-loop turns are entirely unaffected; auto-collapsed when the first
+    // answer token arrives (still expandable afterwards). Held in a ref
+    // object (not a bare closure-mutated `let`) to sidestep the TS narrowing
+    // pitfall where such vars get inferred as `never` at read sites.
+    const activity: { current: ActivityLog | null } = { current: null };
+    // Question from a terminal `clarify` event — fallback bubble text when the
+    // chain does not also surface `clarification_message`.
+    let clarifyQuestion = "";
+
     clearLastTurnStats();
 
     let renderRaf = 0;
@@ -222,6 +255,21 @@ export async function streamQuery(queryText: string): Promise<void> {
         }
         return el.querySelector<HTMLElement>(".reasoning-body")!;
     };
+    // Returns this turn's activity log, lazily creating it on first use and
+    // inserting it into the bubble-wrap BEFORE the reasoning block (when the
+    // reasoning block does not exist yet, before the answer bubble — a later
+    // reasoning block inserts before the bubble too, i.e. below this log, so
+    // the order is always: activity log, thinking, answer).
+    const activityLog = (): ActivityLog => {
+        if (!activity.current) {
+            activity.current = createActivityLog();
+            const wrap = bubbleEl.parentElement;
+            const anchor = wrap?.querySelector<HTMLElement>(".reasoning-block") ?? bubbleEl;
+            wrap?.insertBefore(activity.current.root, anchor);
+        }
+        return activity.current;
+    };
+
     // Relabel the summary with the elapsed thinking time; collapse once the
     // answer begins (when there is no answer, leave it open so the user can read
     // what the model worked through).
@@ -264,6 +312,9 @@ export async function streamQuery(queryText: string): Promise<void> {
                         started = true;
                         firstTokenAt = performance.now();
                         finalizeReasoning(true);
+                        // The accepted answer replay has begun — collapse the
+                        // activity log (design §8; expandable afterwards).
+                        activity.current?.finalize(true);
                     }
                     lastTokenAt = performance.now();
                     tokenEventCount++;
@@ -322,6 +373,23 @@ export async function streamQuery(queryText: string): Promise<void> {
                             (data.ignored_doc_ids ?? []) as string[],
                         );
                     }
+                } else if (isTurnLoopEvent(evtType)) {
+                    // Typed turn-loop activity events (TURN_LOOP_DESIGN.md §8).
+                    // All event text is rendered via textContent inside the
+                    // shared activity-log module — never innerHTML — because
+                    // these strings carry LLM/document content.
+                    typingEl.style.display = "none";
+                    activityLog().handle(evtType, data);
+                    if (evtType === "clarify") {
+                        clarifyQuestion = String(data.question ?? "").trim() || clarifyQuestion;
+                        // Chips live OUTSIDE the collapsible log so they stay
+                        // clickable after it collapses; a click resubmits the
+                        // chip text as the next user query through the same
+                        // registered-resubmit mechanism as the DR chip.
+                        const chips = renderClarifyChips(data, resubmitQuery);
+                        if (chips) bubbleEl.parentElement?.insertBefore(chips, citationsEl);
+                    }
+                    scrollToBottom();
                 } else if (evtType === "error") {
                     errorShown = true;
                     cancelRender();
@@ -338,6 +406,10 @@ export async function streamQuery(queryText: string): Promise<void> {
                     // No answer followed the reasoning — leave it expanded so the
                     // user can still see what the model worked through.
                     if (!started) finalizeReasoning(false);
+                    // Same rule for the activity log: with no answer replay
+                    // (e.g. a terminal clarify) it stays open, relabeled with
+                    // its step count (already finalized+collapsed otherwise).
+                    if (!started) activity.current?.finalize(false);
 
                     if (data.token_budget) lastBudget = data.token_budget;
                     const completionTokens =
@@ -361,8 +433,13 @@ export async function streamQuery(queryText: string): Promise<void> {
                     typingEl.style.display = "none";
                     if (!errorShown) {
                         if (!started) {
+                            // Precedence: chain-level clarification_message,
+                            // then a turn-loop clarify question (the loop's
+                            // terminal CLARIFY may arrive only as its typed
+                            // event), then the generic fallback.
                             const msg =
                                 pendingClarification ||
+                                clarifyQuestion ||
                                 "I couldn't find relevant information for that query. " +
                                     "Could you rephrase your question or provide more details?";
                             bubbleEl.innerHTML = parseMarkdown(msg);
@@ -522,7 +599,9 @@ export async function sendQuery(text: string): Promise<void> {
     else await nonStreamQuery(text);
 }
 
-registerDrSuggestionResubmit(sendQuery);
+// One resubmit sink for every chip that re-sends text as a new user query
+// (DR suggestion chip + turn-loop clarify chips).
+registerQueryResubmit(sendQuery);
 
 interface DrSuggestionPayload {
     suggest?: boolean;

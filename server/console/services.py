@@ -280,6 +280,10 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
     standard ingest with no backfill), and fall back to ``MinioCleanStore`` for
     environments where lifecycle migration populated it instead.
 
+    The layout resolution itself lives in ``src.db.resolve_clean_document``
+    (shared with the turn loop's DEEP_STUDY fetch); this wrapper only keeps
+    the console's HTTP semantics — every failure mode maps to a 404.
+
     Returns:
         (markdown_text, metadata_dict)
 
@@ -288,9 +292,8 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
         from both layouts.
     """
     try:
-        from src.db import build_document_id, get_document
+        from src.db import build_document_id, resolve_clean_document
         from src.db.minio import create_client
-        from src.ingest.common.minio_clean_store import MinioCleanStore
         from config.settings import MINIO_BUCKET
     except Exception as exc:
         logger.warning("minio_clean_store_import_failed error=%s", exc)
@@ -299,25 +302,18 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
     try:
         client = create_client()
 
-        # Primary: the document store written by normal ingest (commit_node).
-        # ``get_document`` returns a ``StoredDocument`` dataclass (attribute
-        # access — NOT a dict), or ``None`` when the id is absent.
-        document_id = build_document_id(source_key)
-        doc = get_document(client, document_id, MINIO_BUCKET)
-        if doc is not None and getattr(doc, "content", None):
+        # Shared resolver: document store (commit_node layout) first, then the
+        # lifecycle-populated MinioCleanStore (clean/ prefix). Library
+        # semantics — returns a ``StoredDocument`` or None, never raises.
+        doc = resolve_clean_document(client, source_key=source_key, bucket=MINIO_BUCKET)
+        if doc is not None:
             return doc.content, dict(getattr(doc, "metadata", None) or {})
-
-        # Fallback: lifecycle-populated MinioCleanStore (clean/ prefix).
-        store = MinioCleanStore(client, MINIO_BUCKET)
-        if store.exists(source_key):
-            text, meta = store.read(source_key)
-            return text, meta
 
         raise HTTPException(
             status_code=404,
             detail=(
                 f"Clean document not found in MinIO "
-                f"(document_id={document_id}, source_key={source_key!r})"
+                f"(document_id={build_document_id(source_key)}, source_key={source_key!r})"
             ),
         )
     except HTTPException:

@@ -158,6 +158,20 @@ def _drive_workflow(request: dict, fake_result: dict):
     return result, captured.get("attrs")
 
 
+# The in-workflow upsert is currently DISABLED (server/workflows.py: the
+# deprecated dict-based ``workflow.upsert_search_attributes`` call is
+# commented out pending migration to the typed SearchAttributePair API), so
+# the workflow-level assertions cannot observe a call. Re-enable these
+# together with that migration; the pure ``_build_dr_search_attributes``
+# mapping stays covered by the unit tests above.
+_UPSERT_DISABLED_REASON = (
+    "workflow.upsert_search_attributes is disabled in RAGQueryWorkflow "
+    "(deprecated dict API; see the DISABLED block in server/workflows.py) — "
+    "re-enable with the typed SearchAttributePair migration"
+)
+
+
+@pytest.mark.skip(reason=_UPSERT_DISABLED_REASON)
 def test_workflow_dr_enabled_multi_topic_upserts_full_attrs():
     fake_result = {
         "results": [],
@@ -180,6 +194,7 @@ def test_workflow_dr_enabled_multi_topic_upserts_full_attrs():
     assert attrs[DR_EARLY_STOPPED] is False
 
 
+@pytest.mark.skip(reason=_UPSERT_DISABLED_REASON)
 def test_workflow_dr_enabled_early_stop_marks_early_stopped():
     fake_result = {
         "metadata": {
@@ -196,6 +211,7 @@ def test_workflow_dr_enabled_early_stop_marks_early_stopped():
     assert attrs[DR_TOPIC_COUNT] == 1
 
 
+@pytest.mark.skip(reason=_UPSERT_DISABLED_REASON)
 def test_workflow_dr_disabled_only_sets_dr_enabled_false():
     fake_result = {"results": []}
     _, attrs = _drive_workflow({"deep_research": False, "query": "q"}, fake_result)

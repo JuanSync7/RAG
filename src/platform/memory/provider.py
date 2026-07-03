@@ -1,18 +1,32 @@
 # @summary
-# Conversation memory providers (Redis canonical backend + no-op fallback) and singleton factory.
+# Conversation memory providers (Redis canonical backend + no-op fallback) and
+# singleton factory. Persists turn-loop context on turns (actions, chunk_refs,
+# answer_confidence, clarification) and meta (docs_studied ledger via
+# record_doc_studied), applies the RAG_TURN_CONTEXT_* preview growth control at
+# the write boundary, and assembles MemoryContext.structured for the turn loop.
 # Exports: ConversationMemoryProvider, NoopConversationMemory, RedisConversationMemory,
 #          get_conversation_memory, conversation_meta_to_dict, conversation_turns_to_dict
-# Deps: config.settings, json, logging, uuid, dataclasses, src.platform.memory.utils, src.platform.llm
+# Deps: config.settings, orjson, inspect, logging, uuid, dataclasses, src.platform.memory.utils, src.platform.llm
 # @end-summary
 """Conversation memory providers and factory.
 
 This module provides a Redis-backed conversation memory implementation plus a
 no-op fallback when memory is disabled or unavailable. It also exposes a
 process-wide singleton resolver for use by API and CLI surfaces.
+
+Turn-loop context transfer (design ``docs/retrieval/TURN_LOOP_DESIGN.md`` §7)
+is layered on the same records: ``append_turn`` accepts the typed turn-loop
+fields, ``record_doc_studied`` maintains the per-conversation deep-study
+ledger, and ``build_context`` returns a ``structured`` dict alongside the
+prose ``context_text``. All new fields are decode-tolerant so records written
+before the migration keep loading. Growth control is applied here — at the
+provider boundary — so every writer inherits the preview cap
+(``RAG_TURN_CONTEXT_STORE_FULL_TEXT`` / ``RAG_TURN_CONTEXT_PREVIEW_CHARS``).
 """
 
 from __future__ import annotations
 
+import inspect
 import orjson
 import logging
 import time
@@ -36,6 +50,9 @@ from config.settings import (
     RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS,
     RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS,
     RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS,
+    RAG_TURN_CONTEXT_MAX_CHUNK_REFS,
+    RAG_TURN_CONTEXT_PREVIEW_CHARS,
+    RAG_TURN_CONTEXT_STORE_FULL_TEXT,
 )
 from src.platform.memory.schemas import (
     ConversationMeta,
@@ -45,7 +62,10 @@ from src.platform.memory.schemas import (
 )
 from src.platform.memory.utils import (
     build_context_text,
+    build_structured_context,
     now_ms,
+    render_clarification_grounding,
+    render_docs_studied_grounding,
     sanitize_memory_text,
     summarize_heuristic,
     trim_turns_to_budget,
@@ -76,6 +96,88 @@ def _decode_id_list(raw: Any) -> list[str]:
 
 def _encode_id_list(values: list[str]) -> str:
     return orjson.dumps(list(values)).decode("utf-8")
+
+
+def _decode_dict_list(raw: Any) -> list[dict]:
+    """Parse a JSON-encoded list of dicts stored on the conversation meta hash.
+
+    Same tolerance posture as :func:`_decode_id_list`: missing / empty /
+    unparsable values (conversations created before the field existed) decode
+    to an empty list, and non-dict entries are dropped rather than raising.
+    """
+    if not raw:
+        return []
+    parsed: Any = raw
+    if not isinstance(raw, list):
+        try:
+            parsed = orjson.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _encode_json_list(values: list) -> str:
+    """Encode a list of JSON-serializable items for storage on the meta hash."""
+    return orjson.dumps(list(values)).decode("utf-8")
+
+
+def _dict_list(value: Any) -> list[dict]:
+    """Coerce an already-parsed JSON value to a list of dicts (tolerant).
+
+    Turn rows are stored as one JSON document, so per-field values arrive
+    parsed; records written before a field existed simply lack the key and
+    decode to an empty list here.
+    """
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _opt_float(value: Any) -> float | None:
+    """Coerce a parsed JSON value to float, or None when absent/invalid."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_dict(value: Any) -> dict | None:
+    """Coerce a parsed JSON value to a dict, or None when absent/invalid."""
+    return value if isinstance(value, dict) else None
+
+
+def _apply_preview_cap(refs: list | None, text_field: str) -> list[dict]:
+    """Apply the turn-context growth control to a list of reference dicts.
+
+    This is the single write-boundary choke point (design §7): every writer —
+    the query route's ``_source_refs``, the turn loop's chunk refs — inherits
+    the cap because it runs inside ``append_turn``. When
+    ``RAG_TURN_CONTEXT_STORE_FULL_TEXT`` is false (default) the named text
+    field of each ref is truncated to ``RAG_TURN_CONTEXT_PREVIEW_CHARS``
+    (full text stays recoverable by chunk id); when true the refs are stored
+    unchanged (debugging escape hatch; unbounded Redis growth).
+
+    Args:
+        refs: Reference dicts to persist (non-dict entries are dropped).
+        text_field: Which field carries the cappable text (``"text"`` for
+            source refs, ``"preview"`` for chunk refs).
+
+    Returns:
+        The list to persist, preview-capped unless full-text storage is on.
+    """
+    capped: list[dict] = []
+    for ref in refs or []:
+        if not isinstance(ref, dict):
+            continue
+        if not RAG_TURN_CONTEXT_STORE_FULL_TEXT:
+            text = ref.get(text_field)
+            if isinstance(text, str) and len(text) > RAG_TURN_CONTEXT_PREVIEW_CHARS:
+                ref = dict(ref)
+                ref[text_field] = text[:RAG_TURN_CONTEXT_PREVIEW_CHARS]
+        capped.append(ref)
+    return capped
 
 
 class ConversationMemoryProvider:
@@ -159,6 +261,10 @@ class ConversationMemoryProvider:
         content: str,
         query_id: str = "",
         sources: list | None = None,
+        actions: list | None = None,
+        chunk_refs: list | None = None,
+        answer_confidence: float | None = None,
+        clarification: dict | None = None,
     ) -> None:
         """Append a single turn to a conversation.
 
@@ -170,6 +276,45 @@ class ConversationMemoryProvider:
             role: Turn role ("user", "assistant", "system").
             content: Turn text content.
             query_id: Optional query/request id for traceability.
+            sources: Optional source references (``_source_refs`` shape);
+                their ``text`` field is preview-capped at this boundary.
+            actions: Optional turn-loop action records
+                (``{action, reason, ms, llm_calls}`` dicts).
+            chunk_refs: Optional served-chunk references (ChunkRef dicts);
+                their ``preview`` field is preview-capped at this boundary.
+            answer_confidence: Optional turn-loop answer-gate composite score.
+            clarification: Optional ``{question, hints, scoping_questions}``
+                payload when an assistant turn ended ``ask_user``.
+        """
+        raise NotImplementedError
+
+    def record_doc_studied(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        entry: dict,
+    ) -> ConversationMeta:
+        """Append one deep-study ledger entry to the conversation meta.
+
+        The ledger (``docs_studied``) records which documents the turn loop
+        deep-studied and what it concluded, so later turns can deepen instead
+        of re-reading. Stored with the same JSON-list meta pattern as
+        ``relevant_doc_ids``/``ignored_doc_ids`` and capped (newest kept) at
+        ``RAG_TURN_CONTEXT_MAX_CHUNK_REFS``.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Conversation identifier.
+            entry: Ledger entry dict (``{document_id, windows_read, sections,
+                conclusion, ts}``); ``ts`` is stamped here when absent.
+
+        Returns:
+            The updated conversation metadata.
         """
         raise NotImplementedError
 
@@ -368,8 +513,28 @@ class NoopConversationMemory(ConversationMemoryProvider):
         content: str,
         query_id: str = "",
         sources: list | None = None,
+        actions: list | None = None,
+        chunk_refs: list | None = None,
+        answer_confidence: float | None = None,
+        clarification: dict | None = None,
     ) -> None:
         return
+
+    def record_doc_studied(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        entry: dict,
+    ) -> ConversationMeta:
+        return ConversationMeta(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id or "",
+        )
 
     def build_context(
         self,
@@ -575,6 +740,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
             summary=summary,
             relevant_doc_ids=_decode_id_list(raw.get("relevant_doc_ids")),
             ignored_doc_ids=_decode_id_list(raw.get("ignored_doc_ids")),
+            docs_studied=_decode_dict_list(raw.get("docs_studied")),
         )
 
     def ensure_conversation(
@@ -606,6 +772,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
             "summary_turns_compacted": 0,
             "relevant_doc_ids": _encode_id_list([]),
             "ignored_doc_ids": _encode_id_list([]),
+            "docs_studied": _encode_json_list([]),
         }
         self._client.hset(meta_key, mapping=payload)
         self._client.zadd(self._index_key(scope), {cid: now})
@@ -652,6 +819,14 @@ class RedisConversationMemory(ConversationMemoryProvider):
                         timestamp_ms=int(payload.get("timestamp_ms", 0)),
                         query_id=str(payload.get("query_id", "")),
                         sources=payload.get("sources") or [],
+                        # Turn-loop fields: tolerant defaults so rows written
+                        # before the migration load unchanged (design §7).
+                        actions=_dict_list(payload.get("actions")),
+                        chunk_refs=_dict_list(payload.get("chunk_refs")),
+                        answer_confidence=_opt_float(
+                            payload.get("answer_confidence")
+                        ),
+                        clarification=_opt_dict(payload.get("clarification")),
                     )
                 )
             except Exception:
@@ -673,8 +848,17 @@ class RedisConversationMemory(ConversationMemoryProvider):
         content: str,
         query_id: str = "",
         sources: list | None = None,
+        actions: list | None = None,
+        chunk_refs: list | None = None,
+        answer_confidence: float | None = None,
+        clarification: dict | None = None,
     ) -> None:
-        if not content.strip() and not (sources or []):
+        if (
+            not content.strip()
+            and not (sources or [])
+            and not (chunk_refs or [])
+            and clarification is None
+        ):
             return
         meta = self.ensure_conversation(
             tenant_id=tenant_id,
@@ -694,7 +878,13 @@ class RedisConversationMemory(ConversationMemoryProvider):
             ),
             "timestamp_ms": now,
             "query_id": query_id,
-            "sources": sources or [],
+            # Growth control at the ONE write boundary so every writer
+            # inherits the preview cap (design §7; 8dfb367 regression fix).
+            "sources": _apply_preview_cap(sources, "text"),
+            "actions": _dict_list(actions),
+            "chunk_refs": _apply_preview_cap(chunk_refs, "preview"),
+            "answer_confidence": _opt_float(answer_confidence),
+            "clarification": _opt_dict(clarification),
         }
         self._client.rpush(key, orjson.dumps(row))
         self._client.hset(
@@ -705,6 +895,41 @@ class RedisConversationMemory(ConversationMemoryProvider):
             },
         )
         self._client.zadd(self._index_key(scope), {meta.conversation_id: now})
+
+    def record_doc_studied(
+        self,
+        *,
+        tenant_id: str,
+        subject: str,
+        project_id: str | None,
+        conversation_id: str,
+        entry: dict,
+    ) -> ConversationMeta:
+        meta = self.ensure_conversation(
+            tenant_id=tenant_id,
+            subject=subject,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        if not isinstance(entry, dict) or not str(entry.get("document_id") or "").strip():
+            return meta
+        scope = self._scope(tenant_id, subject, project_id)
+        meta_key = self._meta_key(scope, meta.conversation_id)
+        ledger = _decode_dict_list(self._client.hgetall(meta_key).get("docs_studied"))
+        stamped = dict(entry)
+        stamped.setdefault("ts", self._now())
+        ledger.append(stamped)
+        # Same cap convention as the chunk-ref context budget: newest kept.
+        ledger = ledger[-RAG_TURN_CONTEXT_MAX_CHUNK_REFS:]
+        self._client.hset(
+            meta_key,
+            mapping={
+                "docs_studied": _encode_json_list(ledger),
+                "updated_at_ms": self._now(),
+            },
+        )
+        meta.docs_studied = ledger
+        return meta
 
     def build_context(
         self,
@@ -731,22 +956,62 @@ class RedisConversationMemory(ConversationMemoryProvider):
             max_tokens_estimate=MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE,
         )
         context_text = build_context_text(summary_text, recent)
+        # Structured sibling of the prose context (design §7). Built over the
+        # full fetched window — not the token-trimmed prose window — so chunk
+        # refs and a pending clarification are never lost to prose trimming.
+        structured = build_structured_context(
+            summary_text,
+            turns,
+            _decode_dict_list(meta_raw.get("docs_studied")) if meta_raw else [],
+            max_recent_pairs=turn_window or MEMORY_MAX_RECENT_TURNS,
+            max_chunk_refs=RAG_TURN_CONTEXT_MAX_CHUNK_REFS,
+            preview_chars=RAG_TURN_CONTEXT_PREVIEW_CHARS,
+        )
         return MemoryContext(
             conversation_id=conversation_id,
             summary_text=summary_text,
             recent_turns=recent,
             context_text=context_text,
+            structured=structured,
         )
 
-    def _llm_summarize(self, turns: list[ConversationTurn], existing_summary: str) -> str:
-        """Summarize turns using the configured LLM, with heuristic fallback."""
+    def _llm_summarize(
+        self,
+        turns: list[ConversationTurn],
+        existing_summary: str,
+        docs_studied: list[dict] | None = None,
+    ) -> str:
+        """Summarize turns using the configured LLM, with heuristic fallback.
+
+        The input assembly includes the structured turn-loop grounding
+        (design §7): the docs-studied ledger and any clarifications asked on
+        the turns being compacted, so the rolling summary keeps the anchors
+        later turns deepen into and the meaning of short user replies.
+
+        Args:
+            turns: Turns to compact, oldest-to-newest.
+            existing_summary: The current rolling summary (may be empty).
+            docs_studied: Deep-study ledger entries from the conversation
+                meta (optional so pre-migration callers keep working).
+
+        Returns:
+            The new rolling summary text.
+        """
         if not turns:
             return existing_summary
         context_parts: list[str] = []
         if existing_summary:
             context_parts.append("Existing summary:\n" + existing_summary)
+        docs_grounding = render_docs_studied_grounding(docs_studied or [])
+        if docs_grounding:
+            context_parts.append(docs_grounding)
         for turn in turns[-MEMORY_SUMMARY_MAX_SOURCE_TURNS :]:
             context_parts.append(f"{turn.role.upper()}: {turn.content}")
+            clarify_grounding = render_clarification_grounding(
+                getattr(turn, "clarification", None)
+            )
+            if clarify_grounding:
+                context_parts.append(clarify_grounding)
         messages = [
             {
                 "role": "system",
@@ -767,6 +1032,32 @@ class RedisConversationMemory(ConversationMemoryProvider):
         except Exception:
             logger.debug("LLM summarization failed, using heuristic", exc_info=True)
         return summarize_heuristic(turns)
+
+    def _summarize_with_grounding(
+        self,
+        turns: list[ConversationTurn],
+        existing_summary: str,
+        docs_studied: list[dict],
+    ) -> str:
+        """Dispatch to ``_llm_summarize``, tolerating pre-migration overrides.
+
+        ``_llm_summarize`` is a documented override/stub seam (tests and
+        subclasses replace it with two-argument callables written before the
+        ``docs_studied`` parameter existed). Inspect the bound callable and
+        only pass the structured grounding when it is accepted — the same
+        tolerance posture as :func:`_decode_id_list` applies to data.
+        """
+        summarize = self._llm_summarize
+        try:
+            params = inspect.signature(summarize).parameters
+        except (TypeError, ValueError):
+            params = {}
+        accepts_grounding = "docs_studied" in params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+        if accepts_grounding:
+            return summarize(turns, existing_summary, docs_studied=docs_studied)
+        return summarize(turns, existing_summary)
 
     def compact_if_needed(
         self,
@@ -796,7 +1087,11 @@ class RedisConversationMemory(ConversationMemoryProvider):
             conversation_id=conversation_id,
             limit=max(MEMORY_SUMMARY_MAX_SOURCE_TURNS, count),
         )
-        summary_text = self._llm_summarize(turns, str(raw.get("summary_text", "")))
+        summary_text = self._summarize_with_grounding(
+            turns,
+            str(raw.get("summary_text", "")),
+            _decode_dict_list(raw.get("docs_studied")),
+        )
         now = self._now()
         turns_compacted = len(turns)
         self._client.hset(
@@ -1087,9 +1382,29 @@ def conversation_meta_to_dict(meta: ConversationMeta) -> dict[str, Any]:
     return payload
 
 
+# Turn-loop extension fields (design §7) omitted from serialized turns when
+# empty/None so pre-loop consumers (workflow payloads, history endpoints) keep
+# receiving the legacy turn shape byte-identically; loop turns carry them.
+_OPTIONAL_TURN_FIELDS = ("actions", "chunk_refs", "answer_confidence", "clarification")
+
+
 def conversation_turns_to_dict(turns: list[ConversationTurn]) -> list[dict[str, Any]]:
-    """Convert conversation turns to JSON-serializable dicts."""
-    return [asdict(turn) for turn in turns]
+    """Convert conversation turns to JSON-serializable dicts.
+
+    The turn-loop extension fields (``actions`` / ``chunk_refs`` /
+    ``answer_confidence`` / ``clarification``) are additive and default-empty;
+    they are dropped from the dict when unpopulated so non-loop turns
+    serialize exactly as before the extension (tolerant decoders on the read
+    side treat absent and empty identically).
+    """
+    payloads: list[dict[str, Any]] = []
+    for turn in turns:
+        payload = asdict(turn)
+        for key in _OPTIONAL_TURN_FIELDS:
+            if payload.get(key) is None or payload.get(key) == []:
+                payload.pop(key, None)
+        payloads.append(payload)
+    return payloads
 
 
 __all__ = [

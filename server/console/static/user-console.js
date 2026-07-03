@@ -276,6 +276,7 @@ async function api(method, path, body) {
 var STORAGE_KEY = "rw_chat_mode";
 var SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
 var DEEP_RESEARCH_STORAGE_KEY = "rw_deep_research";
+var TURN_LOOP_STORAGE_KEY = "rw_turn_loop";
 var RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
 var TOPK_STORAGE_KEY = "rw_sources_top_k";
 var DEFAULT_TOPK = 5;
@@ -318,6 +319,7 @@ function getDeepResearch() {
 function setDeepResearch(enabled) {
   _deepResearch = enabled;
   localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY, enabled ? "1" : "0");
+  if (enabled && _turnLoop) setTurnLoop(false);
   syncDeepResearchUI();
 }
 function syncDeepResearchUI() {
@@ -327,10 +329,31 @@ function syncDeepResearchUI() {
     btn.classList.toggle("active", _deepResearch);
   }
 }
+var _turnLoop = localStorage.getItem(TURN_LOOP_STORAGE_KEY) === "1";
+function getTurnLoop() {
+  return _turnLoop;
+}
+function setTurnLoop(enabled) {
+  _turnLoop = enabled;
+  localStorage.setItem(TURN_LOOP_STORAGE_KEY, enabled ? "1" : "0");
+  if (enabled && _deepResearch) setDeepResearch(false);
+  syncTurnLoopUI();
+}
+function syncTurnLoopUI() {
+  const btn = document.getElementById("chatTurnLoop");
+  if (btn) {
+    btn.setAttribute("aria-pressed", _turnLoop ? "true" : "false");
+    btn.classList.toggle("active", _turnLoop);
+  }
+}
 var _lastSuggestedQuery = "";
 var _resubmit = null;
-function registerDrSuggestionResubmit(fn) {
+function registerQueryResubmit(fn) {
   _resubmit = fn;
+}
+function resubmitQuery(text) {
+  const q = text.trim();
+  if (q && _resubmit) void _resubmit(q);
 }
 function showDrSuggestionChip(forQuery) {
   if (_deepResearch) return;
@@ -351,7 +374,7 @@ function initDrSuggestionChip() {
     const q = _lastSuggestedQuery.trim();
     hideDrSuggestionChip();
     setDeepResearch(true);
-    if (q && _resubmit) void _resubmit(q);
+    resubmitQuery(q);
   });
 }
 function syncSubmodeUI() {
@@ -421,12 +444,17 @@ function initChatMode() {
   if (drBtn) {
     drBtn.addEventListener("click", () => setDeepResearch(!_deepResearch));
   }
+  const tlBtn = document.getElementById("chatTurnLoop");
+  if (tlBtn) {
+    tlBtn.addEventListener("click", () => setTurnLoop(!_turnLoop));
+  }
   initDrSuggestionChip();
   initRailCollapse();
   initTopKInput();
   syncToggleUI();
   syncSubmodeUI();
   syncDeepResearchUI();
+  syncTurnLoopUI();
   applyModeToView();
   renderRail();
   document.addEventListener("conversation-changed", () => {
@@ -1350,11 +1378,15 @@ function appendUserMsg(text) {
           <div class="bubble-wrap">
             <div class="bubble">${escHtml(text)}</div>
             <div class="msg-actions">
-              <button class="msg-action-btn" onclick="copyMsg(this,'${escHtml(text)}')" >&#128203; Copy</button>
+              <button class="msg-action-btn">&#128203; Copy</button>
             </div>
             <div class="msg-meta">${ts}</div>
           </div>
         </div>`;
+  const copyBtn = group.querySelector(".msg-action-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => copyMsg(copyBtn, text));
+  }
   refs.thread.appendChild(group);
   scrollToBottom();
   return group;
@@ -1400,17 +1432,17 @@ function appendPendingAssistant() {
   return { group, bubbleEl, typingEl, citationsEl, actionsEl, metaEl, fbUpBtn, fbDownBtn };
 }
 function appendSystemMsg(text) {
-  const div = document.createElement("div");
-  div.className = "msg-group";
-  div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${parseMarkdown(text)}</div></div></div>`;
-  refs.thread.appendChild(div);
+  const div2 = document.createElement("div");
+  div2.className = "msg-group";
+  div2.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${parseMarkdown(text)}</div></div></div>`;
+  refs.thread.appendChild(div2);
   scrollToBottom();
 }
 function appendErrorMsg(text) {
-  const div = document.createElement("div");
-  div.className = "msg-group";
-  div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">!</div><div class="bubble-wrap"><div class="bubble error-bubble">&#9888; ${escHtml(text)}</div></div></div>`;
-  refs.thread.appendChild(div);
+  const div2 = document.createElement("div");
+  div2.className = "msg-group";
+  div2.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">!</div><div class="bubble-wrap"><div class="bubble error-bubble">&#9888; ${escHtml(text)}</div></div></div>`;
+  refs.thread.appendChild(div2);
   scrollToBottom();
 }
 
@@ -1792,6 +1824,223 @@ function attachFeedback(upBtn, downBtn, ctx) {
   downBtn.addEventListener("click", onClick("down"));
 }
 
+// src/activityLog.ts
+var TURN_LOOP_EVENT_NAMES = /* @__PURE__ */ new Set([
+  "turn_action",
+  "hyde_query",
+  "retrieve_result",
+  "judge_verdict",
+  "deep_study",
+  "llm_call",
+  "draft",
+  "gate",
+  "clarify"
+]);
+function isTurnLoopEvent(eventType) {
+  return TURN_LOOP_EVENT_NAMES.has(eventType);
+}
+var HYDE_OPEN_MAX_CHARS = 280;
+function asStr(value) {
+  if (value === null || value === void 0) return "";
+  return typeof value === "string" ? value : String(value);
+}
+function asNum(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function asStrList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(asStr).filter((s) => s.trim().length > 0);
+}
+function fmtScore(value) {
+  const n = asNum(value);
+  return n === null ? "?" : n.toFixed(2);
+}
+function div(className, text) {
+  const el = document.createElement("div");
+  el.className = className;
+  if (text !== void 0) el.textContent = text;
+  return el;
+}
+function createActivityLog() {
+  const root = document.createElement("details");
+  root.className = "activity-log";
+  root.open = true;
+  const summary = document.createElement("summary");
+  summary.className = "activity-summary";
+  summary.textContent = "Activity\u2026";
+  root.appendChild(summary);
+  const body = div("activity-body");
+  root.appendChild(body);
+  const startedAt = performance.now();
+  let events = 0;
+  let draftAttempt = null;
+  let draftText = "";
+  let draftLabelEl = null;
+  let draftTextEl = null;
+  const addLine = (className, text) => {
+    const el = div(className, text);
+    body.appendChild(el);
+    return el;
+  };
+  const renderTurnAction = (data) => {
+    const index = asNum(data.index);
+    const action = asStr(data.action).trim() || "?";
+    const reason = asStr(data.reason).trim();
+    const conf = asNum(data.confidence);
+    let text = `${index === null ? "#?" : `#${index}`} ${action}`;
+    if (reason) text += ` \u2014 ${reason}`;
+    if (conf !== null) text += ` \xB7 conf ${fmtScore(conf)}`;
+    addLine("activity-line activity-action", text);
+  };
+  const renderHydeQuery = (data) => {
+    const hypothetical = asStr(data.hypothetical_answer);
+    const round = asNum(data.round);
+    const aspect = asStr(data.target_aspect).trim();
+    const block = document.createElement("details");
+    block.className = "activity-hyde";
+    block.open = hypothetical.length <= HYDE_OPEN_MAX_CHARS;
+    const label = document.createElement("summary");
+    label.className = "activity-hyde-summary";
+    label.textContent = `HyDE hypothetical${round === null ? "" : ` \u2014 round ${round}`}` + (aspect ? ` \xB7 aspect: ${aspect}` : "");
+    block.appendChild(label);
+    block.appendChild(div("activity-hyde-text", hypothetical));
+    const terms = asStrList(data.search_terms);
+    if (terms.length) {
+      block.appendChild(div("activity-line dim", `search terms: ${terms.join(", ")}`));
+    }
+    body.appendChild(block);
+  };
+  const renderRetrieveResult = (data) => {
+    const added = asNum(data.added) ?? 0;
+    const dup = asNum(data.dup);
+    const pool = asNum(data.pool_size);
+    let text = `+${added} new`;
+    if (pool !== null) text += ` (pool ${pool})`;
+    if (dup !== null && dup > 0) text += `, ${dup} dup`;
+    const top = Array.isArray(data.top) ? data.top[0] : void 0;
+    if (top && typeof top === "object") {
+      const doc = asStr(top.doc).trim();
+      const heading = asStr(top.heading).trim();
+      if (doc || heading) {
+        text += `: ${doc}${doc && heading ? " \u203A " : ""}${heading}`;
+      }
+    }
+    addLine("activity-line activity-retrieve", text);
+  };
+  const renderJudgeVerdict = (data) => {
+    const kept = asNum(data.kept);
+    const conf = asNum(data.confidence);
+    const sufficient = data.sufficient === true;
+    let text = `judge: kept ${kept === null ? "?" : kept}`;
+    if (conf !== null) text += ` \xB7 confidence ${fmtScore(conf)}`;
+    text += ` \xB7 ${sufficient ? "sufficient" : "insufficient"}`;
+    addLine("activity-line activity-judge", text);
+    const rawMissing = data.missing_information;
+    const missing = Array.isArray(rawMissing) ? asStrList(rawMissing).join("; ") : asStr(rawMissing).trim();
+    if (missing) {
+      addLine("activity-line dim", `missing: ${missing}`);
+    }
+  };
+  const renderDeepStudy = (data) => {
+    const title = asStr(data.title).trim() || asStr(data.document_id).trim() || "document";
+    const win = asNum(data.window);
+    const of = asNum(data.of_windows);
+    let text = `reading ${title}`;
+    if (win !== null) text += ` \u2014 window ${win}${of === null ? "" : `/${of}`}`;
+    addLine("activity-line activity-study", text);
+    const notes = asStr(data.notes_preview).trim();
+    if (notes) addLine("activity-line dim", notes);
+  };
+  const renderLlmCall = (data) => {
+    const alias = asStr(data.alias).trim() || "llm";
+    const purpose = asStr(data.purpose).trim();
+    const ms = asNum(data.ms);
+    const tokens = (asNum(data.prompt_tokens) ?? 0) + (asNum(data.completion_tokens) ?? 0);
+    let text = alias;
+    if (purpose && purpose !== alias) text += ` \xB7 ${purpose}`;
+    if (ms !== null) text += ` ${(ms / 1e3).toFixed(1)}s`;
+    if (tokens > 0) text += ` ${tokens}tok`;
+    addLine("activity-line activity-llm dim", text);
+  };
+  const renderDraft = (data) => {
+    const attempt = asNum(data.attempt);
+    if (!draftTextEl || attempt !== null && attempt !== draftAttempt) {
+      draftAttempt = attempt;
+      draftText = "";
+      if (!draftTextEl) {
+        const wrap = div("activity-draft");
+        draftLabelEl = div("activity-draft-label");
+        draftTextEl = div("activity-draft-text");
+        wrap.appendChild(draftLabelEl);
+        wrap.appendChild(draftTextEl);
+        body.appendChild(wrap);
+      }
+    }
+    if (draftLabelEl) {
+      draftLabelEl.textContent = draftAttempt === null ? "Draft" : `Draft \u2014 attempt ${draftAttempt}`;
+    }
+    draftText += asStr(data.text_delta);
+    draftTextEl.textContent = draftText;
+  };
+  const renderGate = (data) => {
+    const attempt = asNum(data.attempt);
+    const passed = data.passed === true;
+    const weakest = asStr(data.weakest).trim();
+    let text = `gate${attempt === null ? "" : ` \u2014 attempt ${attempt}`}: `;
+    text += passed ? "PASS" : "FAIL";
+    text += ` (${fmtScore(data.score)} vs threshold ${fmtScore(data.threshold)})`;
+    if (weakest) text += ` \xB7 weakest: ${weakest}`;
+    addLine(`activity-line activity-gate ${passed ? "pass" : "fail"}`, text);
+  };
+  const renderClarify = (data) => {
+    const question = asStr(data.question).trim();
+    addLine("activity-line activity-clarify", `clarify${question ? `: ${question}` : ""}`);
+  };
+  const handle = (type, data) => {
+    if (!isTurnLoopEvent(type)) return;
+    events += 1;
+    if (type === "turn_action") renderTurnAction(data);
+    else if (type === "hyde_query") renderHydeQuery(data);
+    else if (type === "retrieve_result") renderRetrieveResult(data);
+    else if (type === "judge_verdict") renderJudgeVerdict(data);
+    else if (type === "deep_study") renderDeepStudy(data);
+    else if (type === "llm_call") renderLlmCall(data);
+    else if (type === "draft") renderDraft(data);
+    else if (type === "gate") renderGate(data);
+    else renderClarify(data);
+  };
+  const finalize = (collapse) => {
+    const secs = (performance.now() - startedAt) / 1e3;
+    summary.textContent = `Activity \u2014 ${events} step${events === 1 ? "" : "s"}` + (secs > 0.05 ? ` (${secs.toFixed(1)}s)` : "");
+    if (collapse) root.open = false;
+  };
+  return { root, handle, finalize, eventCount: () => events };
+}
+function renderClarifyChips(data, onResubmit) {
+  const payload = data;
+  const question = asStr(payload.question).trim();
+  const hints = asStrList(payload.hints);
+  const scoping = asStrList(payload.scoping_questions);
+  if (!question && !hints.length && !scoping.length) return null;
+  const wrap = div("clarify-chips");
+  if (question) wrap.appendChild(div("clarify-question", question));
+  const addChip2 = (text, extraClass) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `clarify-chip ${extraClass}`.trim();
+    chip.textContent = text;
+    chip.title = "Send this as your reply";
+    chip.addEventListener("click", () => {
+      void onResubmit(text);
+    });
+    wrap.appendChild(chip);
+  };
+  hints.forEach((hint) => addChip2(hint, "clarify-chip-hint"));
+  scoping.forEach((q) => addChip2(q, "clarify-chip-scope"));
+  return wrap;
+}
+
 // src/streaming.ts
 function buildQueryBody(queryText) {
   const s = getSettings();
@@ -1802,7 +2051,8 @@ function buildQueryBody(queryText) {
     memory_enabled: s.memory_enabled !== false,
     conversation_id: state.activeConversationId ?? void 0
   };
-  if (s.tree_retrieval !== void 0) {
+  const turnLoopActive = getTurnLoop() && getChatMode() !== "sources";
+  if (s.tree_retrieval !== void 0 && !turnLoopActive) {
     body.tree_retrieval = Boolean(s.tree_retrieval);
   }
   if (getChatMode() === "sources") {
@@ -1814,6 +2064,9 @@ function buildQueryBody(queryText) {
   }
   if (getDeepResearch()) {
     body.deep_research = true;
+  }
+  if (turnLoopActive) {
+    body.turn_loop = true;
   }
   return body;
 }
@@ -1931,6 +2184,8 @@ async function streamQuery(queryText) {
   let lastResults = [];
   let reasoningText = "";
   let reasoningStartAt = 0;
+  const activity = { current: null };
+  let clarifyQuestion = "";
   clearLastTurnStats();
   let renderRaf = 0;
   const flushRender = () => {
@@ -1959,6 +2214,15 @@ async function streamQuery(queryText) {
       reasoningStartAt = performance.now();
     }
     return el.querySelector(".reasoning-body");
+  };
+  const activityLog = () => {
+    if (!activity.current) {
+      activity.current = createActivityLog();
+      const wrap = bubbleEl.parentElement;
+      const anchor = wrap?.querySelector(".reasoning-block") ?? bubbleEl;
+      wrap?.insertBefore(activity.current.root, anchor);
+    }
+    return activity.current;
   };
   const finalizeReasoning = (collapse) => {
     const el = bubbleEl.parentElement?.querySelector(".reasoning-block");
@@ -1995,6 +2259,7 @@ async function streamQuery(queryText) {
             started = true;
             firstTokenAt = performance.now();
             finalizeReasoning(true);
+            activity.current?.finalize(true);
           }
           lastTokenAt = performance.now();
           tokenEventCount++;
@@ -2040,6 +2305,15 @@ async function streamQuery(queryText) {
               data.ignored_doc_ids ?? []
             );
           }
+        } else if (isTurnLoopEvent(evtType)) {
+          typingEl.style.display = "none";
+          activityLog().handle(evtType, data);
+          if (evtType === "clarify") {
+            clarifyQuestion = String(data.question ?? "").trim() || clarifyQuestion;
+            const chips = renderClarifyChips(data, resubmitQuery);
+            if (chips) bubbleEl.parentElement?.insertBefore(chips, citationsEl);
+          }
+          scrollToBottom();
         } else if (evtType === "error") {
           errorShown = true;
           cancelRender();
@@ -2054,6 +2328,7 @@ async function streamQuery(queryText) {
           const cid = String(data.conversation_id ?? "").trim();
           if (cid) setActiveConversation(cid);
           if (!started) finalizeReasoning(false);
+          if (!started) activity.current?.finalize(false);
           if (data.token_budget) lastBudget = data.token_budget;
           const completionTokens = Number(lastBudget?.actual_completion_tokens) || tokenEventCount;
           const promptTokens = Number(lastBudget?.actual_prompt_tokens) || Number(lastBudget?.input_tokens) || 0;
@@ -2070,7 +2345,7 @@ async function streamQuery(queryText) {
           typingEl.style.display = "none";
           if (!errorShown) {
             if (!started) {
-              const msg = pendingClarification || "I couldn't find relevant information for that query. Could you rephrase your question or provide more details?";
+              const msg = pendingClarification || clarifyQuestion || "I couldn't find relevant information for that query. Could you rephrase your question or provide more details?";
               bubbleEl.innerHTML = parseMarkdown(msg);
               bubbleEl.style.display = "block";
             } else {
@@ -2199,7 +2474,7 @@ async function sendQuery(text) {
   if (useStreaming) await streamQuery(text);
   else await nonStreamQuery(text);
 }
-registerDrSuggestionResubmit(sendQuery);
+registerQueryResubmit(sendQuery);
 function maybeShowDrChip(payload, query) {
   if (!payload || !payload.suggest) return;
   if (getDeepResearch()) return;

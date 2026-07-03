@@ -31,6 +31,7 @@ This directory contains the full test suite for the RAG platform, covering API c
 | `test_markdown_processor.py` | Markdown semantic chunking and cleaning |
 | `test_mcp_adapter.py` | MCP tooling adapter tool registration and dispatch |
 | `test_memory_provider.py` | Conversation memory provider: turn storage, sliding window, rolling summary trigger |
+| `test_memory_turn_context.py` | Turn-loop memory extensions: append_turn loop kwargs, docs-studied ledger, structured turn context, preview capping, pending-clarification lifecycle |
 | `test_podman_migration.py` | Podman compose compatibility and runtime detection |
 | `test_project_config.py` | Configuration validation and env var binding |
 | `test_query_filters.py` | Retrieval query filter parsing and application |

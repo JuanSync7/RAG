@@ -214,6 +214,7 @@ QUERY_REQUEST_ONLY_FIELDS = frozenset({
     "memory_enabled",       # controls whether route handler injects memory
     "memory_turn_window",   # controls how many turns route handler fetches
     "compact_now",          # triggers compaction after response
+    "turn_loop",            # API-process turn loop path; never reaches RAGQueryWorkflow
 })
 
 # RAGRequest fields that are NOT exposed via QueryRequest

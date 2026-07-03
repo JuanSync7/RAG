@@ -1,16 +1,34 @@
 /**
  * @summary
  * Shared TypeScript type aliases used across the admin/operator console modules.
- * `ConversationMeta` is re-exported from `./shared-types` so both consoles
- * share one contract.
+ * `ConversationMeta` and the turn-loop SSE event payloads are re-exported from
+ * `./shared-types` so both consoles share one contract; `StreamEventData`
+ * intersects the turn-loop fields for typed event handling
+ * (TURN_LOOP_DESIGN.md §8).
  * Exports: JsonObject, QueryResult, StreamEventData, TokenBudgetPayload, TimingPayload,
  *   ConsoleCommandSpec, CommandExecution, ConversationMeta, ConversationTurn,
- *   MarkedLike, DomPurifyLike
+ *   MarkedLike, DomPurifyLike (+ turn-loop event payload re-exports)
  * Deps: shared-types
  * @end-summary
  */
 
 export { ConversationMeta } from "./shared-types";
+export type {
+    TurnActionEventData,
+    HydeQueryEventData,
+    RetrieveResultTopDoc,
+    RetrieveResultEventData,
+    JudgeVerdictEventData,
+    DeepStudyEventData,
+    LlmCallEventData,
+    DraftEventData,
+    GateEventData,
+    ClarifyEventData,
+    TurnLoopEventDataMap,
+    TurnLoopEventName,
+    TurnLoopStreamEventFields,
+} from "./shared-types";
+import type { TurnLoopStreamEventFields } from "./shared-types";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -20,7 +38,7 @@ export type QueryResult = {
     metadata?: Record<string, unknown>;
 };
 
-export type StreamEventData = {
+export type StreamEventData = TurnLoopStreamEventFields & {
     token?: string;
     message?: string;
     results?: QueryResult[];

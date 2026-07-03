@@ -6,6 +6,10 @@
 // so a single thread can be replayed under either renderer. Sources mode also
 // renders a right rail (Relevant / Hidden) backed by the conversation's
 // doc-state, mirroring the standalone Retrieval tab's mark-relevant/hide flow.
+// Also owns the per-request deep-research and turn-loop toggles (mutually
+// exclusive per TURN_LOOP_DESIGN.md §5) and the shared query-resubmit sink
+// (`registerQueryResubmit` / `resubmitQuery`) used by the DR suggestion chip
+// and the turn-loop clarify chips.
 // @end-summary
 
 import { byId, escHtml, fmtTime } from "./dom";
@@ -23,6 +27,7 @@ export type RetrievalSubMode = "hard" | "auto";
 const STORAGE_KEY = "rw_chat_mode";
 const SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
 const DEEP_RESEARCH_STORAGE_KEY = "rw_deep_research";
+const TURN_LOOP_STORAGE_KEY = "rw_turn_loop";
 const RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
 const TOPK_STORAGE_KEY = "rw_sources_top_k";
 const DEFAULT_TOPK = 5;
@@ -76,6 +81,10 @@ export function getDeepResearch(): boolean {
 export function setDeepResearch(enabled: boolean): void {
     _deepResearch = enabled;
     localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY, enabled ? "1" : "0");
+    // Mutual exclusion (TURN_LOOP_DESIGN.md §5): the request-schema validator
+    // rejects turn_loop together with deep_research, so the UI never lets
+    // both toggles be active at once.
+    if (enabled && _turnLoop) setTurnLoop(false);
     syncDeepResearchUI();
 }
 
@@ -87,12 +96,52 @@ function syncDeepResearchUI(): void {
     }
 }
 
+// Turn-level agentic loop per-request toggle (TURN_LOOP_DESIGN.md §8) —
+// mirrors the deep_research toolbar-button pattern: persisted globally,
+// sent on the query body only while active (absent ⇒ server config default).
+let _turnLoop: boolean = localStorage.getItem(TURN_LOOP_STORAGE_KEY) === "1";
+
+export function getTurnLoop(): boolean {
+    return _turnLoop;
+}
+
+export function setTurnLoop(enabled: boolean): void {
+    _turnLoop = enabled;
+    localStorage.setItem(TURN_LOOP_STORAGE_KEY, enabled ? "1" : "0");
+    // Mutual exclusion with deep research (see setDeepResearch).
+    if (enabled && _deepResearch) setDeepResearch(false);
+    syncTurnLoopUI();
+}
+
+function syncTurnLoopUI(): void {
+    const btn = document.getElementById("chatTurnLoop");
+    if (btn) {
+        btn.setAttribute("aria-pressed", _turnLoop ? "true" : "false");
+        btn.classList.toggle("active", _turnLoop);
+    }
+}
+
 let _lastSuggestedQuery: string = "";
 type ResubmitFn = (text: string) => void | Promise<void>;
 let _resubmit: ResubmitFn | null = null;
 
-export function registerDrSuggestionResubmit(fn: ResubmitFn): void {
+/**
+ * Register the single query-resubmit sink (the user console registers
+ * `sendQuery` once at startup). Shared by every chip that re-sends text as a
+ * new user query: the deep-research suggestion chip and the turn-loop clarify
+ * hint/scoping chips.
+ */
+export function registerQueryResubmit(fn: ResubmitFn): void {
     _resubmit = fn;
+}
+
+/** Back-compat alias (pre-turn-loop name for `registerQueryResubmit`). */
+export const registerDrSuggestionResubmit = registerQueryResubmit;
+
+/** Resubmit `text` as the next user query through the registered sink. */
+export function resubmitQuery(text: string): void {
+    const q = text.trim();
+    if (q && _resubmit) void _resubmit(q);
 }
 
 export function showDrSuggestionChip(forQuery: string): void {
@@ -116,7 +165,7 @@ function initDrSuggestionChip(): void {
         const q = _lastSuggestedQuery.trim();
         hideDrSuggestionChip();
         setDeepResearch(true);
-        if (q && _resubmit) void _resubmit(q);
+        resubmitQuery(q);
     });
 }
 
@@ -199,12 +248,17 @@ export function initChatMode(): void {
     if (drBtn) {
         drBtn.addEventListener("click", () => setDeepResearch(!_deepResearch));
     }
+    const tlBtn = document.getElementById("chatTurnLoop");
+    if (tlBtn) {
+        tlBtn.addEventListener("click", () => setTurnLoop(!_turnLoop));
+    }
     initDrSuggestionChip();
     initRailCollapse();
     initTopKInput();
     syncToggleUI();
     syncSubmodeUI();
     syncDeepResearchUI();
+    syncTurnLoopUI();
     applyModeToView();
     renderRail();
 
