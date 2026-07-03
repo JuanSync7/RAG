@@ -45,11 +45,12 @@ class TurnAction:
     """
 
     RETRIEVE: str = "RETRIEVE"
+    DECOMPOSE: str = "DECOMPOSE"
     DEEP_STUDY: str = "DEEP_STUDY"
     CLARIFY: str = "CLARIFY"
     ANSWER: str = "ANSWER"
 
-    ALL: frozenset[str] = frozenset({RETRIEVE, DEEP_STUDY, CLARIFY, ANSWER})
+    ALL: frozenset[str] = frozenset({RETRIEVE, DECOMPOSE, DEEP_STUDY, CLARIFY, ANSWER})
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,20 @@ class RetrieveArgs:
     query_text: str
     hypothetical_answer: Optional[str] = None
     target_aspect: Optional[str] = None
+
+
+@dataclass
+class DecomposeArgs:
+    """Arguments for a DECOMPOSE action: fan a broad/compound question out into a
+    few focused sub-queries retrieved in parallel into the same flat pool.
+
+    ``question`` is the compound question to split (defaults to the turn query).
+    ``missing_information`` optionally carries the judge's named gap so the split
+    targets what is still uncovered rather than re-deriving the whole question.
+    """
+
+    question: str
+    missing_information: Optional[str] = None
 
 
 @dataclass
@@ -105,7 +120,7 @@ class AnswerArgs:
     """
 
 
-TurnActionArgs = Union[RetrieveArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs]
+TurnActionArgs = Union[RetrieveArgs, DecomposeArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs]
 """Union of the per-action argument payloads carried by a :class:`TurnDecision`."""
 
 
@@ -192,6 +207,13 @@ class TurnDecision:
                     raw_args.get("hypothetical_answer")
                 ),
                 target_aspect=_coerce_opt_str(raw_args.get("target_aspect")),
+            )
+        elif action == TurnAction.DECOMPOSE:
+            args = DecomposeArgs(
+                question=_coerce_str(raw_args.get("question")),
+                missing_information=_coerce_opt_str(
+                    raw_args.get("missing_information")
+                ),
             )
         elif action == TurnAction.DEEP_STUDY:
             args = DeepStudyArgs(

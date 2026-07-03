@@ -1,0 +1,242 @@
+# @summary
+# DECOMPOSE action for the turn loop: one controller LLM call splits a broad /
+# compound question into a few focused sub-queries, which are retrieved in
+# PARALLEL via the injected retrieve_ranked seam (asyncio.gather — the latency
+# contract: one concurrent wave, never N sequential rounds), merged + deduped
+# against TurnState.seen_chunk_ids, judged once as a single round (reusing
+# retrieve._judge_round), and added to the flat pool. This is the cheap
+# decompose/fan-out demoted from deep_research — NOT its heavy report loop.
+# Fail-open everywhere: a failed split falls back to a single sub-query (the
+# question itself), a failed retrieval contributes nothing, and the stage never
+# raises. Emits hyde_query (the decomposition) + retrieve_result + judge_verdict,
+# reusing the existing event vocabulary (no new SSE event / frontend change).
+# Exports: run_decompose
+# Deps: src.retrieval.pipeline.turn_loop.{schemas,events,controller,retrieve};
+#       src.common.{prompts,utils}; config.settings (lazily)
+# @end-summary
+"""DECOMPOSE stage: split -> PARALLEL fan-out -> merge -> single judge round."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from src.common.prompts import load_prompt, render, strip_reasoning
+from src.common.utils import parse_json_object
+from src.retrieval.pipeline.turn_loop.controller import controller_model_alias
+from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
+from src.retrieval.pipeline.turn_loop.retrieve import _judge_round
+from src.retrieval.pipeline.turn_loop.schemas import (
+    DecomposeArgs,
+    EvidenceChunk,
+    TurnBudget,
+    TurnEventType,
+    TurnLoopDeps,
+    TurnState,
+)
+
+logger = logging.getLogger(__name__)
+
+_PROMPT_FILE = "turn_decompose.md"
+_TOP_PREVIEW_COUNT = 3
+
+
+def _max_subqueries() -> int:
+    """Cap on sub-queries per DECOMPOSE (bounds the parallel fan-out width)."""
+    from config import settings
+
+    return max(2, int(getattr(settings, "RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES", 4)))
+
+
+def _coerce_subqueries(payload: Any, cap: int) -> list[str]:
+    """Extract a clean, deduped, capped list of sub-question strings.
+
+    Tolerates the ``{"sub_questions": [...]}`` shape this stage's prompt emits
+    AND the deep-research ``{"topics": [{"questions": [...]}]}`` shape, so the
+    same planner prompt could be swapped in. Pure dict/str ops (CLAUDE.md §0).
+    """
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("sub_questions") or payload.get("questions") or []
+    if not raw and isinstance(payload.get("topics"), list):
+        raw = []
+        for topic in payload["topics"]:
+            if isinstance(topic, dict):
+                raw.extend(topic.get("questions") or [])
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        q = str(item or "").strip()
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+        if len(out) >= cap:
+            break
+    return out
+
+
+async def _split(
+    question: str,
+    missing: str | None,
+    *,
+    state: TurnState,
+    budget: TurnBudget,
+    emitter: TurnEventEmitter,
+) -> list[str]:
+    """One controller LLM call → up to ``_max_subqueries()`` sub-queries.
+
+    Fail-open: an exhausted ledger, provider error, or unparseable JSON yields
+    ``[]`` (the caller falls back to the whole question as a single sub-query).
+    """
+    if state.llm_calls >= budget.max_llm_calls:
+        return []
+    try:
+        prompt = render(
+            load_prompt(_PROMPT_FILE),
+            question=question,
+            missing_information=missing or "(no specific gap named)",
+            max_subqueries=str(_max_subqueries()),
+        )
+        response = await emitter.charged_call(
+            alias=controller_model_alias(),
+            purpose="decompose",
+            prompt=prompt,
+            temperature=0.0,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail open to the single-query fallback
+        logger.warning("turn loop decompose split failed: %s", exc)
+        return []
+    if response is None:
+        return []
+    payload = parse_json_object(strip_reasoning(getattr(response, "content", "") or ""))
+    return _coerce_subqueries(payload, _max_subqueries())
+
+
+async def run_decompose(
+    args: DecomposeArgs,
+    *,
+    query: str,
+    state: TurnState,
+    budget: TurnBudget,
+    deps: TurnLoopDeps,
+    emitter: TurnEventEmitter,
+) -> None:
+    """Run one DECOMPOSE action: split → parallel retrieve → merge → judge → pool.
+
+    Flow: split the (compound) question into a few sub-queries with ONE
+    controller call; fire ``deps.retrieve_ranked`` for all of them CONCURRENTLY
+    (``asyncio.gather`` — so wall-clock is one retrieval wave, not the sum);
+    merge and dedup the returns against everything the turn has seen; judge the
+    merged set once (reusing the RETRIEVE round judge); kept chunks enter the
+    flat ``state.pool``. Two sequential LLM calls total (split + judge) — the
+    cost model behind the latency GO in the unification blueprint.
+
+    Args:
+        args: The controller's decompose arguments (question + optional gap).
+        query: The user's turn query (the judge's grounding question).
+        state: The turn's mutable state (pool, dedup set, tried lists).
+        budget: The frozen per-turn budget.
+        deps: Injected capabilities (``retrieve_ranked``, provider, emit).
+        emitter: The turn's event emitter / charged-call wrapper.
+    """
+    round_index = max(0, state.iteration - 1)
+    round_display = round_index + 1
+    question = args.question or query
+
+    # 1. Split (one controller LLM call). Fail-open → the whole question as a
+    #    single sub-query, so DECOMPOSE degrades to a plain retrieval, never a
+    #    no-op.
+    subqueries = await _split(
+        question, args.missing_information, state=state, budget=budget, emitter=emitter
+    )
+    if not subqueries:
+        subqueries = [question]
+
+    state.tried_queries.extend(subqueries)
+    # Surface the decomposition on the existing hyde_query event (the sub-queries
+    # ARE this round's retrieval queries) — no new SSE event / frontend change.
+    await emitter.emit(
+        TurnEventType.HYDE_QUERY,
+        {
+            "round": round_display,
+            "hypothetical_answer": "",
+            "search_terms": list(subqueries),
+            "target_aspect": "decomposition",
+        },
+    )
+
+    # 2. PARALLEL fan-out — the latency contract. One concurrent wave of
+    #    retrievals; a single sub-query failure contributes nothing (fail-open)
+    #    but never aborts the others.
+    async def _one(subq: str) -> list[EvidenceChunk]:
+        try:
+            return await deps.retrieve_ranked(subq, None, budget.retrieve_top_k)
+        except Exception as exc:  # noqa: BLE001 — one failed leg, not the round
+            logger.warning("turn loop decompose retrieve failed for %r: %s", subq, exc)
+            return []
+
+    legs = await asyncio.gather(*[_one(subq) for subq in subqueries])
+
+    # 3. Merge + dedup — done AFTER the gather (single-threaded) so the shared
+    #    seen-set is never mutated concurrently.
+    fresh: list[EvidenceChunk] = []
+    dup_count = 0
+    for chunks in legs:
+        for chunk in chunks:
+            if chunk.chunk_id in state.seen_chunk_ids:
+                dup_count += 1
+                continue
+            state.seen_chunk_ids.add(chunk.chunk_id)
+            fresh.append(chunk)
+
+    # 4. One judge round over the merged fresh set (reuse the RETRIEVE judge).
+    kept, pool_verdict = await _judge_round(
+        query=query,
+        fresh=fresh,
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+    for chunk in kept:
+        chunk.round_added = round_index
+        state.pool.append(chunk)
+
+    await emitter.emit(
+        TurnEventType.RETRIEVE_RESULT,
+        {
+            "round": round_display,
+            "added": len(kept),
+            "dup": dup_count,
+            "pool_size": len(state.pool),
+            "sub_queries": len(subqueries),
+            "top": [
+                {
+                    "doc": chunk.source or chunk.document_id,
+                    "heading": chunk.heading,
+                    "score": chunk.score,
+                }
+                for chunk in kept[:_TOP_PREVIEW_COUNT]
+            ],
+        },
+    )
+    if pool_verdict is not None:
+        await emitter.emit(
+            TurnEventType.JUDGE_VERDICT,
+            {
+                "round": round_display,
+                "kept": len(kept),
+                "sufficient": bool(pool_verdict.sufficient),
+                "confidence": float(pool_verdict.confidence),
+                "missing_information": str(pool_verdict.missing_information or ""),
+            },
+        )
+
+
+__all__ = ["run_decompose"]

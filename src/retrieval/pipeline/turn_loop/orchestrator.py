@@ -38,10 +38,12 @@ from src.retrieval.pipeline.turn_loop.controller import (
     build_evidence_digest,
     decide,
 )
+from src.retrieval.pipeline.turn_loop.decompose import run_decompose
 from src.retrieval.pipeline.turn_loop.deep_study import run_deep_study
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.retrieve import run_retrieve
 from src.retrieval.pipeline.turn_loop.schemas import (
+    DecomposeArgs,
     DeepStudyArgs,
     RetrieveArgs,
     TurnAction,
@@ -333,6 +335,20 @@ async def run_turn_loop(
                         else RetrieveArgs(query_text=query)
                     )
                     await run_retrieve(
+                        args,
+                        query=query,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
+                elif decision.action == TurnAction.DECOMPOSE:
+                    args = (
+                        decision.args
+                        if isinstance(decision.args, DecomposeArgs)
+                        else DecomposeArgs(question=query)
+                    )
+                    await run_decompose(
                         args,
                         query=query,
                         state=state,
