@@ -214,6 +214,21 @@ async def run_retrieve(
         state.seen_chunk_ids.add(chunk.chunk_id)
         fresh.append(chunk)
 
+    if not fresh and dup_count and not state.pool:
+        # Second chance (class: dropped-chunk dedup poisoning a whole turn).
+        # Every retrieved candidate was judged-and-dropped in an earlier round
+        # yet the pool is still EMPTY — one over-aggressive judge round must
+        # not permanently starve the turn, so re-judge the returning
+        # candidates instead of discarding the round. Pooled chunks can never
+        # reach here (a non-empty pool skips this path), so this re-admits
+        # only dropped ids; the ids stay in ``seen_chunk_ids``.
+        fresh = list(retrieved)
+        logger.info(
+            "turn loop pool empty and all %d candidates previously dropped — "
+            "re-judging them",
+            dup_count,
+        )
+
     kept, pool_verdict = await _judge_round(
         query=query,
         fresh=fresh,

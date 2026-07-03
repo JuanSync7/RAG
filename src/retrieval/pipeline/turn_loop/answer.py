@@ -317,15 +317,29 @@ async def run_answer(
     else:
         self_score, unsupported_claims = 0.0, []
 
-    verdict = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
+    # The generation draft is grounded in the WHOLE pool, so the gate's judge
+    # component must reflect the pool's best evidence — the maximum verdict
+    # confidence across the turn's rounds. Reading only the latest verdict
+    # let a dud final round (kept=0, confidence 0) poison a pool that earlier
+    # rounds had judged strong (observed live). ``missing_information`` still
+    # comes from the latest verdict: it is the freshest statement of the gap.
+    latest = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
     judge_confidence = _NEUTRAL_JUDGE_CONFIDENCE
     missing_information: list[str] = []
-    if verdict is not None:
+    round_confidences: list[float] = []
+    for event in state.events:
+        if event.type != TurnEventType.JUDGE_VERDICT:
+            continue
         try:
-            judge_confidence = min(1.0, max(0.0, float(verdict.get("confidence"))))
+            round_confidences.append(
+                min(1.0, max(0.0, float(event.payload.get("confidence"))))
+            )
         except (TypeError, ValueError):
-            judge_confidence = _NEUTRAL_JUDGE_CONFIDENCE
-        missing = str(verdict.get("missing_information") or "").strip()
+            continue
+    if round_confidences:
+        judge_confidence = max(round_confidences)
+    if latest is not None:
+        missing = str(latest.get("missing_information") or "").strip()
         if missing:
             missing_information.append(missing)
 

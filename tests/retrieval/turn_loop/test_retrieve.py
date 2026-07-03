@@ -233,3 +233,50 @@ async def test_pool_confidence_derived_from_kept_relevance_when_unusable():
     assert len(kept) == 2
     assert pool_verdict is not None
     assert abs(pool_verdict.confidence - 0.8) < 1e-6
+
+
+async def test_pool_empty_all_dups_rejudges_dropped_chunks():
+    """One over-aggressive judge round must not starve the whole turn.
+
+    Class: dropped-chunk dedup poisoning — chunks judged-and-dropped earlier
+    return as 'dups' forever while the pool stays empty (observed live: the
+    right chunk was dropped in round 1 and blocked for the next 5 rounds).
+    With an EMPTY pool and an all-dup round, the candidates are re-judged.
+    """
+    import src.retrieval.pipeline.agentic.judge as judge_mod
+    import src.retrieval.pipeline.turn_loop.retrieve as retrieve_mod
+    from src.retrieval.pipeline.turn_loop.schemas import RetrieveArgs
+
+    chunks = [make_chunk(i) for i in range(2)]
+    provider = FakeProvider()
+    deps, _ = make_deps(provider, retrieve_batches=[chunks])
+    state, budget = TurnState(), make_budget()
+    state.iteration = 2
+    # Simulate an earlier round that judged-and-dropped both chunks.
+    for c in chunks:
+        state.seen_chunk_ids.add(c.chunk_id)
+    assert not state.pool
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+
+    class _Verdict:
+        def __init__(self, index):
+            self.index = index
+            self.relevance = 0.9
+            self.faithfulness = 1.0
+            self.keep = True
+            self.rank = index
+
+    async def fake_judge_chunks(_provider, **_kwargs):
+        return [_Verdict(0), _Verdict(1)], None
+
+    original = judge_mod.judge_chunks
+    judge_mod.judge_chunks = fake_judge_chunks
+    try:
+        await retrieve_mod.run_retrieve(
+            RetrieveArgs(query_text="q", hypothetical_answer=None, target_aspect=None),
+            query="q", state=state, budget=budget, deps=deps, emitter=emitter,
+        )
+    finally:
+        judge_mod.judge_chunks = original
+
+    assert len(state.pool) == 2  # dropped chunks got their second judgment

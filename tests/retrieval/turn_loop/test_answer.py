@@ -228,3 +228,48 @@ async def test_messages_use_single_leading_system_message(empty_context):
     assert [m["role"] for m in messages] == ["system", "user"]
     assert "[1]" in messages[1]["content"]  # citation-indexed evidence
     assert "the question" in messages[1]["content"]
+
+
+async def test_gate_judge_component_uses_best_round_not_latest():
+    """A dud final judge round must not poison a pool judged strong earlier.
+
+    Class: latest-sample-overwrites-best — the draft is grounded in the whole
+    pool, so the gate's judge component reflects the max round confidence.
+    """
+    from src.retrieval.pipeline.turn_loop.schemas import TurnEvent, TurnEventType
+
+    state = TurnState()
+    state.pool.append(make_chunk(0))
+    state.events.append(TurnEvent.now(
+        TurnEventType.JUDGE_VERDICT,
+        {"round": 1, "kept": 1, "confidence": 0.9, "missing_information": ""},
+    ))
+    state.events.append(TurnEvent.now(
+        TurnEventType.JUDGE_VERDICT,
+        {"round": 2, "kept": 0, "confidence": 0.0,
+         "missing_information": "still missing X"},
+    ))
+    provider = FakeProvider(
+        streams=[[("content", "grounded answer [1]")]],
+        responses=['{"self_score": 1.0, "unsupported_claims": []}'],
+    )
+    deps, _ = make_deps(provider)
+    budget = make_budget(answer_confidence_threshold=0.6)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=False)
+
+    from src.retrieval.pipeline.turn_loop.answer import run_answer
+    from src.retrieval.pipeline.turn_loop.schemas import TurnContext
+
+    draft, feedback = await run_answer(
+        query="q",
+        context=TurnContext(conversation_id="c"),
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+
+    gate = [e for e in state.events if e.type == TurnEventType.GATE][-1]
+    # judge component 0.9 (best round), not 0.0 (latest round)
+    assert gate.payload["score"] >= 0.6
+    assert gate.payload["passed"] is True

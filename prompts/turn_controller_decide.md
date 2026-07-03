@@ -50,15 +50,19 @@ Return a single JSON object, no prose outside it. `args` depends on `action`:
 - `CLARIFY` → `{}`
 - `ANSWER` → `{}`
 
+The shape (structure only — every value below is a placeholder; NEVER copy
+placeholder wording into your own output, derive all values from the actual
+inputs above):
+
 ```json
 {
   "action": "RETRIEVE",
-  "reason": "The pool covers the setup steps but the gate named 'required signal timing values' as missing; a query targeted at the timing section can close that gap.",
+  "reason": "<which specific gap/ref/gate-feedback drives this choice>",
   "confidence": 0.7,
   "args": {
-    "query_text": "required signal timing values for the setup sequence",
-    "hypothetical_answer": "The setup sequence requires the following timing values: ...",
-    "target_aspect": "signal timing requirements"
+    "query_text": "<search query built from the question's own terminology>",
+    "hypothetical_answer": "<one plausible answer sentence in the corpus's voice, or null>",
+    "target_aspect": "<the aspect this round targets, or null>"
   }
 }
 ```
