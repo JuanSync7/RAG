@@ -169,6 +169,46 @@ function initDrSuggestionChip(): void {
     });
 }
 
+// --- Suggested follow-up questions ("you might also ask…") --------------------
+// Rendered as a block at the tail of a SPECIFIC answer's bubble-wrap (not a
+// global bar), so each answer keeps its own suggestions inline. Each question is
+// a button that resubmits itself as a normal query (NOT forcing Deep Research,
+// unlike the DR-suggestion chip). Reuses the resubmit fn registered via
+// registerDrSuggestionResubmit(sendQuery).
+
+export function renderFollowUps(
+    bubbleWrap: HTMLElement | null | undefined,
+    questions: string[],
+): void {
+    if (!bubbleWrap) return;
+    // Drop any prior block on this turn (e.g. a non-stream re-render) so we never
+    // stack duplicates; other turns' blocks are untouched.
+    bubbleWrap.querySelector(".followup-block")?.remove();
+    const qs = (questions || []).map((q) => (q || "").trim()).filter(Boolean).slice(0, 5);
+    if (!qs.length) return;
+
+    const block = document.createElement("div");
+    block.className = "followup-block";
+    const label = document.createElement("div");
+    label.className = "followup-label";
+    label.textContent = "You might also ask:";
+    block.appendChild(label);
+    for (const q of qs) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "followup-q";
+        item.textContent = q;  // textContent (not innerHTML) — no injection
+        item.addEventListener("click", () => {
+            if (_resubmit) void _resubmit(q);
+        });
+        block.appendChild(item);
+    }
+    // Place at the tail of the answer, right after the answer bubble (a null
+    // reference makes insertBefore append, so this is safe if .bubble is last).
+    const bubble = bubbleWrap.querySelector(".bubble");
+    bubbleWrap.insertBefore(block, bubble ? bubble.nextSibling : null);
+}
+
 function syncSubmodeUI(): void {
     const hardBtn = document.getElementById("chatSubmodeHard");
     const autoBtn = document.getElementById("chatSubmodeAuto");

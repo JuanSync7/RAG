@@ -299,6 +299,8 @@ class DeepResearch:
         model_alias: str = "default",
         llm_timeout_s: int = 30,
         reranker: Optional[Any] = None,
+        max_output_tokens: int = 2048,
+        domain: str = "",
     ) -> None:
         self._provider = provider
         self._kb_retrieve = kb_retrieve
@@ -308,6 +310,14 @@ class DeepResearch:
         self._budget = budget or DeepResearchBudget()
         self._model_alias = model_alias
         self._llm_timeout_s = llm_timeout_s
+        # Bounded output for the JSON controller calls; must not inherit the
+        # generation-wide max_tokens (would overflow a compact instruct model's
+        # context). See RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS.
+        self._max_output_tokens = max(1, int(max_output_tokens))
+        # Corpus domain rendered into the sufficiency/decomposition prompts so the
+        # controller resolves domain-ambiguous acronyms in-corpus (same fix as HyDE;
+        # a mis-read acronym splits topics into the wrong field). Empty → no grounding.
+        self._domain = domain or "(no specific domain configured)"
         self._reranker = reranker
         # Per-topic rerank decision bookkeeping (set by _apply_per_topic_rerank).
         self._per_topic_rerank_applied: bool = False
@@ -659,6 +669,7 @@ class DeepResearch:
         evidence = pool.evidence_text(max_chars=RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS)
         prompt = _render(
             self._sufficiency_template,
+            domain=self._domain,
             original_question=self._original_question,
             evidence_pool=evidence,
         )
@@ -678,6 +689,7 @@ class DeepResearch:
         evidence = evidence_pool.evidence_text(max_chars=RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS)
         prompt = _render(
             self._decomp_template,
+            domain=self._domain,
             original_question=self._original_question,
             current_query=current_query,
             evidence_pool=evidence,
@@ -730,6 +742,7 @@ class DeepResearch:
                 response_format={"type": "json_object"},
                 timeout=self._llm_timeout_s,
                 temperature=0.0,
+                max_tokens=self._max_output_tokens,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("deep_research %s LLM call failed: %s", purpose, exc)

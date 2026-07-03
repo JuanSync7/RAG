@@ -1,8 +1,8 @@
 // src/dom.ts
 var byId = (id) => {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing required element #${id}`);
-  return el;
+  const el2 = document.getElementById(id);
+  if (!el2) throw new Error(`Missing required element #${id}`);
+  return el2;
 };
 function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/\//g, "&#x2F;");
@@ -376,6 +376,30 @@ function initDrSuggestionChip() {
     setDeepResearch(true);
     resubmitQuery(q);
   });
+}
+function renderFollowUps(bubbleWrap, questions) {
+  if (!bubbleWrap) return;
+  bubbleWrap.querySelector(".followup-block")?.remove();
+  const qs = (questions || []).map((q) => (q || "").trim()).filter(Boolean).slice(0, 5);
+  if (!qs.length) return;
+  const block = document.createElement("div");
+  block.className = "followup-block";
+  const label = document.createElement("div");
+  label.className = "followup-label";
+  label.textContent = "You might also ask:";
+  block.appendChild(label);
+  for (const q of qs) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "followup-q";
+    item.textContent = q;
+    item.addEventListener("click", () => {
+      if (_resubmit) void _resubmit(q);
+    });
+    block.appendChild(item);
+  }
+  const bubble = bubbleWrap.querySelector(".bubble");
+  bubbleWrap.insertBefore(block, bubble ? bubble.nextSibling : null);
 }
 function syncSubmodeUI() {
   const hardBtn = document.getElementById("chatSubmodeHard");
@@ -1180,12 +1204,12 @@ function showPanel(panelId) {
   );
   if (panelId) document.getElementById(panelId)?.classList.add("active");
 }
-function setNavActive(el) {
+function setNavActive(el2) {
   document.querySelectorAll(".sidebar-nav-item").forEach(
     (n) => n.classList.remove("active")
   );
-  el.classList.add("active");
-  if (!refs.sidebar.classList.contains("collapsed")) showPanel(el.dataset.panel);
+  el2.classList.add("active");
+  if (!refs.sidebar.classList.contains("collapsed")) showPanel(el2.dataset.panel);
   if (!isDesktop()) closeSidebar();
 }
 function toggleSidebarCollapse() {
@@ -1261,8 +1285,8 @@ var mq = window.matchMedia("(prefers-color-scheme: light)");
 function applyThemeToDOM(val) {
   const resolved = val === "system" ? mq.matches ? "light" : "dark" : val;
   document.documentElement.dataset.theme = resolved;
-  document.querySelectorAll(".theme-opt").forEach((el) => {
-    el.classList.toggle("active", el.dataset.themeVal === val);
+  document.querySelectorAll(".theme-opt").forEach((el2) => {
+    el2.classList.toggle("active", el2.dataset.themeVal === val);
   });
 }
 function setTheme(val) {
@@ -1341,8 +1365,8 @@ function initSettings() {
   mq.addEventListener("change", () => {
     if (localStorage.getItem("nc_theme") === "system") applyThemeToDOM("system");
   });
-  document.querySelectorAll(".theme-opt").forEach((el) => {
-    el.addEventListener("click", () => setTheme(el.dataset.themeVal || "dark"));
+  document.querySelectorAll(".theme-opt").forEach((el2) => {
+    el2.addEventListener("click", () => setTheme(el2.dataset.themeVal || "dark"));
   });
   document.getElementById("presetSelect")?.addEventListener("change", (e) => {
     applyPreset(e.target.value);
@@ -1364,8 +1388,8 @@ function initSettings() {
 
 // src/thread.ts
 function setEmptyState(visible) {
-  const el = document.getElementById("threadEmpty");
-  if (el) el.style.display = visible ? "" : "none";
+  const el2 = document.getElementById("threadEmpty");
+  if (el2) el2.style.display = visible ? "" : "none";
 }
 function appendUserMsg(text) {
   setEmptyState(false);
@@ -1492,14 +1516,14 @@ function renderConversationList(convs) {
     });
   }
   container.innerHTML = html;
-  container.querySelectorAll(".conv-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      const id = el.dataset.convId;
+  container.querySelectorAll(".conv-item").forEach((el2) => {
+    el2.addEventListener("click", () => {
+      const id = el2.dataset.convId;
       if (id) void selectConversation(id);
     });
-    el.addEventListener("contextmenu", (e) => {
+    el2.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const id = el.dataset.convId;
+      const id = el2.dataset.convId;
       if (!id) return;
       const conv = convs.find((c) => c.conversation_id === id);
       showConvCtxMenu(e.clientX, e.clientY, id, conv?.title || "");
@@ -1529,8 +1553,8 @@ async function selectConversation(id) {
     state.isStreaming = false;
   }
   setActiveConversation(id);
-  byId("convList").querySelectorAll(".conv-item").forEach((el) => {
-    el.classList.toggle("active", el.dataset.convId === id);
+  byId("convList").querySelectorAll(".conv-item").forEach((el2) => {
+    el2.classList.toggle("active", el2.dataset.convId === id);
   });
   await loadConversationHistory(id);
 }
@@ -1596,8 +1620,8 @@ function createNewConversation() {
   clearViewPayloads();
   refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
   byId("convTitle").textContent = "New conversation";
-  byId("convList").querySelectorAll(".conv-item").forEach((el) => {
-    el.classList.remove("active");
+  byId("convList").querySelectorAll(".conv-item").forEach((el2) => {
+    el2.classList.remove("active");
   });
   const input = document.getElementById("msgInput");
   if (input) input.focus();
@@ -1857,10 +1881,10 @@ function fmtScore(value) {
   return n === null ? "?" : n.toFixed(2);
 }
 function div(className, text) {
-  const el = document.createElement("div");
-  el.className = className;
-  if (text !== void 0) el.textContent = text;
-  return el;
+  const el2 = document.createElement("div");
+  el2.className = className;
+  if (text !== void 0) el2.textContent = text;
+  return el2;
 }
 function createActivityLog() {
   const root = document.createElement("details");
@@ -1879,9 +1903,9 @@ function createActivityLog() {
   let draftLabelEl = null;
   let draftTextEl = null;
   const addLine = (className, text) => {
-    const el = div(className, text);
-    body.appendChild(el);
-    return el;
+    const el2 = div(className, text);
+    body.appendChild(el2);
+    return el2;
   };
   const renderTurnAction = (data) => {
     const index = asNum(data.index);
@@ -2039,6 +2063,132 @@ function renderClarifyChips(data, onResubmit) {
   hints.forEach((hint) => addChip2(hint, "clarify-chip-hint"));
   scoping.forEach((q) => addChip2(q, "clarify-chip-scope"));
   return wrap;
+}
+
+// src/queryProcessing.ts
+function num(v) {
+  return typeof v === "number" && isFinite(v) ? v : 0;
+}
+function plural(n) {
+  return n === 1 ? "" : "s";
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function hydeRoundEl(r, fallbackIndex) {
+  const box = el("div", "qp-round");
+  const head = el("div", "qp-round-head");
+  head.textContent = `Round ${r.round ?? fallbackIndex}` + (r.target_aspect ? ` \u2014 ${r.target_aspect}` : "");
+  if (r.fell_back) {
+    head.appendChild(document.createTextNode(" "));
+    head.appendChild(el("span", "qp-badge-warn", "literal fallback"));
+  }
+  box.appendChild(head);
+  if (r.hypothetical_answer) {
+    const hyp = el("div", "qp-hyp");
+    hyp.textContent = r.hypothetical_answer;
+    box.appendChild(hyp);
+  }
+  if (r.search_terms && r.search_terms.length) {
+    box.appendChild(el("div", "qp-terms", "Search terms: " + r.search_terms.join(", ")));
+  }
+  return box;
+}
+function hydeSection(a) {
+  const sec = el("div", "qp-section");
+  sec.appendChild(el("div", "qp-section-title", "HyDE retrieval"));
+  const stats = [];
+  if (num(a.rounds_run)) stats.push(`${a.rounds_run} round${plural(num(a.rounds_run))}`);
+  if (num(a.hyde_variants_tried)) stats.push(`${a.hyde_variants_tried} variant${plural(num(a.hyde_variants_tried))}`);
+  if (a.kept_count != null) stats.push(`${a.kept_count} chunk${plural(num(a.kept_count))} kept`);
+  if (num(a.backfilled)) stats.push(`${a.backfilled} backfilled`);
+  if (a.ranker) stats.push(`ranker: ${a.ranker}`);
+  if (a.stop_reason) stats.push(`stop: ${a.stop_reason}`);
+  if (num(a.elapsed_ms)) stats.push(`${(num(a.elapsed_ms) / 1e3).toFixed(1)}s`);
+  if (stats.length) sec.appendChild(el("div", "qp-stats", stats.join(" \xB7 ")));
+  if (num(a.hyde_failures) > 0) {
+    sec.appendChild(el(
+      "div",
+      "qp-warn",
+      `\u26A0 HyDE generation failed on ${a.hyde_failures} round${plural(num(a.hyde_failures))} \u2014 fell back to plain literal-query retrieval (the answer-space HyDE advantage was forfeited).`
+    ));
+  }
+  if (a.hyde_rounds && a.hyde_rounds.length) {
+    a.hyde_rounds.forEach((r, i) => sec.appendChild(hydeRoundEl(r, i + 1)));
+  } else if (a.tried_hyde && a.tried_hyde.length) {
+    a.tried_hyde.forEach((t, i) => sec.appendChild(hydeRoundEl({ hypothetical_answer: t }, i + 1)));
+  }
+  return sec;
+}
+function drSection(d) {
+  const sec = el("div", "qp-section");
+  sec.appendChild(el("div", "qp-section-title", "Deep research"));
+  const stats = [];
+  if (d.decomposed != null) stats.push(d.decomposed ? "decomposed" : "unified");
+  if (num(d.topic_count)) stats.push(`${d.topic_count} topic${plural(num(d.topic_count))}`);
+  if (num(d.iteration_count)) stats.push(`${d.iteration_count} iteration${plural(num(d.iteration_count))}`);
+  if (num(d.node_count)) stats.push(`${d.node_count} node${plural(num(d.node_count))}`);
+  if (num(d.llm_call_count)) stats.push(`${d.llm_call_count} LLM call${plural(num(d.llm_call_count))}`);
+  if (d.budget_exhausted) {
+    stats.push(`\u26A0 budget exhausted${d.budget_exhausted_reason ? ` (${d.budget_exhausted_reason})` : ""}`);
+  }
+  if (num(d.elapsed_ms)) stats.push(`${(num(d.elapsed_ms) / 1e3).toFixed(1)}s`);
+  if (stats.length) sec.appendChild(el("div", "qp-stats", stats.join(" \xB7 ")));
+  return sec;
+}
+function summarize(agentic, hasAgentic, dr, hasDr, showRewrite) {
+  const parts = [];
+  if (hasAgentic && agentic) {
+    const rounds = num(agentic.rounds_run) || (agentic.hyde_rounds?.length ?? 0);
+    if (rounds) parts.push(`HyDE \xB7 ${rounds} round${plural(rounds)}`);
+    else parts.push("HyDE");
+    if (num(agentic.hyde_failures) > 0) parts.push(`\u26A0 ${agentic.hyde_failures} fallback${plural(num(agentic.hyde_failures))}`);
+  }
+  if (hasDr && dr) parts.push(`Deep research \xB7 ${num(dr.topic_count)} topic${plural(num(dr.topic_count))}`);
+  if (showRewrite && !parts.length) parts.push("query rewritten");
+  return "\u{1F50E} Query processing" + (parts.length ? " \xB7 " + parts.join(" \xB7 ") : "");
+}
+function renderQueryProcessing(bubbleWrap, data, rawQuery) {
+  if (!bubbleWrap) return;
+  bubbleWrap.querySelector(".query-processing-block")?.remove();
+  const agentic = data.metadata?.agentic_retrieval;
+  const dr = data.metadata?.deep_research;
+  const processed = (data.processed_query || "").trim();
+  const raw = (rawQuery || "").trim();
+  const showRewrite = !!processed && processed.toLowerCase() !== raw.toLowerCase();
+  const kg = Array.isArray(data.kg_expanded_terms) ? data.kg_expanded_terms.map((t) => (t || "").trim()).filter(Boolean) : [];
+  const hasAgentic = !!agentic && (num(agentic.rounds_run) > 0 || (agentic.hyde_rounds?.length ?? 0) > 0 || (agentic.tried_hyde?.length ?? 0) > 0);
+  const hasDr = !!dr && (dr.decomposed === true || num(dr.topic_count) > 0);
+  if (!showRewrite && !hasAgentic && !hasDr && !kg.length) return;
+  const details = document.createElement("details");
+  details.className = "query-processing-block";
+  details.open = true;
+  const summary = el("summary", "qp-summary", summarize(agentic, hasAgentic, dr, hasDr, showRewrite));
+  details.appendChild(summary);
+  const body = el("div", "qp-body");
+  details.appendChild(body);
+  if (showRewrite) {
+    const sec = el("div", "qp-section");
+    sec.appendChild(el("div", "qp-section-title", "Query rewrite"));
+    sec.appendChild(el("div", "qp-hyp", processed));
+    if (num(data.query_confidence)) {
+      sec.appendChild(el("div", "qp-terms", `Confidence: ${num(data.query_confidence).toFixed(2)}`));
+    }
+    body.appendChild(sec);
+  }
+  if (hasAgentic && agentic) body.appendChild(hydeSection(agentic));
+  if (hasDr && dr) body.appendChild(drSection(dr));
+  if (kg.length) {
+    const sec = el("div", "qp-section");
+    sec.appendChild(el("div", "qp-section-title", "KG-expanded terms"));
+    sec.appendChild(el("div", "qp-terms", kg.join(", ")));
+    body.appendChild(sec);
+  }
+  const anchor = bubbleWrap.querySelector(".reasoning-block") ?? bubbleWrap.querySelector(".bubble");
+  bubbleWrap.insertBefore(details, anchor);
 }
 
 // src/streaming.ts
@@ -2204,16 +2354,16 @@ async function streamQuery(queryText) {
   };
   const reasoningBody = () => {
     const wrap = bubbleEl.parentElement;
-    let el = wrap?.querySelector(".reasoning-block") ?? null;
-    if (!el) {
-      el = document.createElement("details");
-      el.className = "reasoning-block";
-      el.open = true;
-      el.innerHTML = `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary><div class="reasoning-body"></div>`;
-      wrap?.insertBefore(el, bubbleEl);
+    let el2 = wrap?.querySelector(".reasoning-block") ?? null;
+    if (!el2) {
+      el2 = document.createElement("details");
+      el2.className = "reasoning-block";
+      el2.open = true;
+      el2.innerHTML = `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary><div class="reasoning-body"></div>`;
+      wrap?.insertBefore(el2, bubbleEl);
       reasoningStartAt = performance.now();
     }
-    return el.querySelector(".reasoning-body");
+    return el2.querySelector(".reasoning-body");
   };
   const activityLog = () => {
     if (!activity.current) {
@@ -2225,14 +2375,14 @@ async function streamQuery(queryText) {
     return activity.current;
   };
   const finalizeReasoning = (collapse) => {
-    const el = bubbleEl.parentElement?.querySelector(".reasoning-block");
-    if (!el) return;
-    const summaryEl = el.querySelector(".reasoning-summary");
+    const el2 = bubbleEl.parentElement?.querySelector(".reasoning-block");
+    if (!el2) return;
+    const summaryEl = el2.querySelector(".reasoning-summary");
     if (summaryEl) {
       const secs = reasoningStartAt ? (performance.now() - reasoningStartAt) / 1e3 : 0;
       summaryEl.innerHTML = secs > 0 ? `&#128173; Thought for ${secs.toFixed(1)}s` : "&#128173; Thought process";
     }
-    if (collapse) el.open = false;
+    if (collapse) el2.open = false;
   };
   try {
     while (true) {
@@ -2305,6 +2455,7 @@ async function streamQuery(queryText) {
               data.ignored_doc_ids ?? []
             );
           }
+          renderQueryProcessing(bubbleEl.parentElement, data, queryText);
         } else if (isTurnLoopEvent(evtType)) {
           typingEl.style.display = "none";
           activityLog().handle(evtType, data);
@@ -2364,6 +2515,10 @@ async function streamQuery(queryText) {
           actionsEl.style.display = "flex";
           metaEl.textContent = fmtTime(Date.now());
           metaEl.style.display = "block";
+          if (!errorShown && started) {
+            const sq = data.suggested_questions;
+            renderFollowUps(bubbleEl.parentElement, Array.isArray(sq) ? sq : []);
+          }
           scrollToBottom();
           await loadConversations();
           updateConvTitle();
@@ -2431,6 +2586,7 @@ async function nonStreamQuery(queryText) {
     const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
     bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
     bubbleEl.style.display = "block";
+    renderQueryProcessing(bubbleEl.parentElement, data, queryText);
     const tb = data.token_budget;
     if (tb) {
       updateContextIndicator(tb, {
@@ -2453,6 +2609,12 @@ async function nonStreamQuery(queryText) {
     actionsEl.style.display = "flex";
     metaEl.textContent = fmtTime(Date.now());
     metaEl.style.display = "block";
+    if (data.generated_answer) {
+      renderFollowUps(
+        bubbleEl.parentElement,
+        Array.isArray(data.suggested_questions) ? data.suggested_questions : []
+      );
+    }
     scrollToBottom();
     await loadConversations();
     updateConvTitle();
@@ -2529,7 +2691,7 @@ function setSelected(i) {
   const vis = state.allSlashItems.filter((x) => x.style.display !== "none");
   if (!vis.length) return;
   state.slashSelIdx = (i + vis.length) % vis.length;
-  vis.forEach((el, j) => el.classList.toggle("selected", j === state.slashSelIdx));
+  vis.forEach((el2, j) => el2.classList.toggle("selected", j === state.slashSelIdx));
 }
 function executeCmd(cmd) {
   refs.ta.value = cmd + " ";
@@ -2563,7 +2725,7 @@ function handleSlashInput() {
 function setPickerSelected(idx) {
   if (!state.allPickerItems.length) return;
   state.pickerIdx = (idx + state.allPickerItems.length) % state.allPickerItems.length;
-  state.allPickerItems.forEach((el, i) => el.classList.toggle("selected", i === state.pickerIdx));
+  state.allPickerItems.forEach((el2, i) => el2.classList.toggle("selected", i === state.pickerIdx));
   state.allPickerItems[state.pickerIdx]?.scrollIntoView({ block: "nearest" });
 }
 function executePicker(item) {
@@ -2754,9 +2916,9 @@ function attachWebUrl() {
   showToast("Web page added to context");
 }
 function filterKB(q) {
-  document.querySelectorAll(".kb-item").forEach((el) => {
-    const name = el.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
-    el.style.display = name.includes(q.toLowerCase()) ? "" : "none";
+  document.querySelectorAll(".kb-item").forEach((el2) => {
+    const name = el2.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
+    el2.style.display = name.includes(q.toLowerCase()) ? "" : "none";
   });
 }
 function attachKBDocs() {
@@ -3016,9 +3178,9 @@ function renderJob(job) {
   if (!card) {
     const wrap = document.createElement("div");
     wrap.innerHTML = jobCardHtml(job);
-    const el = wrap.firstElementChild;
-    list.prepend(el);
-    card = el;
+    const el2 = wrap.firstElementChild;
+    list.prepend(el2);
+    card = el2;
   } else {
     card.outerHTML = jobCardHtml(job);
   }

@@ -46,6 +46,9 @@ The downstream node will turn the gap into queries — your job is naming the ga
 
 ## Inputs
 
+Corpus domain (resolve all acronyms/terms within this domain, not a globally-common off-domain reading):
+{{ domain }}
+
 Original question:
 {{ original_question }}
 

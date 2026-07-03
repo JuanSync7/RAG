@@ -4,6 +4,9 @@ You are a query planner for a RAG pipeline. The retriever has already searched a
 
 ## Inputs
 
+Corpus domain (resolve all acronyms/terms within this domain — the same letters can mean different things in different fields; always use the in-corpus meaning):
+{{ domain }}
+
 Original question (pinned, immutable):
 {{ original_question }}
 

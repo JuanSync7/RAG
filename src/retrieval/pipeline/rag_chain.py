@@ -87,6 +87,7 @@ from src.platform.token_budget import calculate_budget, get_capabilities, TokenB
 from src.platform.llm.provider import get_llm_provider
 from src.retrieval.generation.nodes import get_system_prompt
 from src.retrieval.pipeline.query_shape import should_suggest_deep_research
+from src.retrieval.pipeline.follow_up import generate_follow_ups_sync
 from src.retrieval.pipeline.deep_research import (
     DeepResearch,
     DeepResearchBudget,
@@ -102,6 +103,7 @@ from config.settings import (
     RETRY_INITIAL_BACKOFF_SECONDS,
     RETRY_MAX_ATTEMPTS,
     RETRY_MAX_BACKOFF_SECONDS,
+    DOMAIN_DESCRIPTION,
     MAX_SANITIZATION_ITERATIONS,
     QUERY_CONFIDENCE_THRESHOLD,
     RAG_DEFAULT_FAST_PATH,
@@ -119,7 +121,9 @@ from config.settings import (
     RAG_DEEP_RESEARCH_MAX_NODES,
     RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
     RAG_DEEP_RESEARCH_MAX_DEPTH,
+    RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS,
     RAG_DEEP_RESEARCH_MAX_TOPICS,
+    RAG_DEEP_RESEARCH_MODEL_ALIAS,
     RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
     RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
     RAG_DEEP_RESEARCH_KB_TOP_PER_NODE,
@@ -192,8 +196,6 @@ from config.settings import (
 )
 from config.settings import (
     RERANK_MIN_CHARS,
-    RERANK_DROP_NAVIGATIONAL,
-    RERANK_NAV_MAX_CHARS,
     RETRIEVAL_ENFORCE_CONFIG_FLOOR,
     RAG_DOCUMENT_ROUTING_ENABLED,
     RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
@@ -243,26 +245,11 @@ logger = logging.getLogger("rag.rag_chain")
 
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
 _TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
-# A run of 4+ dots is the classic table-of-contents / index dotted leader
-# ("A1.3 AXI Architecture ............ A1-22"). Length-independent: ToC pages
-# are often long lists, so we score by leader *density*, not chunk length.
-# Navigational/front-matter detection now lives in the neutral shared module so
-# the ingest-time drop and this query-time rerank filter use one predicate (kept
-# symmetric). Imported under the existing private names so call sites are unchanged.
-from src.ingest.common.shared import (  # noqa: E402
-    is_navigational as _is_navigational,
-)
-
-
-def _is_low_value_chunk(
-    text: str, min_chars: int, drop_nav: bool, nav_max_chars: int
-) -> bool:
-    """Combined predicate: thin/heading-only OR (optionally) navigational."""
-    if _is_thin_or_heading(text, min_chars):
-        return True
-    if drop_nav and _is_navigational(text, nav_max_chars):
-        return True
-    return False
+# Navigational/boilerplate chunk suppression is now handled at retrieval time by
+# the metadata `chunk_role` filter (RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT); the former
+# query-side `is_navigational` regex heuristic has been retired here. Only the
+# thin/heading-only floor below remains — a distinct safeguard the role filter does
+# not cover (a tiny title fragment can be tagged `content` yet still carry no answer).
 
 
 def _is_thin_or_heading(text: str, min_chars: int) -> bool:
@@ -283,21 +270,15 @@ def _filter_thin_candidates(
     items: list,
     min_chars: int,
     floor: int,
-    drop_nav: bool = False,
-    nav_max_chars: int = 320,
 ) -> list:
-    """Drop thin/heading-only (and optionally navigational) candidates before
-    rerank, keeping at least ``floor`` items (topping up from dropped ones,
-    original order, if needed)."""
-    # When only the navigational pass is active (min_chars<=0) we must still run.
-    if (min_chars <= 0 and not drop_nav) or not items:
+    """Drop thin/heading-only candidates before rerank, keeping at least ``floor``
+    items (topping up from dropped ones, original order, if needed)."""
+    if min_chars <= 0 or not items:
         return items
     kept: list = []
     dropped: list = []
     for it in items:
-        if _is_low_value_chunk(
-            getattr(it, "text", "") or "", min_chars, drop_nav, nav_max_chars
-        ):
+        if _is_thin_or_heading(getattr(it, "text", "") or "", min_chars):
             dropped.append(it)
         else:
             kept.append(it)
@@ -1581,6 +1562,9 @@ class RAGChain:
             processed_query=processed_query,
             budget=budget,
             reranker=self.reranker,
+            model_alias=RAG_DEEP_RESEARCH_MODEL_ALIAS,
+            max_output_tokens=RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS,
+            domain=DOMAIN_DESCRIPTION,
         )
 
         return _asyncio.run(orchestrator.research())
@@ -1616,10 +1600,8 @@ class RAGChain:
             chunks = list(pool.chunks_by_id.values())
             if not chunks:
                 return []
-            return self.reranker.rerank(
-                query=processed_query,
-                documents=chunks,
-                top_k=rerank_top_k,
+            return self._safe_rerank(
+                processed_query, chunks, rerank_top_k,
             )
 
         # Hybrid: per-topic rerank.
@@ -1630,10 +1612,8 @@ class RAGChain:
             chunks = list(pool.chunks_by_id.values())
             if not chunks:
                 continue
-            ranked = self.reranker.rerank(
-                query=pool.rerank_anchor or processed_query,
-                documents=chunks,
-                top_k=per_topic_k,
+            ranked = self._safe_rerank(
+                pool.rerank_anchor or processed_query, chunks, per_topic_k,
             )
             for r in ranked:
                 # Stable id for dedup across topic pools.
@@ -1648,6 +1628,46 @@ class RAGChain:
                 seen_ids.add(key)
                 merged.append(r)
         return merged
+
+    def _safe_rerank(
+        self, query: str, chunks: list, top_k: int,
+    ) -> list[RankedResult]:
+        """Rerank ``chunks``, falling back to hybrid score order on any error.
+
+        Generic robustness fix (not specific to the endpoint that surfaced it):
+        the cross-encoder reranker is an EXTERNAL dependency, and its outage or a
+        misrouted endpoint must degrade ranking — never zero out (or 500) the
+        query. Used at EVERY rerank call site (primary hybrid path, standalone
+        fallback, confidence re-retrieval, and deep-research) so one reranker
+        outage can't hard-fail one path while another degrades gracefully. On any
+        reranker error we fall back to the chunks' existing hybrid/retrieval score
+        order (``_ranked_from_search_results``), which is also the measured-stronger
+        ordering when the cross-encoder is net-negative. Fail-open, mirroring the
+        rest of the pipeline.
+        """
+        try:
+            return self.reranker.rerank(query=query, documents=chunks, top_k=top_k)
+        except Exception as exc:  # noqa: BLE001 — external ranker must not nuke a query
+            logger.warning(
+                "reranker unavailable (%s) — falling back to hybrid score order "
+                "for %d chunk(s)", exc, len(chunks),
+            )
+            return self._ranked_from_search_results(chunks, top_k)
+
+    @staticmethod
+    def _retrieved_headings(ranked: list) -> list[str]:
+        """Section headings present in the retrieved results — the in-corpus topics
+        available to ground follow-up-question suggestions. Prefers the full
+        heading_path breadcrumb, falls back to the leaf heading."""
+        out: list[str] = []
+        for r in ranked or []:
+            md = getattr(r, "metadata", None) or {}
+            hp = md.get("heading_path") or []
+            if isinstance(hp, list) and hp:
+                out.append(" > ".join(str(h) for h in hp if h))
+            elif md.get("heading"):
+                out.append(str(md.get("heading")))
+        return out
 
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
@@ -1747,8 +1767,6 @@ class RAGChain:
                 items,
                 min_chars=RERANK_MIN_CHARS,
                 floor=rerank_top_k,
-                drop_nav=RERANK_DROP_NAVIGATIONAL,
-                nav_max_chars=RERANK_NAV_MAX_CHARS,
             )
 
         # Effective round ceiling (QFS routing without a surface classifier):
@@ -1814,6 +1832,7 @@ class RAGChain:
             fill_mode=RAG_AGENTIC_FILL_MODE,
             role_backstop=RAG_AGENTIC_ROLE_BACKSTOP,
             excluded_roles=RAG_RETRIEVAL_EXCLUDED_ROLES,
+            domain=DOMAIN_DESCRIPTION,
         )
         return _asyncio.run(orchestrator.run())
 
@@ -1930,13 +1949,14 @@ class RAGChain:
             search_ms = (time.perf_counter() - t0) * 1000
             span.set_attribute("search_result_count", len(search_results))
 
-            # Thin/nav filter (same pre-rerank placement + floor as Stage 4->5).
+            # Thin/heading filter (same pre-rerank placement + floor as Stage 4->5).
+            # The query-side navigational heuristic was removed in favour of the
+            # ingest-time chunk_role classification; only the thin/heading floor
+            # remains (see _filter_thin_candidates).
             search_results = _filter_thin_candidates(
                 search_results,
                 min_chars=RERANK_MIN_CHARS,
                 floor=int(top_k),
-                drop_nav=RERANK_DROP_NAVIGATIONAL,
-                nav_max_chars=RERANK_NAV_MAX_CHARS,
             )
 
             # Cross-encoder rerank, anchored to the user's query text. An
@@ -2757,15 +2777,11 @@ class RAGChain:
                     search_results,
                     min_chars=RERANK_MIN_CHARS,
                     floor=rerank_top_k,
-                    drop_nav=RERANK_DROP_NAVIGATIONAL,
-                    nav_max_chars=RERANK_NAV_MAX_CHARS,
                 )
                 if len(search_results) != _n_before:
                     logger.info(
-                        "thin/nav-chunk filter: %d -> %d candidates "
-                        "(min_chars=%d, drop_nav=%s)",
-                        _n_before, len(search_results),
-                        RERANK_MIN_CHARS, RERANK_DROP_NAVIGATIONAL,
+                        "thin-chunk filter: %d -> %d candidates (min_chars=%d)",
+                        _n_before, len(search_results), RERANK_MIN_CHARS,
                     )
 
             # Stage 5: Reranking (cross-encoder + fusion R1)
@@ -2785,11 +2801,12 @@ class RAGChain:
                             candidates=list(search_results),
                         )
 
-                    # 5b. Cross-encoder rerank — the heavy lifter.
-                    reranked = self.reranker.rerank(
-                        query=processed_query,
-                        documents=search_results,
-                        top_k=max(rerank_top_k, len(search_results)) if RAG_RERANK_FUSION_ENABLED else rerank_top_k,
+                    # 5b. Cross-encoder rerank — the heavy lifter. Fail-open: a
+                    # reranker outage degrades to hybrid score order, never 500s.
+                    reranked = self._safe_rerank(
+                        processed_query,
+                        search_results,
+                        max(rerank_top_k, len(search_results)) if RAG_RERANK_FUSION_ENABLED else rerank_top_k,
                     )
 
                     # 5c. Apply fusion (BM25-RRF + heading + anchor) on top of CE.
@@ -2907,12 +2924,10 @@ class RAGChain:
                         idempotency_key=f"search_fb:{fb_query}:{source_filter}:{heading_filter}:{search_limit}",
                     )
 
-                    # Rerank fallback results
+                    # Rerank fallback results (fail-open, same as primary)
                     if fb_search_results:
-                        fb_reranked = self.reranker.rerank(
-                            query=fb_query,
-                            documents=fb_search_results,
-                            top_k=rerank_top_k,
+                        fb_reranked = self._safe_rerank(
+                            fb_query, fb_search_results, rerank_top_k,
                         )
 
                         # Compare best reranker scores: primary vs fallback
@@ -3308,10 +3323,8 @@ class RAGChain:
                         )
 
                         if retry_search_results:
-                            retry_reranked = self.reranker.rerank(
-                                query=processed_query,
-                                documents=retry_search_results,
-                                top_k=rerank_top_k,
+                            retry_reranked = self._safe_rerank(
+                                processed_query, retry_search_results, rerank_top_k,
                             )
                         else:
                             retry_reranked = []
@@ -3432,16 +3445,29 @@ class RAGChain:
                 else None
             )
 
-            # Advisory DR-suggestion chip — baseline path only. When DR was
-            # already active the user opted in; suggesting it again would just
-            # be noise (and risks a re-run loop on the UI side).
+            # Advisory "go deeper" DR-suggestion chip. Computed on every path
+            # EXCEPT when deep-research is already active (suggesting DR while on
+            # DR is noise and risks a UI re-run loop). It IS surfaced on the
+            # agentic path — agentic did iterative HyDE retrieval, but a broad /
+            # compound query can still benefit from DR's topic decomposition, so
+            # the "try Deep Research" affordance stays useful there.
             dr_suggestion_payload: Optional[dict[str, Any]] = None
-            if not _alt_active:
+            if not _dr_active:
                 try:
                     suggest, reason = should_suggest_deep_research(query, reranked)
                     dr_suggestion_payload = {"suggest": bool(suggest), "reason": reason}
                 except Exception:  # noqa: BLE001 — never let an advisory hint break the response
                     dr_suggestion_payload = None
+
+            # Suggested "you might also ask…" follow-up questions (advisory,
+            # fail-open). Grounded in the answer + retrieved section headings so
+            # they stay in-corpus. The sync bridge no-ops when disabled / no answer.
+            suggested_questions: Optional[list[str]] = None
+            if generated_answer:
+                _sq = generate_follow_ups_sync(
+                    query, generated_answer, self._retrieved_headings(reranked),
+                )
+                suggested_questions = _sq or None
 
             tp.log_summary()
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
@@ -3541,6 +3567,7 @@ class RAGChain:
                 history_decision=query_result.history_decision,
                 history_turns_used=query_result.history_turns_used,
                 dr_suggestion=dr_suggestion_payload,
+                suggested_questions=suggested_questions,
                 metadata=response_metadata,
             )
 

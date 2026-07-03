@@ -1,0 +1,232 @@
+# Turn-Loop Query Basket — end-to-end routing/behaviour test set
+#
+# Purpose: the canonical basket of REAL queries used to validate the turn_loop
+# unification across every phase (see docs/retrieval/TURN_LOOP_UNIFICATION_BLUEPRINT.md).
+# It exercises each routing path the unified orchestrator must get right:
+#   fast_lane  -> trivial factoid: 1 deterministic RETRIEVE + ANSWER, no controller LLM call
+#   retrieve   -> single/agentic RETRIEVE round(s) then ANSWER
+#   decompose  -> compound/comparison: DECOMPOSE (parallel fan-out) into the flat pool
+#   deep_study -> answer needs a full-document read (windowed)
+#   clarify    -> too vague to retrieve: CLARIFY (terminal, ask_user)
+#   refuse     -> out-of-corpus / unanswerable: state-unknown, do NOT fabricate
+#   multi_turn -> conversational context carry (TurnContext); later turns resolve refs
+#
+# Honesty contract (CLAUDE.md §0): `ground_truth` is filled ONLY where verified
+# (user-stated corpus facts or DFT FLOWS.pdf ground truth). Everything else carries
+# `verify: true` — the span/source must be confirmed against the live corpus before
+# it is used for hard recall scoring. `anchor_terms` are concepts expected in a good
+# retrieval (used for a soft retrieval-hit check), NOT literal answer strings.
+#
+# Corpus: the ai03 dev "sanity" ASIC/DFT corpus (silicon SoC design: DFT, MBIST,
+# ATPG, scan, AMBA CHI/AXI, IR-drop/EM signoff, Vitec G60, regression/floorplan).
+# This is a self-contained basket; it can later be promoted to a full evals/packs/
+# pack (pack.yaml + goldens/*.jsonl) once spans are corpus-verified.
+
+meta:
+  name: turn_loop_query_basket
+  version: 1
+  corpus: sanity_asic_dft
+  domain: >-
+    Silicon SoC / ASIC design: design-for-test (DFT), MBIST/ATPG/scan, AMBA CHI &
+    AXI protocols, power-integrity signoff (IR-drop, electromigration/Redhawk),
+    physical design (floorplan), and verification/regression flows.
+  notes: >-
+    expected_route is the path the UNIFIED (turn_loop) orchestrator should take.
+    On today's agentic-default it is advisory; it becomes assertable at Phase 3
+    (router) and Phase 4 (turn_loop default).
+
+queries:
+  # ---- factoid -> fast-lane (single fact, must stay ~6s, no controller loop) ----
+  - qid: f001
+    qtype: factoid
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What is the maximum IR-drop signoff limit for Vitec G60 blocks under static conditions?"
+    ground_truth: "100 mV (static)"
+    anchor_terms: ["IR-drop", "signoff", "Vitec G60", "static"]
+    note: user-verified corpus fact (Redhawk power-integrity limits)
+  - qid: f002
+    qtype: factoid
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What is the maximum IR-drop signoff limit for Vitec G60 blocks under dynamic conditions?"
+    ground_truth: "50 mV (dynamic)"
+    anchor_terms: ["IR-drop", "dynamic", "Vitec G60"]
+    note: user-verified corpus fact
+  - qid: f003
+    qtype: factoid
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What is the electromigration signoff limit for the design?"
+    ground_truth: "1% of the total wire length"
+    anchor_terms: ["electromigration", "signoff", "wire length"]
+    note: user-verified corpus fact (Redhawk)
+  - qid: f004
+    qtype: factoid
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What is the AXI protocol?"
+    anchor_terms: ["AXI", "AMBA", "channel", "burst"]
+    verify: true
+  - qid: f005
+    qtype: factoid
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What does MBIST stand for?"
+    ground_truth: "Memory Built-In Self-Test"
+    anchor_terms: ["MBIST", "memory", "built-in self-test"]
+
+  # ---- disambiguation -> domain acronym must resolve in-corpus ----
+  - qid: d001
+    qtype: disambiguation
+    expected_route: fast_lane
+    expected_behavior: answer
+    query: "What is DFT in this context?"
+    ground_truth: "Design-For-Test (NOT Discrete Fourier Transform / Density Functional Theory)"
+    anchor_terms: ["design-for-test", "scan", "test", "coverage"]
+    note: guards the DOMAIN_DESCRIPTION grounding; wrong-domain answer = regression
+
+  # ---- howto / procedural -> RETRIEVE (may go multi-round) then ANSWER ----
+  - qid: h001
+    qtype: howto
+    expected_route: retrieve
+    expected_behavior: answer
+    query: "What are the steps before inserting MBIST for a block?"
+    anchor_terms: ["MBIST", "insertion", "test model", "floorplan", "reset"]
+    expected_source_docs: ["DFT FLOWS.pdf"]
+    note: "ground-truth doc = DFT FLOWS.pdf (memory: mbist-ground-truth-and-retrieval-gap)"
+  - qid: h002
+    qtype: howto
+    expected_route: retrieve
+    expected_behavior: answer
+    query: "How do you set up the regression environment?"
+    anchor_terms: ["regression", "setup", "environment", "flow"]
+    verify: true
+
+  # ---- comparison / multi_aspect -> DECOMPOSE (the fan-out latency case) ----
+  - qid: c001
+    qtype: multi_aspect
+    expected_route: decompose
+    expected_behavior: answer
+    query: "Compare the CHI and AXI protocols across channel structure and transaction ordering."
+    anchor_terms: ["CHI", "AXI", "channel", "transaction ordering"]
+    note: canonical DECOMPOSE case; measure fan-out latency here
+  - qid: c002
+    qtype: multi_aspect
+    expected_route: decompose
+    expected_behavior: answer
+    query: "What are the differences between AXI4 and AXI4-Lite for a memory-mapped peripheral?"
+    anchor_terms: ["AXI4", "AXI4-Lite", "burst", "memory-mapped"]
+    verify: true
+
+  # ---- multi_topic -> DECOMPOSE (several named aspects in one question) ----
+  - qid: mt001
+    qtype: multi_topic
+    expected_route: decompose
+    expected_behavior: answer
+    query: "Walk through MBIST insertion: test-model selection, floorplan data partitioning, and reset-sequence integration."
+    anchor_terms: ["MBIST", "test model", "floorplan", "partition", "reset sequence"]
+    verify: true
+
+  # ---- qfs / broad summary -> DECOMPOSE or multi-round RETRIEVE ----
+  - qid: q001
+    qtype: qfs
+    expected_route: decompose
+    expected_behavior: answer
+    query: "Summarize the full DFT flow from RTL to signoff, including scan, MBIST and ATPG."
+    anchor_terms: ["DFT", "RTL", "signoff", "scan", "MBIST", "ATPG"]
+    verify: true
+  - qid: q002
+    qtype: qfs
+    expected_route: decompose
+    expected_behavior: answer
+    query: "Summarize the power-integrity signoff limits for Vitec G60 blocks (IR-drop and electromigration)."
+    ground_truth: "IR-drop 100 mV static / 50 mV dynamic; electromigration 1% of total wire length (Redhawk)"
+    anchor_terms: ["IR-drop", "electromigration", "Vitec G60", "Redhawk", "signoff"]
+    note: user-verified; a multi-fact summary — good DECOMPOSE-vs-single-round A/B
+
+  # ---- messy -> normalize then RETRIEVE (short/typo'd) ----
+  - qid: m001
+    qtype: messy
+    expected_route: retrieve
+    expected_behavior: answer
+    query: "mbist steps??"
+    normalized_query: "What are the steps before inserting MBIST for a block?"
+    anchor_terms: ["MBIST", "steps", "insertion"]
+  - qid: m002
+    qtype: messy
+    expected_route: retrieve
+    expected_behavior: answer
+    query: "ir drop limit g60 static"
+    normalized_query: "What is the static IR-drop signoff limit for Vitec G60 blocks?"
+    ground_truth: "100 mV (static)"
+    anchor_terms: ["IR-drop", "Vitec G60", "static"]
+
+  # ---- clarify -> too vague to retrieve; CLARIFY terminal (ask_user) ----
+  - qid: cl001
+    qtype: clarify
+    expected_route: clarify
+    expected_behavior: clarify
+    query: "how do I set it up?"
+    note: no antecedent, no entity — must ask what "it" is, not fabricate a retrieval
+  - qid: cl002
+    qtype: clarify
+    expected_route: clarify
+    expected_behavior: clarify
+    query: "what are the limits?"
+    note: ambiguous ("limits" of what?) — CLARIFY unless a prior turn pinned the topic
+
+  # ---- multi_turn -> TurnContext carry; later turns resolve references ----
+  - qid: tt001
+    qtype: multi_turn
+    expected_behavior: answer
+    turns:
+      - query: "What is MBIST?"
+        expected_route: fast_lane
+        anchor_terms: ["MBIST", "memory", "self-test"]
+      - query: "What are the steps before inserting it?"
+        expected_route: retrieve
+        resolves_reference: "it -> MBIST"
+        anchor_terms: ["MBIST", "insertion", "test model", "floorplan"]
+        note: turn-2 must inherit MBIST from turn-1 (the 'tell me more' drift case)
+  - qid: tt002
+    qtype: multi_turn
+    expected_behavior: answer
+    turns:
+      - query: "Tell me about the AXI protocol."
+        expected_route: retrieve
+        anchor_terms: ["AXI", "channel", "burst"]
+      - query: "How does it compare to CHI?"
+        expected_route: decompose
+        resolves_reference: "it -> AXI"
+        anchor_terms: ["AXI", "CHI", "compare"]
+        note: turn-2 becomes a comparison -> DECOMPOSE, anchored on AXI from turn-1
+
+  # ---- adversarial -> in-domain-adjacent but unanswerable; state-unknown ----
+  - qid: adv001
+    qtype: adversarial
+    expected_route: refuse
+    expected_behavior: refuse_or_state_unknown
+    query: "What is the AXI5 protocol specification?"
+    note: corpus has AMBA CHI + AXI(3/4) but not AXI5 — must not confabulate a spec
+  - qid: adv002
+    qtype: adversarial
+    expected_route: refuse
+    expected_behavior: refuse_or_state_unknown
+    query: "Does the Vitec G60 support DDR5 memory interfaces?"
+    verify: true
+    note: likely absent — must state unknown rather than invent support
+
+  # ---- out_of_corpus -> clearly outside the domain; refuse ----
+  - qid: ooc001
+    qtype: out_of_corpus
+    expected_route: refuse
+    expected_behavior: refuse_or_state_unknown
+    query: "What is the capital of France?"
+    note: sanity floor — a RAG system must not answer this from a DFT corpus
+  - qid: ooc002
+    qtype: out_of_corpus
+    expected_route: refuse
+    expected_behavior: refuse_or_state_unknown
+    query: "What is the instruction-cache size of the ARM Cortex-M4?"
+    note: plausible-sounding but out-of-corpus; must state-unknown

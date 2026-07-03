@@ -256,8 +256,7 @@ class IngestionConfig:
     Query-time role filter stays as defense-in-depth."""
     nav_max_chars: int = RAG_INGESTION_NAV_MAX_CHARS
     """Length cap for the front-matter pointer-phrase branch of the ingest-time
-    navigational test (mirrors query-side RERANK_NAV_MAX_CHARS). Env:
-    RAG_INGESTION_NAV_MAX_CHARS."""
+    navigational test. Env: RAG_INGESTION_NAV_MAX_CHARS."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN
