@@ -249,6 +249,45 @@ def _seed_decision(
     return None
 
 
+def _no_progress_decision(
+    state: TurnState, budget: TurnBudget, no_progress_rounds: int
+) -> Optional[TurnDecision]:
+    """Force an ANSWER when evidence-gathering has stalled, else ``None``.
+
+    Guards the observed pathology (weak controller re-retrieving already-pooled
+    chunks after the judge marked the pool sufficient): once
+    ``max_no_progress_rounds`` consecutive gather rounds have added ZERO new
+    chunks and the pool is non-empty, the loop answers from what it has instead
+    of burning more actions/latency and drifting into a max_actions best-effort
+    exit. Only fires while answer attempts remain — once they're spent the
+    ANSWER branch's own cap takes the turn to best-effort. Disabled when
+    ``max_no_progress_rounds <= 0``.
+    """
+    if (
+        budget.max_no_progress_rounds > 0
+        and no_progress_rounds >= budget.max_no_progress_rounds
+        and state.pool
+        and state.answer_attempts < budget.max_answer_attempts
+    ):
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=(
+                f"loop guard: {no_progress_rounds} consecutive retrieval rounds "
+                "added no new evidence — answering from the pool gathered so far"
+            ),
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
+# Evidence-gathering actions (grow the pool); the no-progress guard tracks
+# consecutive rounds of these that add nothing new.
+_GATHER_ACTIONS = frozenset(
+    {TurnAction.RETRIEVE, TurnAction.DECOMPOSE, TurnAction.DEEP_STUDY}
+)
+
+
 async def run_turn_loop(
     query: str,
     context: TurnContext,
@@ -289,6 +328,9 @@ async def run_turn_loop(
     state = TurnState()
     emitter = TurnEventEmitter(deps=deps, state=state, budget=budget)
     best_draft: Optional[tuple[float, str]] = None
+    # Consecutive gather rounds (RETRIEVE/DECOMPOSE/DEEP_STUDY) that added no
+    # new chunks — drives the no-progress ANSWER guard (_no_progress_decision).
+    no_progress_rounds = 0
 
     try:
         while True:
@@ -305,12 +347,19 @@ async def run_turn_loop(
                     emitter=emitter,
                 )
 
-            # Fast lane: the router's deterministic opening decision skips the
-            # controller LLM call (fail-open — returns None to re-engage it).
+            # Decision precedence: (1) the router fast-lane's deterministic
+            # opening skips the controller LLM; (2) the no-progress guard forces
+            # an ANSWER when gathering has stalled; (3) otherwise the controller
+            # decides. Both deterministic paths are fail-open (return None to
+            # hand back to the controller).
             decision: Optional[TurnDecision] = _seed_decision(
                 route_hint, state, query
             )
-            seeded = decision is not None
+            source = "router" if decision is not None else "controller"
+            if decision is None:
+                decision = _no_progress_decision(state, budget, no_progress_rounds)
+                if decision is not None:
+                    source = "loop_guard"
             if decision is None:
                 decision = await decide(
                     query=query,
@@ -329,9 +378,10 @@ async def run_turn_loop(
                     "action": decision.action,
                     "reason": decision.reason,
                     "confidence": decision.confidence,
-                    # Who chose this action: the fast-lane router (deterministic,
-                    # no LLM) or the controller.
-                    "source": "router" if seeded else "controller",
+                    # Who chose this action: the fast-lane router or the
+                    # no-progress loop guard (both deterministic, no LLM) or the
+                    # controller.
+                    "source": source,
                 },
             )
             state.iteration += 1
@@ -386,6 +436,7 @@ async def run_turn_loop(
             # Evidence-gathering actions: contained per-action so one broken
             # injected seam degrades the action, not the turn (budgets still
             # bound the loop).
+            pool_before = len(state.pool)
             try:
                 if decision.action == TurnAction.RETRIEVE:
                     args = (
@@ -433,6 +484,13 @@ async def run_turn_loop(
                 logger.warning(
                     "turn loop %s action failed: %s", decision.action, exc
                 )
+            # No-progress tracking: a gather round that grew the pool resets the
+            # streak; one that added nothing (all dedup, empty, or a failed
+            # seam) advances it toward the _no_progress_decision ANSWER guard.
+            if len(state.pool) > pool_before:
+                no_progress_rounds = 0
+            else:
+                no_progress_rounds += 1
     except Exception:  # noqa: BLE001 — the loop itself must never raise
         logger.exception("turn loop failed unexpectedly — exiting best-effort")
         if best_draft is not None:

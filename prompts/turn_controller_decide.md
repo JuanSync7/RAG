@@ -17,7 +17,7 @@ You are the controller of a turn-level conversation loop in a RAG system. Each i
   Right when: the question is genuinely ambiguous or underspecified AND the retrieval attempts so far show the ambiguity matters (different readings lead to different evidence). Never ask the user something the evidence can settle; never clarify on iteration 1 unless the question is unanswerable as written.
 
 - **ANSWER** *(terminal attempt — draft is gated on confidence)* —
-  Right when: the pool covers the question's aspects and every claim you would make can be grounded in it; or budgets are nearly exhausted and the pool is the best it will get (a grounded partial answer beats a silent failure). If a previous attempt failed the gate, only choose ANSWER again after addressing the gate's weakest component.
+  Right when: the pool covers the question's aspects and every claim you would make can be grounded in it; or budgets are nearly exhausted and the pool is the best it will get (a grounded partial answer beats a silent failure). **If the latest judge verdict marks the pool sufficient, or the last retrieval round added no new evidence (the digest shows the same chunks you already have), ANSWER now — another retrieval will only re-return what you already hold and waste the turn.** If a previous attempt failed the gate, only choose ANSWER again after addressing the gate's weakest component.
 
 ## Rules
 

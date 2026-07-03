@@ -320,6 +320,15 @@ class TurnBudget:
     loop action; below it the loop goes straight to its best-effort exit
     instead of firing calls with near-zero timeouts."""
 
+    max_no_progress_rounds: int = 2
+    """Consecutive evidence-gathering rounds (RETRIEVE / DECOMPOSE / DEEP_STUDY)
+    that may add ZERO new chunks before the loop forces an ANSWER attempt from
+    the pool gathered so far. Guards the observed pathology where a weak
+    controller keeps re-retrieving the same chunks after the judge already
+    marked the pool sufficient — wasting actions and latency, and risking a
+    max_actions best-effort exit instead of a clean gated answer. 0 disables
+    the guard."""
+
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
         """Multiplier the router's ``effort`` applies to the work budgets.
@@ -376,6 +385,7 @@ class TurnBudget:
             gate_weight_citation=weights[2],
             llm_max_tokens=settings.RAG_TURN_LOOP_LLM_MAX_TOKENS,
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
+            max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
         )
 
 

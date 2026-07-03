@@ -393,6 +393,72 @@ async def test_non_fast_lane_hint_still_calls_controller(empty_context):
     assert action_events[0]["source"] == "controller"
 
 
+async def test_no_progress_guard_forces_answer_after_stalled_retrieval(empty_context):
+    """Once ``max_no_progress_rounds`` gather rounds add no new chunks, the loop
+    forces an ANSWER (source=loop_guard) instead of retrieving the same chunks
+    forever — the observed 'controller won't commit' pathology."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("RETRIEVE", query_text="q1"),
+            judge_json([0], 1, confidence=0.9),
+            decision_json("RETRIEVE", query_text="q2"),
+            decision_json("RETRIEVE", query_text="q3"),
+            selfscore_json(0.95),  # forced-answer self-score
+        ],
+        streams=[[("content", "grounded answer [1]")]],
+    )
+    # Same chunk every round → rounds 2 and 3 add nothing (all dup).
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[[make_chunk("c1")], [make_chunk("c1")], [make_chunk("c1")]],
+    )
+    budget = make_budget(max_actions=10, max_no_progress_rounds=2)
+
+    result = await run_turn_loop("q", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_GATE_PASSED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == [
+        "RETRIEVE", "RETRIEVE", "RETRIEVE", "ANSWER",
+    ]
+    # The ANSWER was forced by the loop guard, not chosen by the controller.
+    assert [a["source"] for a in action_events] == [
+        "controller", "controller", "controller", "loop_guard",
+    ]
+    # The forced ANSWER made NO controller LLM call.
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes == [
+        "controller", "judge", "controller", "controller", "draft", "self_score",
+    ]
+
+
+async def test_no_progress_guard_disabled_with_zero_setting(empty_context):
+    """max_no_progress_rounds=0 disables the guard — the controller keeps
+    control (and here retrieves duplicates until max_actions)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("RETRIEVE", query_text="q1"),
+            judge_json([0], 1, confidence=0.4, missing="more"),
+            decision_json("RETRIEVE", query_text="q2"),
+            decision_json("RETRIEVE", query_text="q3"),
+            selfscore_json(0.9),  # best-effort final draft self-score
+        ],
+        streams=[[("content", "best effort [1]")]],
+    )
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[[make_chunk("c1")], [make_chunk("c1")], [make_chunk("c1")]],
+    )
+    budget = make_budget(max_actions=3, max_no_progress_rounds=0)
+
+    result = await run_turn_loop("q", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_MAX_ACTIONS
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "RETRIEVE", "RETRIEVE"]
+    assert all(a["source"] == "controller" for a in action_events)
+
+
 async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):
     """The loop must exit to best-effort while one meaningful call still fits.
 
