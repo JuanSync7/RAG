@@ -308,6 +308,43 @@ async def test_judge_rejects_all_retains_fallback_floor_without_pooling():
     assert [c.chunk_id for c in state.fallback_chunks] == ["c1", "c2"]
 
 
+async def test_round_judge_uses_concise_mode_by_default():
+    """The round judge runs the agentic CONCISE judge by default — matching the
+    agentic path (the shared 7B judge is better-calibrated + faster there). A
+    regression that dropped the flag would revert to verbose scored-per-chunk."""
+    import src.retrieval.pipeline.agentic.judge as judge_mod
+
+    captured: dict = {}
+
+    async def spy_judge_chunks(_provider, **kwargs):
+        captured.update(kwargs)
+        return [], None
+
+    chunks = [make_chunk("c1")]
+    provider = FakeProvider()
+    deps, _ = make_deps(provider, retrieve_batches=[chunks])
+    state, budget = TurnState(), make_budget()
+    state.iteration = 1
+    emitter = TurnEventEmitter(
+        deps=deps, state=state, budget=budget, stream_events=False
+    )
+    original = judge_mod.judge_chunks
+    judge_mod.judge_chunks = spy_judge_chunks
+    try:
+        await run_retrieve(
+            RetrieveArgs(query_text="q"),
+            query="q",
+            state=state,
+            budget=budget,
+            deps=deps,
+            emitter=emitter,
+        )
+    finally:
+        judge_mod.judge_chunks = original
+
+    assert captured.get("concise") is True
+
+
 async def test_fallback_floor_disabled_with_zero_size():
     """``fallback_pool_size=0`` disables the grounding floor (pre-fix behavior)."""
     provider = FakeProvider(

@@ -1571,6 +1571,17 @@ keep/rank + answer self-score). Distinct from the controller alias to avoid
 correlated over-optimism (same rationale as RAG_AGENTIC_JUDGE_MODEL_ALIAS).
 Consumed by turn_loop/retrieve.py and turn_loop/answer.py."""
 
+RAG_TURN_LOOP_JUDGE_CONCISE: bool = os.environ.get(
+    "RAG_TURN_LOOP_JUDGE_CONCISE", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the loop's round judge uses the agentic CONCISE judge (reasons then
+emits only a ranked id-list + sufficiency) instead of a scored-object-per-chunk.
+Default true to MATCH the agentic path (which runs concise): the shared 7B judge
+model emits a short ranked list far more reliably than per-chunk JSON, so the
+verbose mode over-rejects good chunks and pays a longer decode. Concise collapses
+gate+rank into one short output — cheaper and better-calibrated on the same model.
+Consumed by turn_loop/retrieve.py `_judge_round`."""
+
 RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", "2")
 ))

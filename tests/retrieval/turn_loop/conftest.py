@@ -186,7 +186,12 @@ def judge_json(
     confidence: float = 0.9,
     missing: str = "",
 ) -> str:
-    """Serialize an agentic-judge response keeping ``keep_indexes`` in order."""
+    """Serialize an agentic-judge response keeping ``keep_indexes`` in order.
+
+    Format-agnostic: carries the sufficiency block BOTH nested under ``pool``
+    (the verbose scored-object parser) AND at top level (the concise ranked
+    id-list parser), so the same fixture drives ``judge_chunks`` in either mode.
+    """
     return json.dumps(
         {
             "chunks": [
@@ -204,6 +209,9 @@ def judge_json(
                 "confidence": confidence,
                 "missing_information": missing,
             },
+            "sufficient": sufficient,
+            "confidence": confidence,
+            "missing_information": missing,
         }
     )
 

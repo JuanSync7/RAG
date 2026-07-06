@@ -75,6 +75,16 @@ def _judge_json_mode() -> bool:
     return bool(getattr(settings, "RAG_AGENTIC_LLM_JSON_MODE", False))
 
 
+def _judge_concise() -> bool:
+    """Whether the round judge uses the agentic CONCISE judge (ranked id-list +
+    sufficiency) rather than a scored object per chunk. Default true to match the
+    agentic path — the shared 7B judge is better-calibrated and faster in concise
+    mode (``RAG_TURN_LOOP_JUDGE_CONCISE``)."""
+    from config import settings
+
+    return bool(getattr(settings, "RAG_TURN_LOOP_JUDGE_CONCISE", True))
+
+
 async def _judge_round(
     *,
     query: str,
@@ -130,6 +140,7 @@ async def _judge_round(
             candidates=candidates,
             timeout_s=emitter.remaining_timeout_s(),
             json_mode=_judge_json_mode(),
+            concise=_judge_concise(),
         )
     except Exception as exc:  # noqa: BLE001 — fail open to keep-all
         logger.warning("turn loop round judge failed: %s — keeping all", exc)
