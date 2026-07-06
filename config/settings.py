@@ -1263,11 +1263,18 @@ RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K: int = int(
 # (QFS) queries iterate. All judging is a generic, model-driven property — no
 # regex / vendor / phrase matching (CLAUDE.md §0).
 RAG_AGENTIC_RETRIEVAL_ENABLED: bool = os.environ.get(
-    "RAG_AGENTIC_RETRIEVAL_ENABLED", "false"
+    "RAG_AGENTIC_RETRIEVAL_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
-"""Master gate for the agentic HyDE/controller/judge retrieval loop. When
-False (default) the branch never runs; the per-request ``agentic_retrieval``
-override may still force it on/off for a single request."""
+"""Master gate for the agentic HyDE/controller/judge retrieval loop, AND the
+system's default retrieval orchestrator. 2026-07-07 decision: agentic is the
+best-measured mode on the eval basket (highest per-class quality and lowest
+latency of the alternates), so a no-flag query resolves to it via rag_chain's
+``_agentic_resolved`` (= this setting when ``agentic_retrieval`` is unset). The
+per-request ``agentic_retrieval`` override forces it on/off for one request;
+``deep_research`` and opt-in ``turn_loop`` (RAG_TURN_LOOP_ENABLED) take
+precedence when set. PROD CAVEAT: prod vLLM endpoints must be corrected before
+this default reaches prod (prod agentic is currently misconfigured — see the
+ai01 vllm portmap notes); dev is unaffected."""
 
 RAG_AGENTIC_MAX_ROUNDS: int = max(1, int(
     os.environ.get("RAG_AGENTIC_MAX_ROUNDS", "3")
