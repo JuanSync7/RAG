@@ -649,8 +649,14 @@ def test_flag_off_stream_path_untouched(loop_env, monkeypatch):
     assert env["loop"].calls == []
 
 
-def test_flag_off_nonstream_response_has_no_metadata_key(loop_env, monkeypatch):
-    """Flag off: /query body stays byte-identical (no metadata key added)."""
+def test_flag_off_nonstream_response_has_no_turn_loop_metadata(loop_env, monkeypatch):
+    """Flag off: the loop injects nothing of its own into /query.
+
+    The response now always carries a ``metadata`` key — develop standardised
+    it to expose query-processing telemetry (empty on the linear path). The
+    invariant the turn loop owns is narrower: with the flag off, no
+    ``turn_loop`` / ``router`` block rides along.
+    """
     import config.settings as settings_mod
     monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ENABLED", False, raising=False)
     env = loop_env(ANSWER_EVENTS, _answered_result())
@@ -659,7 +665,8 @@ def test_flag_off_nonstream_response_has_no_metadata_key(loop_env, monkeypatch):
     resp = client.post("/query", json={"query": "hello"})
 
     assert resp.status_code == 200
-    assert "metadata" not in resp.json()
+    meta = resp.json().get("metadata", {})
+    assert "turn_loop" not in meta and "router" not in meta
     assert env["loop"].calls == []
 
 

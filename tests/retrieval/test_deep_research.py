@@ -85,6 +85,7 @@ def _orch(
     original_question: str = "what is X and Y?",
     processed_query: str = "X Y context",
     budget: Optional[DeepResearchBudget] = None,
+    model_alias: str = "default",
 ) -> DeepResearch:
     kb_map = dict(kb_results_per_query or {})
     kg_map = dict(kg_results_per_query or {})
@@ -110,6 +111,7 @@ def _orch(
             max_nodes=10, max_llm_calls=20, wall_clock_ms=5000,
             max_depth=3, max_topics=3, per_topic_questions=3,
         ),
+        model_alias=model_alias,
     )
     o._kb_calls = kb_calls  # type: ignore[attr-defined] — for test introspection
     o._kg_calls = kg_calls  # type: ignore[attr-defined]
@@ -179,6 +181,38 @@ class TestTopicPool:
 
 
 class TestOrchestrator:
+    @pytest.mark.asyncio
+    async def test_llm_calls_use_configured_model_alias(self) -> None:
+        """Deep-research controller calls run on the configured alias, so it can be
+        pointed at the instruct model instead of the reasoning/gen default."""
+        provider = FakeProvider(responses=[
+            {"is_sufficient": True, "missing_information": "", "coverage_notes": "ok"},
+        ])
+        o = _orch(provider=provider, model_alias="judge", budget=DeepResearchBudget(
+            max_nodes=10, max_llm_calls=20, wall_clock_ms=5000,
+            max_depth=3, max_topics=3, per_topic_questions=3, early_stop_enabled=False,
+        ))
+        await o.research()
+        assert provider.calls, "expected at least one LLM call"
+        assert all(c["kwargs"].get("model_alias") == "judge" for c in provider.calls)
+
+    @pytest.mark.asyncio
+    async def test_domain_is_injected_into_controller_prompts(self) -> None:
+        """The corpus domain is rendered into the sufficiency/decomposition prompts
+        so DR resolves domain-ambiguous acronyms in-corpus (same fix as HyDE)."""
+        provider = FakeProvider(responses=[
+            {"is_sufficient": True, "missing_information": "", "coverage_notes": "ok"},
+        ])
+        o = _orch(provider=provider, budget=DeepResearchBudget(
+            max_nodes=10, max_llm_calls=20, wall_clock_ms=5000,
+            max_depth=3, max_topics=3, per_topic_questions=3, early_stop_enabled=False,
+        ))
+        o._domain = "Silicon/SoC design: DFT (Design-for-Test), MBIST, AMBA."
+        await o.research()
+        assert provider.calls, "expected at least one controller LLM call"
+        prompt_text = provider.calls[0]["messages"][0]["content"]
+        assert "Design-for-Test" in prompt_text  # domain reached the prompt
+
     @pytest.mark.asyncio
     async def test_sufficient_on_first_round_returns_unified(self) -> None:
         provider = FakeProvider(responses=[

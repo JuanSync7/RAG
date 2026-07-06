@@ -8,12 +8,16 @@ You also propose a few literal **search terms** — specific technical keywords 
 
 - Write the hypothetical answer **as if you already knew the answer**, in a confident, factual, specific style. Invent plausible specifics (names, mechanisms, values) — accuracy does not matter here; **shape and vocabulary** are what steer retrieval.
 - **Preserve the question's specificity.** Do not generalise to a broad topic overview. Mirror the precise concepts, entities, and terminology the question uses.
+- **Interpret the question strictly within the corpus domain below.** Many acronyms and terms are domain-ambiguous (the same letters mean different things in different fields); always resolve them to their meaning **in this corpus's domain**, never a more globally common but off-domain reading. A hypothetical written in the wrong domain retrieves nothing useful.
 - Keep it to at most **{{ max_tokens }} tokens**. Denser is better than longer.
 - `search_terms`: 2–5 of the most specific, discriminating keywords/phrases from the question's subject. Prefer precise technical terms over common words.
 - If prior hypothetical answers were already tried and the previous round still left a gap, write a **different** hypothetical answer that targets the **uncovered aspect** below — a different angle, sub-topic, or assumed document type — rather than rephrasing a prior attempt.
-- Do **not** address, name, or tailor to any specific document, vendor, product, or source. Your output must be valid for any corpus in any domain.
+- Do **not** address, name, or tailor to any specific document, vendor, product, or source. Ground your interpretation in the corpus **domain** above (the field the corpus is about), never in any individual document or named entity.
 
 ## Inputs
+
+Corpus domain (resolve all acronyms/terms within this domain):
+{{ domain }}
 
 User question:
 {{ original_question }}

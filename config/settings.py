@@ -77,21 +77,11 @@ RERANK_TOP_K = int(os.environ.get("RAG_RERANK_TOP_K", "5"))
 # many chars before rerank. 0 = disabled. These chunks win dense cosine on
 # topical queries but carry no answer content; see rag_chain thin-chunk filter.
 RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
-# Drop *navigational* candidates before rerank even when they exceed
-# RERANK_MIN_CHARS: table-of-contents / index lines (dotted ".... page" leaders)
-# and chapter/part front-matter stubs ("Read this chapter for a description
-# of ..."). These carry no answer content but win both dense similarity and the
-# cross-encoder reranker on topical queries (observed: an ARM spec ToC stub
-# scored 0.95 while the actual answer chunk scored 0.51), starving the LLM of
-# real body chunks. The candidate floor still guarantees >= rerank_top_k items.
-RERANK_DROP_NAVIGATIONAL = os.environ.get(
-    "RAG_RERANK_DROP_NAVIGATIONAL", "true"
-).lower() in ("true", "1", "yes")
-# A front-matter pointer stub is only treated as navigational when its total
-# length is <= this many chars (real body chunks that merely *mention* "see
-# chapter X" are far longer and are kept). ToC dotted-leader detection is
-# length-independent.
-RERANK_NAV_MAX_CHARS = int(os.environ.get("RAG_RERANK_NAV_MAX_CHARS", "320"))
+# NOTE: the former query-side navigational drop (RAG_RERANK_DROP_NAVIGATIONAL /
+# RAG_RERANK_NAV_MAX_CHARS) has been retired. Navigational/boilerplate suppression
+# now happens via the ingest-time chunk_role metadata + query-time role filter
+# (RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT / RAG_RETRIEVAL_EXCLUDED_ROLES). Only the
+# thin/heading-only floor (RERANK_MIN_CHARS above) remains query-side.
 # Floor client-supplied search_limit/rerank_top_k up to the configured
 # SEARCH_LIMIT/RERANK_TOP_K so UI clients that hardcode small values (e.g. the
 # console presets 10/5) still retrieve enough candidates for the reranker to
@@ -137,11 +127,17 @@ QUERY_PROCESSING_TIMEOUT = int(
 )
 QUERY_LOG_DIR = PROJECT_ROOT / "logs"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
+# Corpus domain hint, injected into query-processing, HyDE, and deep-research
+# prompts so the LLM resolves domain-ambiguous acronyms in-corpus. The DEFAULT is
+# deliberately domain-NEUTRAL: an unconfigured deployment gets harmless "use the
+# in-corpus meaning" guidance rather than a concrete-but-wrong domain that would
+# actively misdirect retrieval (e.g. an AI/ML default reading "DFT" as Density
+# Functional Theory on a silicon-design corpus). Set RAG_DOMAIN_DESCRIPTION to the
+# actual corpus domain per deployment.
 DOMAIN_DESCRIPTION = os.environ.get(
     "RAG_DOMAIN_DESCRIPTION",
-    "This knowledge base covers information retrieval, NLP, machine learning, "
-    "embeddings, vector search, language models, and related AI/ML topics. "
-    "Interpret all acronyms and abbreviations in this domain context.",
+    "Interpret all acronyms and abbreviations according to how they are used in "
+    "this corpus's documents, not their most common meaning in unrelated fields.",
 )
 
 # --- Knowledge Graph (retrieval-side flag) ---
@@ -613,20 +609,19 @@ RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
 at INGEST time (not just at query time). ~17% of the spec corpus is navigational
 ToC/front-matter that out-scores real answer chunks on both dense cosine and the
 reranker (a ToC stub scored 0.95 vs the answer's 0.51), causing "I cannot answer"
-refusals. The query-time rerank filter (RAG_RERANK_DROP_NAVIGATIONAL) is kept as
-defense-in-depth, but stripping at ingest is the single-source-of-truth fix: it
-shrinks the index, cuts embedding cost, and protects consumers that bypass the
-query filter (deep-research path, eval harnesses, alternate rerankers). Uses the
-shared ``is_navigational`` predicate so emission and filtering stay symmetric. A
-per-document over-prune guard never removes a document's entire chunk set."""
+refusals. This ingest-time regex drop is the LEGACY path (used when
+RAG_INGESTION_NAV_CLASSIFY is off); the current default tags chunk_role via the LLM
+classifier and the query-side role filter excludes navigation/boilerplate. Stripping
+at ingest still shrinks the index and protects consumers that bypass the query filter
+(eval harnesses, alternate rerankers). Uses the shared ``is_navigational`` predicate.
+A per-document over-prune guard never removes a document's entire chunk set."""
 
 RAG_INGESTION_NAV_MAX_CHARS: int = int(
     os.environ.get("RAG_INGESTION_NAV_MAX_CHARS", "320")
 )
 """Length cap (chars) below which the front-matter pointer-phrase branch of the
-navigational test fires at ingest. Mirrors the query-side RERANK_NAV_MAX_CHARS so
-both gates treat the same chunks as navigational. The dotted-leader (ToC) branch is
-length-independent and unaffected by this cap."""
+navigational test fires at the legacy ingest-time drop. The dotted-leader (ToC)
+branch is length-independent and unaffected by this cap."""
 
 # Adaptive table-chunking knobs (env-wired so they can be tuned on the live
 # Temporal worker; previously hardcoded dataclass defaults — audit
@@ -784,6 +779,15 @@ RAG_NEMO_FAITHFULNESS_THRESHOLD = float(
 RAG_NEMO_FAITHFULNESS_ACTION = os.environ.get(
     "RAG_NEMO_FAITHFULNESS_ACTION", "flag"
 )
+# Router alias for the LLM faithfulness/self-check scorer. The rail's own system
+# prompt already frames the model as a faithfulness evaluator; this selects WHICH
+# model runs it. Defaults to "judge" (the instruct model) rather than "default"
+# (the reasoning/gen model): a compact instruct model scores groundedness more
+# cheaply and does not spend the short output budget inside a hidden reasoning
+# block. Any alias the router knows is valid ("default", "query", "judge", ...).
+RAG_FAITHFULNESS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_FAITHFULNESS_MODEL_ALIAS", "judge"
+).strip() or "judge"
 RAG_NEMO_OUTPUT_PII_ENABLED = os.environ.get(
     "RAG_NEMO_OUTPUT_PII_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
@@ -1173,6 +1177,50 @@ RAG_DEEP_RESEARCH_MAX_NODES: int = int(
 RAG_DEEP_RESEARCH_MAX_LLM_CALLS: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_MAX_LLM_CALLS", "24")
 )
+# Router alias for the deep-research controller LLM (topic decomposition +
+# sufficiency checks). Historically hard-coded to "default" (the reasoning/gen
+# model); made configurable so deep research can run on the faster instruct model
+# ("judge") whose JSON is more reliable and whose decode does not burn the budget
+# inside a hidden reasoning block. Any alias the router knows is valid
+# ("default", "query", "controller", "judge").
+RAG_DEEP_RESEARCH_MODEL_ALIAS: str = os.environ.get(
+    "RAG_DEEP_RESEARCH_MODEL_ALIAS", "default"
+).strip() or "default"
+# Output-token cap for the deep-research controller's JSON calls (sufficiency
+# verdict + topic decomposition). These are SMALL structured outputs, so this is
+# deliberately modest. Critically it must NOT inherit RAG_GENERATION_MAX_TOKENS
+# (16384): on a compact instruct model whose full context is ~16k, requesting the
+# whole window as OUTPUT leaves no room for the prompt → ContextWindowExceededError.
+RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", "2048")
+)
+
+# --- Suggested follow-up questions ---
+# After an answer is generated, an instruct-model call proposes a few specific,
+# in-corpus follow-up questions the user could ask next (rendered as clickable
+# chips). Targets vague / multi-factor queries where the user hasn't supplied
+# enough context to decompose intent — good suggestions let them narrow in one
+# click. Grounded in the answer + retrieved section headings so it never suggests
+# a question the corpus cannot answer. Fail-open: any error yields no chips.
+RAG_SUGGESTED_QUESTIONS_ENABLED: bool = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_SUGGESTED_QUESTIONS_COUNT: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_COUNT", "3")
+)
+# Router alias for the generator (defaults to the fast instruct model, like the
+# agentic judge/HyDE) — a short JSON list, so it must NOT inherit the generation
+# max_tokens (same context-overflow rationale as deep research).
+RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS", "judge"
+).strip() or "judge"
+RAG_SUGGESTED_QUESTIONS_MAX_TOKENS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", "256")
+)
+RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", "20")
+)
+
 RAG_DEEP_RESEARCH_MAX_DEPTH: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_MAX_DEPTH", "3")
 )
@@ -2797,6 +2845,10 @@ def validate_all_config() -> None:
         ("RATE_LIMIT_WINDOW_SECONDS", RATE_LIMIT_WINDOW_SECONDS),
         ("RERANKER_BATCH_SIZE", RERANKER_BATCH_SIZE),
         ("RAG_INGESTION_LLM_MAX_KEYWORDS", RAG_INGESTION_LLM_MAX_KEYWORDS),
+        ("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_COUNT", RAG_SUGGESTED_QUESTIONS_COUNT),
+        ("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", RAG_SUGGESTED_QUESTIONS_MAX_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS),
     ]:
         if val <= 0:
             errors.append(f"{name}={val} must be > 0")
