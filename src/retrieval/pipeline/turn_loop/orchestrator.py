@@ -67,6 +67,7 @@ STOP_MAX_ACTIONS = "max_actions"
 STOP_MAX_LLM_CALLS = "max_llm_calls"
 STOP_WALL_CLOCK = "wall_clock"
 STOP_MAX_ANSWER_ATTEMPTS = "max_answer_attempts"
+STOP_NO_PROGRESS = "no_progress_stall"
 STOP_ERROR = "error"
 
 
@@ -433,6 +434,28 @@ async def run_turn_loop(
                         stop_reason=STOP_GATE_PASSED,
                     )
                 state.last_gate = feedback
+                # Stall exit (class: gate-failing answer on a stalled pool). When
+                # gathering has stalled for >= max_no_progress_rounds AND drafting
+                # from what we have just failed the gate, more retrieval is futile
+                # — the judge keeps rejecting the same corpus. For a genuinely
+                # unanswerable / out-of-corpus query a low-confidence grounded
+                # refusal IS the best possible answer, so commit the best draft
+                # instead of burning the rest of the action/wall-clock budget
+                # re-retrieving (the observed 44s tail). Shares the guard's knob.
+                if (
+                    budget.max_no_progress_rounds > 0
+                    and no_progress_rounds >= budget.max_no_progress_rounds
+                ):
+                    return await _best_effort_result(
+                        stop_reason=STOP_NO_PROGRESS,
+                        best_draft=best_draft,
+                        query=query,
+                        context=context,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
                 continue
 
             # Evidence-gathering actions: contained per-action so one broken

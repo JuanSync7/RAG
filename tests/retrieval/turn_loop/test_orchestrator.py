@@ -24,6 +24,7 @@ from src.retrieval.pipeline.turn_loop.orchestrator import (
     STOP_MAX_ACTIONS,
     STOP_MAX_ANSWER_ATTEMPTS,
     STOP_MAX_LLM_CALLS,
+    STOP_NO_PROGRESS,
     STOP_WALL_CLOCK,
 )
 from src.retrieval.pipeline.turn_loop.schemas import (
@@ -496,6 +497,45 @@ async def test_empty_judged_pool_grounds_answer_on_fallback_floor(empty_context)
     assert result.stop_reason == STOP_GATE_PASSED
     # The draft was GROUNDED on the promoted fallback floor (not cannot-answer),
     # and the returned pool carries the cited best-effort sources.
+    assert "[1]" in result.answer
+    assert [c.chunk_id for c in result.pool] == ["c1", "c2"]
+
+
+async def test_stalled_gate_failing_answer_exits_without_more_retrieval(empty_context):
+    """Latency fix: when gathering has stalled (>= max_no_progress_rounds) AND a
+    floor-grounded answer fails the gate, commit the best draft instead of
+    resuming futile retrieval to max_actions/wall_clock. A low-confidence
+    grounded refusal is the best possible answer for an unanswerable query."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("RETRIEVE", query_text="q1"),
+            judge_json([], 1, sufficient=False, confidence=0.2),  # round 1 rejects
+            decision_json("RETRIEVE", query_text="q2"),
+            judge_json([], 1, sufficient=False, confidence=0.2),  # round 2 rejects
+            selfscore_json(0.1),  # low self-score → the grounded answer fails the gate
+        ],
+        streams=[[("content", "The context does not support an answer [1][2].")]],
+    )
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[
+            [make_chunk("c1", score=0.9)],
+            [make_chunk("c2", score=0.7)],
+        ],
+    )
+    # High threshold so the floor-grounded refusal fails the gate; big action
+    # budget so ONLY the stall-exit (not max_actions) can end the turn early.
+    budget = make_budget(
+        max_actions=10, max_no_progress_rounds=2, answer_confidence_threshold=0.62
+    )
+
+    result = await run_turn_loop("q", empty_context, deps, budget)
+
+    # Exited on the stall, NOT max_actions — and after just RETRIEVE,RETRIEVE,ANSWER.
+    assert result.stop_reason == STOP_NO_PROGRESS
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "RETRIEVE", "ANSWER"]
+    # Best grounded draft is still returned (not a bare cannot-answer).
     assert "[1]" in result.answer
     assert [c.chunk_id for c in result.pool] == ["c1", "c2"]
 
