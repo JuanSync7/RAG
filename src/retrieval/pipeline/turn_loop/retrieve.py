@@ -43,6 +43,29 @@ logger = logging.getLogger(__name__)
 _TOP_PREVIEW_COUNT = 3
 
 
+def _retain_fallback(
+    state: TurnState, retrieved: list[EvidenceChunk], *, cap: int
+) -> None:
+    """Retain the turn's best-scored RAW retrieved chunks as a grounding floor.
+
+    Judge-INDEPENDENT by design: merges this round's raw candidates into
+    ``state.fallback_chunks`` (dedup by chunk_id), keeps the top ``cap`` by
+    score. Consumed only when the judged ``pool`` is empty — so a round judge
+    that rejects an entire fresh batch can no longer strand the turn with
+    nothing to cite (class fix, not a query/content match — CLAUDE.md §0).
+    ``cap <= 0`` disables the floor (pre-fix behavior).
+    """
+    if cap <= 0 or not retrieved:
+        return
+    seen = {chunk.chunk_id for chunk in state.fallback_chunks}
+    for chunk in retrieved:
+        if chunk.chunk_id not in seen:
+            state.fallback_chunks.append(chunk)
+            seen.add(chunk.chunk_id)
+    state.fallback_chunks.sort(key=lambda chunk: chunk.score, reverse=True)
+    del state.fallback_chunks[cap:]
+
+
 def _judge_json_mode() -> bool:
     """Guided-JSON toggle for the judge call (``RAG_AGENTIC_LLM_JSON_MODE``
     rationale, design §6: off by default because reasoning models emit empty
@@ -204,6 +227,10 @@ async def run_retrieve(
     except Exception as exc:  # noqa: BLE001 — a failed round must not kill the turn
         logger.warning("turn loop retrieve_ranked failed: %s", exc)
         retrieved = []
+
+    # Grounding floor: retain the best RAW candidates (before dedup/judge) so an
+    # empty judged pool can still ground a draft/refusal (see _retain_fallback).
+    _retain_fallback(state, retrieved, cap=budget.fallback_pool_size)
 
     fresh: list[EvidenceChunk] = []
     dup_count = 0

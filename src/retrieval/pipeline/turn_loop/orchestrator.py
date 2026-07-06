@@ -254,19 +254,21 @@ def _no_progress_decision(
 ) -> Optional[TurnDecision]:
     """Force an ANSWER when evidence-gathering has stalled, else ``None``.
 
-    Guards the observed pathology (weak controller re-retrieving already-pooled
-    chunks after the judge marked the pool sufficient): once
-    ``max_no_progress_rounds`` consecutive gather rounds have added ZERO new
-    chunks and the pool is non-empty, the loop answers from what it has instead
-    of burning more actions/latency and drifting into a max_actions best-effort
-    exit. Only fires while answer attempts remain — once they're spent the
-    ANSWER branch's own cap takes the turn to best-effort. Disabled when
-    ``max_no_progress_rounds <= 0``.
+    Guards two forms of the same stall: (a) a weak controller re-retrieving
+    already-pooled chunks after the judge marked the pool sufficient, and (b) a
+    round judge that rejects every fresh batch so the judged pool never grows —
+    the empty-pool spiral that otherwise burns every action to a max_actions
+    best-effort exit (draft from "(no evidence retrieved)"). Once
+    ``max_no_progress_rounds`` consecutive gather rounds add ZERO new judged
+    chunks, the loop answers from whatever grounding it has — the judged pool if
+    non-empty, else the best-effort ``fallback_chunks`` floor. Only fires while
+    answer attempts remain — once they're spent the ANSWER branch's own cap
+    takes the turn to best-effort. Disabled when ``max_no_progress_rounds <= 0``.
     """
     if (
         budget.max_no_progress_rounds > 0
         and no_progress_rounds >= budget.max_no_progress_rounds
-        and state.pool
+        and (state.pool or state.fallback_chunks)
         and state.answer_attempts < budget.max_answer_attempts
     ):
         return TurnDecision(

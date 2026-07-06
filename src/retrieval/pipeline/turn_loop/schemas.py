@@ -329,6 +329,11 @@ class TurnBudget:
     max_actions best-effort exit instead of a clean gated answer. 0 disables
     the guard."""
 
+    fallback_pool_size: int = 8
+    """How many best-scored RAW retrieved chunks to retain per turn as the
+    judge-independent grounding floor (``TurnState.fallback_chunks``). Consumed
+    only when the judged pool is empty; 0 disables the floor."""
+
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
         """Multiplier the router's ``effort`` applies to the work budgets.
@@ -386,6 +391,7 @@ class TurnBudget:
             llm_max_tokens=settings.RAG_TURN_LOOP_LLM_MAX_TOKENS,
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
+            fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
         )
 
 
@@ -574,6 +580,14 @@ class TurnState:
 
     pool: list[EvidenceChunk] = field(default_factory=list)
     """Accumulated evidence; ordering = pool order fed to drafting."""
+
+    fallback_chunks: list[EvidenceChunk] = field(default_factory=list)
+    """Best-scored RAW retrieved chunks (judge-INDEPENDENT), retained across the
+    turn as a grounding floor. Populated every RETRIEVE round from the raw
+    candidates BEFORE the judge; consumed only when ``pool`` is empty — an ANSWER
+    then grounds on these instead of "(no evidence retrieved)". Guards the class
+    where a judge rejecting an entire fresh batch strands the turn with nothing
+    to cite (never a query/content match — CLAUDE.md §0)."""
 
     seen_chunk_ids: set[str] = field(default_factory=set)
     """Stable chunk ids ever pooled — cross-action dedup."""

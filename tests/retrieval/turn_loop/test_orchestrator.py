@@ -459,6 +459,47 @@ async def test_no_progress_guard_disabled_with_zero_setting(empty_context):
     assert all(a["source"] == "controller" for a in action_events)
 
 
+async def test_empty_judged_pool_grounds_answer_on_fallback_floor(empty_context):
+    """Empty-pool spiral fix: when the round judge rejects EVERY fresh batch the
+    judged pool never grows, so the no-progress guard (now firing on the
+    fallback floor, not only a non-empty pool) commits to ANSWER and the draft is
+    grounded on the best-effort raw chunks — not "(no evidence retrieved)".
+    Without the floor the loop would spiral to a max_actions empty best-effort."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("RETRIEVE", query_text="q1"),
+            judge_json([], 1, sufficient=False, confidence=0.2),  # round 1 rejects
+            decision_json("RETRIEVE", query_text="q2"),
+            judge_json([], 1, sufficient=False, confidence=0.2),  # round 2 rejects
+            selfscore_json(0.9),  # forced-answer self-score
+        ],
+        streams=[[("content", "Based on the retrieved sources [1][2], ...")]],
+    )
+    # Each round retrieves a DIFFERENT chunk the judge rejects → pool never grows.
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[
+            [make_chunk("c1", score=0.9)],
+            [make_chunk("c2", score=0.7)],
+        ],
+    )
+    budget = make_budget(
+        max_actions=10, max_no_progress_rounds=2, answer_confidence_threshold=0.3
+    )
+
+    result = await run_turn_loop("q", empty_context, deps, budget)
+
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["RETRIEVE", "RETRIEVE", "ANSWER"]
+    # The ANSWER was forced by the loop guard firing on the fallback floor.
+    assert action_events[-1]["source"] == "loop_guard"
+    assert result.stop_reason == STOP_GATE_PASSED
+    # The draft was GROUNDED on the promoted fallback floor (not cannot-answer),
+    # and the returned pool carries the cited best-effort sources.
+    assert "[1]" in result.answer
+    assert [c.chunk_id for c in result.pool] == ["c1", "c2"]
+
+
 async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):
     """The loop must exit to best-effort while one meaningful call still fits.
 

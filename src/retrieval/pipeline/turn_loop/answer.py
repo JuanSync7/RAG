@@ -300,6 +300,20 @@ async def run_answer(
     attempt = state.answer_attempts + 1
     state.answer_attempts = attempt
 
+    # Grounding floor (class: a round judge that rejects every fresh batch
+    # leaves the judged pool empty). Draft from the best-effort raw retrieved
+    # chunks rather than "(no evidence retrieved)" so a refusal is evidenced and
+    # citations resolve — and only when the judged pool came back empty, so the
+    # judge's filtering is preserved whenever it kept anything. Promoted into the
+    # pool (not just read) so the returned result carries the cited sources.
+    if not state.pool and state.fallback_chunks:
+        state.pool = list(state.fallback_chunks)
+        logger.info(
+            "turn loop grounding answer on %d best-effort chunks — judged pool "
+            "was empty",
+            len(state.pool),
+        )
+
     messages = _build_messages(query, context, state)
     draft = await _stream_draft(
         messages,
