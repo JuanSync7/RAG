@@ -233,6 +233,7 @@ RAG_RESPONSE_INTERNAL_FIELDS = frozenset({
     "guardrails",
     "composite_confidence",
     "confidence_breakdown",
+    "first_composite",  # initial composite confidence before internal re-retrieval loop
     "post_guardrail_action",
     "version_conflicts",
     "retry_count",
