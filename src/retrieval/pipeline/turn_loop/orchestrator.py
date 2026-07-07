@@ -1,18 +1,20 @@
 # @summary
-# The turn loop itself: run_turn_loop drives controller-decide -> dispatch
-# (RETRIEVE / DEEP_STUDY / CLARIFY / ANSWER) iterations while the budgets hold
-# (max_actions, max_llm_calls, wall clock), emitting a turn_action event per
-# decision. CLARIFY and a gate-passing ANSWER are terminal; a failed gate
-# feeds GateFeedback back into the next decision. Budget exhaustion exits
-# best-effort: the best failed draft, else one final draft if the LLM ledger
-# allows, else an explicit user-facing cannot-answer-confidently message
-# (source names + capped previews only; the internal evidence digest is
-# logged, never returned) — never an empty response. Pure control flow over
-# TurnLoopDeps; per-action errors are contained so one broken seam degrades,
-# not crashes, a turn.
+# The turn loop itself: run_turn_loop first resolves a follow-up's
+# back-references into a history-stripped standalone query (retrieval seed only;
+# generation keeps the verbatim query + full context), then drives
+# controller-decide -> dispatch (RETRIEVE / DECOMPOSE / DEEP_STUDY / CLARIFY /
+# ANSWER) iterations while the budgets hold (max_actions, max_llm_calls, wall
+# clock), emitting a turn_action event per decision. CLARIFY and a gate-passing
+# ANSWER are terminal; a failed gate feeds GateFeedback back into the next
+# decision. Budget exhaustion exits best-effort: the best failed draft, else one
+# final draft if the LLM ledger allows, else an explicit user-facing
+# cannot-answer-confidently message (source names + capped previews only; the
+# internal evidence digest is logged, never returned) — never an empty response.
+# Pure control flow over TurnLoopDeps; per-action errors are contained so one
+# broken seam degrades, not crashes, a turn.
 # Exports: run_turn_loop
 # Deps: src.retrieval.pipeline.turn_loop.{schemas,events,controller,retrieve,
-#       deep_study,clarify,answer}
+#       decompose,deep_study,clarify,answer,standalone}
 # @end-summary
 """Turn-loop orchestrator: budgets, dispatch, stop conditions (design §5).
 
@@ -43,6 +45,7 @@ from src.retrieval.pipeline.turn_loop.deep_study import run_deep_study
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.retrieve import run_retrieve
 from src.retrieval.pipeline.turn_loop.router import RouteHint
+from src.retrieval.pipeline.turn_loop.standalone import resolve_standalone_query
 from src.retrieval.pipeline.turn_loop.schemas import (
     AnswerArgs,
     DecomposeArgs,
@@ -335,6 +338,25 @@ async def run_turn_loop(
     # new chunks — drives the no-progress ANSWER guard (_no_progress_decision).
     no_progress_rounds = 0
 
+    # History-stripped retrieval seed (multi-turn robustness): resolve a
+    # follow-up's back-references into a self-contained query BEFORE any
+    # retrieval, so conversation memory grounds GENERATION (still passed the full
+    # `context`) without poisoning the retrieval/HyDE seed. Fail-open to the
+    # verbatim query; no LLM call on a fresh first turn. Only the retrieval-facing
+    # paths (controller query authoring, RETRIEVE/DECOMPOSE grounding) use this;
+    # generation/clarify keep the verbatim `query`.
+    try:
+        retrieval_query = await resolve_standalone_query(
+            query=query,
+            context=context,
+            state=state,
+            budget=budget,
+            emitter=emitter,
+        )
+    except Exception:  # noqa: BLE001 — resolution must never break the turn
+        logger.exception("turn loop standalone-query resolution failed — verbatim")
+        retrieval_query = query
+
     try:
         while True:
             stop_reason = _budget_stop_reason(state, budget)
@@ -356,7 +378,7 @@ async def run_turn_loop(
             # decides. Both deterministic paths are fail-open (return None to
             # hand back to the controller).
             decision: Optional[TurnDecision] = _seed_decision(
-                route_hint, state, query
+                route_hint, state, retrieval_query
             )
             source = "router" if decision is not None else "controller"
             if decision is None:
@@ -365,7 +387,7 @@ async def run_turn_loop(
                     source = "loop_guard"
             if decision is None:
                 decision = await decide(
-                    query=query,
+                    query=retrieval_query,
                     context=context,
                     state=state,
                     budget=budget,
@@ -467,11 +489,11 @@ async def run_turn_loop(
                     args = (
                         decision.args
                         if isinstance(decision.args, RetrieveArgs)
-                        else RetrieveArgs(query_text=query)
+                        else RetrieveArgs(query_text=retrieval_query)
                     )
                     await run_retrieve(
                         args,
-                        query=query,
+                        query=retrieval_query,
                         state=state,
                         budget=budget,
                         deps=deps,
@@ -481,11 +503,11 @@ async def run_turn_loop(
                     args = (
                         decision.args
                         if isinstance(decision.args, DecomposeArgs)
-                        else DecomposeArgs(question=query)
+                        else DecomposeArgs(question=retrieval_query)
                     )
                     await run_decompose(
                         args,
-                        query=query,
+                        query=retrieval_query,
                         state=state,
                         budget=budget,
                         deps=deps,

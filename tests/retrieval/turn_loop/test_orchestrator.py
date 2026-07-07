@@ -558,3 +558,64 @@ async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):
     monkeypatch.setattr(state, "elapsed_ms", lambda: 53_000)  # 7s left < 8s floor
 
     assert _budget_stop_reason(state, budget) == STOP_WALL_CLOCK
+
+
+import json as _json
+
+from src.retrieval.pipeline.turn_loop.schemas import TurnContext as _TurnContext
+
+
+def _rewrite_json(decision: str, processed: str) -> str:
+    """Serialize a retrieval_query_rewriter response (standalone stage)."""
+    return _json.dumps(
+        {"decision": decision, "processed_query": processed, "history_turns_used": 1}
+    )
+
+
+async def test_followup_resolves_standalone_query_for_retrieval_not_generation():
+    """A follow-up turn seeds RETRIEVAL from the history-resolved standalone
+    query, while GENERATION keeps the verbatim user query (memory grounds the
+    answer without poisoning the retrieval seed — the multi-turn fix)."""
+    context = _TurnContext(
+        conversation_id="conv-1",
+        recent_turns=[{"query": "What is MBIST?", "answer": "Memory BIST."}],
+    )
+    provider = FakeProvider(
+        responses=[
+            # 1) standalone resolver runs BEFORE the loop
+            _rewrite_json("partial_history", "steps before inserting MBIST"),
+            # 2) controller decides RETRIEVE (no query_text -> falls back to
+            #    the resolved query), then 4) ANSWER
+            decision_json("RETRIEVE"),
+            judge_json([0], 1, confidence=0.9),
+            decision_json("ANSWER"),
+            selfscore_json(0.95),
+        ],
+        streams=[[("content", "The steps are [1].")]],
+    )
+    deps, _emitted = make_deps(provider, retrieve_batches=[[make_chunk("c1")]])
+
+    result = await run_turn_loop(
+        "What are the steps before inserting it?", context, deps, make_budget()
+    )
+
+    assert result.action == TurnLoopResult.ACTION_ANSWERED
+    # First call is the standalone rewrite: it sees the verbatim query + history.
+    assert provider.calls[0][0] == "agenerate"
+    rewrite_prompt = provider.calls[0][1][0]["content"]
+    assert "USER_QUERY: What are the steps before inserting it?" in rewrite_prompt
+    assert "MBIST" in rewrite_prompt  # history rendered in
+
+    # The controller (retrieval-facing) is prompted with the RESOLVED query.
+    controller_prompts = [
+        msgs[0]["content"]
+        for method, msgs, _kw in provider.calls
+        if method == "agenerate" and "steps before inserting MBIST" in msgs[0]["content"]
+    ]
+    assert controller_prompts, "controller was not seeded with the resolved query"
+
+    # Generation (draft stream) keeps the VERBATIM follow-up query.
+    draft_msgs = [msgs for method, msgs, _kw in provider.calls if method == "generate_stream"]
+    assert draft_msgs, "no draft stream call recorded"
+    draft_text = draft_msgs[0][-1]["content"]
+    assert "Question: What are the steps before inserting it?" in draft_text
