@@ -172,22 +172,44 @@ async def run_decompose(
     )
 
     # 2. PARALLEL fan-out — the latency contract. One concurrent wave of
-    #    retrievals; a single sub-query failure contributes nothing (fail-open)
-    #    but never aborts the others.
-    async def _one(subq: str) -> list[EvidenceChunk]:
+    #    retrievals; a single leg failure contributes nothing (fail-open) but
+    #    never aborts the others.
+    #
+    #    Additive anchor (RRF/union): the RAW turn query is retrieved as its own
+    #    leg alongside the sub-queries, so the merged pool is the UNION of the
+    #    raw-query hits and the rewritten sub-query hits. A DECOMPOSE rewrite can
+    #    then only ADD candidates — never DROP a document the raw query matched
+    #    (the query-transform variance the sub-queries-only fan-out caused: the
+    #    rewrite steered retrieval off a perfectly-matched doc). Mirrors the
+    #    agentic loop's HyDE asymmetry (BM25 stays anchored to the raw query).
+    #    Skipped when the split degraded to the whole question (the anchor would
+    #    duplicate the single leg) or when disabled via decompose_anchor_raw.
+    anchor_raw = bool(
+        budget.decompose_anchor_raw
+        and query.strip()
+        and query.strip().lower() not in {s.strip().lower() for s in subqueries}
+    )
+    fanout = ([query] if anchor_raw else []) + subqueries
+
+    async def _one(leg_query: str) -> list[EvidenceChunk]:
         try:
-            return await deps.retrieve_ranked(subq, None, budget.retrieve_top_k)
+            return await deps.retrieve_ranked(leg_query, None, budget.retrieve_top_k)
         except Exception as exc:  # noqa: BLE001 — one failed leg, not the round
-            logger.warning("turn loop decompose retrieve failed for %r: %s", subq, exc)
+            logger.warning(
+                "turn loop decompose retrieve failed for %r: %s", leg_query, exc
+            )
             return []
 
-    legs = await asyncio.gather(*[_one(subq) for subq in subqueries])
+    all_legs = await asyncio.gather(*[_one(q) for q in fanout])
+    # Sub-query legs (for per-facet attribution) are the fan-out minus the
+    # anchor leg — the raw-query anchor is additive retrieval, not a facet.
+    sub_legs = all_legs[1:] if anchor_raw else all_legs
 
     # 3. Merge + dedup — done AFTER the gather (single-threaded) so the shared
     #    seen-set is never mutated concurrently.
     fresh: list[EvidenceChunk] = []
     dup_count = 0
-    for chunks in legs:
+    for chunks in all_legs:
         for chunk in chunks:
             if chunk.chunk_id in state.seen_chunk_ids:
                 dup_count += 1
@@ -229,7 +251,7 @@ async def run_decompose(
     if budget.facet_commit_enabled and len(subqueries) >= 2:
         judged = pool_verdict is not None
         evidence_ids = {chunk.chunk_id for chunk in state.pool}
-        for subq, leg in zip(subqueries, legs):
+        for subq, leg in zip(subqueries, sub_legs):
             leg_ids = {chunk.chunk_id for chunk in leg}
             state.record_facet(subq, judged and bool(evidence_ids & leg_ids))
 

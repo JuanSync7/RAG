@@ -1714,6 +1714,21 @@ is filled toward RAG_TURN_LOOP_FALLBACK_POOL_SIZE with context chunks the answer
 need not all cite (dividing by the full filled size would spuriously fail a valid
 grounded refusal). Consumed by turn_loop/answer.py `run_answer`."""
 
+RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW: bool = os.environ.get(
+    "RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW", "true"
+).lower() in ("true", "1", "yes")
+"""Whether a DECOMPOSE round retrieves the RAW turn query as an additive anchor
+leg alongside its sub-queries (RRF/union). When True (default), the pool is the
+UNION of the raw-query hits and the sub-query hits, so a decomposition can only
+ADD candidates — never DROP a document the raw query matched. Fixes the observed
+query-transform variance where DECOMPOSE rewrote the query into sub-queries that
+drifted off a perfectly-matched doc (mode D: raw-query top hit lost). Mirrors the
+agentic loop's HyDE asymmetry (BM25 stays anchored to the raw query; the rewrite
+only adds dense candidates), which is purely additive. False reverts to
+sub-queries-only (the substitutive behavior). Generic (union property), never a
+query/content match (CLAUDE.md §0). Consumed via ``TurnBudget.from_settings()``
+by turn_loop/decompose.py."""
+
 RAG_TURN_LOOP_FACET_COMMIT_ENABLED: bool = os.environ.get(
     "RAG_TURN_LOOP_FACET_COMMIT_ENABLED", "true"
 ).lower() in ("true", "1", "yes")

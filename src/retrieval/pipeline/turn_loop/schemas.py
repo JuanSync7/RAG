@@ -350,6 +350,14 @@ class TurnBudget:
     signal, gathering that stopped producing new evidence). False disables it (the
     controller alone decides when to answer)."""
 
+    decompose_anchor_raw: bool = True
+    """Whether a DECOMPOSE round retrieves the RAW turn query as an additive
+    anchor leg alongside its sub-queries (RRF/union). When True, the pool is the
+    UNION of raw-query and sub-query hits, so a decomposition can only ADD
+    candidates — never DROP a doc the raw query matched (the query-transform
+    variance fix; mirrors the agentic HyDE asymmetry). False reverts to
+    sub-queries-only (substitutive)."""
+
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
         """Multiplier the router's ``effort`` applies to the work budgets.
@@ -410,6 +418,7 @@ class TurnBudget:
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
             facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
+            decompose_anchor_raw=settings.RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW,
         )
 
 

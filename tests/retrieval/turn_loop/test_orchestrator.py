@@ -561,7 +561,7 @@ async def test_facet_commit_guard_forces_answer_when_all_facets_covered(empty_co
     deps, emitted = make_deps(
         provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
     )
-    budget = make_budget(max_actions=10)
+    budget = make_budget(max_actions=10, decompose_anchor_raw=False)
 
     result = await run_turn_loop("throughput and latency?", empty_context, deps, budget)
 
@@ -623,7 +623,7 @@ async def test_facet_covered_gate_failure_commits_best_draft(empty_context):
     )
     # High threshold so the draft fails; large action budget so ONLY the
     # facet-commit exit (not max_actions) can end the turn early.
-    budget = make_budget(max_actions=10, answer_confidence_threshold=0.9)
+    budget = make_budget(max_actions=10, answer_confidence_threshold=0.9, decompose_anchor_raw=False)
 
     result = await run_turn_loop("a and b?", empty_context, deps, budget)
 
@@ -659,7 +659,8 @@ async def test_facet_covered_commits_after_answer_budget_spent(empty_context):
     # One attempt only + generous actions: only the facet-covered commit (NOT
     # max_actions) can end the turn once the attempt is spent pre-coverage.
     budget = make_budget(
-        max_actions=10, max_answer_attempts=1, answer_confidence_threshold=0.9
+        max_actions=10, max_answer_attempts=1, answer_confidence_threshold=0.9,
+        decompose_anchor_raw=False,
     )
 
     result = await run_turn_loop("a and b?", empty_context, deps, budget)

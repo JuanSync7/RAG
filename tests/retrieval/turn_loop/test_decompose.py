@@ -38,7 +38,11 @@ def _split_json(*subqs: str) -> str:
 
 def _setup(provider, batches, *, emitted=None):
     deps, ev = make_deps(provider, retrieve_batches=batches, emitted=emitted)
-    state, budget = TurnState(), make_budget()
+    # These tests exercise sub-query fan-out / dedup / facet mechanics in
+    # isolation; the additive raw-query anchor leg (a separate concern) is
+    # covered by its own tests, so disable it here to keep the FIFO-batch
+    # arithmetic 1:1 with the sub-queries.
+    state, budget = TurnState(), make_budget(decompose_anchor_raw=False)
     emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
     return deps, ev, state, budget, emitter
 
@@ -91,7 +95,8 @@ async def test_parallel_fanout_calls_retrieve_per_subquery():
 
     deps = TurnLoopDeps(retrieve_ranked=retrieve_ranked, fetch_document=None,
                         llm_provider=provider, emit=emit)
-    state, budget = TurnState(), make_budget()
+    # anchor off: assert one retrieve PER SUB-QUERY (the anchor leg is separate).
+    state, budget = TurnState(), make_budget(decompose_anchor_raw=False)
     emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
 
     await run_decompose(DecomposeArgs(question="q"), query="q", state=state,
@@ -125,6 +130,121 @@ async def test_split_failopen_falls_back_to_single_subquery():
     assert [c.chunk_id for c in state.pool] == ["c1"]
     hyde = events_of(ev, TurnEventType.HYDE_QUERY)[0]
     assert hyde["search_terms"] == ["the whole question"]  # single fallback leg
+
+
+# ── additive raw-query anchor leg (RRF/union — mode-D fix) ───────────────────
+
+async def test_raw_query_anchor_recovers_a_doc_the_subqueries_drift_off():
+    """Additive/RRF property (the SMP-3 mode-D regression): DECOMPOSE rewrites the
+    query into sub-queries that drift off the doc the RAW query matched. The
+    raw-query anchor leg re-includes that doc, so a rewrite can only ADD
+    candidates, never DROP a raw-query hit."""
+    provider = FakeProvider(
+        responses=[_split_json("amba chi channel a", "amba chi channel b"),
+                   judge_json([0, 1, 2], 3)],
+    )
+    raw_hit = make_chunk("pt_eco_flow", source="pt_eco_flow.pdf")
+
+    async def retrieve_ranked(qt, hyde, k):
+        # Only the RAW query surfaces the target doc; the drifted sub-queries
+        # return unrelated CHI-noise chunks.
+        if qt == "back-end ECO flow signoff order":
+            return [raw_hit]
+        return [make_chunk(f"chi-{qt[-1]}")]
+
+    async def emit(e):  # noqa: ANN001
+        pass
+
+    deps = TurnLoopDeps(retrieve_ranked=retrieve_ranked, fetch_document=None,
+                        llm_provider=provider, emit=emit)
+    state, budget = TurnState(), make_budget()  # anchor ON by default
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+    await run_decompose(
+        DecomposeArgs(question="back-end ECO flow signoff order"),
+        query="back-end ECO flow signoff order",
+        state=state, budget=budget, deps=deps, emitter=emitter,
+    )
+
+    # The raw-query doc was RETRIEVED (anchor leg) and survived into the pool.
+    assert "pt_eco_flow" in state.seen_chunk_ids  # anchor leg retrieved it
+    assert "pt_eco_flow" in {c.chunk_id for c in state.pool}  # judge kept it
+
+
+async def test_raw_query_anchor_leg_is_retrieved():
+    """The fan-out issues a retrieval on the RAW query itself (the anchor leg),
+    in addition to the sub-queries."""
+    provider = FakeProvider(responses=[_split_json("sub one", "sub two"),
+                                       judge_json([], 0)])
+    seen_qts = []
+
+    async def retrieve_ranked(qt, hyde, k):
+        seen_qts.append(qt)
+        return []
+
+    async def emit(e):  # noqa: ANN001
+        pass
+
+    deps = TurnLoopDeps(retrieve_ranked=retrieve_ranked, fetch_document=None,
+                        llm_provider=provider, emit=emit)
+    state, budget = TurnState(), make_budget()
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+    await run_decompose(DecomposeArgs(question="the raw question"),
+                        query="the raw question", state=state, budget=budget,
+                        deps=deps, emitter=emitter)
+
+    assert "the raw question" in seen_qts  # anchor leg
+    assert seen_qts.count("the raw question") == 1  # not duplicated
+    assert {"sub one", "sub two"} <= set(seen_qts)  # sub-query legs too
+
+
+async def test_raw_anchor_not_registered_as_a_facet():
+    """The raw-query anchor leg is an additive retrieval, NOT a decomposed facet
+    — only the sub-queries are facets (the anchor must not distort coverage)."""
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0, 1, 2], 3)])
+
+    async def retrieve_ranked(qt, hyde, k):
+        return [make_chunk(f"doc-{qt}")]
+
+    async def emit(e):  # noqa: ANN001
+        pass
+
+    deps = TurnLoopDeps(retrieve_ranked=retrieve_ranked, fetch_document=None,
+                        llm_provider=provider, emit=emit)
+    state, budget = TurnState(), make_budget()
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    # Facets are the two sub-queries only — never the raw "a and b" anchor.
+    assert [f.question for f in state.facets] == ["a", "b"]
+
+
+async def test_raw_anchor_disabled_reverts_to_subqueries_only():
+    provider = FakeProvider(responses=[_split_json("sub one", "sub two"),
+                                       judge_json([], 0)])
+    seen_qts = []
+
+    async def retrieve_ranked(qt, hyde, k):
+        seen_qts.append(qt)
+        return []
+
+    async def emit(e):  # noqa: ANN001
+        pass
+
+    deps = TurnLoopDeps(retrieve_ranked=retrieve_ranked, fetch_document=None,
+                        llm_provider=provider, emit=emit)
+    state, budget = TurnState(), make_budget(decompose_anchor_raw=False)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+    await run_decompose(DecomposeArgs(question="the raw question"),
+                        query="the raw question", state=state, budget=budget,
+                        deps=deps, emitter=emitter)
+
+    assert "the raw question" not in seen_qts  # no anchor leg
+    assert set(seen_qts) == {"sub one", "sub two"}
 
 
 # ── facet coverage (drives the commit guard) ─────────────────────────────────
