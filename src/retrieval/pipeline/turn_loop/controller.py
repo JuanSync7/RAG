@@ -81,6 +81,23 @@ def judge_model_alias() -> str:
     return str(getattr(settings, "RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", "judge"))
 
 
+def _domain_description() -> str:
+    """The corpus domain the controller resolves the query + inline HyDE within.
+
+    The turn controller authors both the search ``query_text`` and the inline
+    ``hypothetical_answer`` (HyDE), so — like the agentic HyDE generator — it must
+    resolve domain-ambiguous acronyms/terms to their in-corpus meaning, never a
+    globally-common off-domain reading (a hypothetical written in the wrong domain
+    retrieves nothing). Reads ``DOMAIN_DESCRIPTION`` lazily so importing this
+    module stays config-free; a blank/unset value falls open to a neutral
+    placeholder (domain grounding is advisory, never a hard failure). §0-safe:
+    the configured domain string, not any corpus term/vendor match."""
+    from config import settings
+
+    domain = str(getattr(settings, "DOMAIN_DESCRIPTION", "") or "").strip()
+    return domain or "(no specific domain configured)"
+
+
 def build_evidence_digest(state: TurnState) -> str:
     """Render the deterministic evidence digest of the turn so far.
 
@@ -255,6 +272,7 @@ async def decide(
     prompt = render(
         load_prompt(_PROMPT_FILE),
         user_query=query,
+        domain=_domain_description(),
         turn_context=context.render_for_prompt(CONTEXT_DIGEST_MAX_CHARS)
         or "(no prior conversation context)",
         evidence_digest=build_evidence_digest(state),
