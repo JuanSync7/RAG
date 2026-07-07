@@ -51,13 +51,13 @@ Pre-flight router hint (advisory only — a cheap classifier's suggestion for ho
 
 Return a single JSON object, no prose outside it.
 
-Also classify the **intrinsic shape of the user's question** in a top-level `query_shape` field — a property of the question itself, independent of which action you choose:
+First determine `query_shape` — the intrinsic shape of the user's question, a property of the question itself, independent of which action you choose. Decide it by asking: **would a complete answer need evidence about more than one distinct subject, option, or facet?**
 
-- `single_facet` — asks about one thing; a single retrieval can cover it.
-- `compound` — names several distinct facets at once: a comparison ("X vs Y", "how do X and Y differ"), a multi-part "X, Y and Z" question, or a broad "summarise the whole flow". These need the parallel DECOMPOSE fan-out, not one shallow retrieval.
+- `compound` — YES. The question needs information about two or more distinct subjects/facets and cannot be fully answered from evidence about just one. This ALWAYS includes: a comparison or contrast (the *differences between* X and Y, X *versus* Y, how A *compares to* B — comparing two named things is inherently two facets, one per side); a multi-part question (X, Y, *and* Z); a request to walk through or explain a process that itself **names several distinct stages or sub-tasks** (e.g. "walk through P: A, B and C" — each named stage needs its own evidence); or a broad request spanning several sections (summarise a whole flow or process). If answering well would mean gathering evidence about more than one thing, it is `compound` — even when no comparison keyword appears.
+- `single_facet` — NO. One subject, one information need; a single focused retrieval can cover it. An "and" that merely joins two words of one concept (e.g. "read and write channel") does not make a question compound, and a how-to about ONE task that does not itself enumerate several distinct sub-tasks stays single_facet.
 - `vague` — too underspecified to retrieve well as written.
 
-Judge `query_shape` from the question's meaning, not from any specific keyword — a comparison phrased without the word "versus" is still `compound`, and an "and" joining two words of a single concept is not.
+Judge shape from meaning, not keywords. A comparison or contrast of two or more named things is `compound`, never `single_facet` — the whole point is that each side needs its own evidence.
 
 `args` depends on `action`:
 
@@ -73,8 +73,8 @@ inputs above):
 
 ```json
 {
-  "action": "RETRIEVE",
   "query_shape": "single_facet",
+  "action": "RETRIEVE",
   "reason": "<which specific gap/ref/gate-feedback drives this choice>",
   "confidence": 0.7,
   "args": {

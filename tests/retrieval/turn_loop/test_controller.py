@@ -164,6 +164,27 @@ async def test_prompt_substitutes_every_template_variable(empty_context):
     assert "q" in prompt
 
 
+async def test_prompt_asks_for_query_shape_classification(empty_context):
+    """Contract guard: the controller prompt must instruct the model to emit
+    query_shape with the compound/comparison guidance the coercion depends on
+    (a live-validated wording — losing it silently regresses the c002 fix, which
+    unit tests can't catch since they script query_shape directly)."""
+    provider = FakeProvider(responses=[decision_json("ANSWER")])
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    await decide(
+        query="q", context=empty_context, state=state, budget=budget, emitter=emitter
+    )
+
+    prompt = provider.calls[0][1][0]["content"]
+    assert "query_shape" in prompt
+    for token in ("compound", "single_facet"):
+        assert token in prompt
+    # the comparison-is-compound rule (the exact class the c002 model missed)
+    assert "comparison" in prompt.lower()
+
+
 async def test_route_hint_renders_into_first_controller_prompt(empty_context):
     """An advisory (non-fast-lane) seed is rendered into the iteration-0 prompt;
     the controller still decides freely (fail-open)."""
