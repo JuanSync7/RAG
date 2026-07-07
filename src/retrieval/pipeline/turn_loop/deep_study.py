@@ -32,6 +32,7 @@ from typing import Optional
 
 from src.common.prompts import load_prompt, render, strip_reasoning
 from src.common.utils import parse_json_object
+from src.retrieval.pipeline.turn_loop.common import preview_chars
 from src.retrieval.pipeline.turn_loop.controller import controller_model_alias
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.schemas import (
@@ -48,14 +49,6 @@ from src.retrieval.pipeline.turn_loop.schemas import (
 logger = logging.getLogger(__name__)
 
 _PROMPT_FILE = "turn_deep_study_read.md"
-
-
-def _notes_preview_chars() -> int:
-    """Preview cap for deep_study event payloads (reuses the turn-context
-    preview tunable — one knob for every preview surface)."""
-    from config import settings
-
-    return int(getattr(settings, "RAG_TURN_CONTEXT_PREVIEW_CHARS", 320))
 
 
 def _window_stride(budget: TurnBudget) -> int:
@@ -249,7 +242,7 @@ async def run_deep_study(
     anchor = _anchor_offset(state, doc_key)
     start_window = 0 if anchor < 0 else min(window_count - 1, anchor // stride)
 
-    preview_cap = _notes_preview_chars()
+    preview_cap = preview_chars()
     template = load_prompt(_PROMPT_FILE)
     windows_read_this_call = 0
     window = start_window

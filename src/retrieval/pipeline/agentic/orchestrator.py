@@ -84,6 +84,7 @@ class AgenticRetrieval:
         role_backstop: bool = False,
         excluded_roles: Optional[list] = None,
         graph_context: str = "",
+        domain: str = "",
     ) -> None:
         self._provider = provider
         self._retrieve = retrieve
@@ -108,6 +109,11 @@ class AgenticRetrieval:
         self._role_backstop = role_backstop
         self._excluded_roles = frozenset(excluded_roles or [])
         self._graph_context = graph_context
+        # Corpus domain, injected into the HyDE prompt so the controller resolves
+        # domain-ambiguous acronyms/terms to their in-corpus meaning instead of a
+        # globally-common but off-domain reading (which produces a wrong-domain
+        # hypothetical that retrieves nothing).
+        self._hyde_domain = domain
         self._state = AgenticState(
             original_question=original_question,
             processed_query=processed_query,
@@ -155,6 +161,8 @@ class AgenticRetrieval:
             graph_context=self._graph_context,
             rounds_run=s.round_index,
             hyde_variants_tried=len(s.tried_hyde),
+            tried_hyde=list(s.tried_hyde),
+            hyde_rounds=list(s.hyde_rounds),
             kept_count=len(s.kept),
             llm_calls=s.llm_calls,
             judge_calls=s.judge_calls,
@@ -239,8 +247,19 @@ class AgenticRetrieval:
 
         # 1. HyDE generation (controller). Fail-open -> embed the processed query
         #    so retrieval is never worse than a plain hybrid search.
+        _failures_before = s.hyde_failures
         variant = await self._next_hyde()
         s.tried_hyde.append(variant.hypothetical_answer)
+        # Retain the full variant for the UI query-processing panel. fell_back is
+        # derived from the failure counter delta so _next_hyde's signature stays
+        # unchanged (a fallback round embeds the literal query, not a real HyDE).
+        s.hyde_rounds.append({
+            "round": s.round_index,
+            "hypothetical_answer": variant.hypothetical_answer,
+            "search_terms": list(variant.search_terms),
+            "target_aspect": variant.target_aspect,
+            "fell_back": s.hyde_failures > _failures_before,
+        })
 
         # 2. Retrieve-as-tool (embed HyDE answer + BM25 anchor + hybrid search).
         try:
@@ -422,6 +441,7 @@ class AgenticRetrieval:
             temperature=self._hyde_temperature,
             timeout_s=self._llm_timeout_s,
             json_mode=self._json_mode,
+            domain=self._hyde_domain,
         )
         s.llm_calls += 1
         if variant is None:

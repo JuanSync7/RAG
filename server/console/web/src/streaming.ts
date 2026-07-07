@@ -18,10 +18,11 @@ import { buildCitationsHtml, buildSourcesLineHtml, revealCitations } from "./cit
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, getDeepResearch, getTurnLoop, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerQueryResubmit, resubmitQuery } from "./chatMode";
+import { getChatMode, getDeepResearch, getTurnLoop, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerQueryResubmit, resubmitQuery, registerDrSuggestionResubmit, renderFollowUps } from "./chatMode";
 import { createActivityLog, isTurnLoopEvent, renderClarifyChips } from "./activityLog";
 import type { ActivityLog } from "./activityLog";
-import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
+import { renderQueryProcessing } from "./queryProcessing";
+import type { ChunkResult, QueryMetadata, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
     const s = getSettings();
@@ -373,6 +374,10 @@ export async function streamQuery(queryText: string): Promise<void> {
                             (data.ignored_doc_ids ?? []) as string[],
                         );
                     }
+                    // Query-processing panel (HyDE/rewrite/DR) — rendered ABOVE the
+                    // thinking block. The retrieval event carries the full metadata
+                    // and fires before any reasoning/token, so the panel lands first.
+                    renderQueryProcessing(bubbleEl.parentElement, data, queryText);
                 } else if (isTurnLoopEvent(evtType)) {
                     // Typed turn-loop activity events (TURN_LOOP_DESIGN.md §8).
                     // All event text is rendered via textContent inside the
@@ -463,6 +468,12 @@ export async function streamQuery(queryText: string): Promise<void> {
                     actionsEl.style.display = "flex";
                     metaEl.textContent = fmtTime(Date.now());
                     metaEl.style.display = "block";
+                    // Suggested "you might also ask…" block at the tail of this
+                    // answer's bubble (arrives in the done event).
+                    if (!errorShown && started) {
+                        const sq = (data as { suggested_questions?: string[] }).suggested_questions;
+                        renderFollowUps(bubbleEl.parentElement, Array.isArray(sq) ? sq : []);
+                    }
                     scrollToBottom();
 
                     await loadConversations();
@@ -534,6 +545,11 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
             conversation_id?: string;
             token_budget?: TokenBudget;
             dr_suggestion?: DrSuggestionPayload;
+            suggested_questions?: string[];
+            processed_query?: string;
+            query_confidence?: number;
+            kg_expanded_terms?: string[] | null;
+            metadata?: QueryMetadata;
         }>("POST", "/console/query", buildQueryBody(queryText));
         maybeShowDrChip(data.dr_suggestion, queryText);
 
@@ -550,6 +566,9 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
         bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
         bubbleEl.style.display = "block";
+        // Query-processing panel (HyDE/rewrite/DR) above the answer (no reasoning
+        // block on the non-stream path, so it anchors before the bubble).
+        renderQueryProcessing(bubbleEl.parentElement, data, queryText);
 
         const tb = data.token_budget;
         if (tb) {
@@ -575,6 +594,15 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         actionsEl.style.display = "flex";
         metaEl.textContent = fmtTime(Date.now());
         metaEl.style.display = "block";
+        // Suggested "you might also ask…" block at the tail of this answer's
+        // bubble — only for a real generated answer (parity with the streaming
+        // path, which guards on `started`); never on a clarification/no-answer turn.
+        if (data.generated_answer) {
+            renderFollowUps(
+                bubbleEl.parentElement,
+                Array.isArray(data.suggested_questions) ? data.suggested_questions : [],
+            );
+        }
         scrollToBottom();
         await loadConversations();
         updateConvTitle();
@@ -587,7 +615,9 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 }
 
 export async function sendQuery(text: string): Promise<void> {
-    // Hide any prior suggestion — a new query supersedes the previous advisory.
+    // Hide any prior deep-research suggestion — a new query supersedes it. The
+    // follow-up block is per-turn (lives in its own answer bubble), so there is
+    // no global one to clear here.
     hideDrSuggestionChip();
     if (getChatMode() === "sources") {
         await sourcesOnlyQuery(text);

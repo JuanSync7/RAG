@@ -1,18 +1,20 @@
 # @summary
-# The turn loop itself: run_turn_loop drives controller-decide -> dispatch
-# (RETRIEVE / DEEP_STUDY / CLARIFY / ANSWER) iterations while the budgets hold
-# (max_actions, max_llm_calls, wall clock), emitting a turn_action event per
-# decision. CLARIFY and a gate-passing ANSWER are terminal; a failed gate
-# feeds GateFeedback back into the next decision. Budget exhaustion exits
-# best-effort: the best failed draft, else one final draft if the LLM ledger
-# allows, else an explicit user-facing cannot-answer-confidently message
-# (source names + capped previews only; the internal evidence digest is
-# logged, never returned) — never an empty response. Pure control flow over
-# TurnLoopDeps; per-action errors are contained so one broken seam degrades,
-# not crashes, a turn.
+# The turn loop itself: run_turn_loop first resolves a follow-up's
+# back-references into a history-stripped standalone query (retrieval seed only;
+# generation keeps the verbatim query + full context), then drives
+# controller-decide -> dispatch (RETRIEVE / DECOMPOSE / DEEP_STUDY / CLARIFY /
+# ANSWER) iterations while the budgets hold (max_actions, max_llm_calls, wall
+# clock), emitting a turn_action event per decision. CLARIFY and a gate-passing
+# ANSWER are terminal; a failed gate feeds GateFeedback back into the next
+# decision. Budget exhaustion exits best-effort: the best failed draft, else one
+# final draft if the LLM ledger allows, else an explicit user-facing
+# cannot-answer-confidently message (source names + capped previews only; the
+# internal evidence digest is logged, never returned) — never an empty response.
+# Pure control flow over TurnLoopDeps; per-action errors are contained so one
+# broken seam degrades, not crashes, a turn.
 # Exports: run_turn_loop
-# Deps: src.retrieval.pipeline.turn_loop.{schemas,events,controller,retrieve,
-#       deep_study,clarify,answer}
+# Deps: src.retrieval.pipeline.turn_loop.{schemas,events,common,controller,
+#       retrieve,decompose,deep_study,clarify,answer,standalone}
 # @end-summary
 """Turn-loop orchestrator: budgets, dispatch, stop conditions (design §5).
 
@@ -30,18 +32,27 @@ likewise the endpoint's job.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.retrieval.pipeline.turn_loop.answer import run_answer
 from src.retrieval.pipeline.turn_loop.clarify import run_clarify
+from src.retrieval.pipeline.turn_loop.common import one_line, preview_chars
 from src.retrieval.pipeline.turn_loop.controller import (
     build_evidence_digest,
     decide,
 )
+from src.retrieval.pipeline.turn_loop.decompose import run_decompose
 from src.retrieval.pipeline.turn_loop.deep_study import run_deep_study
-from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
+from src.retrieval.pipeline.turn_loop.events import (
+    TurnEventEmitter,
+    latest_event_payload,
+)
 from src.retrieval.pipeline.turn_loop.retrieve import run_retrieve
+from src.retrieval.pipeline.turn_loop.router import RouteHint
+from src.retrieval.pipeline.turn_loop.standalone import resolve_standalone_query
 from src.retrieval.pipeline.turn_loop.schemas import (
+    AnswerArgs,
+    DecomposeArgs,
     DeepStudyArgs,
     RetrieveArgs,
     TurnAction,
@@ -63,6 +74,8 @@ STOP_MAX_ACTIONS = "max_actions"
 STOP_MAX_LLM_CALLS = "max_llm_calls"
 STOP_WALL_CLOCK = "wall_clock"
 STOP_MAX_ANSWER_ATTEMPTS = "max_answer_attempts"
+STOP_NO_PROGRESS = "no_progress_stall"
+STOP_FACETS_COVERED = "facets_covered"
 STOP_ERROR = "error"
 
 
@@ -84,13 +97,6 @@ def _budget_stop_reason(state: TurnState, budget: TurnBudget) -> Optional[str]:
     return None
 
 
-def _preview_chars() -> int:
-    """Preview cap for user-facing evidence lines (the one preview knob)."""
-    from config import settings
-
-    return int(getattr(settings, "RAG_TURN_CONTEXT_PREVIEW_CHARS", 320))
-
-
 def _cannot_answer_text(state: TurnState) -> str:
     """Deterministic best-effort answer when no draft could be produced.
 
@@ -107,7 +113,7 @@ def _cannot_answer_text(state: TurnState) -> str:
         build_evidence_digest(state),
     )
     lines = ["I could not reach a confident answer within this turn's budget."]
-    preview_cap = _preview_chars()
+    preview_cap = preview_chars()
     seen: set[tuple[str, str]] = set()
     evidence_lines: list[str] = []
     for chunk in state.pool:
@@ -118,9 +124,7 @@ def _cannot_answer_text(state: TurnState) -> str:
         label = chunk.source or "unnamed source"
         if chunk.heading:
             label += f" — {chunk.heading}"
-        preview = " ".join((chunk.text or "").split())
-        if preview_cap > 0 and len(preview) > preview_cap:
-            preview = preview[:preview_cap]
+        preview = one_line(chunk.text, preview_cap)
         evidence_lines.append(f"- {label}: {preview}" if preview else f"- {label}")
     if evidence_lines:
         lines.append("")
@@ -158,6 +162,35 @@ def _result(
     )
 
 
+def _draft_result(
+    state: TurnState,
+    best_draft: Optional[tuple[float, str]],
+    stop_reason: str,
+) -> TurnLoopResult:
+    """Terminal result from the best gate-scored draft, else the cannot-answer
+    digest. The single place that turns a ``(confidence, answer)`` best-draft
+    into a :class:`TurnLoopResult`, shared by the best-effort exit and the
+    never-raise error containment so their fallback shape can never drift."""
+    if best_draft is not None:
+        confidence, answer = best_draft
+        return _result(
+            state, answer=answer, confidence=confidence, stop_reason=stop_reason
+        )
+    return _result(
+        state, answer=_cannot_answer_text(state), stop_reason=stop_reason
+    )
+
+
+def _coerce_args(decision: TurnDecision, expected: type, default: Any):
+    """The decision's typed ``args`` when they match ``expected``, else ``default``.
+
+    A sloppy controller may emit a decision whose ``args`` are the wrong shape
+    (or absent); the gather stage still runs on a sane default keyed off the
+    resolved retrieval query rather than crashing the dispatch.
+    """
+    return decision.args if isinstance(decision.args, expected) else default
+
+
 async def _best_effort_result(
     *,
     stop_reason: str,
@@ -190,20 +223,233 @@ async def _best_effort_result(
                 best_draft = (feedback.score, draft)
         except Exception as exc:  # noqa: BLE001 — best-effort must not raise
             logger.warning("turn loop final best-effort draft failed: %s", exc)
-    if best_draft is not None:
-        confidence, answer = best_draft
-        return _result(
-            state,
-            answer=answer,
-            confidence=confidence,
-            stop_reason=stop_reason,
+    return _draft_result(state, best_draft, stop_reason)
+
+
+def _seed_decision(
+    route_hint: Optional[RouteHint], state: TurnState, query: str
+) -> Optional[TurnDecision]:
+    """The fast-lane's deterministic opening decision, or ``None``.
+
+    When the router took the fast lane, the first two iterations are fixed —
+    a RETRIEVE (iteration 0) then, once it yielded a pool, an ANSWER (iteration
+    1) — with NO controller LLM call between them (the ~2-round-trip latency
+    win). Deliberately narrow so the fast lane always degrades to the
+    controller (fail-open): a later iteration, an empty pool, or a prior gate
+    failure returns ``None`` here, handing the turn to :func:`decide`. A
+    non-fast-lane hint also returns ``None`` — that seed is advisory-only and
+    reaches the controller through the prompt, never as a forced decision.
+    """
+    if route_hint is None or not route_hint.fast_lane:
+        return None
+    if state.iteration == 0:
+        return TurnDecision(
+            action=TurnAction.RETRIEVE,
+            reason=(
+                "router fast-lane: high-confidence self-contained factoid — "
+                "retrieving directly (controller skipped)"
+            ),
+            confidence=0.0,
+            args=RetrieveArgs(query_text=query),
         )
-    return _result(
-        state,
-        answer=_cannot_answer_text(state),
-        confidence=0.0,
-        stop_reason=stop_reason,
+    if state.iteration == 1 and state.pool and state.last_gate is None:
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=(
+                "router fast-lane: pool covers the factoid — answering directly "
+                "(controller skipped)"
+            ),
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
+def _no_progress_decision(
+    state: TurnState, budget: TurnBudget, no_progress_rounds: int
+) -> Optional[TurnDecision]:
+    """Force an ANSWER when evidence-gathering has stalled, else ``None``.
+
+    Guards two forms of the same stall: (a) a weak controller re-retrieving
+    already-pooled chunks after the judge marked the pool sufficient, and (b) a
+    round judge that rejects every fresh batch so the judged pool never grows —
+    the empty-pool spiral that otherwise burns every action to a max_actions
+    best-effort exit (draft from "(no evidence retrieved)"). Once
+    ``max_no_progress_rounds`` consecutive gather rounds add ZERO new judged
+    chunks, the loop answers from whatever grounding it has — the judged pool if
+    non-empty, else the best-effort ``fallback_chunks`` floor. Only fires while
+    answer attempts remain — once they're spent the ANSWER branch's own cap
+    takes the turn to best-effort. Disabled when ``max_no_progress_rounds <= 0``.
+    """
+    if (
+        budget.max_no_progress_rounds > 0
+        and no_progress_rounds >= budget.max_no_progress_rounds
+        and (state.pool or state.fallback_chunks)
+        and state.answer_attempts < budget.max_answer_attempts
+    ):
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=(
+                f"loop guard: {no_progress_rounds} consecutive retrieval rounds "
+                "added no new evidence — answering from the pool gathered so far"
+            ),
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
+def _pool_judged_sufficient(state: TurnState) -> bool:
+    """True when the latest GENUINELY-emitted judge verdict marks the pool
+    sufficient.
+
+    Reads the most recent ``judge_verdict`` event from the trace. That event is
+    only emitted when the round judge actually validated the pool
+    (``pool_verdict is not None``): a fail-open keep-all round (exhausted ledger,
+    judge error, unparseable output) emits NO verdict, so this stays False and
+    the guard never commits on a broken judge — the same
+    ``pool_verdict is not None`` discipline the per-facet coverage attribution
+    uses (decompose.py). Pure trace read, no content matching (CLAUDE.md §0)."""
+    verdict = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
+    return bool(verdict and verdict.get("sufficient"))
+
+
+def _decomposed_pool_answerable(state: TurnState) -> bool:
+    """True when a DECOMPOSE-driven turn's pool is ready to synthesize.
+
+    The commit signal for the facet guard, satisfied two ways once a multi-way
+    DECOMPOSE has run (``state.facets`` non-empty):
+
+    - **every facet covered** (``facets_fully_covered``) — each decomposed
+      sub-question has its own judge-kept chunk; or
+    - **the pool is judged sufficient** (``_pool_judged_sufficient``) — the round
+      judge's holistic verdict says the gathered evidence answers the question.
+
+    The second arm closes a real spiral: when a thin first round covers only some
+    facets and later rounds REPHRASE the sub-queries, the cumulative facet set
+    never fully covers (each rephrasing is a new, distinct facet), so per-facet
+    coverage alone would never commit — the controller re-DECOMPOSEs forever
+    (observed live on the AXI4/AXI4-Lite comparison: 3 DECOMPOSE rounds, the last
+    all-duplicate, before a stall guard fired). The judge's sufficient verdict is
+    the phrasing-independent signal that the decomposed question is answerable.
+    Requires ``state.facets`` so it stays scoped to DECOMPOSE turns — a plain
+    RETRIEVE turn's commit stays with the controller + no-progress guard."""
+    if not state.facets:
+        return False
+    return state.facets_fully_covered() or _pool_judged_sufficient(state)
+
+
+def _facet_commit_decision(
+    state: TurnState, budget: TurnBudget
+) -> Optional[TurnDecision]:
+    """Force an ANSWER once a decomposed turn's pool is answerable, else ``None``.
+
+    The DECOMPOSE-spiral guard, complementary to :func:`_no_progress_decision`.
+    After a compound question is split into facets (``state.facets``, populated
+    by a multi-way DECOMPOSE), the pool can synthesize once it is answerable —
+    every facet has a judge-kept chunk OR the round judge marked the pool
+    sufficient (see :func:`_decomposed_pool_answerable`) — so the loop must commit
+    instead of letting the controller gather more (or the round judge keep naming
+    a fresh per-facet gap, or re-DECOMPOSE with rephrased sub-queries) forever.
+    Deterministic on purpose: a prompt nudge alone will not make a small
+    controller stop while it can still gather (the a3dffdd lesson). Only fires
+    while answer attempts remain — once spent, the ANSWER branch's own cap takes
+    the turn to best-effort. Disabled via ``facet_commit_enabled``; inert until a
+    DECOMPOSE runs (no facets).
+    """
+    if (
+        budget.facet_commit_enabled
+        and _decomposed_pool_answerable(state)
+        and state.answer_attempts < budget.max_answer_attempts
+    ):
+        if state.facets_fully_covered():
+            reason = (
+                f"facet-commit guard: all {len(state.facets)} decomposed facets "
+                "have supporting evidence — synthesizing from the pool"
+            )
+        else:
+            reason = (
+                "facet-commit guard: the round judge marked the decomposed pool "
+                "sufficient — synthesizing instead of re-decomposing"
+            )
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=reason,
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
+def _commit_stop_reason(
+    state: TurnState, budget: TurnBudget, no_progress_rounds: int
+) -> Optional[str]:
+    """Stop reason if a gate-failing draft should commit rather than re-gather.
+
+    Two conditions where resuming retrieval after a failed gate is futile — the
+    best low-confidence grounded draft is already the best possible answer, so
+    the loop exits best-effort instead of burning the rest of the action /
+    wall-clock budget:
+
+    - **facets covered** (``STOP_FACETS_COVERED``): every decomposed facet has
+      evidence, so the pool can only synthesize, not grow toward the answer;
+    - **no-progress stall** (``STOP_NO_PROGRESS``): gathering has added no new
+      evidence for ``max_no_progress_rounds`` rounds.
+
+    Returns the reason (facets checked first — the more specific signal) or
+    ``None`` while the loop should keep gathering.
+    """
+    if budget.facet_commit_enabled and _decomposed_pool_answerable(state):
+        return STOP_FACETS_COVERED
+    if (
+        budget.max_no_progress_rounds > 0
+        and no_progress_rounds >= budget.max_no_progress_rounds
+    ):
+        return STOP_NO_PROGRESS
+    return None
+
+
+async def _select_decision(
+    *,
+    route_hint: Optional[RouteHint],
+    retrieval_query: str,
+    context: TurnContext,
+    state: TurnState,
+    budget: TurnBudget,
+    emitter: TurnEventEmitter,
+    no_progress_rounds: int,
+) -> tuple[TurnDecision, str]:
+    """Choose the iteration's decision by precedence, with its source label.
+
+    The precedence is a single fail-open ladder (each rung hands to the next by
+    returning ``None``): (1) the router fast-lane's deterministic opening
+    (``"router"``, skips the controller LLM); (2) the facet-commit guard forcing
+    an ANSWER once every decomposed facet has evidence (``"facet_guard"``);
+    (3) the no-progress guard forcing an ANSWER when gathering has stalled
+    (``"loop_guard"``); (4) the controller LLM (``"controller"``).
+    Retrieval-facing decisions author from the history-resolved
+    ``retrieval_query``; generation keeps the verbatim query in the caller.
+    Returns the chosen ``(decision, source)`` — ``decide`` always yields a valid
+    decision, so the ladder never falls through.
+    """
+    decision = _seed_decision(route_hint, state, retrieval_query)
+    if decision is not None:
+        return decision, "router"
+    decision = _facet_commit_decision(state, budget)
+    if decision is not None:
+        return decision, "facet_guard"
+    decision = _no_progress_decision(state, budget, no_progress_rounds)
+    if decision is not None:
+        return decision, "loop_guard"
+    decision = await decide(
+        query=retrieval_query,
+        context=context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+        route_hint=route_hint,
     )
+    return decision, "controller"
 
 
 async def run_turn_loop(
@@ -211,6 +457,7 @@ async def run_turn_loop(
     context: TurnContext,
     deps: TurnLoopDeps,
     budget: TurnBudget,
+    route_hint: Optional[RouteHint] = None,
 ) -> TurnLoopResult:
     """Run one full conversation turn through the agentic loop.
 
@@ -231,6 +478,12 @@ async def run_turn_loop(
             provider, event sink).
         budget: The frozen per-turn budget (``TurnBudget.from_settings()`` at
             the endpoint; hand-built in tests).
+        route_hint: The pre-flight router's advisory verdict (``None`` = no
+            router / neutral, the pre-router baseline). A non-fast-lane hint
+            biases only the first controller prompt; a fast-lane hint drives
+            the deterministic RETRIEVE->ANSWER opening (see
+            :func:`_seed_decision`). Always fail-open — a wrong hint degrades
+            to the controller's own judgment.
 
     Returns:
         The :class:`TurnLoopResult` for the route layer — answer or
@@ -239,6 +492,28 @@ async def run_turn_loop(
     state = TurnState()
     emitter = TurnEventEmitter(deps=deps, state=state, budget=budget)
     best_draft: Optional[tuple[float, str]] = None
+    # Consecutive gather rounds (RETRIEVE/DECOMPOSE/DEEP_STUDY) that added no
+    # new chunks — drives the no-progress ANSWER guard (_no_progress_decision).
+    no_progress_rounds = 0
+
+    # History-stripped retrieval seed (multi-turn robustness): resolve a
+    # follow-up's back-references into a self-contained query BEFORE any
+    # retrieval, so conversation memory grounds GENERATION (still passed the full
+    # `context`) without poisoning the retrieval/HyDE seed. Fail-open to the
+    # verbatim query; no LLM call on a fresh first turn. Only the retrieval-facing
+    # paths (controller query authoring, RETRIEVE/DECOMPOSE grounding) use this;
+    # generation/clarify keep the verbatim `query`.
+    try:
+        retrieval_query = await resolve_standalone_query(
+            query=query,
+            context=context,
+            state=state,
+            budget=budget,
+            emitter=emitter,
+        )
+    except Exception:  # noqa: BLE001 — resolution must never break the turn
+        logger.exception("turn loop standalone-query resolution failed — verbatim")
+        retrieval_query = query
 
     try:
         while True:
@@ -255,12 +530,44 @@ async def run_turn_loop(
                     emitter=emitter,
                 )
 
-            decision: TurnDecision = await decide(
-                query=query,
+            # Attempts-independent commit exit. The facet / no-progress guards
+            # below force a FRESH gated ANSWER, so they require an answer attempt
+            # to still be available — which leaves a hole: if the controller
+            # spends the answer budget BEFORE the pool becomes committed (e.g. a
+            # premature ANSWER, then a DECOMPOSE that covers every facet), those
+            # guards can never fire and the loop would gather to max_actions —
+            # the very spiral this is meant to stop. So once the pool IS
+            # committed (all facets covered, or gathering stalled) and no attempt
+            # remains to draft again, exit best-effort with the best draft here.
+            # While attempts remain this is a no-op (best_draft empty of a fresh
+            # attempt) and the guards below own the commit.
+            if state.answer_attempts >= budget.max_answer_attempts:
+                commit_reason = _commit_stop_reason(
+                    state, budget, no_progress_rounds
+                )
+                if commit_reason is not None:
+                    return await _best_effort_result(
+                        stop_reason=commit_reason,
+                        best_draft=best_draft,
+                        query=query,
+                        context=context,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
+
+            # Decision precedence (fast-lane router -> facet-commit guard ->
+            # no-progress guard -> controller), fail-open per rung — see
+            # _select_decision.
+            decision, source = await _select_decision(
+                route_hint=route_hint,
+                retrieval_query=retrieval_query,
                 context=context,
                 state=state,
                 budget=budget,
                 emitter=emitter,
+                no_progress_rounds=no_progress_rounds,
             )
             await emitter.emit(
                 TurnEventType.TURN_ACTION,
@@ -271,6 +578,10 @@ async def run_turn_loop(
                     "action": decision.action,
                     "reason": decision.reason,
                     "confidence": decision.confidence,
+                    # Who chose this action: the fast-lane router or the
+                    # no-progress loop guard (both deterministic, no LLM) or the
+                    # controller.
+                    "source": source,
                 },
             )
             state.iteration += 1
@@ -320,21 +631,56 @@ async def run_turn_loop(
                         stop_reason=STOP_GATE_PASSED,
                     )
                 state.last_gate = feedback
+                # Commit exit (class: gate-failing answer on a pool more
+                # retrieval can't improve). Two signals — gathering stalled for
+                # >= max_no_progress_rounds, OR every decomposed facet is already
+                # covered — mean drafting again from the same evidence would just
+                # re-fail: the judge keeps rejecting the same corpus, or the
+                # comparison is as complete as it will get. A low-confidence
+                # grounded draft IS then the best possible answer, so commit the
+                # best draft instead of burning the rest of the action/wall-clock
+                # budget re-retrieving (the observed 44s tail). See
+                # _commit_stop_reason.
+                commit_reason = _commit_stop_reason(
+                    state, budget, no_progress_rounds
+                )
+                if commit_reason is not None:
+                    return await _best_effort_result(
+                        stop_reason=commit_reason,
+                        best_draft=best_draft,
+                        query=query,
+                        context=context,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
                 continue
 
             # Evidence-gathering actions: contained per-action so one broken
             # injected seam degrades the action, not the turn (budgets still
             # bound the loop).
+            pool_before = len(state.pool)
             try:
                 if decision.action == TurnAction.RETRIEVE:
-                    args = (
-                        decision.args
-                        if isinstance(decision.args, RetrieveArgs)
-                        else RetrieveArgs(query_text=query)
+                    args = _coerce_args(
+                        decision, RetrieveArgs, RetrieveArgs(query_text=retrieval_query)
                     )
                     await run_retrieve(
                         args,
-                        query=query,
+                        query=retrieval_query,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
+                elif decision.action == TurnAction.DECOMPOSE:
+                    args = _coerce_args(
+                        decision, DecomposeArgs, DecomposeArgs(question=retrieval_query)
+                    )
+                    await run_decompose(
+                        args,
+                        query=retrieval_query,
                         state=state,
                         budget=budget,
                         deps=deps,
@@ -358,21 +704,16 @@ async def run_turn_loop(
                 logger.warning(
                     "turn loop %s action failed: %s", decision.action, exc
                 )
+            # No-progress tracking: a gather round that grew the pool resets the
+            # streak; one that added nothing (all dedup, empty, or a failed
+            # seam) advances it toward the _no_progress_decision ANSWER guard.
+            if len(state.pool) > pool_before:
+                no_progress_rounds = 0
+            else:
+                no_progress_rounds += 1
     except Exception:  # noqa: BLE001 — the loop itself must never raise
         logger.exception("turn loop failed unexpectedly — exiting best-effort")
-        if best_draft is not None:
-            confidence, answer = best_draft
-            return _result(
-                state,
-                answer=answer,
-                confidence=confidence,
-                stop_reason=STOP_ERROR,
-            )
-        return _result(
-            state,
-            answer=_cannot_answer_text(state),
-            stop_reason=STOP_ERROR,
-        )
+        return _draft_result(state, best_draft, STOP_ERROR)
 
 
 __all__ = ["run_turn_loop"]

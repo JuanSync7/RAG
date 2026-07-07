@@ -5,6 +5,9 @@
 # the controller LLM through the charged-call wrapper; salvage-parses the JSON
 # into a TurnDecision. Fail-open per design §6: an unusable decision becomes
 # RETRIEVE-with-the-verbatim-user-query on iteration 1, else an ANSWER attempt.
+# Post-parse it coerces an opening single-RETRIEVE to DECOMPOSE when the
+# controller labelled the query query_shape=compound (the LLM-driven replacement
+# for the router's compound-marker regex; the c002 fix).
 # Also the canonical home of the model-alias getters and the evidence digest
 # (shared with answer.py's self-score).
 # Exports: decide, build_evidence_digest, controller_model_alias,
@@ -25,14 +28,20 @@ from __future__ import annotations
 
 import logging
 
+from typing import Optional
+
 from src.common.prompts import load_prompt, render, strip_reasoning
 from src.common.utils import parse_json_object
+from src.retrieval.pipeline.turn_loop.common import one_line, preview_chars
 from src.retrieval.pipeline.turn_loop.events import (
     TurnEventEmitter,
     latest_event_payload,
 )
+from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
     AnswerArgs,
+    DecomposeArgs,
+    QueryShape,
     RetrieveArgs,
     TurnAction,
     TurnBudget,
@@ -72,21 +81,6 @@ def judge_model_alias() -> str:
     return str(getattr(settings, "RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", "judge"))
 
 
-def _preview_chars() -> int:
-    """Per-chunk preview cap for digests (``RAG_TURN_CONTEXT_PREVIEW_CHARS``)."""
-    from config import settings
-
-    return int(getattr(settings, "RAG_TURN_CONTEXT_PREVIEW_CHARS", 320))
-
-
-def _one_line(text: str, max_chars: int) -> str:
-    """Flatten ``text`` to one whitespace-normalized line capped at ``max_chars``."""
-    flat = " ".join((text or "").split())
-    if max_chars > 0 and len(flat) > max_chars:
-        flat = flat[:max_chars]
-    return flat
-
-
 def build_evidence_digest(state: TurnState) -> str:
     """Render the deterministic evidence digest of the turn so far.
 
@@ -105,7 +99,7 @@ def build_evidence_digest(state: TurnState) -> str:
         The prompt-ready digest string; a placeholder line when no evidence
         has been gathered yet.
     """
-    preview_cap = _preview_chars()
+    preview_cap = preview_chars()
     lines: list[str] = []
     if state.pool:
         lines.append(f"Evidence pool ({len(state.pool)} chunks):")
@@ -114,7 +108,7 @@ def build_evidence_digest(state: TurnState) -> str:
                 f"[{index}] document_id={chunk.document_id} "
                 f"source_key={chunk.source_key} source={chunk.source} "
                 f"heading={chunk.heading} score={chunk.score:.2f} "
-                f"({chunk.provenance}) :: {_one_line(chunk.text, preview_cap)}"
+                f"({chunk.provenance}) :: {one_line(chunk.text, preview_cap)}"
             )
     else:
         lines.append("(no evidence gathered yet this turn)")
@@ -122,12 +116,12 @@ def build_evidence_digest(state: TurnState) -> str:
         lines.append("")
         lines.append("Queries already tried (do not repeat verbatim):")
         for query in state.tried_queries:
-            lines.append(f"- {_one_line(query, preview_cap)}")
+            lines.append(f"- {one_line(query, preview_cap)}")
     if state.tried_hyde:
         lines.append("")
         lines.append("HyDE hypothetical answers already tried:")
         for hyde in state.tried_hyde:
-            lines.append(f"- {_one_line(hyde, preview_cap)}")
+            lines.append(f"- {one_line(hyde, preview_cap)}")
     if state.studied:
         lines.append("")
         lines.append("Documents deep-studied this turn:")
@@ -135,7 +129,7 @@ def build_evidence_digest(state: TurnState) -> str:
             lines.append(
                 f"- document_id={doc.document_id} "
                 f"windows_read={len(doc.windows_read)} :: "
-                f"{_one_line(doc.conclusion or doc.notes, preview_cap)}"
+                f"{one_line(doc.conclusion or doc.notes, preview_cap)}"
             )
     verdict = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
     if verdict is not None:
@@ -144,7 +138,7 @@ def build_evidence_digest(state: TurnState) -> str:
             "Latest judge verdict: "
             f"sufficient={verdict.get('sufficient')} "
             f"confidence={verdict.get('confidence')} "
-            f"missing_information={_one_line(str(verdict.get('missing_information') or ''), preview_cap)}"
+            f"missing_information={one_line(str(verdict.get('missing_information') or ''), preview_cap)}"
         )
     return "\n".join(lines)
 
@@ -179,6 +173,25 @@ def _render_gate_feedback(state: TurnState) -> str:
         for gap in gate.missing_information:
             lines.append(f"- {gap}")
     return "\n".join(lines)
+
+
+def _render_router_hint(route_hint: Optional[RouteHint], state: TurnState) -> str:
+    """Render the pre-flight router's advisory hint for the controller prompt.
+
+    Only the FIRST controller decision (``iteration == 0``) is seeded — the
+    hint is a suggestion for how to *open* the turn; once the loop is under way
+    the controller reasons from the actual evidence/gate state, so later
+    iterations render ``(none)``. The fast-lane hint is handled by the
+    orchestrator (it skips this call entirely), so a hint reaching here is
+    always advisory: the controller may follow or ignore it (fail-open).
+    """
+    if route_hint is None or state.iteration != 0 or not route_hint.initial_action:
+        return "(none)"
+    return (
+        f"A cheap pre-flight classifier suggests opening with "
+        f"{route_hint.initial_action} because: {route_hint.reason}. Treat this "
+        "as advice — choose the action the state above actually warrants."
+    )
 
 
 def _fail_open_decision(query: str, state: TurnState) -> TurnDecision:
@@ -217,6 +230,7 @@ async def decide(
     state: TurnState,
     budget: TurnBudget,
     emitter: TurnEventEmitter,
+    route_hint: Optional[RouteHint] = None,
 ) -> TurnDecision:
     """Run one controller iteration: choose the turn's next action.
 
@@ -246,6 +260,7 @@ async def decide(
         evidence_digest=build_evidence_digest(state),
         budgets=_render_budgets(state, budget),
         gate_feedback=_render_gate_feedback(state),
+        router_hint=_render_router_hint(route_hint, state),
     )
     response = await emitter.charged_call(
         alias=controller_model_alias(),
@@ -265,6 +280,7 @@ async def decide(
             )
     if decision is None:
         return _fail_open_decision(query, state)
+    decision = _coerce_shape_decompose(decision, query, state, budget)
     # Normalize a RETRIEVE with an empty query to the verbatim user query so a
     # sloppy controller output still produces a valid retrieval round.
     if decision.action == TurnAction.RETRIEVE and isinstance(
@@ -272,6 +288,62 @@ async def decide(
     ):
         if not decision.args.query_text:
             decision.args.query_text = query
+    return decision
+
+
+def _coerce_shape_decompose(
+    decision: TurnDecision, query: str, state: TurnState, budget: TurnBudget
+) -> TurnDecision:
+    """Rewrite an opening single-RETRIEVE to DECOMPOSE when the query is compound.
+
+    The LLM-driven replacement for the router's compound-marker regex seed: the
+    controller labels every decision with an intrinsic ``query_shape``; when it
+    calls the OPENING query ``compound`` yet still chose a single RETRIEVE (the
+    c002 pathology — it recognised the comparison in its own reason but retrieved
+    anyway, then burned iterations before a guard rescued it), coerce that first
+    move to DECOMPOSE so the facets fan out in one parallel wave.
+
+    Deliberately narrow (mirrors the a3dffdd lesson that a prompt nudge alone
+    won't make a small controller stop/redirect):
+
+    - **Opening iteration only** (``state.iteration == 0``): later the controller
+      reasons from evidence/gate state, and forcing DECOMPOSE there could
+      re-trigger the DECOMPOSE spiral the facet guard exists to close.
+    - **RETRIEVE only**: a deliberate DEEP_STUDY / CLARIFY / ANSWER is a
+      considered move, never overridden; an already-DECOMPOSE decision is left
+      untouched (its own ``question`` is preserved).
+
+    Safe to fire DECOMPOSE *more* here ONLY because DECOMPOSE is additive
+    (``decompose_anchor_raw`` retrieves the raw query as an anchor leg), so the
+    coerced fan-out is a superset of the RETRIEVE it replaces — it can only ADD
+    candidates. That invariant is ENFORCED, not merely asserted in prose: the
+    coercion also requires ``budget.decompose_anchor_raw`` (the two are
+    independent env booleans, both default true). With the anchor OFF the fan-out
+    would be substitutive — a sub-query rewrite could steer retrieval off a doc
+    the raw RETRIEVE matched (the mode-D variance the anchor exists to prevent) —
+    so shape-coercion self-disables rather than force a non-superset DECOMPOSE.
+    Gated by ``shape_decompose_enabled``. Class solved (CLAUDE.md §0): "a
+    multi-facet question needs the parallel fan-out", decided by the LLM shape
+    label — never a vendor/phrase/corpus match.
+    """
+    if (
+        budget.shape_decompose_enabled
+        and budget.decompose_anchor_raw
+        and state.iteration == 0
+        and decision.query_shape == QueryShape.COMPOUND
+        and decision.action == TurnAction.RETRIEVE
+    ):
+        return TurnDecision(
+            action=TurnAction.DECOMPOSE,
+            reason=(
+                "query_shape=compound -> DECOMPOSE (deterministic): the controller "
+                "labelled the opening query compound but chose a single retrieval; "
+                "a multi-facet question needs the parallel fan-out"
+            ),
+            confidence=decision.confidence,
+            args=DecomposeArgs(question=query),
+            query_shape=decision.query_shape,
+        )
     return decision
 
 

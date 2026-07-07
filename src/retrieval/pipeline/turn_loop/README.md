@@ -35,19 +35,61 @@ self-score — charge ONE `TurnBudget.max_llm_calls` ledger.
 | --- | --- |
 | `__init__.py` | Public facade: `run_turn_loop`, `build_turn_context`, all schema re-exports. Callers import from the package only. |
 | `schemas.py` | The full typed contract surface (see schema ownership below). |
-| `orchestrator.py` | The loop: budget checks (actions / LLM ledger / wall clock), controller dispatch, terminal handling, best-effort exhaustion exit, never-raise containment. |
-| `controller.py` | Per-iteration action selection (controller LLM, salvage-parsed JSON, §6 fail-open ladder); home of the deterministic evidence digest and the model-alias getters. |
+| `common.py` | Shared side-effect-light helpers used by multiple stages (CLAUDE.md §2): `one_line()` (whitespace-normalizing flattener), `preview_chars()` (per-chunk preview cap reader), `TOP_PREVIEW_COUNT` (event preview count). Centralized so stage files don't each carry a copy. |
+| `orchestrator.py` | The loop: standalone-query resolution up front, budget checks (actions / LLM ledger / wall clock), controller dispatch, terminal handling, the router fast-lane seed (`_seed_decision`), best-effort exhaustion exit, never-raise containment. |
+| `standalone.py` | **Follow-up standalone-query resolution** (multi-turn): reuses the shared `retrieval_query_rewriter` prompt to resolve a follow-up's back-references (pronouns/demonstratives) into a self-contained query that seeds RETRIEVE/DECOMPOSE + the controller's query authoring. Generation keeps the verbatim query + full `TurnContext`, so memory grounds the answer without poisoning the retrieval seed. Fresh first turn → no LLM call; fail-open to the literal query (`RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED`). |
+| `router.py` | **Pre-flight confidence router** (pure): `route(RouteSignals, RouteConfig) → RouteHint` — seeds the first action + `effort` as an ADVISORY hint (short/confident/self-contained factoid → fast lane; else no seed). A compound query is **not** seeded here — `is_compound` only excludes it from the fast lane; the positive compound → DECOMPOSE decision moved to the controller's `query_shape` classification. Zero heavy imports; the runner gathers the signals. |
+| `controller.py` | Per-iteration action selection (controller LLM, salvage-parsed JSON, §6 fail-open ladder); renders the router hint into the first prompt; emits a top-level `query_shape` (`single_facet`/`compound`/`vague`) and coerces an opening single-RETRIEVE to DECOMPOSE when the query is `compound` (`_coerce_shape_decompose`, the LLM-driven replacement for the router's compound regex — §0); home of the deterministic evidence digest and the model-alias getters. |
 | `retrieve.py` | RETRIEVE action — `retrieve_ranked` seam call + chunk-id dedup + agentic `judge_chunks` composition; kept chunks pooled in judge-rank order. |
+| `decompose.py` | DECOMPOSE action — one split LLM call fans a compound question into focused sub-queries retrieved **in parallel** (`asyncio.gather`) into the same flat pool, judged once as a round. |
 | `deep_study.py` | DEEP_STUDY action — `fetch_document` seam + anchored overlapping-window walk (`refactored_char_start >= 0` guard, `-1` sentinel → window 0); window findings enter the pool as `deep_study`-provenance chunks. |
 | `clarify.py` | CLARIFY action (terminal) — LLM-authored question + hint/scoping chips, hints capped at `clarify_max_hints`, deterministic fallback. |
 | `answer.py` | ANSWER action (terminal attempt) — streamed draft (live `draft` events, reasoning + content kinds) + self-score + weighted gate (judge / self / citation coverage). |
 | `events.py` | `TurnEventEmitter`: trace append + gated SSE forward (`RAG_TURN_LOOP_STREAM_EVENTS`), sink errors swallowed; the charged LLM-call wrapper (single ledger + `llm_call` event). |
 | `context.py` | `build_turn_context`: tolerant assembly of the typed `TurnContext` from the memory layer's structured dict. |
 
+## Pre-flight router + fast lane + effort dial (Phase 3)
+
+Before the loop, a cheap LLM-free **router** (`router.py`) runs once at the
+runner seam (`server/turn_loop_runner.py` — `build_route_signals` →
+`resolve_route_hint`) and returns a `RouteHint` that the loop treats as
+**advice**, never a hard override (so the whole path fails open to the
+pre-router baseline). Signals are the classifiers the codebase already owns —
+`query_shape.has_compound_marker`, `query_processor.heuristic_confidence` /
+`has_backward_reference` / `detect_suppress_memory` — so there is no new
+inference on the critical path.
+
+- **Compound query** → **not** seeded by the router. Compound → DECOMPOSE is now
+  the controller's job: it emits a top-level `query_shape`, and
+  `controller._coerce_shape_decompose` rewrites an opening (iteration 0)
+  single-RETRIEVE into DECOMPOSE when `query_shape == compound`
+  (`RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED`). Classifying by the reasoning LLM
+  instead of a keyword regex is the §0 generic fix (a comparison phrased without
+  "vs"/"and" is still caught). Additive-safe — it self-disables unless
+  `decompose_anchor_raw` makes the fan-out a superset of the RETRIEVE it replaces
+  — and fail-open (an absent/unknown shape skips the coercion). The router's
+  `is_compound` signal now only holds a possibly-compound query **out** of the
+  fast lane (never skip the controller for one).
+- **Fast lane** (short, high-confidence, self-contained, single-facet) → the
+  loop skips the first controller LLM call and runs a deterministic
+  RETRIEVE→ANSWER (`_seed_decision`), re-engaging the controller only if that
+  answer fails the gate. This is the router's one non-advisory move — hence
+  opt-in (`RAG_TURN_LOOP_FAST_LANE_ENABLED`, default off until the routing
+  eval confirms p50/p95 matches linear).
+- **Effort** (`fast` / `balanced` / `thorough`) selects the `TurnBudget` scale
+  via `TurnBudget.from_settings(effort=...)` (scales `max_actions` /
+  `max_llm_calls`; the wall clock is a fixed ceiling, never scaled). `balanced`
+  is byte-for-byte today's budget.
+
+The routing decision is surfaced verbatim on `metadata.turn_loop.router` and
+each `turn_action` event carries `source: "router" | "facet_guard" |
+"loop_guard" | "controller"` (the decision ladder in `_select_decision`).
+
 ## Control flow (design §5)
 
-Per iteration: budget check → controller decision (`turn_action` event) →
-dispatch. RETRIEVE / DEEP_STUDY grow the evidence pool and loop. CLARIFY ends
+Per iteration: budget check → router seed OR controller decision
+(`turn_action` event) → dispatch. RETRIEVE / DECOMPOSE / DEEP_STUDY grow the
+evidence pool and loop. CLARIFY ends
 the turn as `ask_user`. ANSWER drafts, self-scores, and evaluates
 `gate = w_judge * judge_pool_confidence + w_self * self_score +
 w_citation * citation_coverage` against
@@ -57,6 +99,27 @@ next controller prompt. Budget exhaustion exits best-effort: the best failed
 draft, else one final draft if the LLM ledger allows, else an explicit
 cannot-answer-confidently message over the evidence digest — never an empty
 response.
+
+**Commit guards (deterministic, no LLM).** Two guards break the "controller
+won't commit" spirals a prompt nudge alone can't (a small controller keeps
+gathering while the judge still names *something* missing). Both sit in the
+decision ladder ahead of the controller and force an ANSWER:
+
+- **facet-commit** (`facet_guard`, `RAG_TURN_LOOP_FACET_COMMIT_ENABLED`): once a
+  multi-way DECOMPOSE has covered every facet — each decomposed sub-question has
+  ≥1 judge-kept chunk (`TurnState.facets`) — the pool can synthesize the
+  comparison, so the loop answers instead of exploring further. Fixes the
+  DECOMPOSE spiral where a comparison decomposes perfectly but never commits.
+- **no-progress** (`loop_guard`, `RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS`): the
+  opposite signal — after N consecutive gather rounds add zero new evidence, the
+  loop answers from the pool (or the `fallback_chunks` floor) gathered so far.
+
+When a *forced* ANSWER then fails the gate, more retrieval is futile (the
+comparison is complete, or the corpus keeps yielding nothing), so the loop
+commits the best grounded draft best-effort — `stop_reason` `facets_covered` or
+`no_progress_stall` — rather than burning the rest of the action/wall-clock
+budget. Both guards fail-open (a config flag disables each) and never fire
+before the evidence to justify them exists.
 
 Fail-open ladder (design §6): every LLM output is `</think>`-stripped and
 salvage-parsed; an unusable controller decision becomes RETRIEVE with the
@@ -91,10 +154,11 @@ import time; `TurnBudget.from_settings()` is the one (lazy) bridge to the
 
 ## Prompts
 
-`prompts/turn_controller_decide.md`, `turn_deep_study_read.md`,
-`turn_clarify_generate.md`, `turn_answer_selfscore.md` — `{{ var }}`
-convention, loaded/rendered via the shared `src/common/prompts.py` helpers,
-strict-JSON output salvage-parsed with fail-open defaults (design §6).
+`prompts/turn_controller_decide.md` (carries the advisory `{{ router_hint }}`),
+`turn_decompose.md`, `turn_deep_study_read.md`, `turn_clarify_generate.md`,
+`turn_answer_selfscore.md` — `{{ var }}` convention, loaded/rendered via the
+shared `src/common/prompts.py` helpers, strict-JSON output salvage-parsed with
+fail-open defaults (design §6).
 
 ## Tests
 

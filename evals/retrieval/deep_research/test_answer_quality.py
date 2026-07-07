@@ -14,27 +14,29 @@ Acceptance:
 
 Pure substring scoring is computed in parallel as a sanity floor — if the
 LLM judge is unavailable the test falls back to substring counts.
+
+The scorer itself lives in ``evals.common.answer_quality`` (shared with the
+turn_loop multi-mode basket); this module keeps thin private aliases for
+backward compatibility.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import math
-import re
 from typing import Any
 
 import pytest
 
+from evals.common.answer_quality import (
+    JUDGE_NOISE_FLOOR as _JUDGE_NOISE_FLOOR,
+    judge_score as _judge_score,
+    score_answer as _score,
+    substring_score as _substring_score,
+)
+
 logger = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.eval_deep_research
-
-
-# Tolerance to absorb LLM-judge non-determinism. DR may score 0.05 below
-# baseline and still be accepted as "no regression". On multi/disjoint
-# we still require DR >= baseline - tolerance.
-_JUDGE_NOISE_FLOOR = 0.10
 
 
 def _generate_answer(rag_chain, query: str, *, deep_research: bool) -> str | None:
@@ -48,75 +50,6 @@ def _generate_answer(rag_chain, query: str, *, deep_research: bool) -> str | Non
         overall_timeout_ms=240_000 if deep_research else 60_000,
     )
     return getattr(response, "generated_answer", None)
-
-
-def _substring_score(answer: str, keywords: list[str]) -> float:
-    """Fraction of keywords that appear (case-insensitive) in ``answer``."""
-    if not keywords:
-        return float("nan")
-    if not answer:
-        return 0.0
-    blob = answer.lower()
-    hits = sum(1 for k in keywords if k.lower() in blob)
-    return hits / len(keywords)
-
-
-_JUDGE_SYSTEM = (
-    "You are a strict evaluator. Given a candidate ANSWER and a list of "
-    "EXPECTED_KEYWORDS, score how many of the keywords (or close synonyms) "
-    "are clearly addressed in the answer. Return STRICT JSON of the form "
-    '{"score": <float in [0,1]>, "missing": [<keyword>...]}. Do not include '
-    "any other text."
-)
-
-
-def _judge_score(query: str, answer: str, keywords: list[str]) -> float | None:
-    """LLM-as-judge: returns a 0..1 score, or None if judge call failed."""
-    if not answer or not keywords:
-        return None
-    try:
-        from src.platform.llm.provider import call_oneshot
-    except Exception as exc:
-        logger.warning("judge import failed: %s", exc)
-        return None
-
-    prompt = (
-        f"QUESTION:\n{query}\n\n"
-        f"EXPECTED_KEYWORDS: {json.dumps(keywords)}\n\n"
-        f"ANSWER:\n{answer}\n\n"
-        'Reply with JSON only: {"score": float, "missing": [string]}'
-    )
-    raw = call_oneshot(
-        prompt,
-        system=_JUDGE_SYSTEM,
-        model_alias="query",
-        temperature=0.0,
-        max_tokens=200,
-    )
-    if not raw:
-        return None
-    # Tolerate ```json fences or stray prose around the JSON object.
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(0))
-        score = float(obj.get("score"))
-        if math.isnan(score):
-            return None
-        return max(0.0, min(1.0, score))
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return None
-
-
-def _score(query: str, answer: str | None, keywords: list[str]) -> float:
-    """Prefer LLM-judge; fall back to substring score on judge failure."""
-    if not answer:
-        return 0.0
-    judged = _judge_score(query, answer, keywords)
-    if judged is not None:
-        return judged
-    return _substring_score(answer, keywords)
 
 
 def test_answer_quality_dr_no_regression(rag_chain, golden_queries_deep_research_asic):
@@ -179,3 +112,9 @@ def test_answer_quality_dr_no_regression(rag_chain, golden_queries_deep_research
         "Answer-quality regressions detected:\n  " + "\n  ".join(failures)
         + f"\n\nFull rows: {rows}"
     )
+
+
+# Back-compat: keep the private names importable for any external caller that
+# reached into this module before the scorer moved to evals.common.
+__all__ = ["_generate_answer", "_score", "_judge_score", "_substring_score",
+           "_JUDGE_NOISE_FLOOR", "test_answer_quality_dr_no_regression"]

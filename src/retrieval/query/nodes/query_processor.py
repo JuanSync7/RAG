@@ -423,6 +423,18 @@ def _heuristic_confidence(query: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Public signal surface (stable import names)
+# ---------------------------------------------------------------------------
+# Pure, LLM-free query classifiers reused outside this module — the turn-loop
+# pre-flight router (turn_loop.router via turn_loop_runner.build_route_signals)
+# reads them to seed the first action/effort. Public aliases so callers do not
+# import the underscore-prefixed in-module names; the originals stay the
+# in-module callers (CLAUDE.md §2 stable facade).
+has_backward_reference = _has_backward_reference
+heuristic_confidence = _heuristic_confidence
+
+
+# ---------------------------------------------------------------------------
 # Graph nodes
 # ---------------------------------------------------------------------------
 

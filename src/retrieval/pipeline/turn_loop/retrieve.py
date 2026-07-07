@@ -26,6 +26,7 @@ import logging
 import time
 from typing import Any, Optional
 
+from src.retrieval.pipeline.turn_loop.common import TOP_PREVIEW_COUNT
 from src.retrieval.pipeline.turn_loop.controller import judge_model_alias
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.schemas import (
@@ -39,8 +40,28 @@ from src.retrieval.pipeline.turn_loop.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# How many kept chunks the retrieve_result event previews (display cap only).
-_TOP_PREVIEW_COUNT = 3
+
+def _retain_fallback(
+    state: TurnState, retrieved: list[EvidenceChunk], *, cap: int
+) -> None:
+    """Retain the turn's best-scored RAW retrieved chunks as a grounding floor.
+
+    Judge-INDEPENDENT by design: merges this round's raw candidates into
+    ``state.fallback_chunks`` (dedup by chunk_id), keeps the top ``cap`` by
+    score. Consumed only when the judged ``pool`` is empty — so a round judge
+    that rejects an entire fresh batch can no longer strand the turn with
+    nothing to cite (class fix, not a query/content match — CLAUDE.md §0).
+    ``cap <= 0`` disables the floor (pre-fix behavior).
+    """
+    if cap <= 0 or not retrieved:
+        return
+    seen = {chunk.chunk_id for chunk in state.fallback_chunks}
+    for chunk in retrieved:
+        if chunk.chunk_id not in seen:
+            state.fallback_chunks.append(chunk)
+            seen.add(chunk.chunk_id)
+    state.fallback_chunks.sort(key=lambda chunk: chunk.score, reverse=True)
+    del state.fallback_chunks[cap:]
 
 
 def _judge_json_mode() -> bool:
@@ -50,6 +71,16 @@ def _judge_json_mode() -> bool:
     from config import settings
 
     return bool(getattr(settings, "RAG_AGENTIC_LLM_JSON_MODE", False))
+
+
+def _judge_concise() -> bool:
+    """Whether the round judge uses the agentic CONCISE judge (ranked id-list +
+    sufficiency) rather than a scored object per chunk. Default true to match the
+    agentic path — the shared 7B judge is better-calibrated and faster in concise
+    mode (``RAG_TURN_LOOP_JUDGE_CONCISE``)."""
+    from config import settings
+
+    return bool(getattr(settings, "RAG_TURN_LOOP_JUDGE_CONCISE", True))
 
 
 async def _judge_round(
@@ -107,6 +138,7 @@ async def _judge_round(
             candidates=candidates,
             timeout_s=emitter.remaining_timeout_s(),
             json_mode=_judge_json_mode(),
+            concise=_judge_concise(),
         )
     except Exception as exc:  # noqa: BLE001 — fail open to keep-all
         logger.warning("turn loop round judge failed: %s — keeping all", exc)
@@ -205,6 +237,10 @@ async def run_retrieve(
         logger.warning("turn loop retrieve_ranked failed: %s", exc)
         retrieved = []
 
+    # Grounding floor: retain the best RAW candidates (before dedup/judge) so an
+    # empty judged pool can still ground a draft/refusal (see _retain_fallback).
+    _retain_fallback(state, retrieved, cap=budget.fallback_pool_size)
+
     fresh: list[EvidenceChunk] = []
     dup_count = 0
     for chunk in retrieved:
@@ -254,7 +290,7 @@ async def run_retrieve(
                     "heading": chunk.heading,
                     "score": chunk.score,
                 }
-                for chunk in kept[:_TOP_PREVIEW_COUNT]
+                for chunk in kept[:TOP_PREVIEW_COUNT]
             ],
         },
     )

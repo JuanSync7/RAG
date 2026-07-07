@@ -1,6 +1,8 @@
 # @summary
-# ANSWER action for the turn loop: builds generation messages (canonical RAG
-# system prompt + single leading system message carrying the turn context +
+# ANSWER action for the turn loop: FILLS the generation pool toward
+# fallback_pool_size with the best raw chunks when the judge kept too few (kept
+# chunks first — stable citation indices), builds generation messages (canonical
+# RAG system prompt + single leading system message carrying the turn context +
 # citation-indexed evidence pool), streams the draft through the sync provider
 # generate_stream pulled via asyncio.to_thread (draft events carry
 # kind='reasoning'|'content' deltas live), self-scores the draft with
@@ -21,9 +23,11 @@ weights assume calibrated reranker scores, while this loop's pool carries raw
 server-scale scores (design §5 confidence-semantics rule). Instead it blends
 three loop-native components under configurable weights: the judge's latest
 pool confidence (trace-sourced, neutral 0.5 when no verdict exists), the
-draft's LLM self-score, and deterministic citation coverage (the fraction of
-pool chunks the draft actually cites — pure ``[n]`` token scanning, no content
-pattern-matching).
+draft's LLM self-score, and deterministic citation coverage (distinct ``[n]``
+citations over a target-saturated denominator — pure token scanning, no content
+pattern-matching). Because the pool is FILLED with context chunks the answer
+need not all cite, coverage saturates at ``citation_target`` rather than dividing
+by the full pool size.
 """
 
 from __future__ import annotations
@@ -184,23 +188,32 @@ async def _stream_draft(
     return strip_reasoning("".join(parts)).strip()
 
 
-def citation_coverage(draft: str, pool_size: int) -> float:
-    """Fraction of pool chunks the draft cites — deterministic ``[n]`` scan.
+def citation_coverage(draft: str, pool_size: int, target: int = 5) -> float:
+    """Grounding score from the draft's distinct citations — deterministic ``[n]`` scan.
 
     Structural token parsing over the draft with plain ``str`` methods (finds
     bracketed integers, validates them against the 1-based pool range) — this
     counts citation MARKERS, it never matches answer content (CLAUDE.md §0).
 
+    The denominator SATURATES at ``target`` (``min(pool_size, target)``): a
+    grounded answer cites a handful of distinct sources, it need not cite EVERY
+    pooled chunk. Without this, filling the pool with context chunks (see
+    ``run_answer``) would spuriously tank coverage — a valid refusal citing one
+    source out of a 12-chunk filled pool would score 0.08 and fail the gate.
+    ``target <= 0`` restores the raw ``/pool_size`` fraction.
+
     Args:
         draft: The drafted answer text.
         pool_size: Current evidence pool size (citation index upper bound).
+        target: Distinct-source count at which coverage saturates to 1.0.
 
     Returns:
-        ``len(distinct valid citations) / pool_size``; ``0.0`` for an empty
-        pool or draft.
+        ``len(distinct valid citations) / min(pool_size, target)`` clamped to
+        ``[0, 1]``; ``0.0`` for an empty pool or draft.
     """
     if pool_size <= 0 or not draft:
         return 0.0
+    denominator = min(pool_size, target) if target > 0 else pool_size
     cited: set[int] = set()
     position = 0
     while True:
@@ -220,7 +233,7 @@ def citation_coverage(draft: str, pool_size: int) -> float:
             # Not a citation token — resume scanning INSIDE this bracket so a
             # nested "[see [2]]" still finds the inner citation.
             position = open_at + 1
-    return len(cited) / pool_size
+    return min(1.0, len(cited) / denominator)
 
 
 async def _self_score(
@@ -300,6 +313,54 @@ async def run_answer(
     attempt = state.answer_attempts + 1
     state.answer_attempts = attempt
 
+    # Grounding fill (class: the judge over-prunes for precision — it can leave
+    # the pool EMPTY (rejected every fresh batch) or merely THIN (kept 1-2 on a
+    # low-yield query), starving generation of the surrounding context needed to
+    # disambiguate a near-miss ("that's the Cortex-M7, not the M4 you asked
+    # about") or to cover both sides of a comparison. Top the pool up toward
+    # ``fallback_pool_size`` with the best raw retrieved chunks — kept chunks stay
+    # FIRST so citation indices are stable and the judge's ranking is preserved;
+    # the appended context chunks the answer need not all cite (citation_coverage
+    # saturates). Agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS); generic
+    # (judged-pool-thin), never a query/content match (CLAUDE.md §0).
+    if budget.fallback_pool_size > 0 and len(state.pool) < budget.fallback_pool_size:
+        have = {chunk.chunk_id for chunk in state.pool}
+        have_sources = {chunk.source for chunk in state.pool if chunk.source}
+        before = len(state.pool)
+        candidates = [
+            chunk for chunk in state.fallback_chunks if chunk.chunk_id not in have
+        ]
+
+        def _take(chunk) -> None:
+            state.pool.append(chunk)
+            have.add(chunk.chunk_id)
+            if chunk.source:
+                have_sources.add(chunk.source)
+
+        # Pass 1 — source DIVERSITY first: the best-scored chunk of each source
+        # NOT yet in the pool. A thin judged pool (often one document) is then
+        # topped up with the OTHER retrieved documents rather than more chunks of
+        # the same doc — the cross-document coverage the "answered from one doc"
+        # failure lacked. Generic (distinct-source property), never a
+        # query/content match (CLAUDE.md §0).
+        for chunk in candidates:  # fallback_chunks is best-first by score
+            if len(state.pool) >= budget.fallback_pool_size:
+                break
+            if chunk.source and chunk.source not in have_sources:
+                _take(chunk)
+        # Pass 2 — top up any remaining slots by score (sources may repeat).
+        for chunk in candidates:
+            if len(state.pool) >= budget.fallback_pool_size:
+                break
+            if chunk.chunk_id not in have:
+                _take(chunk)
+        if len(state.pool) > before:
+            logger.info(
+                "turn loop filled generation pool %d -> %d from best-effort "
+                "chunks (judged pool was thin)",
+                before, len(state.pool),
+            )
+
     messages = _build_messages(query, context, state)
     draft = await _stream_draft(
         messages,
@@ -343,7 +404,9 @@ async def run_answer(
         if missing:
             missing_information.append(missing)
 
-    coverage = citation_coverage(draft, len(state.pool))
+    coverage = citation_coverage(
+        draft, len(state.pool), target=budget.citation_target
+    )
     components = {
         "judge": judge_confidence,
         "self": self_score,

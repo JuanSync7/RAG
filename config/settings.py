@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_LOOP_LLM_MAX_TOKENS, RAG_TURN_LOOP_MIN_CALL_BUDGET_MS, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_CONCISE, RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_LOOP_LLM_MAX_TOKENS, RAG_TURN_LOOP_MIN_CALL_BUDGET_MS, RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS, RAG_TURN_LOOP_FALLBACK_POOL_SIZE, RAG_TURN_LOOP_CITATION_TARGET, RAG_TURN_LOOP_FACET_COMMIT_ENABLED, RAG_TURN_LOOP_ROUTER_ENABLED, RAG_TURN_LOOP_FAST_LANE_ENABLED, RAG_TURN_LOOP_FAST_LANE_MAX_WORDS, RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE, RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED, RAG_TURN_LOOP_EFFORT_FAST_SCALE, RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -77,21 +77,11 @@ RERANK_TOP_K = int(os.environ.get("RAG_RERANK_TOP_K", "5"))
 # many chars before rerank. 0 = disabled. These chunks win dense cosine on
 # topical queries but carry no answer content; see rag_chain thin-chunk filter.
 RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
-# Drop *navigational* candidates before rerank even when they exceed
-# RERANK_MIN_CHARS: table-of-contents / index lines (dotted ".... page" leaders)
-# and chapter/part front-matter stubs ("Read this chapter for a description
-# of ..."). These carry no answer content but win both dense similarity and the
-# cross-encoder reranker on topical queries (observed: an ARM spec ToC stub
-# scored 0.95 while the actual answer chunk scored 0.51), starving the LLM of
-# real body chunks. The candidate floor still guarantees >= rerank_top_k items.
-RERANK_DROP_NAVIGATIONAL = os.environ.get(
-    "RAG_RERANK_DROP_NAVIGATIONAL", "true"
-).lower() in ("true", "1", "yes")
-# A front-matter pointer stub is only treated as navigational when its total
-# length is <= this many chars (real body chunks that merely *mention* "see
-# chapter X" are far longer and are kept). ToC dotted-leader detection is
-# length-independent.
-RERANK_NAV_MAX_CHARS = int(os.environ.get("RAG_RERANK_NAV_MAX_CHARS", "320"))
+# NOTE: the former query-side navigational drop (RAG_RERANK_DROP_NAVIGATIONAL /
+# RAG_RERANK_NAV_MAX_CHARS) has been retired. Navigational/boilerplate suppression
+# now happens via the ingest-time chunk_role metadata + query-time role filter
+# (RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT / RAG_RETRIEVAL_EXCLUDED_ROLES). Only the
+# thin/heading-only floor (RERANK_MIN_CHARS above) remains query-side.
 # Floor client-supplied search_limit/rerank_top_k up to the configured
 # SEARCH_LIMIT/RERANK_TOP_K so UI clients that hardcode small values (e.g. the
 # console presets 10/5) still retrieve enough candidates for the reranker to
@@ -137,11 +127,17 @@ QUERY_PROCESSING_TIMEOUT = int(
 )
 QUERY_LOG_DIR = PROJECT_ROOT / "logs"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
+# Corpus domain hint, injected into query-processing, HyDE, and deep-research
+# prompts so the LLM resolves domain-ambiguous acronyms in-corpus. The DEFAULT is
+# deliberately domain-NEUTRAL: an unconfigured deployment gets harmless "use the
+# in-corpus meaning" guidance rather than a concrete-but-wrong domain that would
+# actively misdirect retrieval (e.g. an AI/ML default reading "DFT" as Density
+# Functional Theory on a silicon-design corpus). Set RAG_DOMAIN_DESCRIPTION to the
+# actual corpus domain per deployment.
 DOMAIN_DESCRIPTION = os.environ.get(
     "RAG_DOMAIN_DESCRIPTION",
-    "This knowledge base covers information retrieval, NLP, machine learning, "
-    "embeddings, vector search, language models, and related AI/ML topics. "
-    "Interpret all acronyms and abbreviations in this domain context.",
+    "Interpret all acronyms and abbreviations according to how they are used in "
+    "this corpus's documents, not their most common meaning in unrelated fields.",
 )
 
 # --- Knowledge Graph (retrieval-side flag) ---
@@ -613,20 +609,19 @@ RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
 at INGEST time (not just at query time). ~17% of the spec corpus is navigational
 ToC/front-matter that out-scores real answer chunks on both dense cosine and the
 reranker (a ToC stub scored 0.95 vs the answer's 0.51), causing "I cannot answer"
-refusals. The query-time rerank filter (RAG_RERANK_DROP_NAVIGATIONAL) is kept as
-defense-in-depth, but stripping at ingest is the single-source-of-truth fix: it
-shrinks the index, cuts embedding cost, and protects consumers that bypass the
-query filter (deep-research path, eval harnesses, alternate rerankers). Uses the
-shared ``is_navigational`` predicate so emission and filtering stay symmetric. A
-per-document over-prune guard never removes a document's entire chunk set."""
+refusals. This ingest-time regex drop is the LEGACY path (used when
+RAG_INGESTION_NAV_CLASSIFY is off); the current default tags chunk_role via the LLM
+classifier and the query-side role filter excludes navigation/boilerplate. Stripping
+at ingest still shrinks the index and protects consumers that bypass the query filter
+(eval harnesses, alternate rerankers). Uses the shared ``is_navigational`` predicate.
+A per-document over-prune guard never removes a document's entire chunk set."""
 
 RAG_INGESTION_NAV_MAX_CHARS: int = int(
     os.environ.get("RAG_INGESTION_NAV_MAX_CHARS", "320")
 )
 """Length cap (chars) below which the front-matter pointer-phrase branch of the
-navigational test fires at ingest. Mirrors the query-side RERANK_NAV_MAX_CHARS so
-both gates treat the same chunks as navigational. The dotted-leader (ToC) branch is
-length-independent and unaffected by this cap."""
+navigational test fires at the legacy ingest-time drop. The dotted-leader (ToC)
+branch is length-independent and unaffected by this cap."""
 
 # Adaptive table-chunking knobs (env-wired so they can be tuned on the live
 # Temporal worker; previously hardcoded dataclass defaults — audit
@@ -784,6 +779,15 @@ RAG_NEMO_FAITHFULNESS_THRESHOLD = float(
 RAG_NEMO_FAITHFULNESS_ACTION = os.environ.get(
     "RAG_NEMO_FAITHFULNESS_ACTION", "flag"
 )
+# Router alias for the LLM faithfulness/self-check scorer. The rail's own system
+# prompt already frames the model as a faithfulness evaluator; this selects WHICH
+# model runs it. Defaults to "judge" (the instruct model) rather than "default"
+# (the reasoning/gen model): a compact instruct model scores groundedness more
+# cheaply and does not spend the short output budget inside a hidden reasoning
+# block. Any alias the router knows is valid ("default", "query", "judge", ...).
+RAG_FAITHFULNESS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_FAITHFULNESS_MODEL_ALIAS", "judge"
+).strip() or "judge"
 RAG_NEMO_OUTPUT_PII_ENABLED = os.environ.get(
     "RAG_NEMO_OUTPUT_PII_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
@@ -1173,6 +1177,50 @@ RAG_DEEP_RESEARCH_MAX_NODES: int = int(
 RAG_DEEP_RESEARCH_MAX_LLM_CALLS: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_MAX_LLM_CALLS", "24")
 )
+# Router alias for the deep-research controller LLM (topic decomposition +
+# sufficiency checks). Historically hard-coded to "default" (the reasoning/gen
+# model); made configurable so deep research can run on the faster instruct model
+# ("judge") whose JSON is more reliable and whose decode does not burn the budget
+# inside a hidden reasoning block. Any alias the router knows is valid
+# ("default", "query", "controller", "judge").
+RAG_DEEP_RESEARCH_MODEL_ALIAS: str = os.environ.get(
+    "RAG_DEEP_RESEARCH_MODEL_ALIAS", "default"
+).strip() or "default"
+# Output-token cap for the deep-research controller's JSON calls (sufficiency
+# verdict + topic decomposition). These are SMALL structured outputs, so this is
+# deliberately modest. Critically it must NOT inherit RAG_GENERATION_MAX_TOKENS
+# (16384): on a compact instruct model whose full context is ~16k, requesting the
+# whole window as OUTPUT leaves no room for the prompt → ContextWindowExceededError.
+RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", "2048")
+)
+
+# --- Suggested follow-up questions ---
+# After an answer is generated, an instruct-model call proposes a few specific,
+# in-corpus follow-up questions the user could ask next (rendered as clickable
+# chips). Targets vague / multi-factor queries where the user hasn't supplied
+# enough context to decompose intent — good suggestions let them narrow in one
+# click. Grounded in the answer + retrieved section headings so it never suggests
+# a question the corpus cannot answer. Fail-open: any error yields no chips.
+RAG_SUGGESTED_QUESTIONS_ENABLED: bool = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_SUGGESTED_QUESTIONS_COUNT: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_COUNT", "3")
+)
+# Router alias for the generator (defaults to the fast instruct model, like the
+# agentic judge/HyDE) — a short JSON list, so it must NOT inherit the generation
+# max_tokens (same context-overflow rationale as deep research).
+RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS", "judge"
+).strip() or "judge"
+RAG_SUGGESTED_QUESTIONS_MAX_TOKENS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", "256")
+)
+RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", "20")
+)
+
 RAG_DEEP_RESEARCH_MAX_DEPTH: int = int(
     os.environ.get("RAG_DEEP_RESEARCH_MAX_DEPTH", "3")
 )
@@ -1215,11 +1263,18 @@ RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K: int = int(
 # (QFS) queries iterate. All judging is a generic, model-driven property — no
 # regex / vendor / phrase matching (CLAUDE.md §0).
 RAG_AGENTIC_RETRIEVAL_ENABLED: bool = os.environ.get(
-    "RAG_AGENTIC_RETRIEVAL_ENABLED", "false"
+    "RAG_AGENTIC_RETRIEVAL_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
-"""Master gate for the agentic HyDE/controller/judge retrieval loop. When
-False (default) the branch never runs; the per-request ``agentic_retrieval``
-override may still force it on/off for a single request."""
+"""Master gate for the agentic HyDE/controller/judge retrieval loop, AND the
+system's default retrieval orchestrator. 2026-07-07 decision: agentic is the
+best-measured mode on the eval basket (highest per-class quality and lowest
+latency of the alternates), so a no-flag query resolves to it via rag_chain's
+``_agentic_resolved`` (= this setting when ``agentic_retrieval`` is unset). The
+per-request ``agentic_retrieval`` override forces it on/off for one request;
+``deep_research`` and opt-in ``turn_loop`` (RAG_TURN_LOOP_ENABLED) take
+precedence when set. PROD CAVEAT: prod vLLM endpoints must be corrected before
+this default reaches prod (prod agentic is currently misconfigured — see the
+ai01 vllm portmap notes); dev is unaffected."""
 
 RAG_AGENTIC_MAX_ROUNDS: int = max(1, int(
     os.environ.get("RAG_AGENTIC_MAX_ROUNDS", "3")
@@ -1516,6 +1571,31 @@ keep/rank + answer self-score). Distinct from the controller alias to avoid
 correlated over-optimism (same rationale as RAG_AGENTIC_JUDGE_MODEL_ALIAS).
 Consumed by turn_loop/retrieve.py and turn_loop/answer.py."""
 
+RAG_TURN_LOOP_JUDGE_CONCISE: bool = os.environ.get(
+    "RAG_TURN_LOOP_JUDGE_CONCISE", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the loop's round judge uses the agentic CONCISE judge (reasons then
+emits only a ranked id-list + sufficiency) instead of a scored-object-per-chunk.
+Default true to MATCH the agentic path (which runs concise): the shared 7B judge
+model emits a short ranked list far more reliably than per-chunk JSON, so the
+verbose mode over-rejects good chunks and pays a longer decode. Concise collapses
+gate+rank into one short output — cheaper and better-calibrated on the same model.
+Consumed by turn_loop/retrieve.py `_judge_round`."""
+
+RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether a follow-up turn's back-references are resolved into a self-contained
+retrieval query before retrieval. Default true: the turn loop runs in the API
+process and so does NOT inherit the query-processor coreference rewrite the
+legacy/agentic paths get via rag_chain, so a follow-up like "how does it compare
+to X?" would otherwise embed the pronoun verbatim and drift (confirmed
+multi-turn-memory-poisons-retrieval regression). Reuses the shared
+``retrieval_query_rewriter`` prompt through the turn's charged LLM wrapper; the
+seed is history-stripped while GENERATION still receives the full TurnContext.
+Off restores the verbatim-follow-up behavior. No LLM call on a fresh first turn.
+Consumed by turn_loop/standalone.py `resolve_standalone_query`."""
+
 RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", "2")
 ))
@@ -1544,6 +1624,14 @@ RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS: int = max(1, int(
 """Max windows read per studied document (caps LLM read calls for very long
 documents). Consumed via ``TurnBudget.from_settings()`` by
 turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES: int = max(2, int(
+    os.environ.get("RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES", "4")
+))
+"""Max sub-queries a single DECOMPOSE action fans out (bounds the parallel
+retrieval-wave width and the merged-pool size). The controller splits a broad /
+compound question into up to this many focused sub-queries, retrieved
+concurrently. Consumed by turn_loop/decompose.py."""
 
 RAG_TURN_LOOP_CLARIFY_MAX_HINTS: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_CLARIFY_MAX_HINTS", "3")
@@ -1585,6 +1673,151 @@ LLM call. Below this the loop goes straight to its best-effort exit instead
 of firing calls whose derived timeout is near zero (observed live: doomed
 1-2s controller/judge calls at the budget tail). Consumed via
 ``TurnBudget.from_settings()`` by turn_loop/events.py and orchestrator.py."""
+
+RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS", "2")
+))
+"""Consecutive evidence-gathering rounds (RETRIEVE / DECOMPOSE / DEEP_STUDY)
+that may add ZERO new chunks before the loop deterministically forces an ANSWER
+attempt from the pool gathered so far. Guards the observed pathology where a
+weak controller keeps re-retrieving already-pooled chunks after the judge marked
+the pool sufficient — wasting actions/latency and risking a max_actions
+best-effort exit instead of a clean gated answer. 0 disables the guard. Consumed
+via ``TurnBudget.from_settings()`` by turn_loop/orchestrator.py."""
+
+RAG_TURN_LOOP_FALLBACK_POOL_SIZE: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_FALLBACK_POOL_SIZE", "8")
+))
+"""Target generation-pool size AND how many best-scored RAW retrieved chunks the
+turn loop retains per turn as a judge-INDEPENDENT grounding floor. Two uses of the
+same set: (1) when the round judge rejects an entire fresh batch the judged pool
+is empty — the ANSWER stage grounds on these top chunks so a refusal is evidenced;
+(2) when the judged pool is merely THIN (judge kept only 1-2 chunks on a low-yield
+query), the ANSWER stage FILLS the generation pool toward this size with the best
+raw chunks (kept chunks stay first, so citation indices are stable). The fill is
+agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS): a generator handed only the
+strictly-judged chunk(s) lacks the surrounding context needed to disambiguate a
+near-miss (e.g. "that's the Cortex-M7, not the M4 you asked about") or to cover
+both sides of a comparison — the judge over-prunes for precision and starves
+generation. Generic property (judged-pool-thin), never a query/content match
+(CLAUDE.md §0). 0 disables both the floor and the fill (judge-kept-only). Consumed
+via ``TurnBudget.from_settings()`` by turn_loop/{retrieve,answer,orchestrator}.py."""
+
+RAG_TURN_LOOP_CITATION_TARGET: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_CITATION_TARGET", "5")
+))
+"""Distinct-source count at which the answer-gate's citation-coverage component
+SATURATES to 1.0 (denominator = min(pool_size, target)). Coverage measures whether
+the draft grounded itself in the evidence — citing this many distinct sources is
+"fully grounded"; it must NOT require citing EVERY pooled chunk, because the pool
+is filled toward RAG_TURN_LOOP_FALLBACK_POOL_SIZE with context chunks the answer
+need not all cite (dividing by the full filled size would spuriously fail a valid
+grounded refusal). Consumed by turn_loop/answer.py `run_answer`."""
+
+RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW: bool = os.environ.get(
+    "RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW", "true"
+).lower() in ("true", "1", "yes")
+"""Whether a DECOMPOSE round retrieves the RAW turn query as an additive anchor
+leg alongside its sub-queries (RRF/union). When True (default), the pool is the
+UNION of the raw-query hits and the sub-query hits, so a decomposition can only
+ADD candidates — never DROP a document the raw query matched. Fixes the observed
+query-transform variance where DECOMPOSE rewrote the query into sub-queries that
+drifted off a perfectly-matched doc (mode D: raw-query top hit lost). Mirrors the
+agentic loop's HyDE asymmetry (BM25 stays anchored to the raw query; the rewrite
+only adds dense candidates), which is purely additive. False reverts to
+sub-queries-only (the substitutive behavior). Generic (union property), never a
+query/content match (CLAUDE.md §0). Consumed via ``TurnBudget.from_settings()``
+by turn_loop/decompose.py."""
+
+RAG_TURN_LOOP_FACET_COMMIT_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_FACET_COMMIT_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the deterministic facet-commit guard is armed. When True (default),
+once a multi-way DECOMPOSE has split a compound question into facets AND every
+facet has >=1 judge-kept chunk, the loop forces an ANSWER from the pool instead
+of gathering further — the fix for the DECOMPOSE spiral where the controller
+(or a judge that always names a fresh gap) keeps exploring a comparison it can
+already synthesize, never committing. Deterministic because a prompt nudge alone
+will not make a small controller stop (the a3dffdd lesson); complements the
+no-progress guard (RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS), which fires on the
+opposite signal — gathering that has stopped producing new evidence. Generic
+property (all-facets-covered), never a query/content match (CLAUDE.md §0). False
+disables the guard (the controller alone decides when to answer). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/{decompose,orchestrator}.py."""
+
+# --- Pre-flight confidence router + fast lane + effort dial (Phase 3) ---
+# A cheap, LLM-free router runs once before the loop and seeds the first action
+# + effort as an ADVISORY hint (fail-open): a short/high-confidence/self-contained
+# factoid may take the fast lane (skip the first controller call). A compound
+# query gets NO router seed — its DECOMPOSE is now the controller's query_shape
+# coercion (RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED), not a router regex seed;
+# has_compound_marker survives here only as a conservative fast-lane exclusion.
+# Signals are the heuristics the codebase already owns (query_shape.has_compound_marker,
+# query_processor.heuristic_confidence / has_backward_reference) — no new inference.
+# Consumed by turn_loop/router.py + the runner (server/turn_loop_runner.py).
+
+RAG_TURN_LOOP_ROUTER_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_ROUTER_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master gate for the pre-flight router. When True (default) the router seeds
+the first action/effort as advice (the fast-lane opening + effort dial); when
+False :func:`turn_loop.router.route` returns the neutral hint and the loop runs
+exactly as pre-router. Safe to leave on: the seed is advisory (the controller
+may override) and the whole path fails open. Only takes effect when the turn
+loop itself runs (RAG_TURN_LOOP_ENABLED / per-request override)."""
+
+RAG_TURN_LOOP_FAST_LANE_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_FAST_LANE_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the router's fast lane may fire. Defaults False because skipping the
+first controller LLM call is the router's one non-advisory move: it stays
+opt-in until the routing eval confirms fast-lane p50/p95 matches the linear
+path (blueprint Phase 3 gate). Even enabled it degrades safely — a fast-lane
+answer that fails the confidence gate hands control back to the controller.
+Consumed by turn_loop/router.py via RouteConfig.from_settings()."""
+
+RAG_TURN_LOOP_FAST_LANE_MAX_WORDS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_FAST_LANE_MAX_WORDS", "24")
+))
+"""Upper query length (whitespace tokens) for the fast lane — excludes long,
+likely multi-part questions even at high heuristic confidence. Consumed by
+turn_loop/router.py."""
+
+RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE: float = float(
+    os.environ.get("RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE", "0.8")
+)
+"""Minimum heuristic query confidence [0,1] for the fast lane. At the default,
+``heuristic_confidence``'s word-count buckets admit only well-formed (>5-word)
+questions and exclude ultra-short ambiguous ones (<=2 words -> 0.4). Must be in
+[0,1] (validate_turn_loop_config()). Consumed by turn_loop/router.py."""
+
+RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the controller's ``query_shape=compound`` label coerces the OPENING
+turn move to DECOMPOSE. The LLM-driven replacement for the removed
+RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND regex seed (regex→LLM, CLAUDE.md §0):
+a query the controller itself calls compound but opens with a single RETRIEVE is
+rewritten to the DECOMPOSE parallel fan-out (the c002 fix). Safe only because
+DECOMPOSE is additive (RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW) — the coercion
+self-disables when that anchor is off (it would otherwise force a substitutive
+fan-out that could drop a raw-query match). Consumed by turn_loop/controller.py
+via TurnBudget.shape_decompose_enabled."""
+
+RAG_TURN_LOOP_EFFORT_FAST_SCALE: float = float(
+    os.environ.get("RAG_TURN_LOOP_EFFORT_FAST_SCALE", "0.5")
+)
+"""Multiplier the ``fast`` effort applies to ``max_actions`` / ``max_llm_calls``
+(the wall clock is never scaled). Must be > 0 (validate_turn_loop_config()).
+Consumed by ``TurnBudget.from_settings(effort=...)``."""
+
+RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE: float = float(
+    os.environ.get("RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", "1.5")
+)
+"""Multiplier the ``thorough`` effort applies to ``max_actions`` /
+``max_llm_calls`` (the wall clock is never scaled). Must be > 0
+(validate_turn_loop_config()). Consumed by
+``TurnBudget.from_settings(effort=...)``."""
 
 RAG_TURN_CONTEXT_MAX_CHUNK_REFS: int = max(1, int(
     os.environ.get("RAG_TURN_CONTEXT_MAX_CHUNK_REFS", "24")
@@ -2525,6 +2758,23 @@ def validate_turn_loop_config() -> None:
     ]:
         if not val.strip():
             errors.append(f"{name} must not be empty")
+    # Router / fast-lane / effort dial (Phase 3).
+    if not (0.0 <= RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE <= 1.0):
+        errors.append(
+            "RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE="
+            f"{RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE} must be in [0.0, 1.0]"
+        )
+    if RAG_TURN_LOOP_FAST_LANE_MAX_WORDS < 1:
+        errors.append(
+            "RAG_TURN_LOOP_FAST_LANE_MAX_WORDS="
+            f"{RAG_TURN_LOOP_FAST_LANE_MAX_WORDS} must be >= 1"
+        )
+    for name, val in [
+        ("RAG_TURN_LOOP_EFFORT_FAST_SCALE", RAG_TURN_LOOP_EFFORT_FAST_SCALE),
+        ("RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE),
+    ]:
+        if val <= 0.0:
+            errors.append(f"{name}={val} must be > 0")
     if errors:
         raise ValueError(
             "Turn-loop configuration validation failed:\n  "
@@ -2695,6 +2945,10 @@ def validate_all_config() -> None:
         ("RATE_LIMIT_WINDOW_SECONDS", RATE_LIMIT_WINDOW_SECONDS),
         ("RERANKER_BATCH_SIZE", RERANKER_BATCH_SIZE),
         ("RAG_INGESTION_LLM_MAX_KEYWORDS", RAG_INGESTION_LLM_MAX_KEYWORDS),
+        ("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_COUNT", RAG_SUGGESTED_QUESTIONS_COUNT),
+        ("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", RAG_SUGGESTED_QUESTIONS_MAX_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS),
     ]:
         if val <= 0:
             errors.append(f"{name}={val} must be > 0")

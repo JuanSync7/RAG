@@ -215,6 +215,8 @@ QUERY_REQUEST_ONLY_FIELDS = frozenset({
     "memory_turn_window",   # controls how many turns route handler fetches
     "compact_now",          # triggers compaction after response
     "turn_loop",            # API-process turn loop path; never reaches RAGQueryWorkflow
+    "retrieval_strategy",   # API-only orchestrator selector; maps to the legacy
+                            # booleans (which ARE in RAGRequest) — dispatch reads those
 })
 
 # RAGRequest fields that are NOT exposed via QueryRequest
@@ -231,6 +233,7 @@ RAG_RESPONSE_INTERNAL_FIELDS = frozenset({
     "guardrails",
     "composite_confidence",
     "confidence_breakdown",
+    "first_composite",  # initial composite confidence before internal re-retrieval loop
     "post_guardrail_action",
     "version_conflicts",
     "retry_count",

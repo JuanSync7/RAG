@@ -171,11 +171,28 @@ def make_deps(
     )
 
 
-def decision_json(action: str, reason: str = "scripted", confidence: float = 0.9, **args) -> str:
-    """Serialize a controller decision response."""
-    return json.dumps(
-        {"action": action, "reason": reason, "confidence": confidence, "args": args}
-    )
+def decision_json(
+    action: str,
+    reason: str = "scripted",
+    confidence: float = 0.9,
+    query_shape: Optional[str] = None,
+    **args,
+) -> str:
+    """Serialize a controller decision response.
+
+    ``query_shape`` (when given) is emitted as a TOP-LEVEL field (a property of
+    the whole query, not of the per-action ``args``) so it drives the controller's
+    shape-based DECOMPOSE coercion; omitted when None (the pre-query_shape shape).
+    """
+    payload: dict[str, Any] = {
+        "action": action,
+        "reason": reason,
+        "confidence": confidence,
+        "args": args,
+    }
+    if query_shape is not None:
+        payload["query_shape"] = query_shape
+    return json.dumps(payload)
 
 
 def judge_json(
@@ -186,7 +203,12 @@ def judge_json(
     confidence: float = 0.9,
     missing: str = "",
 ) -> str:
-    """Serialize an agentic-judge response keeping ``keep_indexes`` in order."""
+    """Serialize an agentic-judge response keeping ``keep_indexes`` in order.
+
+    Format-agnostic: carries the sufficiency block BOTH nested under ``pool``
+    (the verbose scored-object parser) AND at top level (the concise ranked
+    id-list parser), so the same fixture drives ``judge_chunks`` in either mode.
+    """
     return json.dumps(
         {
             "chunks": [
@@ -204,6 +226,9 @@ def judge_json(
                 "confidence": confidence,
                 "missing_information": missing,
             },
+            "sufficient": sufficient,
+            "confidence": confidence,
+            "missing_information": missing,
         }
     )
 

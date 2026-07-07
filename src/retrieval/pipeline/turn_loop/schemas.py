@@ -6,10 +6,11 @@
 # mutable per-turn state accumulator, the clarification/final results, the
 # injected-dependency seam (DI for testability), and the cross-turn TurnContext
 # digest.
-# Exports: TurnAction, RetrieveArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs,
+# Exports: TurnAction, RouteEffort, QueryShape, RetrieveArgs, DecomposeArgs,
+#          DeepStudyArgs, ClarifyArgs, AnswerArgs,
 #          TurnActionArgs, TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
-#          TurnEventType, TurnEvent, StudiedDoc, TurnState, ClarificationOut,
-#          TurnLoopResult, TurnLoopDeps, TurnContext
+#          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
+#          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
 # Deps: dataclasses, time, typing (config.settings lazily inside
 #       TurnBudget.from_settings only)
 # @end-summary
@@ -45,11 +46,58 @@ class TurnAction:
     """
 
     RETRIEVE: str = "RETRIEVE"
+    DECOMPOSE: str = "DECOMPOSE"
     DEEP_STUDY: str = "DEEP_STUDY"
     CLARIFY: str = "CLARIFY"
     ANSWER: str = "ANSWER"
 
-    ALL: frozenset[str] = frozenset({RETRIEVE, DEEP_STUDY, CLARIFY, ANSWER})
+    ALL: frozenset[str] = frozenset({RETRIEVE, DECOMPOSE, DEEP_STUDY, CLARIFY, ANSWER})
+
+
+class RouteEffort:
+    """Str-valued effort levels selecting a :class:`TurnBudget` scale.
+
+    The canonical home (CLAUDE.md §2: shared contracts in one module) for the
+    effort levels the pre-flight router (:mod:`turn_loop.router`) picks and
+    :meth:`TurnBudget.from_settings` consumes — kept here (not in ``router.py``)
+    so ``TurnBudget`` can reference the constants without importing the router
+    (which would be a cycle: the router imports this module). ``BALANCED`` is
+    the neutral level whose budget is byte-for-byte ``from_settings()`` at
+    scale 1.0. Plain ``str`` constants so a hint serializes without adapters.
+    """
+
+    FAST: str = "fast"
+    BALANCED: str = "balanced"
+    THOROUGH: str = "thorough"
+
+
+class QueryShape:
+    """Str-valued intrinsic-shape labels the controller assigns to a query.
+
+    The LLM-driven replacement for the ``query_shape.COMPOUND_MARKERS`` keyword
+    regex (CLAUDE.md §0 — classify by the model that is already reasoning about
+    the query, not by literal ``" and "`` / ``" vs "`` matching): the controller
+    emits one of these on every decision, and the loop coerces the OPENING move
+    to DECOMPOSE when the shape is ``COMPOUND`` (see ``controller.decide``). A
+    property of the question itself, independent of the chosen action. Plain
+    ``str`` constants so a decision serializes to JSON without adapters; ``ALL``
+    is the closed set :meth:`TurnDecision.from_llm_json` validates against
+    (anything else coerces to ``None`` — an absent/unusable shape simply skips
+    the coercion, never mis-fires it).
+    """
+
+    SINGLE_FACET: str = "single_facet"
+    """One thing is asked about — a plain RETRIEVE covers it."""
+
+    COMPOUND: str = "compound"
+    """Several distinct facets at once (a comparison, a multi-part "X, Y and Z",
+    a broad "summarise the whole flow") — needs the DECOMPOSE parallel fan-out."""
+
+    VAGUE: str = "vague"
+    """Too underspecified to retrieve well as written (informational for now —
+    no coercion; a future rung could route it to CLARIFY)."""
+
+    ALL: frozenset[str] = frozenset({SINGLE_FACET, COMPOUND, VAGUE})
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +117,20 @@ class RetrieveArgs:
     query_text: str
     hypothetical_answer: Optional[str] = None
     target_aspect: Optional[str] = None
+
+
+@dataclass
+class DecomposeArgs:
+    """Arguments for a DECOMPOSE action: fan a broad/compound question out into a
+    few focused sub-queries retrieved in parallel into the same flat pool.
+
+    ``question`` is the compound question to split (defaults to the turn query).
+    ``missing_information`` optionally carries the judge's named gap so the split
+    targets what is still uncovered rather than re-deriving the whole question.
+    """
+
+    question: str
+    missing_information: Optional[str] = None
 
 
 @dataclass
@@ -105,7 +167,7 @@ class AnswerArgs:
     """
 
 
-TurnActionArgs = Union[RetrieveArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs]
+TurnActionArgs = Union[RetrieveArgs, DecomposeArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs]
 """Union of the per-action argument payloads carried by a :class:`TurnDecision`."""
 
 
@@ -137,6 +199,18 @@ def _coerce_confidence(value: Any, default: float = 0.0) -> float:
     return min(1.0, max(0.0, num))
 
 
+def _coerce_query_shape(value: Any) -> Optional[str]:
+    """Coerce a raw ``query_shape`` token to the closed :class:`QueryShape` set.
+
+    Case- and separator-insensitive (``"Single-Facet"`` / ``"single facet"`` ->
+    ``SINGLE_FACET``), mirroring the action-token normalization. Anything outside
+    the vocabulary — including a blank/missing value — returns ``None`` so a
+    sloppy or absent shape simply skips the shape coercion rather than mis-firing
+    it. Pure dict/str ops, no regex (CLAUDE.md §0)."""
+    shape = _coerce_str(value).lower().replace(" ", "_").replace("-", "_")
+    return shape if shape in QueryShape.ALL else None
+
+
 @dataclass
 class TurnDecision:
     """One controller verdict: the chosen action plus its typed arguments.
@@ -149,6 +223,11 @@ class TurnDecision:
     reason: str
     confidence: float
     args: Optional[TurnActionArgs] = None
+    query_shape: Optional[str] = None
+    """The controller's intrinsic-shape label for the query (:class:`QueryShape`
+    value, or ``None`` when absent/unrecognized). Drives the shape-based
+    DECOMPOSE coercion in ``controller.decide`` — a top-level property of the
+    query, not of ``args``."""
 
     @classmethod
     def from_llm_json(cls, payload: dict) -> Optional["TurnDecision"]:
@@ -193,6 +272,13 @@ class TurnDecision:
                 ),
                 target_aspect=_coerce_opt_str(raw_args.get("target_aspect")),
             )
+        elif action == TurnAction.DECOMPOSE:
+            args = DecomposeArgs(
+                question=_coerce_str(raw_args.get("question")),
+                missing_information=_coerce_opt_str(
+                    raw_args.get("missing_information")
+                ),
+            )
         elif action == TurnAction.DEEP_STUDY:
             args = DeepStudyArgs(
                 question=_coerce_str(raw_args.get("question")),
@@ -208,6 +294,9 @@ class TurnDecision:
             reason=_coerce_str(payload.get("reason")),
             confidence=_coerce_confidence(payload.get("confidence")),
             args=args,
+            # query_shape is a TOP-LEVEL property of the query (never inside args,
+            # even when the model flattened everything else there).
+            query_shape=_coerce_query_shape(payload.get("query_shape")),
         )
 
 
@@ -280,19 +369,93 @@ class TurnBudget:
     loop action; below it the loop goes straight to its best-effort exit
     instead of firing calls with near-zero timeouts."""
 
+    max_no_progress_rounds: int = 2
+    """Consecutive evidence-gathering rounds (RETRIEVE / DECOMPOSE / DEEP_STUDY)
+    that may add ZERO new chunks before the loop forces an ANSWER attempt from
+    the pool gathered so far. Guards the observed pathology where a weak
+    controller keeps re-retrieving the same chunks after the judge already
+    marked the pool sufficient — wasting actions and latency, and risking a
+    max_actions best-effort exit instead of a clean gated answer. 0 disables
+    the guard."""
+
+    fallback_pool_size: int = 8
+    """Target generation-pool size AND how many best-scored RAW retrieved chunks
+    to retain per turn as the judge-independent grounding floor
+    (``TurnState.fallback_chunks``). The ANSWER stage fills the pool toward this
+    size with the best raw chunks when the judged pool is empty OR thin (kept
+    chunks stay first); 0 disables both the floor and the fill (judge-kept only)."""
+
+    citation_target: int = 5
+    """Distinct-source count at which the answer gate's citation-coverage
+    component saturates to 1.0 (denominator = min(pool_size, target)). Keeps a
+    grounded refusal from failing the gate just because the pool was filled with
+    context chunks it need not all cite."""
+
+    facet_commit_enabled: bool = True
+    """Whether the deterministic facet-commit guard is armed. When True, once a
+    multi-way DECOMPOSE has covered every facet (each with >=1 judge-kept chunk)
+    the loop forces an ANSWER instead of gathering further — the DECOMPOSE-spiral
+    fix, complementary to ``max_no_progress_rounds`` (which fires on the opposite
+    signal, gathering that stopped producing new evidence). False disables it (the
+    controller alone decides when to answer)."""
+
+    decompose_anchor_raw: bool = True
+    """Whether a DECOMPOSE round retrieves the RAW turn query as an additive
+    anchor leg alongside its sub-queries (RRF/union). When True, the pool is the
+    UNION of raw-query and sub-query hits, so a decomposition can only ADD
+    candidates — never DROP a doc the raw query matched (the query-transform
+    variance fix; mirrors the agentic HyDE asymmetry). False reverts to
+    sub-queries-only (substitutive)."""
+
+    shape_decompose_enabled: bool = True
+    """Whether the controller's ``query_shape=compound`` label coerces the
+    OPENING move to DECOMPOSE (``controller.decide``). The LLM-driven replacement
+    for the router's compound-marker regex seed: when True, a query the controller
+    itself calls compound but opens with a single RETRIEVE is rewritten to the
+    DECOMPOSE parallel fan-out (the c002 fix). Safe only because DECOMPOSE is
+    additive (``decompose_anchor_raw``) — the fan-out is a superset of the
+    RETRIEVE it replaces — so the coercion self-disables when ``decompose_anchor_raw``
+    is off (it would otherwise force a substitutive fan-out). False leaves the
+    controller's opening action as-is."""
+
+    @staticmethod
+    def _effort_scale(effort: str, settings: Any) -> float:
+        """Multiplier the router's ``effort`` applies to the work budgets.
+
+        ``balanced`` (and any unknown level) → 1.0, so the default budget is
+        byte-for-byte today's. ``fast`` shrinks and ``thorough`` grows the
+        action/LLM-call ceilings via ``RAG_TURN_LOOP_EFFORT_*_SCALE`` (the
+        wall clock is deliberately NOT scaled — it is a fixed safety ceiling
+        the retrieve timeout is derived from, not a work target)."""
+        if effort == RouteEffort.FAST:
+            return float(getattr(settings, "RAG_TURN_LOOP_EFFORT_FAST_SCALE", 0.5))
+        if effort == RouteEffort.THOROUGH:
+            return float(
+                getattr(settings, "RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", 1.5)
+            )
+        return 1.0
+
     @classmethod
-    def from_settings(cls) -> "TurnBudget":
+    def from_settings(cls, effort: str = "balanced") -> "TurnBudget":
         """Build a budget from the ``RAG_TURN_LOOP_*`` settings block.
 
         Imports ``config.settings`` lazily so this module stays config-free at
         import time (pure contract surface; tests construct budgets directly).
+
+        Args:
+            effort: The router-selected effort level (``fast``/``balanced``/
+                ``thorough``). Scales ``max_actions`` and ``max_llm_calls``
+                only; ``balanced`` (default) leaves every field at its setting.
         """
         from config import settings
 
         weights = settings.RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS
+        scale = cls._effort_scale(effort, settings)
         return cls(
-            max_actions=settings.RAG_TURN_LOOP_MAX_ACTIONS,
-            max_llm_calls=settings.RAG_TURN_LOOP_MAX_LLM_CALLS,
+            max_actions=max(1, round(settings.RAG_TURN_LOOP_MAX_ACTIONS * scale)),
+            max_llm_calls=max(
+                2, round(settings.RAG_TURN_LOOP_MAX_LLM_CALLS * scale)
+            ),
             wall_clock_ms=settings.RAG_TURN_LOOP_WALL_CLOCK_MS,
             max_answer_attempts=settings.RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS,
             deep_study_max_docs=settings.RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS,
@@ -311,6 +474,12 @@ class TurnBudget:
             gate_weight_citation=weights[2],
             llm_max_tokens=settings.RAG_TURN_LOOP_LLM_MAX_TOKENS,
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
+            max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
+            fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
+            citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
+            facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
+            decompose_anchor_raw=settings.RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW,
+            shape_decompose_enabled=settings.RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED,
         )
 
 
@@ -463,6 +632,26 @@ class TurnEvent:
 
 
 @dataclass
+class FacetCoverage:
+    """One decomposed sub-question and whether the turn has gathered supporting
+    evidence for it.
+
+    Populated by a multi-way DECOMPOSE round (``run_decompose``): each sub-query
+    the split produced becomes a facet, marked ``covered`` once at least one
+    judge-KEPT chunk was retrieved for it. Drives the deterministic
+    facet-commit guard (``orchestrator._facet_commit_decision``) — once every
+    facet is covered the loop can synthesize the answer and must stop gathering.
+    Coverage is monotonic (a facet once covered stays covered).
+    """
+
+    question: str
+    """The decomposed sub-question text (facet identity, deduped case-insensitively)."""
+
+    covered: bool = False
+    """True once >=1 judge-kept chunk has been retrieved for this facet."""
+
+
+@dataclass
 class StudiedDoc:
     """Accumulated deep-study progress for one document within a turn."""
 
@@ -500,6 +689,14 @@ class TurnState:
     pool: list[EvidenceChunk] = field(default_factory=list)
     """Accumulated evidence; ordering = pool order fed to drafting."""
 
+    fallback_chunks: list[EvidenceChunk] = field(default_factory=list)
+    """Best-scored RAW retrieved chunks (judge-INDEPENDENT), retained across the
+    turn as a grounding floor. Populated every RETRIEVE round from the raw
+    candidates BEFORE the judge; consumed only when ``pool`` is empty — an ANSWER
+    then grounds on these instead of "(no evidence retrieved)". Guards the class
+    where a judge rejecting an entire fresh batch strands the turn with nothing
+    to cite (never a query/content match — CLAUDE.md §0)."""
+
     seen_chunk_ids: set[str] = field(default_factory=set)
     """Stable chunk ids ever pooled — cross-action dedup."""
 
@@ -511,6 +708,11 @@ class TurnState:
 
     studied: dict[str, StudiedDoc] = field(default_factory=dict)
     """Deep-study progress keyed by document_id."""
+
+    facets: list[FacetCoverage] = field(default_factory=list)
+    """Decomposed sub-questions accumulated across the turn, each with its
+    per-facet coverage (see :class:`FacetCoverage`). Empty until a multi-way
+    DECOMPOSE runs; drives the deterministic facet-commit guard."""
 
     answer_attempts: int = 0
     """Gated ANSWER drafts attempted so far (vs max_answer_attempts)."""
@@ -525,6 +727,34 @@ class TurnState:
         """Charge one LLM call to the turn ledger; returns the new total."""
         self.llm_calls += 1
         return self.llm_calls
+
+    def record_facet(self, question: str, covered: bool) -> None:
+        """Register a decomposed facet, or upgrade an existing one's coverage.
+
+        Deduped by case-insensitive question text — a later DECOMPOSE naming the
+        same facet updates the existing entry rather than duplicating it.
+        Coverage is monotonic: a facet once covered stays covered even if a
+        subsequent round names it again with no fresh evidence. Blank questions
+        are ignored.
+        """
+        key = question.strip().lower()
+        if not key:
+            return
+        for facet in self.facets:
+            if facet.question.strip().lower() == key:
+                facet.covered = facet.covered or covered
+                return
+        self.facets.append(FacetCoverage(question=question.strip(), covered=covered))
+
+    def facets_fully_covered(self) -> bool:
+        """True when at least one facet is tracked and every one is covered.
+
+        The commit signal for the facet guard: a decomposed question whose
+        every facet now has supporting evidence can be synthesized, so the loop
+        should answer rather than keep gathering. False when no DECOMPOSE has
+        run yet (no facets) — the guard then stays out of the way.
+        """
+        return bool(self.facets) and all(facet.covered for facet in self.facets)
 
     def remaining_actions(self, budget: TurnBudget) -> int:
         """Controller iterations still available under ``budget`` (floor 0)."""
@@ -757,7 +987,10 @@ class TurnContext:
 
 __all__ = [
     "TurnAction",
+    "RouteEffort",
+    "QueryShape",
     "RetrieveArgs",
+    "DecomposeArgs",
     "DeepStudyArgs",
     "ClarifyArgs",
     "AnswerArgs",

@@ -4,12 +4,13 @@
 # point run_turn_loop from .orchestrator, and the TurnContext assembler
 # build_turn_context from .context. Callers import from this package only —
 # never from submodules.
-# Exports: run_turn_loop, build_turn_context, TurnAction, RetrieveArgs,
-#          DeepStudyArgs, ClarifyArgs, AnswerArgs, TurnActionArgs,
+# Exports: run_turn_loop, build_turn_context, route, RouteConfig, RouteEffort,
+#          RouteHint, RouteSignals, TurnAction, QueryShape, RetrieveArgs,
+#          DecomposeArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs, TurnActionArgs,
 #          TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
-#          TurnEventType, TurnEvent, StudiedDoc, TurnState, ClarificationOut,
-#          TurnLoopResult, TurnLoopDeps, TurnContext
-# Deps: .schemas, .orchestrator, .context
+#          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
+#          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
+# Deps: .schemas, .orchestrator, .context, .router
 # @end-summary
 """Turn-level agentic conversation loop — public API.
 
@@ -23,13 +24,23 @@ from __future__ import annotations
 
 from src.retrieval.pipeline.turn_loop.context import build_turn_context
 from src.retrieval.pipeline.turn_loop.orchestrator import run_turn_loop
+from src.retrieval.pipeline.turn_loop.router import (
+    RouteConfig,
+    RouteEffort,
+    RouteHint,
+    RouteSignals,
+    route,
+)
 from src.retrieval.pipeline.turn_loop.schemas import (
     AnswerArgs,
     ClarificationOut,
     ClarifyArgs,
+    DecomposeArgs,
     DeepStudyArgs,
     EvidenceChunk,
+    FacetCoverage,
     GateFeedback,
+    QueryShape,
     RetrieveArgs,
     StudiedDoc,
     TurnAction,
@@ -47,8 +58,15 @@ from src.retrieval.pipeline.turn_loop.schemas import (
 __all__ = [
     "run_turn_loop",
     "build_turn_context",
+    "route",
+    "RouteConfig",
+    "RouteEffort",
+    "RouteHint",
+    "RouteSignals",
     "TurnAction",
+    "QueryShape",
     "RetrieveArgs",
+    "DecomposeArgs",
     "DeepStudyArgs",
     "ClarifyArgs",
     "AnswerArgs",
@@ -60,6 +78,7 @@ __all__ = [
     "TurnEventType",
     "TurnEvent",
     "StudiedDoc",
+    "FacetCoverage",
     "TurnState",
     "ClarificationOut",
     "TurnLoopResult",
