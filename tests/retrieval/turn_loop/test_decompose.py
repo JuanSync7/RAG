@@ -127,6 +127,114 @@ async def test_split_failopen_falls_back_to_single_subquery():
     assert hyde["search_terms"] == ["the whole question"]  # single fallback leg
 
 
+# ── facet coverage (drives the commit guard) ─────────────────────────────────
+
+async def test_facets_recorded_with_partial_coverage():
+    """A genuine 2-way split registers one facet per sub-query; a facet is
+    covered only when a judge-KEPT chunk traces back to its leg. Here the judge
+    keeps c1 (leg 'a') but not c2 (leg 'b') → 'a' covered, 'b' not."""
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0], 1)])
+    batches = [[make_chunk("c1")], [make_chunk("c2")]]
+    deps, ev, state, budget, emitter = _setup(provider, batches)
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert [(f.question, f.covered) for f in state.facets] == [("a", True), ("b", False)]
+    assert state.facets_fully_covered() is False
+
+
+async def test_facets_all_covered_when_judge_keeps_every_leg():
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0, 1], 2)])
+    batches = [[make_chunk("c1")], [make_chunk("c2")]]
+    deps, ev, state, budget, emitter = _setup(provider, batches)
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert state.facets_fully_covered() is True
+
+
+async def test_chunk_shared_across_legs_covers_both_facets():
+    """A chunk retrieved by two sub-queries is deduped into one pool entry, but
+    it must still cover BOTH facets (coverage is per-leg raw-id membership, not
+    the deduped pool)."""
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0], 1)])
+    # Both legs return c1; dedup keeps one, the judge keeps it → covers a AND b.
+    batches = [[make_chunk("c1")], [make_chunk("c1")]]
+    deps, ev, state, budget, emitter = _setup(provider, batches)
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert [f.covered for f in state.facets] == [True, True]
+
+
+async def test_single_query_fallback_records_no_facets():
+    """The split fail-open (one sub-query = the whole question) is a plain
+    retrieval, not a decomposition — it must register NO facets so the commit
+    guard does not hijack a degenerate DECOMPOSE."""
+    provider = FakeProvider(responses=["not json", judge_json([0], 1)])
+    deps, ev, state, budget, emitter = _setup(provider, [[make_chunk("c1")]])
+
+    await run_decompose(DecomposeArgs(question="one question"), query="one question",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert state.facets == []
+
+
+async def test_facet_recording_disabled_by_budget_flag():
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0, 1], 2)])
+    deps, ev = make_deps(provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]])
+    state, budget = TurnState(), make_budget(facet_commit_enabled=False)
+    emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert state.facets == []  # guard disarmed → no bookkeeping overhead
+
+
+async def test_facet_covered_by_chunk_pooled_in_an_earlier_round():
+    """Cross-round dedup class: a facet whose only hit was judge-kept by an
+    EARLIER round is deduped out of this round's `fresh`, so it never re-enters
+    `kept`. Coverage must attribute against the accumulated pool, not just this
+    round's keeps — else the richest (chunk-reused) pool falsely reads as
+    uncovered and the guard never commits."""
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0], 1)])
+    shared = make_chunk("cShared")
+    # leg 'a' -> a fresh chunk the judge keeps; leg 'b' -> cShared, already pooled.
+    deps, ev, state, budget, emitter = _setup(provider, [[make_chunk("cA")], [shared]])
+    state.pool.append(shared)             # an earlier round already kept it
+    state.seen_chunk_ids.add("cShared")   # so this round dedups it out of `fresh`
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert [(f.question, f.covered) for f in state.facets] == [("a", True), ("b", True)]
+    assert state.facets_fully_covered() is True
+
+
+async def test_failopen_judge_covers_no_facet():
+    """Judge fail-open (keep-all, pool_verdict None) validated nothing, so no
+    facet may be marked covered even though every chunk is 'kept' — otherwise
+    the guard would force-answer precisely when the judge is broken. Chunks are
+    still pooled (grounding preserved); a genuinely-judged retry can upgrade
+    coverage later (record_facet is monotonic)."""
+    # Unparseable judge output → judge_chunks keeps all with pool_verdict None.
+    provider = FakeProvider(responses=[_split_json("a", "b"), "not valid json"])
+    deps, ev, state, budget, emitter = _setup(
+        provider, [[make_chunk("c1")], [make_chunk("c2")]]
+    )
+
+    await run_decompose(DecomposeArgs(question="a and b"), query="a and b",
+                        state=state, budget=budget, deps=deps, emitter=emitter)
+
+    assert {c.chunk_id for c in state.pool} == {"c1", "c2"}  # grounding preserved
+    assert [f.covered for f in state.facets] == [False, False]  # nothing validated
+    assert state.facets_fully_covered() is False
+
+
 async def test_one_failed_retrieve_leg_does_not_abort():
     provider = FakeProvider(responses=[_split_json("good", "bad"), judge_json([0], 1)])
 

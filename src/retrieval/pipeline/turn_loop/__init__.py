@@ -8,8 +8,8 @@
 #          RouteHint, RouteSignals, TurnAction, RetrieveArgs, DecomposeArgs,
 #          DeepStudyArgs, ClarifyArgs, AnswerArgs, TurnActionArgs,
 #          TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
-#          TurnEventType, TurnEvent, StudiedDoc, TurnState, ClarificationOut,
-#          TurnLoopResult, TurnLoopDeps, TurnContext
+#          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
+#          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
 # Deps: .schemas, .orchestrator, .context, .router
 # @end-summary
 """Turn-level agentic conversation loop — public API.
@@ -38,6 +38,7 @@ from src.retrieval.pipeline.turn_loop.schemas import (
     DecomposeArgs,
     DeepStudyArgs,
     EvidenceChunk,
+    FacetCoverage,
     GateFeedback,
     RetrieveArgs,
     StudiedDoc,

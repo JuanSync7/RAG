@@ -90,6 +90,27 @@ draft, else one final draft if the LLM ledger allows, else an explicit
 cannot-answer-confidently message over the evidence digest — never an empty
 response.
 
+**Commit guards (deterministic, no LLM).** Two guards break the "controller
+won't commit" spirals a prompt nudge alone can't (a small controller keeps
+gathering while the judge still names *something* missing). Both sit in the
+decision ladder ahead of the controller and force an ANSWER:
+
+- **facet-commit** (`facet_guard`, `RAG_TURN_LOOP_FACET_COMMIT_ENABLED`): once a
+  multi-way DECOMPOSE has covered every facet — each decomposed sub-question has
+  ≥1 judge-kept chunk (`TurnState.facets`) — the pool can synthesize the
+  comparison, so the loop answers instead of exploring further. Fixes the
+  DECOMPOSE spiral where a comparison decomposes perfectly but never commits.
+- **no-progress** (`loop_guard`, `RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS`): the
+  opposite signal — after N consecutive gather rounds add zero new evidence, the
+  loop answers from the pool (or the `fallback_chunks` floor) gathered so far.
+
+When a *forced* ANSWER then fails the gate, more retrieval is futile (the
+comparison is complete, or the corpus keeps yielding nothing), so the loop
+commits the best grounded draft best-effort — `stop_reason` `facets_covered` or
+`no_progress_stall` — rather than burning the rest of the action/wall-clock
+budget. Both guards fail-open (a config flag disables each) and never fire
+before the evidence to justify them exists.
+
 Fail-open ladder (design §6): every LLM output is `</think>`-stripped and
 salvage-parsed; an unusable controller decision becomes RETRIEVE with the
 verbatim user query on iteration 1 (else an ANSWER attempt); an unusable judge

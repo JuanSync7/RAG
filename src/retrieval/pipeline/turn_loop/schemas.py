@@ -9,8 +9,8 @@
 # Exports: TurnAction, RouteEffort, RetrieveArgs, DecomposeArgs, DeepStudyArgs,
 #          ClarifyArgs, AnswerArgs,
 #          TurnActionArgs, TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
-#          TurnEventType, TurnEvent, StudiedDoc, TurnState, ClarificationOut,
-#          TurnLoopResult, TurnLoopDeps, TurnContext
+#          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
+#          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
 # Deps: dataclasses, time, typing (config.settings lazily inside
 #       TurnBudget.from_settings only)
 # @end-summary
@@ -342,6 +342,14 @@ class TurnBudget:
     grounded refusal from failing the gate just because the pool was filled with
     context chunks it need not all cite."""
 
+    facet_commit_enabled: bool = True
+    """Whether the deterministic facet-commit guard is armed. When True, once a
+    multi-way DECOMPOSE has covered every facet (each with >=1 judge-kept chunk)
+    the loop forces an ANSWER instead of gathering further — the DECOMPOSE-spiral
+    fix, complementary to ``max_no_progress_rounds`` (which fires on the opposite
+    signal, gathering that stopped producing new evidence). False disables it (the
+    controller alone decides when to answer)."""
+
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
         """Multiplier the router's ``effort`` applies to the work budgets.
@@ -401,6 +409,7 @@ class TurnBudget:
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
+            facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
         )
 
 
@@ -553,6 +562,26 @@ class TurnEvent:
 
 
 @dataclass
+class FacetCoverage:
+    """One decomposed sub-question and whether the turn has gathered supporting
+    evidence for it.
+
+    Populated by a multi-way DECOMPOSE round (``run_decompose``): each sub-query
+    the split produced becomes a facet, marked ``covered`` once at least one
+    judge-KEPT chunk was retrieved for it. Drives the deterministic
+    facet-commit guard (``orchestrator._facet_commit_decision``) — once every
+    facet is covered the loop can synthesize the answer and must stop gathering.
+    Coverage is monotonic (a facet once covered stays covered).
+    """
+
+    question: str
+    """The decomposed sub-question text (facet identity, deduped case-insensitively)."""
+
+    covered: bool = False
+    """True once >=1 judge-kept chunk has been retrieved for this facet."""
+
+
+@dataclass
 class StudiedDoc:
     """Accumulated deep-study progress for one document within a turn."""
 
@@ -610,6 +639,11 @@ class TurnState:
     studied: dict[str, StudiedDoc] = field(default_factory=dict)
     """Deep-study progress keyed by document_id."""
 
+    facets: list[FacetCoverage] = field(default_factory=list)
+    """Decomposed sub-questions accumulated across the turn, each with its
+    per-facet coverage (see :class:`FacetCoverage`). Empty until a multi-way
+    DECOMPOSE runs; drives the deterministic facet-commit guard."""
+
     answer_attempts: int = 0
     """Gated ANSWER drafts attempted so far (vs max_answer_attempts)."""
 
@@ -623,6 +657,34 @@ class TurnState:
         """Charge one LLM call to the turn ledger; returns the new total."""
         self.llm_calls += 1
         return self.llm_calls
+
+    def record_facet(self, question: str, covered: bool) -> None:
+        """Register a decomposed facet, or upgrade an existing one's coverage.
+
+        Deduped by case-insensitive question text — a later DECOMPOSE naming the
+        same facet updates the existing entry rather than duplicating it.
+        Coverage is monotonic: a facet once covered stays covered even if a
+        subsequent round names it again with no fresh evidence. Blank questions
+        are ignored.
+        """
+        key = question.strip().lower()
+        if not key:
+            return
+        for facet in self.facets:
+            if facet.question.strip().lower() == key:
+                facet.covered = facet.covered or covered
+                return
+        self.facets.append(FacetCoverage(question=question.strip(), covered=covered))
+
+    def facets_fully_covered(self) -> bool:
+        """True when at least one facet is tracked and every one is covered.
+
+        The commit signal for the facet guard: a decomposed question whose
+        every facet now has supporting evidence can be synthesized, so the loop
+        should answer rather than keep gathering. False when no DECOMPOSE has
+        run yet (no facets) — the guard then stays out of the way.
+        """
+        return bool(self.facets) and all(facet.covered for facet in self.facets)
 
     def remaining_actions(self, budget: TurnBudget) -> int:
         """Controller iterations still available under ``budget`` (floor 0)."""

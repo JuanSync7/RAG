@@ -72,6 +72,7 @@ STOP_MAX_LLM_CALLS = "max_llm_calls"
 STOP_WALL_CLOCK = "wall_clock"
 STOP_MAX_ANSWER_ATTEMPTS = "max_answer_attempts"
 STOP_NO_PROGRESS = "no_progress_stall"
+STOP_FACETS_COVERED = "facets_covered"
 STOP_ERROR = "error"
 
 
@@ -295,6 +296,68 @@ def _no_progress_decision(
     return None
 
 
+def _facet_commit_decision(
+    state: TurnState, budget: TurnBudget
+) -> Optional[TurnDecision]:
+    """Force an ANSWER once every decomposed facet has evidence, else ``None``.
+
+    The DECOMPOSE-spiral guard, complementary to :func:`_no_progress_decision`.
+    After a compound question is split into facets (``state.facets``, populated
+    by a multi-way DECOMPOSE) and each has >=1 judge-kept chunk, the pool can
+    already synthesize the comparison — so the loop must commit instead of
+    letting the controller gather more (or the round judge keep naming a fresh
+    per-facet gap) forever. Deterministic on purpose: a prompt nudge alone will
+    not make a small controller stop while the judge still reports something
+    "missing" (the a3dffdd lesson). Only fires while answer attempts remain —
+    once spent, the ANSWER branch's own cap takes the turn to best-effort.
+    Disabled via ``facet_commit_enabled``; inert until a DECOMPOSE runs
+    (``facets_fully_covered`` is False with no facets).
+    """
+    if (
+        budget.facet_commit_enabled
+        and state.facets_fully_covered()
+        and state.answer_attempts < budget.max_answer_attempts
+    ):
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=(
+                f"facet-commit guard: all {len(state.facets)} decomposed facets "
+                "have supporting evidence — synthesizing from the pool"
+            ),
+            confidence=0.0,
+            args=AnswerArgs(),
+        )
+    return None
+
+
+def _commit_stop_reason(
+    state: TurnState, budget: TurnBudget, no_progress_rounds: int
+) -> Optional[str]:
+    """Stop reason if a gate-failing draft should commit rather than re-gather.
+
+    Two conditions where resuming retrieval after a failed gate is futile — the
+    best low-confidence grounded draft is already the best possible answer, so
+    the loop exits best-effort instead of burning the rest of the action /
+    wall-clock budget:
+
+    - **facets covered** (``STOP_FACETS_COVERED``): every decomposed facet has
+      evidence, so the pool can only synthesize, not grow toward the answer;
+    - **no-progress stall** (``STOP_NO_PROGRESS``): gathering has added no new
+      evidence for ``max_no_progress_rounds`` rounds.
+
+    Returns the reason (facets checked first — the more specific signal) or
+    ``None`` while the loop should keep gathering.
+    """
+    if budget.facet_commit_enabled and state.facets_fully_covered():
+        return STOP_FACETS_COVERED
+    if (
+        budget.max_no_progress_rounds > 0
+        and no_progress_rounds >= budget.max_no_progress_rounds
+    ):
+        return STOP_NO_PROGRESS
+    return None
+
+
 async def _select_decision(
     *,
     route_hint: Optional[RouteHint],
@@ -309,16 +372,21 @@ async def _select_decision(
 
     The precedence is a single fail-open ladder (each rung hands to the next by
     returning ``None``): (1) the router fast-lane's deterministic opening
-    (``"router"``, skips the controller LLM); (2) the no-progress guard forcing
-    an ANSWER when gathering has stalled (``"loop_guard"``); (3) the controller
-    LLM (``"controller"``). Retrieval-facing decisions author from the
-    history-resolved ``retrieval_query``; generation keeps the verbatim query in
-    the caller. Returns the chosen ``(decision, source)`` — ``decide`` always
-    yields a valid decision, so the ladder never falls through.
+    (``"router"``, skips the controller LLM); (2) the facet-commit guard forcing
+    an ANSWER once every decomposed facet has evidence (``"facet_guard"``);
+    (3) the no-progress guard forcing an ANSWER when gathering has stalled
+    (``"loop_guard"``); (4) the controller LLM (``"controller"``).
+    Retrieval-facing decisions author from the history-resolved
+    ``retrieval_query``; generation keeps the verbatim query in the caller.
+    Returns the chosen ``(decision, source)`` — ``decide`` always yields a valid
+    decision, so the ladder never falls through.
     """
     decision = _seed_decision(route_hint, state, retrieval_query)
     if decision is not None:
         return decision, "router"
+    decision = _facet_commit_decision(state, budget)
+    if decision is not None:
+        return decision, "facet_guard"
     decision = _no_progress_decision(state, budget, no_progress_rounds)
     if decision is not None:
         return decision, "loop_guard"
@@ -411,8 +479,36 @@ async def run_turn_loop(
                     emitter=emitter,
                 )
 
-            # Decision precedence (fast-lane router -> no-progress guard ->
-            # controller), fail-open through each rung — see _select_decision.
+            # Attempts-independent commit exit. The facet / no-progress guards
+            # below force a FRESH gated ANSWER, so they require an answer attempt
+            # to still be available — which leaves a hole: if the controller
+            # spends the answer budget BEFORE the pool becomes committed (e.g. a
+            # premature ANSWER, then a DECOMPOSE that covers every facet), those
+            # guards can never fire and the loop would gather to max_actions —
+            # the very spiral this is meant to stop. So once the pool IS
+            # committed (all facets covered, or gathering stalled) and no attempt
+            # remains to draft again, exit best-effort with the best draft here.
+            # While attempts remain this is a no-op (best_draft empty of a fresh
+            # attempt) and the guards below own the commit.
+            if state.answer_attempts >= budget.max_answer_attempts:
+                commit_reason = _commit_stop_reason(
+                    state, budget, no_progress_rounds
+                )
+                if commit_reason is not None:
+                    return await _best_effort_result(
+                        stop_reason=commit_reason,
+                        best_draft=best_draft,
+                        query=query,
+                        context=context,
+                        state=state,
+                        budget=budget,
+                        deps=deps,
+                        emitter=emitter,
+                    )
+
+            # Decision precedence (fast-lane router -> facet-commit guard ->
+            # no-progress guard -> controller), fail-open per rung — see
+            # _select_decision.
             decision, source = await _select_decision(
                 route_hint=route_hint,
                 retrieval_query=retrieval_query,
@@ -484,20 +580,22 @@ async def run_turn_loop(
                         stop_reason=STOP_GATE_PASSED,
                     )
                 state.last_gate = feedback
-                # Stall exit (class: gate-failing answer on a stalled pool). When
-                # gathering has stalled for >= max_no_progress_rounds AND drafting
-                # from what we have just failed the gate, more retrieval is futile
-                # — the judge keeps rejecting the same corpus. For a genuinely
-                # unanswerable / out-of-corpus query a low-confidence grounded
-                # refusal IS the best possible answer, so commit the best draft
-                # instead of burning the rest of the action/wall-clock budget
-                # re-retrieving (the observed 44s tail). Shares the guard's knob.
-                if (
-                    budget.max_no_progress_rounds > 0
-                    and no_progress_rounds >= budget.max_no_progress_rounds
-                ):
+                # Commit exit (class: gate-failing answer on a pool more
+                # retrieval can't improve). Two signals — gathering stalled for
+                # >= max_no_progress_rounds, OR every decomposed facet is already
+                # covered — mean drafting again from the same evidence would just
+                # re-fail: the judge keeps rejecting the same corpus, or the
+                # comparison is as complete as it will get. A low-confidence
+                # grounded draft IS then the best possible answer, so commit the
+                # best draft instead of burning the rest of the action/wall-clock
+                # budget re-retrieving (the observed 44s tail). See
+                # _commit_stop_reason.
+                commit_reason = _commit_stop_reason(
+                    state, budget, no_progress_rounds
+                )
+                if commit_reason is not None:
                     return await _best_effort_result(
-                        stop_reason=STOP_NO_PROGRESS,
+                        stop_reason=commit_reason,
                         best_draft=best_draft,
                         query=query,
                         context=context,

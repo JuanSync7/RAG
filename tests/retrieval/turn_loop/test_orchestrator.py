@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import types
 
 import pytest
@@ -20,6 +21,7 @@ import src.retrieval.pipeline.turn_loop.schemas as turn_schemas
 from src.retrieval.pipeline.turn_loop import RouteHint, TurnAction, run_turn_loop
 from src.retrieval.pipeline.turn_loop.orchestrator import (
     STOP_CLARIFY,
+    STOP_FACETS_COVERED,
     STOP_GATE_PASSED,
     STOP_MAX_ACTIONS,
     STOP_MAX_ANSWER_ATTEMPTS,
@@ -538,6 +540,161 @@ async def test_stalled_gate_failing_answer_exits_without_more_retrieval(empty_co
     # Best grounded draft is still returned (not a bare cannot-answer).
     assert "[1]" in result.answer
     assert [c.chunk_id for c in result.pool] == ["c1", "c2"]
+
+
+async def test_facet_commit_guard_forces_answer_when_all_facets_covered(empty_context):
+    """The DECOMPOSE-spiral fix (different instance of the class than the c001
+    comparison that surfaced it — a two-part 'throughput and latency' question):
+    once a multi-way DECOMPOSE covers every facet, the loop forces an ANSWER
+    (source=facet_guard, NO controller call) instead of gathering the comparison
+    it can already synthesize forever."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="throughput and latency"),
+            # split -> two facets; each leg retrieves a chunk the judge keeps.
+            json.dumps({"sub_questions": ["throughput", "latency"]}),
+            judge_json([0, 1], 2, confidence=0.9),
+            selfscore_json(0.95),  # forced-answer self-score
+        ],
+        streams=[[("content", "Throughput is X [1]; latency is Y [2].")]],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    budget = make_budget(max_actions=10)
+
+    result = await run_turn_loop("throughput and latency?", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_GATE_PASSED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "ANSWER"]
+    # The ANSWER was forced by the facet guard, not chosen by the controller.
+    assert [a["source"] for a in action_events] == ["controller", "facet_guard"]
+    # The forced ANSWER made NO controller LLM call (split=decompose, not controller).
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes == ["controller", "decompose", "judge", "draft", "self_score"]
+
+
+async def test_facet_commit_guard_disabled_hands_iteration_to_controller(empty_context):
+    """facet_commit_enabled=False disarms the guard: after DECOMPOSE the
+    controller decides the next action as before (here it chooses ANSWER)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="a and b"),
+            json.dumps({"sub_questions": ["a", "b"]}),
+            judge_json([0, 1], 2, confidence=0.9),
+            decision_json("ANSWER"),  # controller keeps control on iteration 1
+            selfscore_json(0.95),
+        ],
+        streams=[[("content", "a is X [1]; b is Y [2].")]],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    budget = make_budget(max_actions=10, facet_commit_enabled=False)
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_GATE_PASSED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "ANSWER"]
+    assert [a["source"] for a in action_events] == ["controller", "controller"]
+    # A second controller call WAS made (the guard did not preempt it).
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes.count("controller") == 2
+
+
+async def test_facet_covered_gate_failure_commits_best_draft(empty_context):
+    """A facet-covered pool whose forced ANSWER fails the gate must commit the
+    best grounded draft (stop_reason=facets_covered) rather than resume futile
+    retrieval — the comparison is as complete as it will get, so more gathering
+    would only re-fail. Mirrors the no-progress stall-exit for the facet signal."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="a and b"),
+            json.dumps({"sub_questions": ["a", "b"]}),
+            judge_json([0, 1], 2, confidence=0.9),
+            selfscore_json(0.1),  # weak self-score -> the grounded draft fails the gate
+        ],
+        streams=[[("content", "Partial comparison [1][2].")]],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    # High threshold so the draft fails; large action budget so ONLY the
+    # facet-commit exit (not max_actions) can end the turn early.
+    budget = make_budget(max_actions=10, answer_confidence_threshold=0.9)
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_FACETS_COVERED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    # No further retrieval after the covered DECOMPOSE — just the forced ANSWER.
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "ANSWER"]
+    assert action_events[-1]["source"] == "facet_guard"
+    # The best grounded draft is returned (not a bare cannot-answer).
+    assert "[1]" in result.answer
+
+
+async def test_facet_covered_commits_after_answer_budget_spent(empty_context):
+    """Guard-precondition-hole class: the facet/no-progress guards force a FRESH
+    ANSWER so they need an attempt left. If the controller spends the answer
+    budget BEFORE a DECOMPOSE covers the facets (premature ANSWER, then
+    DECOMPOSE), the guards can't fire — the loop must STILL commit best-effort
+    (facets_covered), not spiral to max_actions. Different interleaving than the
+    happy-path facet tests (which decompose first)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("ANSWER"),  # iteration 0: premature answer on a thin pool
+            selfscore_json(0.1),      # -> fails the gate, spends the 1 attempt
+            decision_json("DECOMPOSE", question="a and b"),  # iteration 1
+            json.dumps({"sub_questions": ["a", "b"]}),
+            judge_json([0, 1], 2, confidence=0.9),  # covers both facets
+        ],
+        streams=[[("content", "weak premature draft")]],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    # One attempt only + generous actions: only the facet-covered commit (NOT
+    # max_actions) can end the turn once the attempt is spent pre-coverage.
+    budget = make_budget(
+        max_actions=10, max_answer_attempts=1, answer_confidence_threshold=0.9
+    )
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_FACETS_COVERED
+    actions = [a["action"] for a in events_of(emitted, TurnEventType.TURN_ACTION)]
+    assert actions == ["ANSWER", "DECOMPOSE"]  # no RETRIEVE spiral after coverage
+    assert "weak premature draft" in result.answer  # best (only) draft committed
+
+
+async def test_failopen_judge_during_decompose_does_not_force_facet_answer(empty_context):
+    """A DECOMPOSE whose judge fails open (keep-all, no validation) must NOT trip
+    the facet guard on the next iteration — coverage requires a real judgment.
+    The controller keeps control (here it CLARIFYs)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="a and b"),
+            json.dumps({"sub_questions": ["a", "b"]}),
+            "unparseable judge output",  # keep-all fail-open, pool_verdict None
+            decision_json("CLARIFY"),    # iteration 1: controller, NOT facet_guard
+            clarify_json("Which aspect?", ["A", "B"]),
+        ],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    budget = make_budget(max_actions=10)
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    assert result.action == TurnLoopResult.ACTION_ASK_USER
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "CLARIFY"]
+    # The post-DECOMPOSE decision was the controller's, NOT a forced facet ANSWER.
+    assert action_events[1]["source"] == "controller"
 
 
 async def test_wall_clock_stops_early_leaving_min_call_headroom(monkeypatch):

@@ -208,6 +208,31 @@ async def run_decompose(
         chunk.round_added = round_index
         state.pool.append(chunk)
 
+    # 5. Per-facet coverage (drives the facet-commit guard). Only a GENUINE
+    #    multi-way split registers facets — the single-query fallback is a plain
+    #    retrieval, not a decomposition. A facet is covered when its sub-query
+    #    leg points at judge-KEPT evidence the turn HAS (pure id-set membership,
+    #    CLAUDE.md §0 — no content matching). Two subtleties the naive
+    #    "this round's kept only" attribution got wrong:
+    #    - A fail-open keep-all round (pool_verdict is None: exhausted ledger,
+    #      judge error, unparseable output) VALIDATED nothing — kept-set
+    #      membership is then not evidence, so no facet may be marked covered on
+    #      it (else the guard force-answers precisely when the judge is broken).
+    #      The facets are still registered so a genuinely-judged retry can
+    #      upgrade them (record_facet is monotonic).
+    #    - Attribution runs against the turn's accumulated kept pool (state.pool,
+    #      which already includes this round's keeps), NOT just this round's
+    #      kept: cross-round dedup drops an already-pooled chunk from `fresh`, so
+    #      a facet whose only hit was kept by an earlier round would otherwise be
+    #      under-counted. Pooled ids only (never seen_chunk_ids, which also holds
+    #      judge-DROPPED chunks that must not cover a facet).
+    if budget.facet_commit_enabled and len(subqueries) >= 2:
+        judged = pool_verdict is not None
+        evidence_ids = {chunk.chunk_id for chunk in state.pool}
+        for subq, leg in zip(subqueries, legs):
+            leg_ids = {chunk.chunk_id for chunk in leg}
+            state.record_facet(subq, judged and bool(evidence_ids & leg_ids))
+
     await emitter.emit(
         TurnEventType.RETRIEVE_RESULT,
         {
