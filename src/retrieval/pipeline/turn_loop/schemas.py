@@ -330,9 +330,17 @@ class TurnBudget:
     the guard."""
 
     fallback_pool_size: int = 8
-    """How many best-scored RAW retrieved chunks to retain per turn as the
-    judge-independent grounding floor (``TurnState.fallback_chunks``). Consumed
-    only when the judged pool is empty; 0 disables the floor."""
+    """Target generation-pool size AND how many best-scored RAW retrieved chunks
+    to retain per turn as the judge-independent grounding floor
+    (``TurnState.fallback_chunks``). The ANSWER stage fills the pool toward this
+    size with the best raw chunks when the judged pool is empty OR thin (kept
+    chunks stay first); 0 disables both the floor and the fill (judge-kept only)."""
+
+    citation_target: int = 5
+    """Distinct-source count at which the answer gate's citation-coverage
+    component saturates to 1.0 (denominator = min(pool_size, target)). Keeps a
+    grounded refusal from failing the gate just because the pool was filled with
+    context chunks it need not all cite."""
 
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
@@ -392,6 +400,7 @@ class TurnBudget:
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
+            citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
         )
 
 

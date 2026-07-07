@@ -61,6 +61,17 @@ class TestCitationCoverage:
     def test_full_coverage(self):
         assert citation_coverage("[1][2][3]", 3) == 1.0
 
+    def test_saturates_at_target_for_large_filled_pool(self):
+        # A refusal citing 1 source out of a 12-chunk filled pool must NOT score
+        # 1/12 (which would fail the gate) — the denominator saturates at target.
+        assert citation_coverage("only [1]", 12, target=5) == pytest.approx(0.2)
+
+    def test_over_target_citations_clamp_to_one(self):
+        assert citation_coverage("[1][2][3][4][5][6]", 12, target=5) == 1.0
+
+    def test_target_zero_restores_raw_fraction(self):
+        assert citation_coverage("[1]", 12, target=0) == pytest.approx(1 / 12)
+
 
 async def test_gate_pass_with_full_components():
     """judge 0.9 (trace) / self 0.95 / coverage 1.0 under 0.5/0.3/0.2 weights
@@ -91,6 +102,59 @@ async def test_gate_pass_with_full_components():
     assert feedback.passed
     assert feedback.score == pytest.approx(0.935)
     assert state.answer_attempts == 1
+
+
+async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
+    """A judge that kept only 1 chunk starves generation of disambiguating
+    context; run_answer tops the pool up toward fallback_pool_size with the best
+    raw chunks, kept chunk FIRST (stable citation indices), no duplicates."""
+    provider = FakeProvider(
+        responses=[selfscore_json(0.9)],
+        streams=[[("content", "grounded [1]")]],
+    )
+    kept = make_chunk("kept1", score=0.9)
+    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept])
+    # The judge-independent floor retained more raw candidates than the judge kept.
+    state.fallback_chunks = [kept] + [
+        make_chunk(f"raw{i}", score=0.8 - i * 0.01) for i in range(2, 12)
+    ]
+
+    await run_answer(
+        query="q",
+        context=TurnContext(conversation_id="c"),
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+
+    assert len(state.pool) == budget.fallback_pool_size  # topped up (default 8)
+    assert state.pool[0].chunk_id == "kept1"  # kept chunk stays first
+    ids = [chunk.chunk_id for chunk in state.pool]
+    assert len(ids) == len(set(ids))  # kept1 not re-appended
+
+
+async def test_fill_disabled_when_fallback_size_zero():
+    """fallback_pool_size=0 disables the fill — generation sees judge-kept only."""
+    provider = FakeProvider(
+        responses=[selfscore_json(0.9)],
+        streams=[[("content", "just [1]")]],
+    )
+    kept = make_chunk("kept1")
+    budget = make_budget(fallback_pool_size=0)
+    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept], budget=budget)
+    state.fallback_chunks = [kept, make_chunk("raw2"), make_chunk("raw3")]
+
+    await run_answer(
+        query="q",
+        context=TurnContext(conversation_id="c"),
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+
+    assert len(state.pool) == 1  # no fill
 
 
 async def test_draft_events_stream_live_and_precede_gate(empty_context):
