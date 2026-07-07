@@ -24,6 +24,7 @@ from typing import Any
 
 from src.common.prompts import load_prompt, render, strip_reasoning
 from src.common.utils import parse_json_object
+from src.retrieval.pipeline.turn_loop.common import TOP_PREVIEW_COUNT
 from src.retrieval.pipeline.turn_loop.controller import controller_model_alias
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.retrieve import _judge_round
@@ -39,7 +40,6 @@ from src.retrieval.pipeline.turn_loop.schemas import (
 logger = logging.getLogger(__name__)
 
 _PROMPT_FILE = "turn_decompose.md"
-_TOP_PREVIEW_COUNT = 3
 
 
 def _max_subqueries() -> int:
@@ -222,7 +222,7 @@ async def run_decompose(
                     "heading": chunk.heading,
                     "score": chunk.score,
                 }
-                for chunk in kept[:_TOP_PREVIEW_COUNT]
+                for chunk in kept[:TOP_PREVIEW_COUNT]
             ],
         },
     )

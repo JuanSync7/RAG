@@ -13,8 +13,8 @@
 # Pure control flow over TurnLoopDeps; per-action errors are contained so one
 # broken seam degrades, not crashes, a turn.
 # Exports: run_turn_loop
-# Deps: src.retrieval.pipeline.turn_loop.{schemas,events,controller,retrieve,
-#       decompose,deep_study,clarify,answer,standalone}
+# Deps: src.retrieval.pipeline.turn_loop.{schemas,events,common,controller,
+#       retrieve,decompose,deep_study,clarify,answer,standalone}
 # @end-summary
 """Turn-loop orchestrator: budgets, dispatch, stop conditions (design §5).
 
@@ -32,10 +32,11 @@ likewise the endpoint's job.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.retrieval.pipeline.turn_loop.answer import run_answer
 from src.retrieval.pipeline.turn_loop.clarify import run_clarify
+from src.retrieval.pipeline.turn_loop.common import one_line, preview_chars
 from src.retrieval.pipeline.turn_loop.controller import (
     build_evidence_digest,
     decide,
@@ -92,13 +93,6 @@ def _budget_stop_reason(state: TurnState, budget: TurnBudget) -> Optional[str]:
     return None
 
 
-def _preview_chars() -> int:
-    """Preview cap for user-facing evidence lines (the one preview knob)."""
-    from config import settings
-
-    return int(getattr(settings, "RAG_TURN_CONTEXT_PREVIEW_CHARS", 320))
-
-
 def _cannot_answer_text(state: TurnState) -> str:
     """Deterministic best-effort answer when no draft could be produced.
 
@@ -115,7 +109,7 @@ def _cannot_answer_text(state: TurnState) -> str:
         build_evidence_digest(state),
     )
     lines = ["I could not reach a confident answer within this turn's budget."]
-    preview_cap = _preview_chars()
+    preview_cap = preview_chars()
     seen: set[tuple[str, str]] = set()
     evidence_lines: list[str] = []
     for chunk in state.pool:
@@ -126,9 +120,7 @@ def _cannot_answer_text(state: TurnState) -> str:
         label = chunk.source or "unnamed source"
         if chunk.heading:
             label += f" — {chunk.heading}"
-        preview = " ".join((chunk.text or "").split())
-        if preview_cap > 0 and len(preview) > preview_cap:
-            preview = preview[:preview_cap]
+        preview = one_line(chunk.text, preview_cap)
         evidence_lines.append(f"- {label}: {preview}" if preview else f"- {label}")
     if evidence_lines:
         lines.append("")
@@ -166,6 +158,35 @@ def _result(
     )
 
 
+def _draft_result(
+    state: TurnState,
+    best_draft: Optional[tuple[float, str]],
+    stop_reason: str,
+) -> TurnLoopResult:
+    """Terminal result from the best gate-scored draft, else the cannot-answer
+    digest. The single place that turns a ``(confidence, answer)`` best-draft
+    into a :class:`TurnLoopResult`, shared by the best-effort exit and the
+    never-raise error containment so their fallback shape can never drift."""
+    if best_draft is not None:
+        confidence, answer = best_draft
+        return _result(
+            state, answer=answer, confidence=confidence, stop_reason=stop_reason
+        )
+    return _result(
+        state, answer=_cannot_answer_text(state), stop_reason=stop_reason
+    )
+
+
+def _coerce_args(decision: TurnDecision, expected: type, default: Any):
+    """The decision's typed ``args`` when they match ``expected``, else ``default``.
+
+    A sloppy controller may emit a decision whose ``args`` are the wrong shape
+    (or absent); the gather stage still runs on a sane default keyed off the
+    resolved retrieval query rather than crashing the dispatch.
+    """
+    return decision.args if isinstance(decision.args, expected) else default
+
+
 async def _best_effort_result(
     *,
     stop_reason: str,
@@ -198,20 +219,7 @@ async def _best_effort_result(
                 best_draft = (feedback.score, draft)
         except Exception as exc:  # noqa: BLE001 — best-effort must not raise
             logger.warning("turn loop final best-effort draft failed: %s", exc)
-    if best_draft is not None:
-        confidence, answer = best_draft
-        return _result(
-            state,
-            answer=answer,
-            confidence=confidence,
-            stop_reason=stop_reason,
-        )
-    return _result(
-        state,
-        answer=_cannot_answer_text(state),
-        confidence=0.0,
-        stop_reason=stop_reason,
-    )
+    return _draft_result(state, best_draft, stop_reason)
 
 
 def _seed_decision(
@@ -287,11 +295,42 @@ def _no_progress_decision(
     return None
 
 
-# Evidence-gathering actions (grow the pool); the no-progress guard tracks
-# consecutive rounds of these that add nothing new.
-_GATHER_ACTIONS = frozenset(
-    {TurnAction.RETRIEVE, TurnAction.DECOMPOSE, TurnAction.DEEP_STUDY}
-)
+async def _select_decision(
+    *,
+    route_hint: Optional[RouteHint],
+    retrieval_query: str,
+    context: TurnContext,
+    state: TurnState,
+    budget: TurnBudget,
+    emitter: TurnEventEmitter,
+    no_progress_rounds: int,
+) -> tuple[TurnDecision, str]:
+    """Choose the iteration's decision by precedence, with its source label.
+
+    The precedence is a single fail-open ladder (each rung hands to the next by
+    returning ``None``): (1) the router fast-lane's deterministic opening
+    (``"router"``, skips the controller LLM); (2) the no-progress guard forcing
+    an ANSWER when gathering has stalled (``"loop_guard"``); (3) the controller
+    LLM (``"controller"``). Retrieval-facing decisions author from the
+    history-resolved ``retrieval_query``; generation keeps the verbatim query in
+    the caller. Returns the chosen ``(decision, source)`` — ``decide`` always
+    yields a valid decision, so the ladder never falls through.
+    """
+    decision = _seed_decision(route_hint, state, retrieval_query)
+    if decision is not None:
+        return decision, "router"
+    decision = _no_progress_decision(state, budget, no_progress_rounds)
+    if decision is not None:
+        return decision, "loop_guard"
+    decision = await decide(
+        query=retrieval_query,
+        context=context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+        route_hint=route_hint,
+    )
+    return decision, "controller"
 
 
 async def run_turn_loop(
@@ -372,28 +411,17 @@ async def run_turn_loop(
                     emitter=emitter,
                 )
 
-            # Decision precedence: (1) the router fast-lane's deterministic
-            # opening skips the controller LLM; (2) the no-progress guard forces
-            # an ANSWER when gathering has stalled; (3) otherwise the controller
-            # decides. Both deterministic paths are fail-open (return None to
-            # hand back to the controller).
-            decision: Optional[TurnDecision] = _seed_decision(
-                route_hint, state, retrieval_query
+            # Decision precedence (fast-lane router -> no-progress guard ->
+            # controller), fail-open through each rung — see _select_decision.
+            decision, source = await _select_decision(
+                route_hint=route_hint,
+                retrieval_query=retrieval_query,
+                context=context,
+                state=state,
+                budget=budget,
+                emitter=emitter,
+                no_progress_rounds=no_progress_rounds,
             )
-            source = "router" if decision is not None else "controller"
-            if decision is None:
-                decision = _no_progress_decision(state, budget, no_progress_rounds)
-                if decision is not None:
-                    source = "loop_guard"
-            if decision is None:
-                decision = await decide(
-                    query=retrieval_query,
-                    context=context,
-                    state=state,
-                    budget=budget,
-                    emitter=emitter,
-                    route_hint=route_hint,
-                )
             await emitter.emit(
                 TurnEventType.TURN_ACTION,
                 {
@@ -486,10 +514,8 @@ async def run_turn_loop(
             pool_before = len(state.pool)
             try:
                 if decision.action == TurnAction.RETRIEVE:
-                    args = (
-                        decision.args
-                        if isinstance(decision.args, RetrieveArgs)
-                        else RetrieveArgs(query_text=retrieval_query)
+                    args = _coerce_args(
+                        decision, RetrieveArgs, RetrieveArgs(query_text=retrieval_query)
                     )
                     await run_retrieve(
                         args,
@@ -500,10 +526,8 @@ async def run_turn_loop(
                         emitter=emitter,
                     )
                 elif decision.action == TurnAction.DECOMPOSE:
-                    args = (
-                        decision.args
-                        if isinstance(decision.args, DecomposeArgs)
-                        else DecomposeArgs(question=retrieval_query)
+                    args = _coerce_args(
+                        decision, DecomposeArgs, DecomposeArgs(question=retrieval_query)
                     )
                     await run_decompose(
                         args,
@@ -540,19 +564,7 @@ async def run_turn_loop(
                 no_progress_rounds += 1
     except Exception:  # noqa: BLE001 — the loop itself must never raise
         logger.exception("turn loop failed unexpectedly — exiting best-effort")
-        if best_draft is not None:
-            confidence, answer = best_draft
-            return _result(
-                state,
-                answer=answer,
-                confidence=confidence,
-                stop_reason=STOP_ERROR,
-            )
-        return _result(
-            state,
-            answer=_cannot_answer_text(state),
-            stop_reason=STOP_ERROR,
-        )
+        return _draft_result(state, best_draft, STOP_ERROR)
 
 
 __all__ = ["run_turn_loop"]

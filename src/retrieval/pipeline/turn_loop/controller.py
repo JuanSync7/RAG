@@ -29,6 +29,7 @@ from typing import Optional
 
 from src.common.prompts import load_prompt, render, strip_reasoning
 from src.common.utils import parse_json_object
+from src.retrieval.pipeline.turn_loop.common import one_line, preview_chars
 from src.retrieval.pipeline.turn_loop.events import (
     TurnEventEmitter,
     latest_event_payload,
@@ -75,21 +76,6 @@ def judge_model_alias() -> str:
     return str(getattr(settings, "RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", "judge"))
 
 
-def _preview_chars() -> int:
-    """Per-chunk preview cap for digests (``RAG_TURN_CONTEXT_PREVIEW_CHARS``)."""
-    from config import settings
-
-    return int(getattr(settings, "RAG_TURN_CONTEXT_PREVIEW_CHARS", 320))
-
-
-def _one_line(text: str, max_chars: int) -> str:
-    """Flatten ``text`` to one whitespace-normalized line capped at ``max_chars``."""
-    flat = " ".join((text or "").split())
-    if max_chars > 0 and len(flat) > max_chars:
-        flat = flat[:max_chars]
-    return flat
-
-
 def build_evidence_digest(state: TurnState) -> str:
     """Render the deterministic evidence digest of the turn so far.
 
@@ -108,7 +94,7 @@ def build_evidence_digest(state: TurnState) -> str:
         The prompt-ready digest string; a placeholder line when no evidence
         has been gathered yet.
     """
-    preview_cap = _preview_chars()
+    preview_cap = preview_chars()
     lines: list[str] = []
     if state.pool:
         lines.append(f"Evidence pool ({len(state.pool)} chunks):")
@@ -117,7 +103,7 @@ def build_evidence_digest(state: TurnState) -> str:
                 f"[{index}] document_id={chunk.document_id} "
                 f"source_key={chunk.source_key} source={chunk.source} "
                 f"heading={chunk.heading} score={chunk.score:.2f} "
-                f"({chunk.provenance}) :: {_one_line(chunk.text, preview_cap)}"
+                f"({chunk.provenance}) :: {one_line(chunk.text, preview_cap)}"
             )
     else:
         lines.append("(no evidence gathered yet this turn)")
@@ -125,12 +111,12 @@ def build_evidence_digest(state: TurnState) -> str:
         lines.append("")
         lines.append("Queries already tried (do not repeat verbatim):")
         for query in state.tried_queries:
-            lines.append(f"- {_one_line(query, preview_cap)}")
+            lines.append(f"- {one_line(query, preview_cap)}")
     if state.tried_hyde:
         lines.append("")
         lines.append("HyDE hypothetical answers already tried:")
         for hyde in state.tried_hyde:
-            lines.append(f"- {_one_line(hyde, preview_cap)}")
+            lines.append(f"- {one_line(hyde, preview_cap)}")
     if state.studied:
         lines.append("")
         lines.append("Documents deep-studied this turn:")
@@ -138,7 +124,7 @@ def build_evidence_digest(state: TurnState) -> str:
             lines.append(
                 f"- document_id={doc.document_id} "
                 f"windows_read={len(doc.windows_read)} :: "
-                f"{_one_line(doc.conclusion or doc.notes, preview_cap)}"
+                f"{one_line(doc.conclusion or doc.notes, preview_cap)}"
             )
     verdict = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
     if verdict is not None:
@@ -147,7 +133,7 @@ def build_evidence_digest(state: TurnState) -> str:
             "Latest judge verdict: "
             f"sufficient={verdict.get('sufficient')} "
             f"confidence={verdict.get('confidence')} "
-            f"missing_information={_one_line(str(verdict.get('missing_information') or ''), preview_cap)}"
+            f"missing_information={one_line(str(verdict.get('missing_information') or ''), preview_cap)}"
         )
     return "\n".join(lines)
 

@@ -26,6 +26,7 @@ import logging
 import time
 from typing import Any, Optional
 
+from src.retrieval.pipeline.turn_loop.common import TOP_PREVIEW_COUNT
 from src.retrieval.pipeline.turn_loop.controller import judge_model_alias
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.schemas import (
@@ -38,9 +39,6 @@ from src.retrieval.pipeline.turn_loop.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-# How many kept chunks the retrieve_result event previews (display cap only).
-_TOP_PREVIEW_COUNT = 3
 
 
 def _retain_fallback(
@@ -292,7 +290,7 @@ async def run_retrieve(
                     "heading": chunk.heading,
                     "score": chunk.score,
                 }
-                for chunk in kept[:_TOP_PREVIEW_COUNT]
+                for chunk in kept[:TOP_PREVIEW_COUNT]
             ],
         },
     )
