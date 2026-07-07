@@ -8,6 +8,11 @@ def guardrails_config_dir():
     return str(Path(__file__).resolve().parents[2] / "config" / "guardrails")
 
 
+@pytest.mark.skip(
+    reason="needs real langchain_core; suite-wide langchain stub shadows it "
+    "(see tests/conftest.py). Re-enable via a real-langchain boundary. "
+    "Tracked in TEST_COVERAGE_PLAN.md (CI-gating slice)."
+)
 def test_all_co_files_parse(guardrails_config_dir):
     """All .co files must parse without SyntaxError."""
     from nemoguardrails import RailsConfig

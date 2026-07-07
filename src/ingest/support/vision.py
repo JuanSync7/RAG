@@ -19,6 +19,7 @@ from pathlib import Path
 from src.ingest.common import IngestionConfig
 from src.ingest.common import parse_json_object
 from src.platform.llm import get_llm_provider
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,11 @@ def _extract_image_candidates(
 _VISION_PROMPT = (
     "You are an OCR-and-figure-analysis assistant for retrieval indexing. "
     "Return JSON only with keys: caption (string), visible_text (string), tags (array of strings). "
-    "Keep caption under 200 chars, visible_text under 200 chars, and max 8 tags."
+    "caption: a concise one-line description of the figure (aim under 200 chars). "
+    "visible_text: transcribe ALL text visible in the image VERBATIM and in full — "
+    "do NOT summarize, abbreviate, or truncate; this is the figure's searchable content "
+    "(diagrams/tables-as-images can carry a lot of text, capture every word). "
+    "max 8 tags."
 )
 
 
@@ -215,36 +220,53 @@ def _describe_image(
         A normalized `VisionDescription`.
     """
     provider = get_llm_provider()
-    try:
-        response = provider.vision_completion(
-            prompt=_VISION_PROMPT,
-            image_b64=candidate.image_b64,
-            mime_type=candidate.mime_type,
-            model_alias="vision",
-            temperature=config.vision_temperature,
-            max_tokens=config.vision_max_tokens,
-            timeout=config.vision_timeout_seconds,
+    tracer = get_tracer()
+    model_id = str(getattr(config, "vision_model", "") or "vision")
+    with tracer.span(
+        "ingest.vision.caption",
+        {
+            "gen_ai.system": "vision-llm",
+            "gen_ai.request.model": model_id,
+            "gen_ai.prompt": candidate.source_ref or candidate.figure_label,
+            "figure_label": candidate.figure_label,
+        },
+    ) as span:
+        try:
+            response = provider.vision_completion(
+                prompt=_VISION_PROMPT,
+                image_b64=candidate.image_b64,
+                mime_type=candidate.mime_type,
+                model_alias="vision",
+                temperature=config.vision_temperature,
+                max_tokens=config.vision_max_tokens,
+                timeout=config.vision_timeout_seconds,
+            )
+            parsed = parse_json_object(response.content)
+        except Exception as exc:
+            logger.warning(
+                "Vision completion failed for %s: %s",
+                candidate.source_ref,
+                exc,
+            )
+            return None
+        caption = str(parsed.get("caption", "")).strip() or "No caption generated."
+        visible_text = str(parsed.get("visible_text", "")).strip()
+        tags_raw = parsed.get("tags")
+        tags = [str(tag).strip() for tag in tags_raw] if isinstance(tags_raw, list) else []
+        tags = [tag for tag in tags if tag][:8]
+        span.set_attribute("gen_ai.completion", caption[:240])
+        return VisionDescription(
+            figure_label=candidate.figure_label,
+            source_ref=candidate.source_ref,
+            # No content truncation: the figure caption and (especially) the
+            # OCR'd visible_text are the figure's searchable content. The 240/260
+            # caps here used to silently drop most of a text-bearing diagram's
+            # content. The OTel completion attribute above stays capped — that is
+            # telemetry, not stored content.
+            caption=caption,
+            visible_text=visible_text,
+            tags=tags,
         )
-        parsed = parse_json_object(response.content)
-    except Exception as exc:
-        logger.warning(
-            "Vision completion failed for %s: %s",
-            candidate.source_ref,
-            exc,
-        )
-        return None
-    caption = str(parsed.get("caption", "")).strip() or "No caption generated."
-    visible_text = str(parsed.get("visible_text", "")).strip()
-    tags_raw = parsed.get("tags")
-    tags = [str(tag).strip() for tag in tags_raw] if isinstance(tags_raw, list) else []
-    tags = [tag for tag in tags if tag][:8]
-    return VisionDescription(
-        figure_label=candidate.figure_label,
-        source_ref=candidate.source_ref,
-        caption=caption[:240],
-        visible_text=visible_text[:260],
-        tags=tags,
-    )
 
 
 # ── Readiness check ───────────────────────────────────────────────────
@@ -404,8 +426,19 @@ def caption_markdown_images_inline(
         figures.append(figure_meta)
         return f"[{caption_text}]"
 
-    rewritten = _IMAGE_REF_PATTERN.sub(_replace, markdown)
-    return rewritten, figures
+    tracer = get_tracer()
+    image_refs = _IMAGE_REF_PATTERN.findall(markdown)
+    with tracer.span(
+        "ingest.vision.caption_batch",
+        {
+            "image_count": len(image_refs),
+            "max_figures": max_figures,
+            "source_path": str(source_path),
+        },
+    ) as span:
+        rewritten = _IMAGE_REF_PATTERN.sub(_replace, markdown)
+        span.set_attribute("captioned_count", sum(1 for f in figures if f.get("captioned")))
+        return rewritten, figures
 
 
 def generate_vision_notes(
@@ -425,21 +458,33 @@ def generate_vision_notes(
         Tuple of ``(notes, described_count)`` where ``notes`` are compact strings
         suitable for appending to cleaned content.
     """
-    candidates = _extract_image_candidates(
-        markdown,
-        source_path=source_path,
-        max_figures=max(1, config.vision_max_figures),
-        max_image_bytes=max(16_384, config.vision_max_image_bytes),
-    )
-    if not candidates:
-        return [], 0
+    tracer = get_tracer()
+    model_id = str(getattr(config, "vision_model", "") or "vision")
+    with tracer.span(
+        "ingest.vision.notes",
+        {
+            "gen_ai.system": "vision-llm",
+            "gen_ai.request.model": model_id,
+            "source_path": str(source_path),
+        },
+    ) as span:
+        candidates = _extract_image_candidates(
+            markdown,
+            source_path=source_path,
+            max_figures=max(1, config.vision_max_figures),
+            max_image_bytes=max(16_384, config.vision_max_image_bytes),
+        )
+        span.set_attribute("candidate_count", len(candidates))
+        if not candidates:
+            return [], 0
 
-    notes: list[str] = []
-    described_count = 0
-    for candidate in candidates:
-        description = _describe_image(candidate, config)
-        if description is None:
-            continue
-        notes.append(description.as_note())
-        described_count += 1
-    return notes, described_count
+        notes: list[str] = []
+        described_count = 0
+        for candidate in candidates:
+            description = _describe_image(candidate, config)
+            if description is None:
+                continue
+            notes.append(description.as_note())
+            described_count += 1
+        span.set_attribute("described_count", described_count)
+        return notes, described_count

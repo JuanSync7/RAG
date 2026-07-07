@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RagWeave - User Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/console/static/user/styles.css">
 </head>
 <body>
@@ -108,6 +111,12 @@
         <span class="chat-topk-label">top_k</span>
         <input class="chat-topk-input" id="chatTopkInput" type="text" inputmode="numeric" pattern="[0-9]*" value="5">
       </label>
+      <button type="button" class="chat-deep-research-btn" id="chatDeepResearch" aria-pressed="false" title="Deep research: recursive topic-grouped retrieval. Slower (10–30s) but better for multi-aspect questions.">
+        <span class="dr-icon" aria-hidden="true">&#9737;</span><span class="dr-label">Deep research</span>
+      </button>
+      <button type="button" class="chat-turn-loop-btn" id="chatTurnLoop" aria-pressed="false" title="Turn loop: agentic controller iterates retrieve / deep-study / clarify / answer until the answer gate passes; streams its activity live.">
+        <span class="tl-icon" aria-hidden="true">&#8635;</span><span class="tl-label">Turn loop</span>
+      </button>
       <div class="ctx-chip" id="ctxChip">
         <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
         <span id="ctxPct">—</span>
@@ -194,6 +203,10 @@
       </div>
 
       <div class="attach-chips" id="attachChips"></div>
+      <button type="button" class="dr-suggest-chip" id="drSuggestChip" hidden title="Re-run with deep research enabled">
+        <span class="dr-suggest-icon" aria-hidden="true">&#10024;</span>
+        <span class="dr-suggest-text">This looks like a multi-topic question — try Deep Research?</span>
+      </button>
       <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md" style="display:none">
 
       <div class="input-wrap">
@@ -208,6 +221,21 @@
       <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; Esc&nbsp;Esc&nbsp;to&nbsp;clear &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
     </div>
     </div>
+    <!-- Source-document viewer: a side panel that splits the chat 50/50 instead
+         of opening a new browser tab. Hidden until a [view] / source link fires. -->
+    <section class="doc-viewer" id="docViewer" aria-hidden="true" aria-label="Source document viewer">
+      <header class="doc-viewer-header">
+        <span class="doc-viewer-title" id="docViewerTitle">Source document</span>
+        <div class="doc-viewer-actions">
+          <a class="doc-viewer-btn" id="docViewerPopout" href="#" target="_blank" rel="noopener" title="Open in new tab" aria-label="Open in new tab">&#8599;</a>
+          <button class="doc-viewer-btn" id="docViewerClose" title="Close (Esc)" aria-label="Close source viewer">&#10005;</button>
+        </div>
+      </header>
+      <div class="doc-viewer-body">
+        <iframe class="doc-viewer-frame" id="docViewerFrame" title="Source document" referrerpolicy="no-referrer"></iframe>
+        <div class="doc-viewer-status" id="docViewerStatus">Loading…</div>
+      </div>
+    </section>
     <aside class="chat-rail" id="chatRail" aria-label="Document state">
       <div class="chat-rail-header">
         <button class="chat-rail-toggle" id="chatRailToggle" title="Collapse" aria-expanded="true" aria-controls="chatRailBody">&#9654;</button>
@@ -388,6 +416,19 @@
         </div>
         <label class="toggle-switch">
           <input type="checkbox" id="citationsToggle" checked>
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <span class="toggle-label">Hierarchical retrieval</span>
+          <span class="toggle-sub">Use document section structure (TreeRAG) for long structured docs</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="treeRetrievalToggle">
           <span class="toggle-track"></span>
         </label>
       </div>

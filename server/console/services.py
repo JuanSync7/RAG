@@ -1,6 +1,6 @@
 # @summary
 # Shared console service helpers for UI serving, static asset resolution, log snapshots, source previews, and rendering.
-# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html, read_clean_document_from_minio
+# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, is_remote_view_uri, build_source_preview_payload, render_source_document_html, read_clean_document_from_minio
 # Deps: config.settings, server.schemas, fastapi
 # @end-summary
 """Console service helpers."""
@@ -16,7 +16,15 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException
 
-from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL, PROJECT_ROOT
+from config.settings import (
+    DOCUMENTS_DIR,
+    OLLAMA_BASE_URL,
+    PROJECT_ROOT,
+    RAG_CONSOLE_PREVIEW_CONTEXT_CAP,
+    RAG_CONSOLE_PREVIEW_CONTEXT_MIN,
+    RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP,
+    RAG_CONSOLE_PREVIEW_MIN_CHARS,
+)
 from server.schemas import ConsoleLogsResponse
 
 logger = logging.getLogger(__name__)
@@ -139,6 +147,33 @@ def _allowed_source_roots() -> list[Path]:
     return roots
 
 
+def is_remote_view_uri(source_uri: str | None) -> str | None:
+    """Return the URI when it points to a remote origin the console may redirect to.
+
+    Gated by ``RAG_CONSOLE_REMOTE_VIEW_ENABLED`` (default off) so flipping on
+    open-redirect behaviour is opt-in. ``RAG_CONSOLE_REMOTE_VIEW_HOST_ALLOWLIST``
+    (comma-separated host suffixes) optionally narrows further. Returns the
+    original URI when allowed, ``None`` otherwise.
+    """
+    if not source_uri:
+        return None
+    enabled = os.environ.get("RAG_CONSOLE_REMOTE_VIEW_ENABLED", "false").lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not enabled:
+        return None
+    parsed = urlparse(source_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    allowlist = os.environ.get("RAG_CONSOLE_REMOTE_VIEW_HOST_ALLOWLIST", "").strip()
+    if allowlist:
+        suffixes = [s.strip().lower() for s in allowlist.split(",") if s.strip()]
+        host = parsed.netloc.lower()
+        if not any(host == suf or host.endswith("." + suf) for suf in suffixes):
+            return None
+    return source_uri
+
+
 def resolve_console_source_path(source: str | None, source_uri: str | None) -> Path:
     """Resolve console source reference to a local file under an allowed root."""
     if source_uri:
@@ -185,7 +220,10 @@ def build_source_preview_payload(
 ) -> dict:
     """Build payload for `/console/source-document` preview endpoint."""
     total_chars = len(text)
-    effective_max_chars = max(200, min(max_chars, 20000))
+    # Deliberate preview-size guardrails clamping user-supplied params (200..20000 chars).
+    effective_max_chars = max(
+        RAG_CONSOLE_PREVIEW_MIN_CHARS, min(max_chars, RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP)
+    )
     preview_start = 0
     preview_end = min(total_chars, effective_max_chars)
     highlight_start = None
@@ -194,7 +232,10 @@ def build_source_preview_payload(
     if start is not None and end is not None and end > start:
         safe_start = max(0, min(start, total_chars))
         safe_end = max(safe_start, min(end, total_chars))
-        context = max(100, min(context_chars, 5000))
+        # Deliberate preview-size guardrails clamping user-supplied params (100..5000 chars).
+        context = max(
+            RAG_CONSOLE_PREVIEW_CONTEXT_MIN, min(context_chars, RAG_CONSOLE_PREVIEW_CONTEXT_CAP)
+        )
         preview_start = max(0, safe_start - context)
         preview_end = min(total_chars, safe_end + context)
         if preview_end - preview_start > effective_max_chars:
@@ -221,17 +262,38 @@ def build_source_preview_payload(
 
 
 def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
-    """Read clean markdown + metadata from MinIO clean store by source_key.
+    """Read clean markdown + metadata from MinIO by source_key.
+
+    Two MinIO layouts can hold a document's clean markdown, and they are
+    populated by different paths:
+
+    1. **Document store** (``<document_id>.md`` where
+       ``document_id = build_document_id(source_key)``) — written by the
+       embedding pipeline's ``commit_node`` on every normal ingest when
+       ``store_documents`` is enabled (the default). This is the layout the
+       CLI/Temporal ingest actually fills, for *all* formats (the clean
+       markdown rendering of pdf/docx/pptx/xlsx, not just .md sources).
+    2. **MinioCleanStore** (``clean/{safe_key}.md``) — only populated by the
+       lifecycle tooling (migration/sync). Normal ingest never writes it.
+
+    We therefore try the document store first (so document viewing works on a
+    standard ingest with no backfill), and fall back to ``MinioCleanStore`` for
+    environments where lifecycle migration populated it instead.
+
+    The layout resolution itself lives in ``src.db.resolve_clean_document``
+    (shared with the turn loop's DEEP_STUDY fetch); this wrapper only keeps
+    the console's HTTP semantics — every failure mode maps to a 404.
 
     Returns:
         (markdown_text, metadata_dict)
 
     Raises:
-        HTTPException(404) if MinIO is unreachable or the document is missing.
+        HTTPException(404) if MinIO is unreachable or the document is missing
+        from both layouts.
     """
     try:
+        from src.db import build_document_id, resolve_clean_document
         from src.db.minio import create_client
-        from src.ingest.common.minio_clean_store import MinioCleanStore
         from config.settings import MINIO_BUCKET
     except Exception as exc:
         logger.warning("minio_clean_store_import_failed error=%s", exc)
@@ -239,11 +301,21 @@ def read_clean_document_from_minio(source_key: str) -> tuple[str, dict]:
 
     try:
         client = create_client()
-        store = MinioCleanStore(client, MINIO_BUCKET)
-        if not store.exists(source_key):
-            raise HTTPException(status_code=404, detail="Clean document not found in MinIO")
-        text, meta = store.read(source_key)
-        return text, meta
+
+        # Shared resolver: document store (commit_node layout) first, then the
+        # lifecycle-populated MinioCleanStore (clean/ prefix). Library
+        # semantics — returns a ``StoredDocument`` or None, never raises.
+        doc = resolve_clean_document(client, source_key=source_key, bucket=MINIO_BUCKET)
+        if doc is not None:
+            return doc.content, dict(getattr(doc, "metadata", None) or {})
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Clean document not found in MinIO "
+                f"(document_id={build_document_id(source_key)}, source_key={source_key!r})"
+            ),
+        )
     except HTTPException:
         raise
     except Exception as exc:

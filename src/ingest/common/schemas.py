@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TypedDict
 
 # -- Pipeline schema version constant (FR-3100 AC4) --
-PIPELINE_SCHEMA_VERSION: str = "1.0.0"
+PIPELINE_SCHEMA_VERSION: str = "1.2.0"
 """Single canonical source of truth for the current pipeline schema version.
 
 Referenced by: manifest writes, Weaviate chunk metadata, MinIO metadata

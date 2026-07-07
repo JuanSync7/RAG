@@ -1,7 +1,10 @@
 # @summary
-# Temporal activity that executes RAG queries against a preloaded RAGChain singleton.
+# Temporal activities that execute RAG work against a preloaded RAGChain singleton.
 # The singleton is initialized once by the worker at startup — not per request.
-# Exports: execute_rag_query, init_rag_chain, shutdown_rag_chain
+# execute_rag_query runs the full pipeline; retrieve_ranked is the turn-loop
+# retrieval primitive (embed -> hybrid search -> rerank -> thin/nav filter, no
+# LLM calls, idempotent under retries; TURN_LOOP_DESIGN.md §3).
+# Exports: execute_rag_query, retrieve_ranked, init_rag_chain, shutdown_rag_chain
 # Deps: temporalio, src.retrieval.pipeline.rag_chain, dataclasses
 # @end-summary
 """Temporal activities for the RAG query pipeline.
@@ -18,6 +21,9 @@ from dataclasses import asdict
 from typing import Optional
 
 from temporalio import activity
+from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
+from config.settings import RAG_AGENTIC_RETRIEVAL_ENABLED
+from config.settings import RAG_TURN_LOOP_RETRIEVE_TOP_K
 from src.platform.cache import get_cache
 from src.platform import (
     CACHE_HITS,
@@ -81,7 +87,7 @@ def execute_rag_query(request: dict) -> dict:
     tenant_id: Optional[str] = request.get("tenant_id")
     max_query_iterations: int = int(request.get("max_query_iterations", 3))
     fast_path: Optional[bool] = request.get("fast_path")
-    overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
+    overall_timeout_ms: int = int(request.get("overall_timeout_ms", RAG_RETRIEVAL_TIMEOUT_MS))
     stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
     conversation_id: Optional[str] = request.get("conversation_id")
     memory_context: Optional[str] = request.get("memory_context")
@@ -90,6 +96,29 @@ def execute_rag_query(request: dict) -> dict:
     mode: str = str(request.get("mode") or "query")
     retrieval_sub_mode: str = str(request.get("retrieval_sub_mode") or "auto")
     extra_processing: bool = bool(request.get("extra_processing") or False)
+    # Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
+    # Only treat as override when explicitly present and bool-typed; else None.
+    _tree = request.get("tree_retrieval")
+    tree_retrieval: Optional[bool] = _tree if isinstance(_tree, bool) else None
+    deep_research: bool = bool(request.get("deep_research") or False)
+    # Agentic-retrieval per-request override (AGENTIC_RETRIEVAL_DESIGN.md).
+    # Only treat as override when explicitly present and bool-typed; else None
+    # so the resolution falls back to the RAG_AGENTIC_RETRIEVAL_ENABLED config.
+    _agentic = request.get("agentic_retrieval")
+    agentic_retrieval: Optional[bool] = _agentic if isinstance(_agentic, bool) else None
+    _max_rounds = request.get("max_agentic_rounds")
+    max_agentic_rounds: Optional[int] = (
+        int(_max_rounds) if isinstance(_max_rounds, int) else None
+    )
+    # Whether the agentic loop will actually run for this request — drives the
+    # result-cache bypass below (the controller/judge loop is nondeterministic
+    # by design, so caching one stochastic outcome under a deterministic key
+    # would stale-serve).
+    _agentic_active: bool = (
+        agentic_retrieval
+        if isinstance(agentic_retrieval, bool)
+        else RAG_AGENTIC_RETRIEVAL_ENABLED
+    )
     # Retrieval mode skips answer generation by definition. The route
     # handler may also set skip_generation directly (e.g. for streaming);
     # union both signals so neither path accidentally enables generation.
@@ -116,16 +145,26 @@ def execute_rag_query(request: dict) -> dict:
         "mode": mode,
         "retrieval_sub_mode": retrieval_sub_mode,
         "extra_processing": extra_processing,
+        "tree_retrieval": tree_retrieval,
+        "deep_research": deep_research,
+        "agentic_retrieval": agentic_retrieval,
+        "max_agentic_rounds": max_agentic_rounds,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
 
-    cached = _cache.get(cache_key)
-    if isinstance(cached, dict):
-        CACHE_HITS.labels(layer="activity_result").inc()
-        return cached
-    CACHE_MISSES.labels(layer="activity_result").inc()
+    # The agentic loop is nondeterministic (controller/judge LLM calls), so a
+    # cached result under a deterministic key would stale-serve. Bypass the
+    # result cache entirely when the loop is active. The flag is still part of
+    # cache_payload above so an agentic vs non-agentic run of the same query
+    # can never collide on the non-agentic (cached) path.
+    if not _agentic_active:
+        cached = _cache.get(cache_key)
+        if isinstance(cached, dict):
+            CACHE_HITS.labels(layer="activity_result").inc()
+            return cached
+        CACHE_MISSES.labels(layer="activity_result").inc()
 
     activity.logger.info("Processing query: %s", query[:80])
 
@@ -150,6 +189,10 @@ def execute_rag_query(request: dict) -> dict:
         mode=mode,
         retrieval_sub_mode=retrieval_sub_mode,
         extra_processing=extra_processing,
+        tree_retrieval=tree_retrieval,
+        deep_research=deep_research,
+        agentic_retrieval=agentic_retrieval,
+        max_agentic_rounds=max_agentic_rounds,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -163,5 +206,77 @@ def execute_rag_query(request: dict) -> dict:
         response.action,
         "skipped" if skip_generation else "included",
     )
-    _cache.set(cache_key, result)
+    # Do not cache nondeterministic agentic-loop results (see bypass above).
+    if not _agentic_active:
+        _cache.set(cache_key, result)
     return result
+
+
+def _require_opt_str(request: dict, key: str) -> Optional[str]:
+    """Read an optional string field from an activity request dict.
+
+    Returns ``None`` for absent/``None``/empty values; raises ``ValueError``
+    (non-retryable per the workflow retry policy) on any non-string type so a
+    malformed request fails fast instead of burning retry attempts.
+    """
+    value = request.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string or null")
+    return value.strip() or None
+
+
+@activity.defn
+def retrieve_ranked(request: dict) -> dict:
+    """Turn-loop retrieval primitive: embed -> hybrid search -> rerank.
+
+    Runs ``RAGChain.retrieve_primitive`` against the preloaded singleton
+    (same worker thread-pool model as ``execute_rag_query``). Contains **no
+    LLM calls** and no mutation, so it is idempotent and safe under Temporal
+    retries (TURN_LOOP_DESIGN.md §3). By loop-level rule it applies no
+    ``ignored_doc_ids`` suppression. Results are never cached: each call
+    belongs to a nondeterministic controller loop whose queries are
+    LLM-authored, so a result cache would only stale-serve.
+
+    Request:
+        ``{query_text, hyde_text?, top_k?, source_filter?, heading_filter?}``
+        — ``top_k`` defaults to ``RAG_TURN_LOOP_RETRIEVE_TOP_K``.
+
+    Returns:
+        ``{"chunks": [<EvidenceChunk-shaped dict>, ...],
+        "timings": {"total_ms": float}}``.
+
+    Raises:
+        ValueError: On a malformed request (non-retryable per the workflow
+            retry policy).
+    """
+    rag = get_rag_chain()
+
+    if not isinstance(request, dict):
+        raise ValueError("retrieve_ranked request must be a dict")
+    query_text = request.get("query_text")
+    if not isinstance(query_text, str) or not query_text.strip():
+        raise ValueError("query_text must be a non-empty string")
+    hyde_text = _require_opt_str(request, "hyde_text")
+    source_filter = _require_opt_str(request, "source_filter")
+    heading_filter = _require_opt_str(request, "heading_filter")
+    top_k = request.get("top_k", RAG_TURN_LOOP_RETRIEVE_TOP_K)
+    # bool is an int subclass — reject it explicitly before the int check.
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise ValueError("top_k must be a positive integer")
+
+    start = time.perf_counter()
+    chunks = rag.retrieve_primitive(
+        query_text.strip(),
+        hyde_text,
+        top_k=top_k,
+        source_filter=source_filter,
+        heading_filter=heading_filter,
+    )
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "retrieve_ranked complete in %.0fms — %d chunks (top_k=%d, hyde=%s)",
+        elapsed_ms, len(chunks), top_k, hyde_text is not None,
+    )
+    return {"chunks": chunks, "timings": {"total_ms": round(elapsed_ms, 1)}}

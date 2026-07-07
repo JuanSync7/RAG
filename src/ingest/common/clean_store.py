@@ -13,11 +13,37 @@ import hashlib
 import json
 import logging
 import os
-import orjson
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import orjson
+from config.settings import RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS
+
 logger = logging.getLogger(__name__)
+
+
+_VALID_PHASES = ("phase2a", "phase2b")
+_VALID_ERROR_CLASSES = ("transient", "document", "system")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _empty_phase() -> dict[str, Any]:
+    return {
+        "status": "pending",
+        "attempts": 0,
+        "last_error": None,
+        "error_class": None,
+        "last_attempt_ts": None,
+        "ok_ts": None,
+    }
+
+
+def _empty_status() -> dict[str, dict[str, Any]]:
+    return {phase: _empty_phase() for phase in _VALID_PHASES}
 
 
 class CleanDocumentStore:
@@ -50,6 +76,10 @@ class CleanDocumentStore:
 
     def _meta_path(self, source_key: str) -> Path:
         return self._dir / f"{self._safe_key(source_key)}.meta.json"
+
+    def _status_path(self, source_key: str) -> Path:
+        """Return the path for the per-source status ledger sidecar."""
+        return self._dir / f"{self._safe_key(source_key)}.status.json"
 
     def _docling_path(self, source_key: str) -> Path:
         """Return the path for the serialized DoclingDocument JSON file.
@@ -206,14 +236,158 @@ class CleanDocumentStore:
         return hashlib.sha256(md_path.read_bytes()).hexdigest()
 
     def delete(self, source_key: str) -> None:
-        """Remove the clean document entry for this key (all three files).
+        """Remove the clean document entry for this key (all sidecars).
 
-        Removes ``{safe_key}.md``, ``{safe_key}.meta.json``, and
-        ``{safe_key}.docling.json``. Missing files are silently ignored.
+        Removes ``{safe_key}.md``, ``{safe_key}.meta.json``,
+        ``{safe_key}.docling.json``, and ``{safe_key}.status.json``.
+        Missing files are silently ignored.
         """
         self._md_path(source_key).unlink(missing_ok=True)
         self._meta_path(source_key).unlink(missing_ok=True)
         self._docling_path(source_key).unlink(missing_ok=True)
+        self._status_path(source_key).unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------
+    # Status ledger (Step 7) — durable per-phase ingest status
+    # ------------------------------------------------------------------
+
+    def get_status(self, source_key: str) -> dict[str, dict[str, Any]]:
+        """Return the per-phase status ledger for *source_key*.
+
+        Phases without a recorded attempt return defaults
+        (``status="pending"``, ``attempts=0``).
+
+        Raises:
+            FileNotFoundError: If no clean entry exists for this key.
+        """
+        if not self.exists(source_key):
+            raise FileNotFoundError(
+                f"CleanDocumentStore: no entry for {source_key!r}"
+            )
+        path = self._status_path(source_key)
+        if not path.exists():
+            return _empty_status()
+        try:
+            data = orjson.loads(path.read_bytes())
+        except Exception as exc:
+            logger.warning(
+                "CleanDocumentStore: status sidecar unreadable for %r: %s",
+                source_key, exc,
+            )
+            return _empty_status()
+        merged = _empty_status()
+        for phase in _VALID_PHASES:
+            if isinstance(data.get(phase), dict):
+                merged[phase].update(data[phase])
+        return merged
+
+    def _write_status(
+        self, source_key: str, status: dict[str, dict[str, Any]]
+    ) -> None:
+        """Atomically persist the status ledger for *source_key*."""
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._status_path(source_key)
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            tmp.write_bytes(orjson.dumps(status))
+            os.replace(tmp, path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def record_attempt(
+        self,
+        source_key: str,
+        *,
+        phase: str,
+        success: bool,
+        error: str | None = None,
+        error_class: str | None = None,
+        max_attempts: int = RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS,
+    ) -> dict[str, Any]:
+        """Increment the attempt counter for *phase* and record outcome.
+
+        Status transitions:
+          * ``success=True``       → ``"ok"`` (clears last_error).
+          * transient + attempts < max_attempts → ``"failed_pending_retry"``.
+          * transient + attempts >= max_attempts → ``"failed_permanent"``.
+          * ``error_class="document"`` or ``"system"`` → ``"failed_permanent"``.
+
+        Args:
+            source_key: Stable source identity key.
+            phase: One of ``"phase2a"`` or ``"phase2b"``.
+            success: Whether the attempt succeeded.
+            error: Stringified error message (failure path only).
+            error_class: ``"transient"``, ``"document"``, or ``"system"``.
+            max_attempts: Cap for transient retries before marking permanent.
+
+        Returns:
+            The updated phase entry (dict).
+
+        Raises:
+            FileNotFoundError: If no clean entry exists for this key.
+            ValueError: For unknown ``phase`` or ``error_class``.
+        """
+        if phase not in _VALID_PHASES:
+            raise ValueError(
+                f"unknown phase {phase!r}; expected one of {_VALID_PHASES}"
+            )
+        if not success and error_class is not None and error_class not in _VALID_ERROR_CLASSES:
+            raise ValueError(
+                f"unknown error_class {error_class!r}; "
+                f"expected one of {_VALID_ERROR_CLASSES}"
+            )
+
+        status = self.get_status(source_key)
+        entry = status[phase]
+        entry["attempts"] = int(entry.get("attempts", 0)) + 1
+        entry["last_attempt_ts"] = _now_iso()
+
+        if success:
+            entry["status"] = "ok"
+            entry["last_error"] = None
+            entry["error_class"] = None
+            entry["ok_ts"] = entry["last_attempt_ts"]
+        else:
+            entry["last_error"] = error
+            entry["error_class"] = error_class
+            if error_class in ("document", "system"):
+                entry["status"] = "failed_permanent"
+            elif entry["attempts"] >= max_attempts:
+                entry["status"] = "failed_permanent"
+            else:
+                entry["status"] = "failed_pending_retry"
+
+        status[phase] = entry
+        self._write_status(source_key, status)
+        return entry
+
+    def list_pending(
+        self, *, phase: str, status: str = "failed_pending_retry"
+    ) -> list[str]:
+        """Return source keys whose *phase* matches *status*.
+
+        Used by the backfill workflow to discover documents that need a
+        bounded retry of phase 2b. Backfill drains
+        ``status="failed_pending_retry"``; permanent failures stay out so
+        they can be triaged by an operator.
+        """
+        if phase not in _VALID_PHASES:
+            raise ValueError(
+                f"unknown phase {phase!r}; expected one of {_VALID_PHASES}"
+            )
+        if not self._dir.exists():
+            return []
+        keys: list[str] = []
+        for md_path in self._dir.glob("*.md"):
+            source_key = md_path.stem
+            try:
+                s = self.get_status(source_key)
+            except FileNotFoundError:
+                continue
+            if s[phase]["status"] == status:
+                keys.append(source_key)
+        return sorted(keys)
 
     def list_keys(self) -> list[str]:
         """Return all source keys currently stored."""

@@ -1,0 +1,1 @@
+{"qid": "f001", "qtype": "factoid", "query": "What is the RISC-V core clock frequency in the example SoC?", "expected_answer_span": "160 MHz", "expected_source_docs": ["docs/intro.md"]}

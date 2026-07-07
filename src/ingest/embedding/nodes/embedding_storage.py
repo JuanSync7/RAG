@@ -26,11 +26,13 @@ from src.vector_db import (
 from src.ingest.common import append_processing_log
 from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
+from config.settings import (
+    RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES,
+    RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S,
+)
 
 logger = logging.getLogger("rag.ingest.embedding.storage")
-
-_BATCH_MAX_RETRIES = 3
-_BATCH_RETRY_DELAY = 0.3  # seconds; kept short to limit event-loop blocking in async paths
 
 
 def _form_batches(items: list, batch_size: int) -> list[list]:
@@ -91,7 +93,7 @@ def _log_batch_summary(
 def _embed_batches(
     embedder,
     text_batches: list[list[str]],
-    max_retries: int = _BATCH_MAX_RETRIES,
+    max_retries: int = RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES,
 ) -> tuple[list[list[float]], list[dict[str, Any]], list[bool]]:
     """Embed text batches with per-batch retry isolation.
 
@@ -129,7 +131,7 @@ def _embed_batches(
                     batch_idx + 1, len(text_batches), attempt, max_retries, exc,
                 )
                 if attempt < max_retries:
-                    time.sleep(_BATCH_RETRY_DELAY * attempt)
+                    time.sleep(RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S * attempt)  # seconds; kept short to limit event-loop blocking in async paths
 
         if batch_vectors is not None:
             all_vectors.extend(batch_vectors)
@@ -155,7 +157,40 @@ def _embed_batches(
     return all_vectors, errors, success_mask
 
 
-def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
+def _format_batch_error(err: dict[str, Any]) -> str:
+    """Render a batch-failure dict as a single string.
+
+    The pipeline state ``errors`` field is ``list[str]`` and is forwarded
+    verbatim into ``EmbeddingResult.errors`` (also ``list[str]``), which crosses
+    the Temporal activity->workflow boundary. Temporal decodes that result
+    against the dataclass type hint, so a ``dict`` element raises
+    ``TypeError: Failed converting field errors`` and fails the workflow task
+    (which then retries forever). Stringifying here keeps the structured
+    information (batch index, chunk range, cause) while honouring the contract.
+    """
+    return (
+        f"batch_embedding_failure:batch={err.get('batch_index')}"
+        f" chunk_range={err.get('chunk_range')}: {err.get('error')}"
+    )
+
+
+@node_span("embedding_storage")
+def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:  # noqa: D401
+    from src.platform.observability import get_tracer
+
+    tracer = get_tracer()
+    with tracer.span(
+        "ingest.embedding.store",
+        {
+            "chunk_count": len(state.get("chunks") or []),
+            "source_key": state.get("source_key", ""),
+            "batch_id": state.get("batch_id", ""),
+        },
+    ):
+        return _embedding_storage_node_impl(state)
+
+
+def _embedding_storage_node_impl(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Generate chunk embeddings and STAGE records for atomic commit (Issue #42).
 
     The actual Weaviate write (``add_documents`` / ``delete_by_source_key``) is
@@ -231,7 +266,10 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     logger.debug("embedding_storage_node staged %d records in %.3fs", len(records), time.monotonic() - t0)
     return {
         "stored_count": 0,  # not stored yet — commit_node sets the real count
-        "errors": existing_errors + batch_errors,
+        # Stringify batch failures: state["errors"] is list[str] and is forwarded
+        # into EmbeddingResult.errors (list[str]) which must decode across the
+        # Temporal activity->workflow boundary (dict elements would not).
+        "errors": existing_errors + [_format_batch_error(e) for e in batch_errors],
         "staged_weaviate_records": records,
         "staged_weaviate_delete_old": bool(runtime.config.update_mode),
         "processing_log": append_processing_log(state, "embedding_storage:staged"),

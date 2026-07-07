@@ -72,6 +72,64 @@ label { display: block; margin: 6px 0; color: var(--muted); }
 }
 .markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .muted { color: var(--muted); }
+/* live reasoning ("thinking") block — collapsible, above the answer markdown */
+.reasoning-block {
+  margin: 8px 0; border: 1px dashed var(--border); border-radius: 8px;
+  background: #0d1220; overflow: hidden;
+}
+.reasoning-summary {
+  cursor: pointer; list-style: none; padding: 8px 12px;
+  font-size: 12px; color: var(--muted);
+}
+.reasoning-summary::-webkit-details-marker { display: none; }
+.reasoning-block[open] .reasoning-summary { border-bottom: 1px dashed var(--border); }
+.reasoning-body {
+  padding: 8px 12px; font-size: 12px; line-height: 1.5; color: var(--muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 320px; overflow-y: auto;
+}
+
+/* Turn-loop ACTIVITY LOG — collapsible live loop trace above the answer
+   markdown (mirrors .reasoning-block; content is textContent-only). */
+.activity-log {
+  margin: 8px 0; border: 1px dashed var(--border); border-radius: 8px;
+  background: #0d1220; overflow: hidden;
+}
+.activity-summary {
+  cursor: pointer; list-style: none; padding: 8px 12px;
+  font-size: 12px; color: var(--muted);
+}
+.activity-summary::-webkit-details-marker { display: none; }
+.activity-log[open] .activity-summary { border-bottom: 1px dashed var(--border); }
+.activity-body {
+  padding: 8px 12px; font-size: 12px; line-height: 1.5; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 320px; overflow-y: auto;
+}
+.activity-line { margin: 2px 0; overflow-wrap: anywhere; }
+.activity-line.dim, .activity-body .dim { opacity: 0.75; }
+.activity-action { color: #6aa9ff; font-weight: 600; }
+.activity-clarify { color: #e3b341; }
+.activity-gate.pass { color: #3fb950; font-weight: 600; }
+.activity-gate.fail { color: #e3b341; font-weight: 600; }
+.activity-hyde { margin: 4px 0; border-left: 2px solid var(--border); padding-left: 8px; }
+.activity-hyde-summary { cursor: pointer; list-style: none; color: var(--muted); font-size: 12px; }
+.activity-hyde-summary::-webkit-details-marker { display: none; }
+.activity-hyde-text { white-space: pre-wrap; margin-top: 2px; }
+.activity-draft { margin: 4px 0; border-left: 2px solid var(--border); padding-left: 8px; }
+.activity-draft-label { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+.activity-draft-text { white-space: pre-wrap; color: var(--muted); }
+/* Clarify chips — clickable resubmit chips, outside the collapsible log. */
+.clarify-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.clarify-question { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.clarify-chip {
+  display: inline-flex; align-items: center; padding: 4px 10px;
+  background: #14203a; border: 1px solid #2b4a7a; border-radius: 999px;
+  color: #6aa9ff; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.clarify-chip:hover { border-color: #6aa9ff; }
+.clarify-chip-scope { background: transparent; color: var(--muted); border-color: var(--border); }
 .rerank-table {
   width: 100%;
   border-collapse: collapse;

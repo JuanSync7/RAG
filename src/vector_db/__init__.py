@@ -3,13 +3,15 @@
 # single-collection search, multi-collection fan-out, aggregation, re-exported schemas,
 # and visual collection operations for the visual embedding pipeline.
 # Exports: create_persistent_client, get_client, close_client, ensure_collection,
-#          delete_collection, add_documents, update_chunk_content,
+#          collection_exists, delete_collection, add_documents, update_chunk_content,
 #          delete_by_source, delete_by_source_key,
 #          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
 #          ensure_visual_collection, add_visual_documents, delete_visual_by_source_key,
-#          search_visual, DocumentRecord, SearchResult, SearchFilter, build_chunk_id
+#          search_visual, ensure_card_collection, add_document_cards, delete_document_cards,
+#          DocumentRecord, SearchResult, SearchFilter, build_chunk_id
 # Deps: config.settings, src.vector_db.backend, src.vector_db.common.schemas,
-#       src.vector_db.weaviate.store, src.vector_db.weaviate.visual_store
+#       src.vector_db.weaviate.store, src.vector_db.weaviate.visual_store,
+#       src.vector_db.weaviate.card_store
 # @end-summary
 """Public API for the vector_db subsystem used by the ingestion and retrieval pipelines.
 
@@ -41,6 +43,11 @@ from src.vector_db.weaviate import (
     add_visual_documents,
     delete_visual_by_source_key,
     ensure_visual_collection,
+)
+from src.vector_db.weaviate import (
+    add_document_cards,
+    delete_document_cards,
+    ensure_card_collection,
 )
 
 logger = logging.getLogger("rag.vector_db")
@@ -122,6 +129,19 @@ def ensure_collection(client: Any, collection: Optional[str] = None) -> None:
         collection: Target collection name. ``None`` uses the default.
     """
     _get_vector_backend().ensure_collection(client, collection)
+
+
+def collection_exists(client: Any, collection: Optional[str] = None) -> bool:
+    """Return True iff the named collection exists on the backend.
+
+    Args:
+        client: Vector store client handle.
+        collection: Target collection name. ``None`` uses the default.
+
+    Returns:
+        True if the collection exists, False otherwise.
+    """
+    return _get_vector_backend().collection_exists(client, collection)
 
 
 def delete_collection(client: Any, collection: Optional[str] = None) -> None:
@@ -453,6 +473,7 @@ __all__ = [
     "close_client",
     # Collection management
     "ensure_collection",
+    "collection_exists",
     "delete_collection",
     # Document operations
     "add_documents",
@@ -471,6 +492,10 @@ __all__ = [
     "add_visual_documents",
     "delete_visual_by_source_key",
     "search_visual",
+    # Document-card collection operations (RAPTOR-lite routing)
+    "ensure_card_collection",
+    "add_document_cards",
+    "delete_document_cards",
     # Re-exported schemas
     "DocumentRecord",
     "SearchResult",

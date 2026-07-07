@@ -28,7 +28,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # RagWeave/
 _COVERAGE_OMIT = [
     "src/ingest/scorer.py",
     "src/ingest/scorer_v2.py",
-    "src/ingest/scorer_v3.py",
     "src/ingest/scorer_v5.py",
 ]
 

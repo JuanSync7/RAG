@@ -30,6 +30,37 @@ def test_update_flag_absent_defaults_false():
     assert args.update is False
 
 
+def test_fresh_flag_sets_fresh_true():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh"])
+    assert args.fresh is True
+    assert args.update is False
+
+
+def test_fresh_flag_absent_defaults_false():
+    parser = _build_parser()
+    args = parser.parse_args([])
+    assert args.fresh is False
+
+
+def test_fresh_and_update_are_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--update", "--fresh"])
+
+
+def test_yes_flag_present():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh", "--yes"])
+    assert args.yes is True
+
+
+def test_yes_short_flag_present():
+    parser = _build_parser()
+    args = parser.parse_args(["--fresh", "-y"])
+    assert args.yes is True
+
+
 # ---------------------------------------------------------------------------
 # --file / --dir (source selection)
 # ---------------------------------------------------------------------------
@@ -63,22 +94,6 @@ def test_file_and_dir_are_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["--file", "/tmp/a.pdf", "--dir", "/tmp"])
-
-
-# ---------------------------------------------------------------------------
-# --no-kg
-# ---------------------------------------------------------------------------
-
-def test_no_kg_flag_sets_no_kg_true():
-    parser = _build_parser()
-    args = parser.parse_args(["--no-kg"])
-    assert args.no_kg is True
-
-
-def test_no_kg_flag_absent_defaults_false():
-    parser = _build_parser()
-    args = parser.parse_args([])
-    assert args.no_kg is False
 
 
 # ---------------------------------------------------------------------------
@@ -223,22 +238,6 @@ def test_no_vision_auto_pull_flag():
 
 
 # ---------------------------------------------------------------------------
-# --export-obsidian
-# ---------------------------------------------------------------------------
-
-def test_export_obsidian_flag():
-    parser = _build_parser()
-    args = parser.parse_args(["--export-obsidian"])
-    assert args.export_obsidian is True
-
-
-def test_export_obsidian_absent_defaults_false():
-    parser = _build_parser()
-    args = parser.parse_args([])
-    assert args.export_obsidian is False
-
-
-# ---------------------------------------------------------------------------
 # --no-refactor-mirror
 # ---------------------------------------------------------------------------
 
@@ -264,13 +263,11 @@ def test_multiple_flags_together():
     args = parser.parse_args([
         "--dir", "/tmp/docs",
         "--update",
-        "--no-kg",
         "--no-semantic",
         "--export-processed",
     ])
     assert str(args.dir) == "/tmp/docs"
     assert args.update is True
-    assert args.no_kg is True
     assert args.no_semantic is True
     assert args.export_processed is True
 

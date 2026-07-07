@@ -31,6 +31,7 @@ Users → FastAPI Server → Temporal Server → Temporal Worker(s)
 | **Web Console TypeScript Source** | `console/web/` | TypeScript source/build config compiled to static assets served by the API. |
 | **Schemas** | `schemas.py` | Pydantic models for API request/response validation. |
 | **Route Modules** | `routes/` | Domain-split API routers (`query`, `admin`, `system`) included by `api.py`. |
+| **Turn-Loop Runner** | `turn_loop_runner.py` | API-process assembly for the turn-level agentic loop: flag resolution, pre-loop sanitize/PII gate, `TurnLoopDeps` wiring (TurnRetrieveWorkflow bridge, MinIO doc fetch, LLM provider, SSE event sink) and result→payload helpers used by the query routes. |
 | **Shared Server Common** | `common/` | Shared envelope schemas + request helper utilities reused by API surfaces. |
 | **Server Utils Facade** | `utils.py` | Stable import facade for shared request/envelope helper functions. |
 

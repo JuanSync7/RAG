@@ -1,9 +1,11 @@
 # @summary
-# Reranker providers: local BAAI bge-reranker-v2-m3 (in-process) and TEI over HTTP.
+# Reranker providers: local BGE cross-encoder (in-process) and a remote
+# OpenAI-compatible HTTP client (vLLM / TEI / any compatible API).
 # Key exports: LocalBGEReranker, TEIReranker, RankedResult, get_reranker_provider
-# Deps: transformers + torch (local path only; lazy-imported), httpx (TEI path),
+# Deps: transformers + torch (local path only; lazy-imported), httpx (http path),
 #       config.settings (RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH,
-#       RERANKER_BATCH_SIZE, RERANKER_PRECISION, INFERENCE_BACKEND, TEI_*),
+#       RERANKER_BATCH_SIZE, RERANKER_PRECISION, INFERENCE_BACKEND,
+#       RAG_RERANK_URL, RAG_RERANK_MODEL, RAG_INFERENCE_TIMEOUT_SECONDS),
 #       src.vector_db.common.schemas, src.retrieval.common.schemas,
 #       src.retrieval.common.exceptions
 # @end-summary
@@ -33,9 +35,9 @@ from config.settings import (
     RERANKER_BATCH_SIZE,
     RERANKER_PRECISION,
     INFERENCE_BACKEND,
-    TEI_RERANK_URL,
-    TEI_RERANKER_MODEL,
-    TEI_TIMEOUT_SECONDS,
+    RAG_RERANK_URL,
+    RAG_RERANK_MODEL,
+    RAG_INFERENCE_TIMEOUT_SECONDS,
 )
 from src.platform.observability import get_tracer
 from src.vector_db.common import SearchResult
@@ -174,8 +176,12 @@ class LocalBGEReranker:
         # collection. The context-manager form defers the call to
         # invocation time, which is functionally equivalent.
         with self._torch.inference_mode(), get_tracer().span(
-            "reranker.rerank",
-            {"input_count": len(documents), "top_k": top_k},
+            "retrieval.rerank.local",
+            {
+                "candidate_count": len(documents),
+                "top_k": top_k,
+                "device": str(self.device),
+            },
         ) as span:
             if not documents:
                 logger.debug("rerank: empty document list, returning empty result")
@@ -237,9 +243,9 @@ class TEIReranker:
 
     def __init__(
         self,
-        base_url: str = TEI_RERANK_URL,
-        model: str = TEI_RERANKER_MODEL,
-        timeout: int = TEI_TIMEOUT_SECONDS,
+        base_url: str = RAG_RERANK_URL,
+        model: str = RAG_RERANK_MODEL,
+        timeout: int = RAG_INFERENCE_TIMEOUT_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -266,27 +272,34 @@ class TEIReranker:
             return []
 
         with self.tracer.span(
-            "reranker.rerank",
-            {"input_count": len(documents), "top_k": top_k},
+            "retrieval.rerank.tei",
+            {
+                "candidate_count": len(documents),
+                "top_k": top_k,
+                "endpoint": self.base_url,
+            },
         ) as span:
             resp = self._client.post(
                 f"{self.base_url}/rerank",
                 json={
+                    "model": self.model,
                     "query": query,
-                    "texts": [d.text for d in documents],
-                    "truncate": True,
+                    "documents": [d.text for d in documents],
                 },
             )
             resp.raise_for_status()
             raw = resp.json()
-            # TEI returns a top-level list, sorted desc by score.
+            # Tolerate both rerank API shapes, both sorted desc by score:
+            #   vLLM / Jina / Cohere: {"results": [{"index", "relevance_score"}]}
+            #   TEI native:           [{"index", "score"}]  (top-level list)
+            items = raw.get("results", []) if isinstance(raw, dict) else raw
             results = [
                 RankedResult(
                     text=documents[item["index"]].text,
-                    score=float(item["score"]),
+                    score=float(item.get("relevance_score", item.get("score", 0.0))),
                     metadata=documents[item["index"]].metadata,
                 )
-                for item in raw[:top_k]
+                for item in items[:top_k]
             ]
             if results:
                 values = [r.score for r in results]
@@ -300,11 +313,13 @@ def get_reranker_provider():
     """Return the configured reranker provider.
 
     Reads ``INFERENCE_BACKEND`` from settings:
-      - ``"tei"``   → :class:`TEIReranker` (direct HTTP to rag-rerank container)
+      - ``"http"`` → :class:`TEIReranker` (OpenAI-compatible HTTP to whatever
+                      ``RAG_RERANK_URL`` points at — remote vLLM, a self-hosted
+                      TEI pool, or any compatible API)
       - anything else → :class:`LocalBGEReranker` (in-process transformers;
-                         dev venv path — requires the `local-embed` pyproject extra)
+                         requires the `local-embed` pyproject extra)
     """
-    if INFERENCE_BACKEND == "tei":
+    if INFERENCE_BACKEND == "http":
         return TEIReranker()
     return LocalBGEReranker()
 

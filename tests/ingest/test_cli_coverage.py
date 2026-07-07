@@ -62,7 +62,6 @@ def test_mock_ingest_builds_config():
             documents_dir=Path("/docs"),
             fresh=True,
             update=False,
-            build_kg=False,
             semantic_chunking=False,
             export_processed=True,
         )
@@ -70,10 +69,7 @@ def test_mock_ingest_builds_config():
         # IngestionConfig was constructed with expected kwargs
         call_kwargs = mock_cfg_cls.call_args[1]
         assert call_kwargs["semantic_chunking"] is False
-        assert call_kwargs["build_kg"] is False
         assert call_kwargs["export_processed"] is True
-        assert call_kwargs["enable_knowledge_graph_extraction"] is False
-        assert call_kwargs["enable_knowledge_graph_storage"] is False
 
         # ingest_directory called with the right arguments
         mock_ingest_dir.assert_called_once()
@@ -277,28 +273,6 @@ def test_mock_main_file_not_found(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# test_mock_main_no_kg_flag
-# ---------------------------------------------------------------------------
-
-
-def test_mock_main_no_kg_flag(monkeypatch):
-    """Test main() with --no-kg sets build_kg=False."""
-    from src.ingest.cli import main
-
-    monkeypatch.setattr(sys, "argv", ["cli.py", "--no-kg"])
-
-    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
-        "src.ingest.cli.validate_documents_dir"
-    ) as mock_validate:
-        mock_validate.return_value = Path("/docs")
-
-        main()
-
-        call_kwargs = mock_ingest.call_args[1]
-        assert call_kwargs["build_kg"] is False
-
-
-# ---------------------------------------------------------------------------
 # test_mock_main_update_flag
 # ---------------------------------------------------------------------------
 
@@ -319,3 +293,101 @@ def test_mock_main_update_flag(monkeypatch):
         call_kwargs = mock_ingest.call_args[1]
         assert call_kwargs["update"] is True
         assert call_kwargs["fresh"] is False
+
+
+# ---------------------------------------------------------------------------
+# Safe-default + --fresh confirmation regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_mock_main_no_flags_defaults_to_update(monkeypatch):
+    """Regression guard: running the CLI with no flags must NOT nuke the
+    Weaviate collection. The safe default is incremental update mode.
+    """
+    from src.ingest.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["cli.py"])
+
+    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
+        "src.ingest.cli.validate_documents_dir"
+    ) as mock_validate:
+        mock_validate.return_value = Path("/docs")
+
+        main()
+
+        call_kwargs = mock_ingest.call_args[1]
+        assert call_kwargs["fresh"] is False, (
+            "CLI must not default to fresh=True — that silently nukes the "
+            "Weaviate collection."
+        )
+        assert call_kwargs["update"] is True
+
+
+def test_mock_main_fresh_flag_with_yes_skips_confirmation(monkeypatch):
+    """`--fresh --yes` runs destructively without prompting (CI-friendly)."""
+    from src.ingest.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--fresh", "--yes"])
+
+    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
+        "src.ingest.cli.validate_documents_dir"
+    ) as mock_validate, patch("src.ingest.cli._confirm_fresh") as mock_confirm:
+        mock_validate.return_value = Path("/docs")
+
+        main()
+
+        call_kwargs = mock_ingest.call_args[1]
+        assert call_kwargs["fresh"] is True
+        assert call_kwargs["update"] is False
+        mock_confirm.assert_not_called()
+
+
+def test_mock_main_fresh_without_confirmation_aborts(monkeypatch):
+    """`--fresh` without --yes and without confirmation must abort, not run."""
+    from src.ingest.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--fresh"])
+
+    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
+        "src.ingest.cli.validate_documents_dir"
+    ) as mock_validate, patch(
+        "src.ingest.cli._confirm_fresh", return_value=False
+    ) as mock_confirm:
+        mock_validate.return_value = Path("/docs")
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+        assert exc.value.code == 2
+        mock_confirm.assert_called_once()
+        mock_ingest.assert_not_called()
+
+
+def test_mock_main_fresh_with_confirmation_runs(monkeypatch):
+    """`--fresh` proceeds when the confirmation prompt returns True."""
+    from src.ingest.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--fresh"])
+
+    with patch("src.ingest.cli.ingest") as mock_ingest, patch(
+        "src.ingest.cli.validate_documents_dir"
+    ) as mock_validate, patch(
+        "src.ingest.cli._confirm_fresh", return_value=True
+    ):
+        mock_validate.return_value = Path("/docs")
+
+        main()
+
+        call_kwargs = mock_ingest.call_args[1]
+        assert call_kwargs["fresh"] is True
+        assert call_kwargs["update"] is False
+
+
+def test_mock_main_update_and_fresh_mutually_exclusive(monkeypatch):
+    """`--update --fresh` together must be rejected by argparse."""
+    from src.ingest.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--update", "--fresh"])
+
+    with pytest.raises(SystemExit):
+        main()

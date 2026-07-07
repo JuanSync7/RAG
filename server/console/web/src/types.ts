@@ -70,6 +70,7 @@ export type QueryResult = {
 
 export type StreamEventData = {
   token?: string;
+  text?: string;
   message?: string;
   results?: QueryResult[];
   context_usage_pct?: number;

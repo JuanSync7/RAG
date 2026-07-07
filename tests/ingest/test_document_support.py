@@ -8,18 +8,13 @@ import pytest
 
 from src.ingest.support.document import (
     DocumentMetadata,
-    chunk_text,
-    clean_text,
     clean_whitespace,
     extract_metadata,
     metadata_to_dict,
     normalize_unicode,
-    process_document,
     strip_boilerplate,
-    strip_section_markers,
     strip_trailing_short_lines,
 )
-from src.ingest.common import ProcessedChunk
 
 
 # ---------------------------------------------------------------------------
@@ -397,81 +392,6 @@ class TestCleanWhitespace:
 
 
 # ---------------------------------------------------------------------------
-# strip_section_markers
-# ---------------------------------------------------------------------------
-
-
-class TestStripSectionMarkers:
-    """Tests for strip_section_markers()."""
-
-    def test_markdown_h2_header_stripped(self):
-        result = strip_section_markers("## Introduction\nContent here.")
-        assert "##" not in result
-        assert "Introduction" in result
-
-    def test_markdown_h1_header_stripped(self):
-        result = strip_section_markers("# Title\nContent.")
-        assert "#" not in result
-        assert "Title" in result
-
-    def test_markdown_h3_header_stripped(self):
-        result = strip_section_markers("### Subsection\nContent.")
-        assert "###" not in result
-        assert "Subsection" in result
-
-    def test_markdown_h6_header_stripped(self):
-        result = strip_section_markers("###### Deep Header\nContent.")
-        assert "######" not in result
-        assert "Deep Header" in result
-
-    def test_wiki_header_stripped(self):
-        result = strip_section_markers("== Section Title ==\nContent.")
-        assert "==" not in result
-        assert "Section Title" in result
-
-    def test_wiki_header_with_extra_spaces_stripped(self):
-        result = strip_section_markers("==  Heading  ==\nContent.")
-        assert "==" not in result
-        assert "Heading" in result
-
-    def test_numbered_allcaps_section_1(self):
-        result = strip_section_markers("1. INTRODUCTION\nContent here.")
-        assert "1." not in result
-        assert "Introduction" in result
-
-    def test_numbered_allcaps_section_2(self):
-        result = strip_section_markers("2. METHODS\nContent here.")
-        assert "2." not in result
-        assert "Methods" in result
-
-    def test_numbered_subsection_allcaps(self):
-        result = strip_section_markers("2.1 SUPERVISED LEARNING\nContent.")
-        assert "2.1" not in result
-        assert "Supervised Learning" in result
-
-    def test_regular_text_unchanged(self):
-        text = "This is a regular paragraph with no headers."
-        result = strip_section_markers(text)
-        assert result == text
-
-    def test_empty_string_returns_empty(self):
-        assert strip_section_markers("") == ""
-
-    def test_mixed_headers_and_content(self):
-        text = "## Intro\nFirst paragraph.\n### Sub\nSecond paragraph."
-        result = strip_section_markers(text)
-        assert "##" not in result
-        assert "###" not in result
-        assert "Intro" in result
-        assert "First paragraph." in result
-
-    def test_numbered_section_with_ampersand(self):
-        result = strip_section_markers("3. TOOLS & TECHNIQUES\nContent.")
-        assert "3." not in result
-        assert "Tools & Techniques" in result
-
-
-# ---------------------------------------------------------------------------
 # strip_trailing_short_lines
 # ---------------------------------------------------------------------------
 
@@ -535,63 +455,6 @@ class TestStripTrailingShortLines:
         assert "Main content." in result
         # At least some of the trailing short lines should be stripped
         assert result.strip() != text.strip()
-
-
-# ---------------------------------------------------------------------------
-# clean_text (full pipeline)
-# ---------------------------------------------------------------------------
-
-
-class TestCleanText:
-    """Tests for clean_text() — full pipeline chain."""
-
-    def test_removes_boilerplate_and_normalizes(self):
-        text = "Title: My Doc\n\u201cHello\u201d World\nReal content here."
-        result = clean_text(text)
-        assert "Title: My Doc" not in result
-        assert '"Hello"' in result
-        assert "Real content here." in result
-
-    def test_collapses_whitespace(self):
-        text = "para1\n\n\n\npara2"
-        result = clean_text(text)
-        assert "\n\n\n" not in result
-
-    def test_strips_section_markers(self):
-        text = "## Introduction\nContent here."
-        result = clean_text(text)
-        assert "##" not in result
-        assert "Introduction" in result
-
-    def test_empty_string_returns_empty(self):
-        assert clean_text("") == ""
-
-    def test_only_boilerplate_returns_empty_or_minimal(self):
-        text = "Title: Boilerplate\nAuthor: Nobody\n---"
-        result = clean_text(text)
-        # Should have nothing meaningful left
-        assert len(result.strip()) == 0 or "Boilerplate" not in result
-
-    def test_strips_trailing_short_lines(self):
-        text = "Real content about machine learning.\nAlice"
-        result = clean_text(text)
-        assert "Alice" not in result
-        assert "Real content about machine learning." in result
-
-    def test_final_whitespace_pass_applied(self):
-        text = "## Section\nContent here.\n\n\n\nMore content."
-        result = clean_text(text)
-        assert "\n\n\n" not in result
-
-    def test_unicode_smart_quotes_normalized(self):
-        text = "\u201cThis is quoted\u201d text."
-        result = clean_text(text)
-        assert '"This is quoted"' in result
-
-    def test_tab_replaced_with_space(self):
-        text = "Column1\tColumn2\tColumn3"
-        result = clean_text(text)
-        assert "\t" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -762,162 +625,6 @@ class TestMetadataToDict:
         meta = DocumentMetadata(source="doc.txt")
         d = metadata_to_dict(meta)
         assert set(d.keys()) == {"source", "tenant_id"}
-
-
-# ---------------------------------------------------------------------------
-# chunk_text
-# ---------------------------------------------------------------------------
-
-
-class TestChunkText:
-    """Tests for chunk_text()."""
-
-    def test_short_text_produces_one_chunk(self):
-        text = "This is a short text."
-        chunks = chunk_text(text, chunk_size=512, chunk_overlap=50)
-        assert len(chunks) == 1
-        assert chunks[0] == text
-
-    def test_long_text_produces_multiple_chunks(self):
-        # Generate text longer than default chunk_size of 512
-        text = "word " * 300  # ~1500 chars
-        chunks = chunk_text(text, chunk_size=512, chunk_overlap=50)
-        assert len(chunks) > 1
-
-    def test_chunk_size_respected(self):
-        text = "a " * 500  # ~1000 chars
-        chunk_size = 200
-        chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=20)
-        for chunk in chunks:
-            assert len(chunk) <= chunk_size + 50  # allow small splitter tolerance
-
-    def test_returns_list_of_strings(self):
-        text = "Hello world."
-        chunks = chunk_text(text)
-        assert isinstance(chunks, list)
-        assert all(isinstance(c, str) for c in chunks)
-
-    def test_custom_chunk_size(self):
-        text = "a " * 200  # ~400 chars
-        chunks_small = chunk_text(text, chunk_size=100, chunk_overlap=10)
-        chunks_large = chunk_text(text, chunk_size=400, chunk_overlap=10)
-        assert len(chunks_small) >= len(chunks_large)
-
-    def test_empty_text_returns_no_meaningful_chunks(self):
-        # RecursiveCharacterTextSplitter may return [''] for empty input;
-        # process_document handles this by checking cleaned text before chunking.
-        chunks = chunk_text("")
-        # Either empty list or list containing only empty strings
-        assert chunks == [] or all(c == "" for c in chunks)
-
-    def test_chunks_cover_content(self):
-        text = "The quick brown fox jumps over the lazy dog."
-        chunks = chunk_text(text, chunk_size=512)
-        combined = " ".join(chunks)
-        # All words from original text should appear in combined chunks
-        assert "quick" in combined
-        assert "lazy" in combined
-
-
-# ---------------------------------------------------------------------------
-# process_document (full pipeline)
-# ---------------------------------------------------------------------------
-
-
-class TestProcessDocument:
-    """Tests for process_document()."""
-
-    def test_returns_list_of_processed_chunks(self):
-        text = "Title: My Doc\nAuthor: Alice\nDate: 2024-01-01\n\nThis is the main content of the document. " * 5
-        result = process_document(text, source="doc.txt")
-        assert isinstance(result, list)
-        assert all(isinstance(c, ProcessedChunk) for c in result)
-
-    def test_empty_text_returns_empty_list(self):
-        # If cleaning results in empty text, no chunks returned
-        text = "Title: Only Metadata\nAuthor: Nobody\n---"
-        result = process_document(text, source="empty.txt")
-        # Result can be empty if all content is boilerplate
-        assert isinstance(result, list)
-
-    def test_metadata_attached_to_chunks(self):
-        text = "Title: Test Doc\nAuthor: Bob\nContent about machine learning and NLP. " * 5
-        result = process_document(text, source="test.txt")
-        assert len(result) > 0
-        for chunk in result:
-            assert chunk.metadata["source"] == "test.txt"
-            assert "tenant_id" in chunk.metadata
-
-    def test_title_extracted_and_in_metadata(self):
-        text = "Title: My Great Document\n\nThis is the main content section with enough words to pass cleaning. " * 3
-        result = process_document(text, source="doc.txt")
-        if result:
-            assert result[0].metadata.get("title") == "My Great Document"
-
-    def test_author_extracted_and_in_metadata(self):
-        text = "Author: Jane Smith\n\nMain content with substantial text here for testing purposes. " * 3
-        result = process_document(text, source="doc.txt")
-        if result:
-            assert result[0].metadata.get("author") == "Jane Smith"
-
-    def test_chunk_index_in_metadata(self):
-        text = "Real content section. " * 100  # enough text to create multiple chunks
-        result = process_document(text, source="doc.txt")
-        assert len(result) > 0
-        for i, chunk in enumerate(result):
-            assert chunk.metadata["chunk_index"] == i
-
-    def test_total_chunks_in_metadata(self):
-        text = "Real content section. " * 100
-        result = process_document(text, source="doc.txt")
-        n = len(result)
-        for chunk in result:
-            assert chunk.metadata["total_chunks"] == n
-
-    def test_default_source_is_unknown(self):
-        text = "Some document content here with enough words for chunking. " * 5
-        result = process_document(text)
-        if result:
-            assert result[0].metadata["source"] == "unknown"
-
-    def test_chunk_text_is_string(self):
-        text = "Content for the document pipeline. " * 20
-        result = process_document(text, source="doc.txt")
-        assert len(result) > 0
-        for chunk in result:
-            assert isinstance(chunk.text, str)
-            assert len(chunk.text) > 0
-
-    def test_pipeline_cleans_unicode(self):
-        text = "\u201cThis is a quote\u201d and it contains \u2014 em dash. " * 10
-        result = process_document(text, source="doc.txt")
-        assert len(result) > 0
-        for chunk in result:
-            # Smart quotes and em dash should be normalized
-            assert "\u201c" not in chunk.text
-            assert "\u2014" not in chunk.text
-
-    def test_pipeline_removes_boilerplate(self):
-        # Title header appears once at the top on its own line; body content repeats
-        text = (
-            "Title: Boilerplate Title\n"
-            "---\n\n"
-            + "Main body content here with substantial text.\n\n" * 5
-        )
-        result = process_document(text, source="doc.txt")
-        # The title metadata line should not appear in chunk text
-        for chunk in result:
-            assert "Title: Boilerplate Title" not in chunk.text
-
-    def test_metadata_dict_has_expected_keys(self):
-        text = "Title: T\nAuthor: A\nDate: D\nTags: x, y\n\nContent. " * 5
-        result = process_document(text, source="s.txt")
-        if result:
-            meta = result[0].metadata
-            assert "source" in meta
-            assert "tenant_id" in meta
-            assert "chunk_index" in meta
-            assert "total_chunks" in meta
 
 
 # ---------------------------------------------------------------------------

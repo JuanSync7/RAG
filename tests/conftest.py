@@ -1,11 +1,33 @@
 """Test bootstrap with lightweight stubs for optional heavy dependencies."""
 
 import math
+import os
 import sys
 import types
 
+# Force observability to a known-good provider for the test suite. Without
+# this, transitive imports (notably ``litellm``) call ``dotenv.load_dotenv``,
+# which walks up the directory tree and picks up a developer ``.env`` with
+# ``RAG_OBSERVABILITY_PROVIDER=otel``. The platform module only recognizes
+# ``noop`` and ``langfuse``, so any test that opens a tracer after litellm
+# loads crashes with ``ValueError: Unknown OBSERVABILITY_PROVIDER: 'otel'``.
+# Tests that need a specific provider use ``monkeypatch.setenv`` per-test.
+os.environ["RAG_OBSERVABILITY_PROVIDER"] = "noop"
+
 
 def _install_stub_modules() -> None:
+    # Prefer real heavyweight ML deps when present (Docling's HybridChunker
+    # tokenizer wrapper transitively needs real torch + transformers; without
+    # them, integration tests can't run). Import order matters: torch must be
+    # real before transformers tries to detect it. If any fail, fall through
+    # to per-module stubs below.
+    for _real_mod in ("torch", "transformers", "sentence_transformers"):
+        if _real_mod not in sys.modules:
+            try:
+                __import__(_real_mod)
+            except Exception:
+                pass
+
     if "sentence_transformers" not in sys.modules:
         st = types.ModuleType("sentence_transformers")
 
@@ -237,29 +259,40 @@ def _install_stub_modules() -> None:
         sys.modules["minio.commonconfig"] = minio_commonconfig
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        # Prefer the real Pillow when available — Docling's chunker/converter
+        # needs PIL.ImageColor / ImageDraw / ImageFont, which a hand-rolled
+        # stub does not provide. Real PIL is a transitive dep of Pillow,
+        # which the project already requires, so this should normally succeed.
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            size = (0, 0)
+            class Image:
+                size = (0, 0)
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            def convert(self, mode):
-                return self
+                def convert(self, mode):
+                    return self
 
-            def tobytes(self):
-                return b""
+                def tobytes(self):
+                    return b""
 
-        # `from PIL import Image` resolves to the PIL.Image module; callers
-        # then call Image.open(...) at module level, not on the class.
-        pil_image.Image = Image
-        pil_image.open = Image.open
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            # `from PIL import Image` resolves to the PIL.Image module; callers
+            # then call Image.open(...) at module level, not on the class.
+            pil_image.Image = Image
+            pil_image.open = Image.open
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     # Only stub temporalio when the real package can't be imported. Tests that
     # exercise sandbox/workflow code (e.g. test_temporal_worker.py) need the
@@ -378,42 +411,49 @@ def _install_stub_modules() -> None:
         sys.modules["mcp.server.fastmcp"] = mcp_server_fastmcp
 
     if "prometheus_client" not in sys.modules:
-        prom = types.ModuleType("prometheus_client")
+        # Prefer the real prometheus_client package when it's installed — DR
+        # metrics tests rely on the real Counter/Histogram introspection API
+        # (`_name`, `_value`, `collect()`). Fall back to a no-op stub only when
+        # the real package is absent.
+        try:
+            import prometheus_client as _real_prom  # noqa: F401
+        except ImportError:
+            prom = types.ModuleType("prometheus_client")
 
-        class _MetricBase:
-            def __init__(self, *args, **kwargs):
+            class _MetricBase:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def labels(self, **kwargs):
+                    return self
+
+                def inc(self, amount=1):
+                    pass
+
+                def dec(self, amount=1):
+                    pass
+
+                def set(self, value):
+                    pass
+
+                def observe(self, value):
+                    pass
+
+            class Counter(_MetricBase):
                 pass
 
-            def labels(self, **kwargs):
-                return self
-
-            def inc(self, amount=1):
+            class Gauge(_MetricBase):
                 pass
 
-            def dec(self, amount=1):
+            class Histogram(_MetricBase):
                 pass
 
-            def set(self, value):
-                pass
-
-            def observe(self, value):
-                pass
-
-        class Counter(_MetricBase):
-            pass
-
-        class Gauge(_MetricBase):
-            pass
-
-        class Histogram(_MetricBase):
-            pass
-
-        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
-        prom.generate_latest = lambda registry=None: b""
-        prom.Counter = Counter
-        prom.Gauge = Gauge
-        prom.Histogram = Histogram
-        sys.modules["prometheus_client"] = prom
+            prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+            prom.generate_latest = lambda registry=None: b""
+            prom.Counter = Counter
+            prom.Gauge = Gauge
+            prom.Histogram = Histogram
+            sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
@@ -492,6 +532,7 @@ def _install_stub_modules() -> None:
 
         config_mod = types.ModuleType("weaviate.classes.config")
         query_mod = types.ModuleType("weaviate.classes.query")
+        aggregate_mod = types.ModuleType("weaviate.classes.aggregate")
 
         class Configure:
             class Vectorizer:
@@ -500,12 +541,20 @@ def _install_stub_modules() -> None:
                     return None
 
         class Property:
-            def __init__(self, *args, **kwargs):
-                pass
+            def __init__(self, name=None, data_type=None, description=None,
+                         index_filterable=None, index_searchable=None, **kwargs):
+                self.name = name
+                self.data_type = data_type
+                self.description = description
+                self.index_filterable = index_filterable
+                self.index_searchable = index_searchable
 
         class DataType:
             TEXT = "text"
             INT = "int"
+            NUMBER = "number"
+            BOOL = "bool"
+            TEXT_ARRAY = "text_array"
 
         class Filter:
             @staticmethod
@@ -526,14 +575,31 @@ def _install_stub_modules() -> None:
             def __init__(self, **kwargs):
                 pass
 
+        class GroupByAggregate:
+            def __init__(self, prop=None, **kwargs):
+                self.prop = prop
+
         config_mod.Configure = Configure
         config_mod.Property = Property
         config_mod.DataType = DataType
         query_mod.Filter = Filter
         query_mod.HybridFusion = HybridFusion
         query_mod.MetadataQuery = MetadataQuery
+        aggregate_mod.GroupByAggregate = GroupByAggregate
         sys.modules["weaviate.classes.config"] = config_mod
         sys.modules["weaviate.classes.query"] = query_mod
+        sys.modules["weaviate.classes.aggregate"] = aggregate_mod
+
+        # Expose ``weaviate.classes`` as a real attribute so call-time access
+        # like ``weaviate.classes.aggregate.GroupByAggregate`` resolves under the
+        # stub (registering the submodules in sys.modules alone does not attach
+        # the ``classes`` attribute to the parent module object).
+        classes_mod = types.ModuleType("weaviate.classes")
+        classes_mod.config = config_mod
+        classes_mod.query = query_mod
+        classes_mod.aggregate = aggregate_mod
+        weaviate.classes = classes_mod
+        sys.modules["weaviate.classes"] = classes_mod
 
     if "colpali_engine" not in sys.modules:
         colpali = types.ModuleType("colpali_engine")
@@ -544,84 +610,95 @@ def _install_stub_modules() -> None:
         sys.modules["bitsandbytes"] = bnb
 
     if "PIL" not in sys.modules:
-        pil = types.ModuleType("PIL")
-        pil_image = types.ModuleType("PIL.Image")
+        try:
+            import PIL  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageColor  # noqa: F401
+            import PIL.ImageDraw  # noqa: F401
+            import PIL.ImageFont  # noqa: F401
+        except ImportError:
+            pil = types.ModuleType("PIL")
+            pil_image = types.ModuleType("PIL.Image")
 
-        class Image:
-            """Minimal PIL.Image stub."""
+            class Image:
+                """Minimal PIL.Image stub."""
 
-            LANCZOS = 1
+                LANCZOS = 1
 
-            @staticmethod
-            def open(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def open(*args, **kwargs):
+                    return Image()
 
-            @staticmethod
-            def new(*args, **kwargs):
-                return Image()
+                @staticmethod
+                def new(*args, **kwargs):
+                    return Image()
 
-            def convert(self, *args, **kwargs):
-                return self
+                def convert(self, *args, **kwargs):
+                    return self
 
-            def resize(self, *args, **kwargs):
-                return self
+                def resize(self, *args, **kwargs):
+                    return self
 
-            def save(self, *args, **kwargs):
-                pass
+                def save(self, *args, **kwargs):
+                    pass
 
-            def tobytes(self, *args, **kwargs):
-                return b""
+                def tobytes(self, *args, **kwargs):
+                    return b""
 
-            @property
-            def size(self):
-                return (100, 100)
+                @property
+                def size(self):
+                    return (100, 100)
 
-        pil_image.Image = Image
-        pil_image.LANCZOS = Image.LANCZOS
-        pil.Image = pil_image
-        sys.modules["PIL"] = pil
-        sys.modules["PIL.Image"] = pil_image
+            pil_image.Image = Image
+            pil_image.LANCZOS = Image.LANCZOS
+            pil.Image = pil_image
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = pil_image
 
     if "prometheus_client" not in sys.modules:
-        prom = types.ModuleType("prometheus_client")
+        # Prefer the real prometheus_client when installed (see comment above).
+        try:
+            import prometheus_client as _real_prom2  # noqa: F401
+        except ImportError:
+            prom = types.ModuleType("prometheus_client")
 
-        CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+            CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
-        def generate_latest(*args, **kwargs):
-            return b""
+            def generate_latest(*args, **kwargs):
+                return b""
 
-        class _MetricBase:
-            """Lightweight stub for Counter, Gauge, Histogram."""
+            class _MetricBase:
+                """Lightweight stub for Counter, Gauge, Histogram."""
 
-            def __init__(self, *args, **kwargs):
-                pass
+                def __init__(self, *args, **kwargs):
+                    pass
 
-            def labels(self, *args, **kwargs):
-                return self
+                def labels(self, *args, **kwargs):
+                    return self
 
-            def inc(self, *args, **kwargs):
-                pass
+                def inc(self, *args, **kwargs):
+                    pass
 
-            def dec(self, *args, **kwargs):
-                pass
+                def dec(self, *args, **kwargs):
+                    pass
 
-            def set(self, *args, **kwargs):
-                pass
+                def set(self, *args, **kwargs):
+                    pass
 
-            def observe(self, *args, **kwargs):
-                pass
+                def observe(self, *args, **kwargs):
+                    pass
 
-            def time(self):
-                import contextlib
-                return contextlib.nullcontext()
+                def time(self):
+                    import contextlib
+                    return contextlib.nullcontext()
 
-        prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
-        prom.generate_latest = generate_latest
-        prom.Counter = _MetricBase
-        prom.Gauge = _MetricBase
-        prom.Histogram = _MetricBase
-        prom.Summary = _MetricBase
-        sys.modules["prometheus_client"] = prom
+            prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
+            prom.generate_latest = generate_latest
+            prom.Counter = _MetricBase
+            prom.Gauge = _MetricBase
+            prom.Histogram = _MetricBase
+            prom.Summary = _MetricBase
+            sys.modules["prometheus_client"] = prom
 
     # httpx: prefer the real package if it's installed (litellm + openai depend
     # on it internally, so stubbing over the top breaks their imports). The
@@ -692,3 +769,122 @@ def _install_stub_modules() -> None:
 
 
 _install_stub_modules()
+
+
+# ── langchain stub/real boundary enforcement ────────────────────────────────
+#
+# The tests under tests/llm/ deliberately evict the lightweight langchain stub
+# installed above and import the *real* langchain_core / langgraph (which are
+# installed in the venv) so they can exercise real Runnable / cache / output
+# behaviour. The rest of the suite depends on the stub. Because pytest imports
+# every selected test module up front (collection), an eviction performed while
+# collecting tests/llm leaks the real packages into modules collected
+# afterwards (e.g. src.ingest.support.markdown binds its text splitter at import
+# time). The hook below makes the boundary explicit and order-independent:
+# before collecting any module *outside* tests/llm, the stub is restored; the
+# src modules that capture langchain symbols at import time are evicted so they
+# rebind to the stub on their next import.
+
+_LANGCHAIN_REAL_PREFIXES = ("langchain_core", "langgraph", "langchain_text_splitters")
+_SRC_LANGCHAIN_DEPENDENT = ("src.common.llm", "src.platform.llm", "src.ingest", "src.query")
+
+
+def _evict_modules(prefixes) -> None:
+    for _mod in list(sys.modules):
+        if any(_mod == p or _mod.startswith(p + ".") for p in prefixes):
+            del sys.modules[_mod]
+
+
+def _stub_is_active() -> bool:
+    lc = sys.modules.get("langchain_core")
+    # The stub is a bare types.ModuleType with no __file__; the real package
+    # has one.
+    return lc is not None and getattr(lc, "__file__", None) is None
+
+
+def _restore_stub_environment() -> None:
+    """Re-install the lightweight langchain stub if the real package is live."""
+    if _stub_is_active():
+        return
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES + _SRC_LANGCHAIN_DEPENDENT)
+    _install_stub_modules()
+
+
+def _ensure_real_langchain_environment() -> None:
+    """Evict the langchain stub so the real installed package is imported.
+
+    Also drops the src modules that capture langchain symbols at import time so
+    they rebind to the real package on their next import.
+    """
+    if not _stub_is_active():
+        return
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES + _SRC_LANGCHAIN_DEPENDENT)
+
+
+def _snapshot_langchain_modules() -> dict:
+    return {
+        name: mod
+        for name, mod in sys.modules.items()
+        if any(name == p or name.startswith(p + ".") for p in _LANGCHAIN_REAL_PREFIXES)
+    }
+
+
+# Cached module-object trees for each flavour, captured the first time we see
+# them live. Used to swap the langchain packages in sys.modules at runtime
+# without re-importing (re-import is both slow and identity-breaking).
+_REAL_LANGCHAIN_SNAPSHOT: dict = {}
+_STUB_LANGCHAIN_SNAPSHOT: dict = {}
+
+
+def _swap_langchain_in_sysmodules(snapshot: dict) -> None:
+    _evict_modules(_LANGCHAIN_REAL_PREFIXES)
+    sys.modules.update(snapshot)
+
+
+def _is_llm_node(nodeid: str, fspath: str) -> bool:
+    return nodeid.startswith("tests/llm") or "/tests/llm/" in fspath.replace("\\", "/")
+
+
+def pytest_collectstart(collector) -> None:
+    """Bind the right langchain (stub vs real) before importing each test module.
+
+    pytest collects directory collectors for *all* args first, then the module
+    collectors, so a single one-directional restore is not enough: collecting
+    the tests/ingest directory can flip the environment back to the stub before
+    the tests/llm modules are imported. We therefore set the environment
+    explicitly per collected node based on whether it lives under tests/llm,
+    and snapshot each flavour's module objects for the runtime swap below.
+    """
+    nodeid = getattr(collector, "nodeid", "") or ""
+    fspath = str(getattr(collector, "fspath", "") or "")
+    if _is_llm_node(nodeid, fspath):
+        _ensure_real_langchain_environment()
+    else:
+        _restore_stub_environment()
+    snapshot = _snapshot_langchain_modules()
+    if snapshot:
+        if _stub_is_active():
+            _STUB_LANGCHAIN_SNAPSHOT.clear()
+            _STUB_LANGCHAIN_SNAPSHOT.update(snapshot)
+        else:
+            _REAL_LANGCHAIN_SNAPSHOT.update(snapshot)
+
+
+def pytest_runtest_setup(item) -> None:
+    """Make sure the *running* test sees the langchain flavour it imported.
+
+    Collection and execution are separate phases sharing sys.modules; the env
+    left after collection may be the wrong flavour for the first tests to run.
+    Real langchain performs lazy sub-imports at call time (e.g.
+    ``langchain_core.prompt_values``), so the real package tree must be live in
+    sys.modules while a tests/llm test executes — and the stub while others do.
+    We swap the cached module trees rather than re-importing.
+    """
+    nodeid = getattr(item, "nodeid", "") or ""
+    fspath = str(getattr(item, "fspath", "") or "")
+    if _is_llm_node(nodeid, fspath):
+        if _stub_is_active() and _REAL_LANGCHAIN_SNAPSHOT:
+            _swap_langchain_in_sysmodules(_REAL_LANGCHAIN_SNAPSHOT)
+    else:
+        if not _stub_is_active() and _STUB_LANGCHAIN_SNAPSHOT:
+            _swap_langchain_in_sysmodules(_STUB_LANGCHAIN_SNAPSHOT)

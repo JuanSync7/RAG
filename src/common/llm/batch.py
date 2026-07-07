@@ -16,6 +16,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Sequence
 
+from config.settings import RAG_LLM_BATCH_MAX_CONCURRENCY
 from src.common.llm.schemas import BatchResult
 
 
@@ -23,7 +24,7 @@ def batch(
     fn: Callable[[Any], Any],
     items: Sequence[Any],
     *,
-    max_concurrency: int = 10,
+    max_concurrency: int = RAG_LLM_BATCH_MAX_CONCURRENCY,
 ) -> BatchResult:
     """Process *items* through *fn* using a bounded thread pool.
 
@@ -49,7 +50,7 @@ async def abatch(
     fn: Callable[[Any], Any],
     items: Sequence[Any],
     *,
-    max_concurrency: int = 10,
+    max_concurrency: int = RAG_LLM_BATCH_MAX_CONCURRENCY,
 ) -> BatchResult:
     """Async variant of :func:`batch` using a semaphore for backpressure.
 

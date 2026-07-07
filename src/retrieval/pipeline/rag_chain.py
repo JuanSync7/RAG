@@ -3,6 +3,37 @@
 # visual retrieval, and LLM generation.  KG graph_context (REQ-KG-794, REQ-KG-796) is
 # threaded from expansion to the generator prompt, placed before document chunks when
 # non-empty and omitted entirely when empty.
+# Stage 7.5 implements a bounded internal re-retrieval loop (REQ-706 option B): when
+# composite confidence is below the high threshold and retry budget remains, the chain
+# re-runs search+rerank+generate+score with broader params (alpha-=0.15, limit+=5) and
+# returns whichever attempt scores higher. Surfaces both scores in RAGResponse.
+# RAGChain.__init__ accepts an optional ``collection_name`` kwarg (P0
+# collection-selection slice) so callers can route reads/writes to an arbitrary
+# Weaviate collection without env-var manipulation; resolved value lives on
+# ``self._collection_name`` and is threaded through every internal call site
+# via ``self._resolve_collection()`` (defends against __new__-bypassed init).
+# _collect_candidates optionally accepts routed_doc_ids (RAPTOR-lite document
+# routing, B2): when truthy it adds a 4th candidate source = a hybrid search
+# restricted to the routed docs via the `in` filter, doc-diversity capped to
+# RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, unioned (flat→descent→lift→routed) and
+# bounded to RAG_DOCUMENT_ROUTING_MAX_CANDIDATES. routed_doc_ids None/empty →
+# byte-identical to pre-routing (soft routing, never a hard filter; design §6.2/§7).
+# run() wires Stage-1 routing (B3) via _route_documents_stage1, gated on
+# RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research: it runs AFTER the
+# query embedding (Stage 3) and BEFORE Stage 4, decomposing the query (C3),
+# routing EACH sub-query over the card index (B1), and unioning the routed
+# doc_ids (reusing the cached query embedding for the identity sub-query). The
+# union feeds _collect_candidates as routed_doc_ids; the single rerank stays the
+# final authority. Disabled / low-confidence / any-failure → routed_doc_ids=None
+# (today's flat path exactly). RAG_DOCUMENT_ROUTING_BOOST (default 0.0) is a
+# reserved tiny tie-break only — pool composition is the mechanism (no
+# post-rerank override).
+# retrieve_primitive() is the turn-loop worker primitive (TURN_LOOP_DESIGN.md §3):
+# embed (hyde_text else query_text, shared LRU keyed on the embedded text) →
+# hybrid search via the same _do_search choke point → cross-encoder rerank
+# anchored to query_text → thin/nav filter → top_k dicts shaped like
+# turn_loop.schemas.EvidenceChunk minus provenance/round_added. No Stage 1, no
+# LLM calls, no ignored_doc_ids suppression; idempotent under Temporal retries.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -11,16 +42,15 @@ from __future__ import annotations
 
 from typing import Any, Optional
 import logging
+import math
+import re
 import statistics
 import time
 
-from src.core import get_embedding_provider
+from src.core.embeddings import get_embedding_provider
 from src.retrieval.query.nodes import get_reranker_provider
 from src.retrieval.query.nodes import process_query
-from src.core import (
-    GraphQueryExpander,
-    KnowledgeGraphBuilder,
-)
+from kgweave.client import get_client as _get_kg_client, KGQueryService
 from src.vector_db import (
     create_persistent_client,
     get_client,
@@ -47,16 +77,33 @@ from src.retrieval.common import (
     RAGResponse,
     RankedResult,
     VisualPageResult,
+    AskUserReason,
+    StageOutcome,
+    StageStatus,
+    TerminalDecision,
+    decide_terminal,
 )
 from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
+from src.platform.llm.provider import get_llm_provider
 from src.retrieval.generation.nodes import get_system_prompt
+from src.retrieval.pipeline.query_shape import should_suggest_deep_research
+from src.retrieval.pipeline.follow_up import generate_follow_ups_sync
+from src.retrieval.pipeline.deep_research import (
+    DeepResearch,
+    DeepResearchBudget,
+    DeepResearchResult,
+    KGSnippet,
+    TopicPool,
+)
+from config.settings import VECTOR_COLLECTION_DEFAULT
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
-    KG_PATH, KG_ENABLED, GENERATION_ENABLED,
+    KG_ENABLED, GENERATION_ENABLED,
     RETRY_BACKOFF_MULTIPLIER,
     RETRY_INITIAL_BACKOFF_SECONDS,
     RETRY_MAX_ATTEMPTS,
     RETRY_MAX_BACKOFF_SECONDS,
+    DOMAIN_DESCRIPTION,
     MAX_SANITIZATION_ITERATIONS,
     QUERY_CONFIDENCE_THRESHOLD,
     RAG_DEFAULT_FAST_PATH,
@@ -70,7 +117,49 @@ from config.settings import (
     RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD,
     RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD,
     RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD,
+    RAG_STAGE_BUDGET_DEEP_RESEARCH_MS,
+    RAG_DEEP_RESEARCH_MAX_NODES,
+    RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
+    RAG_DEEP_RESEARCH_MAX_DEPTH,
+    RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS,
+    RAG_DEEP_RESEARCH_MAX_TOPICS,
+    RAG_DEEP_RESEARCH_MODEL_ALIAS,
+    RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
+    RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
+    RAG_DEEP_RESEARCH_KB_TOP_PER_NODE,
+    RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS,
+    RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS,
+    RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE,
 )
+from config.settings import (
+    RAG_AGENTIC_RETRIEVAL_ENABLED,
+    RAG_AGENTIC_MAX_ROUNDS,
+    RAG_AGENTIC_MAX_LLM_CALLS,
+    RAG_AGENTIC_WALL_CLOCK_MS,
+    RAG_AGENTIC_KEEP_TOP_K_PER_ROUND,
+    RAG_AGENTIC_FINAL_MAX_CHUNKS,
+    RAG_AGENTIC_MIN_KEPT_CHUNKS,
+    RAG_AGENTIC_MIN_SOURCES,
+    RAG_AGENTIC_RELEVANCE_THRESHOLD,
+    RAG_AGENTIC_FAITHFULNESS_THRESHOLD,
+    RAG_AGENTIC_SUFFICIENCY_TARGET,
+    RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE,
+    RAG_AGENTIC_HYDE_MAX_TOKENS,
+    RAG_AGENTIC_HYDE_TEMPERATURE,
+    RAG_AGENTIC_CONTROLLER_MODEL_ALIAS,
+    RAG_AGENTIC_JUDGE_MODEL_ALIAS,
+    RAG_AGENTIC_QFS_AUTO,
+    RAG_AGENTIC_RANKER,
+    RAG_AGENTIC_JUDGE_POOL_MAX,
+    RAG_AGENTIC_FILL_MODE,
+    RAG_AGENTIC_JUDGE_VERBOSE,
+    RAG_AGENTIC_LLM_JSON_MODE,
+    RAG_AGENTIC_ROLE_BACKSTOP,
+    RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS,
+    QUERY_PROCESSING_TIMEOUT,
+    validate_agentic_retrieval_config,
+)
+from src.retrieval.pipeline.agentic import AgenticBudget, AgenticRetrieval
 from src.platform import TimingPool
 from config.settings import GUARDRAIL_BACKEND
 from src.guardrails import (
@@ -89,19 +178,130 @@ from config.settings import (
     RAG_CONFIDENCE_LLM_WEIGHT,
     RAG_CONFIDENCE_CITATION_WEIGHT,
     RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
+    RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA,
+    RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
     RAG_DOCUMENT_FORMATTING_ENABLED,
     RAG_VISUAL_RETRIEVAL_ENABLED,
     RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS,
+)
+from config.settings import (
+    RAG_TREE_RETRIEVAL_ENABLED,
+    RAG_TREE_DESCENT_TOP_K,
+    RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+    RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+    RAG_TREE_LIFT_SEED_K,
+    RAG_TREE_LIFT_SIBLINGS,
+    RAG_STAGE_BUDGET_TREE_DESCENT_MS,
+    RAG_STAGE_BUDGET_TREE_LIFT_MS,
+)
+from config.settings import (
+    RERANK_MIN_CHARS,
+    RETRIEVAL_ENFORCE_CONFIG_FLOOR,
+    RAG_DOCUMENT_ROUTING_ENABLED,
+    RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES,
+    RAG_DOCUMENT_ROUTING_MAX_CANDIDATES,
+    RAG_KG_BM25_APPEND_TERMS,
+)
+# RAPTOR-lite Stage-1 document routing (B3 wiring). Imported into the module
+# namespace so run() can call them directly (and tests can patch them here).
+# Both are SOFT and never raise; the Stage-1 block below is additionally wrapped
+# so any failure degrades to routed_doc_ids=None (pure flat retrieval).
+from src.retrieval.routing import decompose_query, route_documents
+from config.settings import (
+    RAG_RERANK_FUSION_ENABLED,
+    RAG_RERANK_RRF_K,
+    RAG_RERANK_RRF_LAMBDA,
+    RAG_RERANK_HEADING_LAMBDA,
+    RAG_RERANK_ANCHOR_LAMBDA,
+    RAG_RERANK_ANCHOR_K,
+    RAG_RERANK_DIVERSITY_ENABLED,
+    RAG_RERANK_MAX_DOC_FRACTION,
+    RAG_TABLE_GROUP_DEDUP_ENABLED,
+)
+from src.retrieval.query.nodes.rerank_fusion import (
+    anchor_confidence,
+    fuse_scores,
+    heading_match_score,
+)
+from src.retrieval.table_group_expansion import expand_table_group_hits
+from src.retrieval.xref_expansion import expand_xref_hits
+import os as _os
+RAG_TREE_SCHEMA_PRESENT: bool = _os.environ.get(
+    "RAG_TREE_SCHEMA_PRESENT", "true"
+).lower() in ("true", "1", "yes")
+
+# Query-time chunk_role exclusion filter (Slice C). Imported into the module
+# namespace — mirroring RAG_TREE_SCHEMA_PRESENT above — so the single _do_search
+# choke point can read them and tests can patch them here. The comma-parsing for
+# the excluded-role list is single-sourced in config.settings (no re-parse here).
+from config.settings import (  # noqa: E402
+    RAG_RETRIEVAL_ROLE_FILTER,
+    RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT,
+    RAG_RETRIEVAL_EXCLUDED_ROLES,
 )
 
 logger = logging.getLogger("rag.rag_chain")
 
 
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
+_TOC_NOISE_RE = re.compile(r"^[\s.\-_|0-9]+$")
+# Navigational/boilerplate chunk suppression is now handled at retrieval time by
+# the metadata `chunk_role` filter (RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT); the former
+# query-side `is_navigational` regex heuristic has been retired here. Only the
+# thin/heading-only floor below remains — a distinct safeguard the role filter does
+# not cover (a tiny title fragment can be tagged `content` yet still carry no answer).
+
+
+def _is_thin_or_heading(text: str, min_chars: int) -> bool:
+    """True if a chunk is a thin title / heading-only / ToC-noise chunk that
+    carries no answer content (e.g. '## AMBA CHI Architecture Specification' or
+    dotted ToC leader lines). Such chunks win dense cosine similarity on topical
+    queries but should not consume rerank slots ahead of real body chunks."""
+    t = (text or "").strip()
+    if len(t) < min_chars:
+        return True
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    return all(_HEADING_LINE_RE.match(ln) or _TOC_NOISE_RE.match(ln) for ln in lines)
+
+
+def _filter_thin_candidates(
+    items: list,
+    min_chars: int,
+    floor: int,
+) -> list:
+    """Drop thin/heading-only candidates before rerank, keeping at least ``floor``
+    items (topping up from dropped ones, original order, if needed)."""
+    if min_chars <= 0 or not items:
+        return items
+    kept: list = []
+    dropped: list = []
+    for it in items:
+        if _is_thin_or_heading(getattr(it, "text", "") or "", min_chars):
+            dropped.append(it)
+        else:
+            kept.append(it)
+    if len(kept) < floor:
+        kept.extend(dropped[: max(0, floor - len(kept))])
+    return kept
+
+
 class RAGChain:
     """End-to-end RAG pipeline: query processing -> KG expansion -> hybrid search -> reranking."""
 
-    def __init__(self, persistent_weaviate: bool = True):
+    def __init__(
+        self,
+        persistent_weaviate: bool = True,
+        collection_name: Optional[str] = None,
+    ):
         from concurrent.futures import ThreadPoolExecutor, Future
+
+        # Resolve target collection: explicit arg wins, otherwise fall back to
+        # the configured default. Threaded through every internal vector-store
+        # call site below so callers can route reads/writes to an arbitrary
+        # collection without env-var manipulation. (P0-collection-selection.)
+        self._collection_name: str = collection_name or VECTOR_COLLECTION_DEFAULT
 
         self.tracer = get_tracer()
         self.retry_provider = get_retry_provider()
@@ -118,27 +318,33 @@ class RAGChain:
         if persistent_weaviate:
             logger.info("Opening persistent Weaviate connection...")
             self._weaviate_client = create_persistent_client()
-            ensure_collection(self._weaviate_client)
+            ensure_collection(self._weaviate_client, collection=self._collection_name)
             logger.info("Weaviate connected (persistent mode).")
 
         # GPU models must load sequentially (parallel .to(cuda) causes meta
         # tensor errors), but KG + generator can load concurrently with them.
-        def _load_kg() -> Optional[GraphQueryExpander]:
+        def _load_kg() -> Optional[KGQueryService]:
+            # Returns the KG read-side service. In-process by default; flips
+            # to HTTP transparently when KGWEAVE_API_URL is set.
             _t0 = time.perf_counter()
-            result: Optional[GraphQueryExpander] = None
+            result: Optional[KGQueryService] = None
             try:
-                if KG_ENABLED and KG_PATH.exists():
-                    try:
-                        builder = KnowledgeGraphBuilder.load(KG_PATH)
-                        stats = builder.stats()
-                        logger.info("Knowledge graph loaded: %s nodes, %s edges", stats["nodes"], stats["edges"])
-                        result = GraphQueryExpander(builder.graph)
-                    except Exception as e:
-                        logger.warning("Could not load knowledge graph: %s", e)
-                elif not KG_ENABLED:
+                if not KG_ENABLED:
                     logger.info("Knowledge graph disabled (set RAG_KG_ENABLED=true to enable).")
-                else:
-                    logger.info("No knowledge graph found (run ingest.py first to build it).")
+                    return None
+                try:
+                    service = _get_kg_client()
+                    health = service.health()
+                    stats = health.stats or {}
+                    logger.info(
+                        "KG service ready (%s): %s nodes, %s edges",
+                        health.backend,
+                        stats.get("nodes", "?"),
+                        stats.get("edges", "?"),
+                    )
+                    result = service
+                except Exception as e:
+                    logger.warning("Could not initialize KG service: %s", e)
                 return result
             finally:
                 logger.info("_load_kg elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
@@ -180,20 +386,20 @@ class RAGChain:
             finally:
                 logger.info("_load_models_sequential elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS) as pool:
             fut_models = pool.submit(_load_models_sequential)
             fut_kg = pool.submit(_load_kg)
             fut_gen = pool.submit(_load_generator)
 
             self.embeddings, self.reranker = fut_models.result()
-            self._kg_expander: Optional[GraphQueryExpander] = fut_kg.result()
+            self._kg_expander: Optional[KGQueryService] = fut_kg.result()
             self._generator: Optional[OllamaGenerator] = fut_gen.result()
 
         # Embedding LRU cache — avoids re-computing embeddings for repeated
         # exact queries (REQ-306). Keyed on the exact query string.
         from collections import OrderedDict
         self._embedding_cache: OrderedDict = OrderedDict()
-        self._embedding_cache_max = 128
+        self._embedding_cache_max = RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE
 
         # Initialize guardrail backend (REQ-701: once at startup, not per-query)
         self._guardrails_merge_gate = None
@@ -209,7 +415,49 @@ class RAGChain:
             validate_visual_retrieval_config()  # FR-111: fail fast on bad config
             logger.info("Visual retrieval enabled — model will be loaded on first visual query.")
 
+        # Table-aware retrieval expansion. ON by default as of the
+        # table-aware-chunking GA flip — two clean real-PDF soaks plus a
+        # hierarchical DOCX smoke confirmed table-group sibling expansion is
+        # production-ready. The expansion path is itself guarded by the
+        # ``_has_table_chunk`` pre-check inside ``_apply_table_expansion`` so
+        # the cost is zero on prose-only corpora.
+        # Env: RAG_TABLE_EXPANSION_ENABLED ("false"/"0"/"no" -> off; default on).
+        # Each table_row chunk already restates the caption + column headers, so
+        # a lone hit is self-interpretable; expansion only pulls the SIBLING row
+        # blocks of the same table. It is therefore opt-in via
+        # RAG_TABLE_EXPANSION_MAX_ROWS (max sibling blocks/group; 0 = no-op).
+        from config.settings import (
+            RAG_TABLE_EXPANSION_ENABLED,
+            RAG_TABLE_EXPANSION_MAX_ROWS,
+            RAG_TABLE_EXPANSION_MAX_GROUPS,
+        )
+        self.enable_table_group_expansion: bool = RAG_TABLE_EXPANSION_ENABLED
+        self.table_expansion_max_rows: int = RAG_TABLE_EXPANSION_MAX_ROWS
+        self.table_expansion_max_groups: int = RAG_TABLE_EXPANSION_MAX_GROUPS
+
+        # Cross-reference (xref) expansion — MVP, default-off dark launch.
+        # Resolves ``section`` / ``section_symbol`` refs only; table/figure/
+        # appendix resolution is TODO (needs a caption registry).
+        from config.settings import (
+            RAG_XREF_EXPANSION_ENABLED,
+            RAG_XREF_MAX_PER_HIT,
+            RAG_XREF_MAX_TOTAL,
+        )
+        self.xref_expansion_enabled: bool = RAG_XREF_EXPANSION_ENABLED
+        self.xref_max_per_hit: int = RAG_XREF_MAX_PER_HIT
+        self.xref_max_total: int = RAG_XREF_MAX_TOTAL
+
         logger.info("RAG chain ready.")
+
+    def _resolve_collection(self) -> str:
+        """Return the configured target collection, defending against bypassed __init__.
+
+        Several tests build a RAGChain via ``__new__`` to skip the heavy
+        initialiser. Those instances never set ``_collection_name``; the
+        default behaviour should be identical to passing no collection_name.
+        See memory ``project_rag_chain_defensive_init``.
+        """
+        return getattr(self, "_collection_name", None) or VECTOR_COLLECTION_DEFAULT
 
     def close(self) -> None:
         """Release persistent resources (database connection, visual model)."""
@@ -247,7 +495,7 @@ class RAGChain:
         if self._visual_model is not None:
             return  # warm path
 
-        with self.tracer.span("visual_retrieval.model_load"):
+        with self.tracer.span("retrieval.visual.model_load"):
             from src.ingest.support import (
                 ensure_colqwen_ready,
                 load_colqwen_model,
@@ -287,7 +535,7 @@ class RAGChain:
         # FR-605: encode text query (uses processed query, not raw)
         from src.ingest.support import embed_text_query
 
-        with self.tracer.span("visual_retrieval.text_encode"):
+        with self.tracer.span("retrieval.visual.text_encode"):
             query_vector = embed_text_query(
                 self._visual_model, self._visual_processor, processed_query
             )
@@ -298,7 +546,7 @@ class RAGChain:
         # FR-609: search visual collection
         from src.vector_db import search_visual
 
-        with self.tracer.span("visual_retrieval.search") as vs_span:
+        with self.tracer.span("retrieval.visual.search") as vs_span:
             page_records = search_visual(
                 client=self._weaviate_client,
                 query_vector=query_vector,
@@ -315,7 +563,7 @@ class RAGChain:
         )
 
         results: list[VisualPageResult] = []
-        with self.tracer.span("visual_retrieval.presigned_urls"):
+        with self.tracer.span("retrieval.visual.presigned_urls"):
             minio_client = create_client()
             for record in page_records:
                 try:
@@ -350,41 +598,1076 @@ class RAGChain:
         logger.info("Visual retrieval returned %d results.", len(results))
         return results
 
-    def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
-        """Run hybrid search against the database layer (persistent or transient client)."""
-        _t0 = time.perf_counter()
+    # ------------------------------------------------------------------
+    # Table-aware retrieval expansion (post-rerank).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ranked_to_dicts(results: list[RankedResult]) -> list[dict]:
+        """Adapter: RankedResult list -> dict list expected by helper."""
+        out: list[dict] = []
+        for r in results:
+            meta = dict(r.metadata or {})
+            out.append({
+                "text": r.text,
+                "score": r.score,
+                "uuid": str(meta.get("chunk_id") or meta.get("uuid") or ""),
+                "metadata": meta,
+            })
+        return out
+
+    @staticmethod
+    def _dicts_to_ranked(dicts: list[dict]) -> list[RankedResult]:
+        """Adapter: dict list (helper output) -> RankedResult list."""
+        return [
+            RankedResult(
+                text=d.get("text", ""),
+                score=float(d.get("score", 0.0)),
+                metadata=dict(d.get("metadata", {}) or {}),
+            )
+            for d in dicts
+        ]
+
+    @staticmethod
+    def _has_table_chunk(results: list[RankedResult]) -> bool:
+        """Cheap pre-check: any hit references a table_group_id."""
+        for r in results:
+            md = r.metadata or {}
+            if md.get("table_group_id") and md.get("chunk_type") == "table_row":
+                return True
+        return False
+
+    def _apply_xref_expansion(
+        self, reranked: list[RankedResult],
+    ) -> list[RankedResult]:
+        """Expand chunk-to-chunk xref edges after rerank (default-off, MVP).
+
+        No-op unless ``xref_expansion_enabled`` is True. Falls back to the
+        original ``reranked`` on any error so retrieval is never blocked.
+        """
+        if not getattr(self, "xref_expansion_enabled", False) or not reranked:
+            return reranked
+        if getattr(self, "_weaviate_client", None) is None:
+            return reranked
         try:
-            if self._weaviate_client is not None:
-                results = search(
-                    client=self._weaviate_client,
-                    query=bm25_query,
-                    query_embedding=query_embedding,
-                    alpha=alpha,
-                    limit=search_limit,
-                    filters=filters,
-                )
-            else:
-                with get_client() as client:
-                    ensure_collection(client)
+            dict_hits = self._ranked_to_dicts(reranked)
+            expanded = expand_xref_hits(
+                dict_hits,
+                client=self._weaviate_client,
+                collection=self._resolve_collection(),
+                enabled=True,
+                max_per_hit=getattr(self, "xref_max_per_hit", 2),
+                max_total=getattr(self, "xref_max_total", 6),
+            )
+            return self._dicts_to_ranked(expanded)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "xref_expansion failed (non-fatal): %s — passing reranked through.",
+                exc,
+            )
+            return reranked
+
+    def _apply_table_expansion(
+        self, reranked: list[RankedResult],
+    ) -> list[RankedResult]:
+        """Expand table-group siblings in-place after rerank (opt-in).
+
+        No-op unless ``enable_table_group_expansion`` is True and the hit
+        list actually contains a table chunk. Falls back to the original
+        ``reranked`` on any error so retrieval is never blocked.
+        """
+        if not getattr(self, "enable_table_group_expansion", False) or not reranked:
+            return reranked
+        if not self._has_table_chunk(reranked):
+            return reranked
+        if getattr(self, "_weaviate_client", None) is None:
+            return reranked
+        try:
+            dict_hits = self._ranked_to_dicts(reranked)
+            expanded = expand_table_group_hits(
+                dict_hits,
+                client=self._weaviate_client,
+                collection=self._resolve_collection(),
+                max_rows_per_group=getattr(self, "table_expansion_max_rows", 0),
+                max_groups_to_expand=getattr(
+                    self, "table_expansion_max_groups", 8,
+                ),
+            )
+            return self._dicts_to_ranked(expanded)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "table_group_expansion failed (non-fatal): %s — passing reranked through.",
+                exc,
+            )
+            return reranked
+
+    def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
+        """Run hybrid search against the database layer (persistent or transient client).
+
+        This is the single seam every retrieval mode flows through (standard
+        retrieval, the deep-research ``kb_retrieve`` closure, and the agentic
+        ``retrieve`` closure all delegate here), so the gated query-time
+        chunk_role exclusion (Slice C) is injected once, right here. It is purely
+        additive (AND) and never mutates the caller's own ``filters`` list.
+        """
+        role_clauses = self._build_role_exclusion_clauses()
+        if role_clauses:
+            # Copy first — never mutate the caller's filter list in place.
+            filters = list(filters or []) + role_clauses
+        _t0 = time.perf_counter()
+        with self.tracer.span(
+            "retrieval.search.weaviate",
+            {"alpha": float(alpha), "limit": int(search_limit)},
+        ) as _span:
+            try:
+                if self._weaviate_client is not None:
                     results = search(
-                        client=client,
+                        client=self._weaviate_client,
                         query=bm25_query,
                         query_embedding=query_embedding,
                         alpha=alpha,
                         limit=search_limit,
                         filters=filters,
+                        collection=self._resolve_collection(),
                     )
+                else:
+                    with get_client() as client:
+                        ensure_collection(client, collection=self._resolve_collection())
+                        results = search(
+                            client=client,
+                            query=bm25_query,
+                            query_embedding=query_embedding,
+                            alpha=alpha,
+                            limit=search_limit,
+                            filters=filters,
+                            collection=self._resolve_collection(),
+                        )
+                _span.set_attribute("result_count", len(results))
+                logger.debug(
+                    "_do_search returned %d hits in %.1fms (alpha=%.2f, limit=%d)",
+                    len(results), (time.perf_counter() - _t0) * 1000, alpha, search_limit,
+                )
+                return results
+            except Exception as exc:
+                logger.error(
+                    "_do_search failed after %.1fms: %s",
+                    (time.perf_counter() - _t0) * 1000, exc,
+                )
+                raise
+
+    @staticmethod
+    def _build_role_exclusion_clauses() -> list:
+        """Return the default query-time chunk_role exclusion clauses (Slice C).
+
+        Mirrors ``_build_leaf_only_filter_clauses``: returns an empty list (a
+        no-op) unless BOTH gates are set — ``RAG_RETRIEVAL_ROLE_FILTER`` (the
+        feature toggle) and ``RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT`` (the migration
+        gate, like ``RAG_TREE_SCHEMA_PRESENT`` for ``node_kind``). The second
+        gate prevents referencing ``chunk_role`` on a collection that has not
+        yet been migrated/backfilled (which would fail with "no such property").
+
+        Uses ``ne`` per excluded role — deliberately fail-open: a clause
+        ``chunk_role != "navigation"`` keeps every chunk whose role is NULL
+        (legacy / un-backfilled) or "content", so no real content is ever
+        dropped. Reads the module-level settings (patchable in tests).
+        """
+        if not (RAG_RETRIEVAL_ROLE_FILTER and RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT):
+            return []
+        return [
+            SearchFilter(property="chunk_role", operator="ne", value=role)
+            for role in RAG_RETRIEVAL_EXCLUDED_ROLES
+        ]
+
+    # ─── Tree retrieval helpers (TREE_RETRIEVAL_DESIGN.md §4) ────────────
+    @staticmethod
+    def _build_leaf_only_filter_clauses(schema_present: bool) -> list:
+        """Return the default Stage-4 filter clauses that pin retrieval to leaves.
+
+        When ``schema_present`` is True (post-1.2.0 collections), section nodes
+        live in the same collection as leaf chunks. Without an explicit
+        ``node_kind="chunk"`` filter, section text would surface as low-quality
+        evidence whenever the retrieval flag is off — see the design doc's
+        section-leak analysis. Operators on legacy collections that haven't
+        run the 1.2.0 migration set ``schema_present=False`` to skip the
+        filter (which would otherwise fail with "no such property").
+        """
+        if not schema_present:
+            return []
+        return [SearchFilter(property="node_kind", operator="eq", value="chunk")]
+
+    def _expand_sections_to_leaves(
+        self,
+        section_parent_ids: list[str],
+        per_section_limit: int,
+        base_filters,
+    ) -> list:
+        """Default expansion: fetch leaf chunks under each section's id.
+
+        Tests stub this method; the real implementation reads from the vector
+        store via ``fetch_chunks_by_parent_section``.
+        """
+        from src.vector_db.weaviate.store import fetch_chunks_by_parent_section
+        if self._weaviate_client is None:
+            return []
+        raw = fetch_chunks_by_parent_section(
+            self._weaviate_client,
+            section_parent_ids,
+            limit_per_section=per_section_limit,
+        )
+        return [
+            type("E", (), {"text": r["text"], "score": 0.0,
+                           "metadata": r["metadata"], "collection": "default"})()
+            for r in raw
+        ]
+
+    def _fetch_siblings(
+        self,
+        parent_ids: list[str],
+        per_group_limit: int,
+        base_filters,
+    ) -> list:
+        """Fetch sibling chunks under each parent_section_id (Stage 4c lift).
+
+        Tests stub this method to avoid hitting Weaviate; the real
+        implementation routes through the same store helper as descent
+        expansion.
+        """
+        return self._expand_sections_to_leaves(
+            parent_ids, per_group_limit, base_filters
+        )
+
+    def _run_tree_descent(
+        self,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        descent_top_k: int,
+        leaves_per_section: int,
+        base_filters,
+    ) -> list:
+        """Stage 4b — search section nodes, then expand to their leaves.
+
+        Each expanded leaf is tagged with ``_anchor_rank`` (private metadata
+        key, leading underscore) — the 0-indexed rank of the section that
+        produced it within ``section_hits``. The rerank-fusion module
+        consumes this signal when its anchor-confidence component is
+        enabled (R1.3).
+        """
+        with self.tracer.span(
+            "retrieval.tree.descent",
+            {"descent_top_k": int(descent_top_k), "leaves_per_section": int(leaves_per_section)},
+        ) as _span:
+            section_filter = SearchFilter(
+                property="node_kind", operator="eq", value="section"
+            )
+            filters = list(base_filters or []) + [section_filter]
+            section_hits = self._do_search(
+                bm25_query, query_embedding, alpha, descent_top_k, filters
+            )
+            # Per TREE_RETRIEVAL_DESIGN.md §4.1: leaves under section S have
+            # parent_section_id == S.chunk_id.
+            parent_ids = [
+                (h.metadata.get("chunk_id") or "")
+                for h in section_hits
+            ]
+            anchor_rank_by_pid: dict[str, int] = {}
+            for rank, pid in enumerate(parent_ids):
+                if pid and pid not in anchor_rank_by_pid:
+                    anchor_rank_by_pid[pid] = rank
+
+            leaves = self._expand_sections_to_leaves(
+                parent_ids, leaves_per_section, base_filters
+            )
+            for leaf in leaves:
+                meta = getattr(leaf, "metadata", None)
+                if meta is None:
+                    meta = {}
+                    try:
+                        leaf.metadata = meta
+                    except AttributeError:  # pragma: no cover
+                        continue
+                pid = meta.get("parent_section_id") or ""
+                ar = anchor_rank_by_pid.get(pid)
+                if ar is not None:
+                    meta["_anchor_rank"] = ar
+            _span.set_attribute("leaf_count", len(leaves))
+            _span.set_attribute("section_hit_count", len(section_hits))
+            return leaves
+
+    def _run_tree_lift(
+        self,
+        seed_results: list,
+        seed_top_k: int,
+        siblings_per_group: int,
+        base_filters,
+    ) -> list:
+        """Stage 4c — for the top seeds, fetch siblings under their parent.
+
+        Each sibling is tagged with ``_anchor_rank`` — the 0-indexed rank
+        of the seed that supplied its parent section. Siblings whose
+        parent_section comes from the strongest seed score the highest
+        anchor-confidence boost in the rerank-fusion stage (R1.3).
+        """
+        with self.tracer.span(
+            "retrieval.tree.lift",
+            {"seed_top_k": int(seed_top_k), "siblings_per_group": int(siblings_per_group)},
+        ) as _span:
+            seeds = list(seed_results)[:seed_top_k]
+            parent_ids: list[str] = []
+            seen: set[str] = set()
+            for seed in seeds:
+                psid = (seed.metadata or {}).get("parent_section_id") or ""
+                if not psid or psid in seen:
+                    continue
+                seen.add(psid)
+                parent_ids.append(psid)
+            if not parent_ids:
+                _span.set_attribute("sibling_count", 0)
+                return []
+            anchor_rank_by_pid: dict[str, int] = {
+                pid: rank for rank, pid in enumerate(parent_ids)
+            }
+            siblings = self._fetch_siblings(parent_ids, siblings_per_group, base_filters)
+            for sib in siblings:
+                meta = getattr(sib, "metadata", None)
+                if meta is None:
+                    meta = {}
+                    try:
+                        sib.metadata = meta
+                    except AttributeError:  # pragma: no cover
+                        continue
+                pid = meta.get("parent_section_id") or ""
+                ar = anchor_rank_by_pid.get(pid)
+                if ar is not None:
+                    meta["_anchor_rank"] = ar
+            _span.set_attribute("sibling_count", len(siblings))
+            return siblings
+
+    def _route_documents_stage1(
+        self,
+        *,
+        processed_query: str,
+        query_embedding,
+        span=None,
+    ) -> Optional[list[str]]:
+        """RAPTOR-lite Stage-1: decompose → route each sub-query → union doc_ids.
+
+        This is the "where do I look?" step (design §3). It runs only when
+        ``RAG_DOCUMENT_ROUTING_ENABLED`` (the caller gates it) and never for
+        deep_research. It is intentionally **soft**:
+
+        * :func:`decompose_query` (C3) is identity unless decomposition is
+          enabled AND the query is a comparison — so ordinary single-doc queries
+          route a single sub-query equal to ``processed_query``;
+        * each sub-query is routed independently via :func:`route_documents`
+          (B1) over the card index, and the routed ``document_id`` values are
+          unioned (de-duped, first-seen order) across sub-queries (design §6.3);
+        * only :class:`RoutingResult` with ``used=True`` contribute — a
+          low-confidence / empty result adds nothing, and if *no* sub-query
+          routed, the result is ``None`` (→ pure flat retrieval).
+
+        The whole body is wrapped in a broad ``try/except`` so Stage-1 can never
+        break ``run()``: any failure degrades to ``None`` (flat path). The
+        returned doc_ids only shape the Stage-4 candidate **pool**
+        (``_collect_candidates``); the reranker stays the final authority and
+        ``RAG_DOCUMENT_ROUTING_BOOST`` (default 0.0) is a reserved tiny tie-break
+        — candidate-pool composition is the mechanism for this slice (no
+        post-rerank score override; design §6.2/§7).
+
+        Args:
+            processed_query: The (sanitised) query whose embedding is already
+                computed and cached.
+            query_embedding: The dense vector for ``processed_query`` — reused
+                verbatim for the identity sub-query so it is **never re-embedded**.
+            span: Optional tracing span for lightweight observability.
+
+        Returns:
+            The unioned routed ``document_id`` list (truthy) when at least one
+            sub-query routed with confidence, otherwise ``None`` (flat fallback).
+        """
+        try:
+            decomp = decompose_query(processed_query)
+            subqueries = [
+                s for s in (decomp.subqueries or []) if isinstance(s, str) and s.strip()
+            ]
+            if not subqueries:
+                # decompose_query is identity-safe, but be defensive.
+                subqueries = [processed_query]
+
+            routed: list[str] = []
+            seen: set[str] = set()
+            routing_used = False
+            for sub in subqueries:
+                # Reuse the already-computed embedding for the identity sub-query
+                # (equal to processed_query) — do NOT re-embed it. Other
+                # sub-queries (from decomposition) are embedded once via the
+                # shared LRU cache helper.
+                if sub == processed_query:
+                    sub_embedding = query_embedding
+                else:
+                    sub_embedding = self._embed_query_cached(sub)
+
+                result = route_documents(
+                    sub_embedding, client=self._weaviate_client, query_text=sub
+                )
+                if not result.used:
+                    continue
+                routing_used = True
+                for doc_id in result.doc_ids:
+                    if doc_id and doc_id not in seen:
+                        seen.add(doc_id)
+                        routed.append(doc_id)
+
+            if span is not None:
+                span.set_attribute("routing_decomposed", bool(decomp.decomposed))
+                span.set_attribute("routing_subquery_count", len(subqueries))
+                span.set_attribute("routing_used", bool(routing_used))
+                span.set_attribute("routed_doc_count", len(routed))
+
+            # Empty union → None so Stage 4 runs the byte-identical flat path.
+            return routed or None
+        except Exception as exc:  # noqa: BLE001 — Stage-1 must never break run().
             logger.debug(
-                "_do_search returned %d hits in %.1fms (alpha=%.2f, limit=%d)",
-                len(results), (time.perf_counter() - _t0) * 1000, alpha, search_limit,
+                "Stage-1 document routing failed (%s) — falling back to pure "
+                "flat retrieval.",
+                exc,
             )
-            return results
-        except Exception as exc:
-            logger.error(
-                "_do_search failed after %.1fms: %s",
-                (time.perf_counter() - _t0) * 1000, exc,
+            if span is not None:
+                try:
+                    span.set_attribute("routing_error", str(exc))
+                except Exception:  # pragma: no cover — tracing best-effort.
+                    pass
+            return None
+
+    def _embed_query_cached(self, text: str):
+        """Embed ``text`` via the shared LRU embedding cache (Stage-3 pattern).
+
+        Mirrors the Stage-3 / fallback cache logic so sub-query embeddings
+        (Stage-1 routing) reuse already-computed vectors and respect the same
+        cache bound. Side-effect-light: a cache hit moves the entry to the MRU
+        end; a miss embeds once, stores, and evicts the LRU entry past the cap.
+        """
+        if text in self._embedding_cache:
+            self._embedding_cache.move_to_end(text)
+            return self._embedding_cache[text]
+        embedding = self.embeddings.embed_query(text)
+        self._embedding_cache[text] = embedding
+        if len(self._embedding_cache) > self._embedding_cache_max:
+            self._embedding_cache.popitem(last=False)
+        return embedding
+
+    def _collect_candidates(
+        self,
+        *,
+        bm25_query: str,
+        query_embedding,
+        alpha: float,
+        search_limit: int,
+        base_filters: list,
+        tree_enabled: bool,
+        schema_present: bool,
+        descent_top_k: int,
+        leaves_per_section: int,
+        lift_seed_k: int,
+        siblings_per_group: int,
+        doc_diversity_top_per_doc: int,
+        routed_doc_ids: Optional[list[str]] = None,
+        per_doc_leaves: Optional[int] = None,
+        max_candidates: Optional[int] = None,
+    ) -> list:
+        """Run Stage 4 + (optionally) 4b descent + 4c lift; return merged list.
+
+        Always applies the leaf-only filter to Stage 4 when ``schema_present``.
+        Tree sub-stages run only when ``tree_enabled`` is True. Descent results
+        are doc-diversity capped before merge so one verbose document cannot
+        dominate the final candidate pool.
+
+        Document routing (DOCUMENT_ROUTING_DESIGN.md §6.2, §7) — when
+        ``routed_doc_ids`` is a non-empty list, a 4th candidate source is added:
+        a hybrid search restricted to those documents via the ``in`` filter
+        (``SearchFilter("document_id", "in", routed_doc_ids)``), doc-diversity
+        capped to ``per_doc_leaves`` so one routed doc cannot dominate. It is
+        unioned into the SAME dedup loop *after* the existing sources so that:
+
+          - flat results keep first priority, then descent, then lift, then
+            routed (a chunk found by both flat and routed dedupes to the flat
+            entry — first occurrence wins, matching the existing rule);
+          - the routed search NEVER hard-filters the pool — a strong chunk from
+            a non-routed doc still survives via the flat path (design §7).
+
+        After merging, the union is bounded to ``max_candidates`` (truncated,
+        order-preserving; design §6.2 — keep the reranker the final authority).
+        This bound is applied ONLY when routing is active, so the
+        ``routed_doc_ids`` None/empty path is byte-identical to pre-routing.
+
+        ``per_doc_leaves`` / ``max_candidates`` default (when None) to
+        ``RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES`` /
+        ``RAG_DOCUMENT_ROUTING_MAX_CANDIDATES``.
+        """
+        routing_active = bool(routed_doc_ids)
+        if per_doc_leaves is None:
+            per_doc_leaves = RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES
+        if max_candidates is None:
+            max_candidates = RAG_DOCUMENT_ROUTING_MAX_CANDIDATES
+
+        with self.tracer.span(
+            "retrieval.collect_candidates",
+            {"tree_enabled": bool(tree_enabled), "search_limit": int(search_limit)},
+        ) as _span:
+            _span.set_attribute(
+                "routed_doc_count", len(routed_doc_ids) if routing_active else 0
             )
-            raise
+            leaf_filters = list(base_filters or []) + self._build_leaf_only_filter_clauses(
+                schema_present=schema_present
+            )
+            leaf_results = self._do_search(
+                bm25_query, query_embedding, alpha, search_limit, leaf_filters or None
+            )
+
+            if not tree_enabled and not routing_active:
+                _span.set_attribute("candidate_count", len(leaf_results))
+                return list(leaf_results)
+
+            if tree_enabled:
+                descent = self._run_tree_descent(
+                    bm25_query=bm25_query,
+                    query_embedding=query_embedding,
+                    alpha=alpha,
+                    descent_top_k=descent_top_k,
+                    leaves_per_section=leaves_per_section,
+                    base_filters=base_filters,
+                )
+                descent_capped = self._apply_doc_diversity_cap(
+                    descent, top_per_doc=doc_diversity_top_per_doc
+                )
+
+                lift = self._run_tree_lift(
+                    seed_results=list(leaf_results),
+                    seed_top_k=lift_seed_k,
+                    siblings_per_group=siblings_per_group,
+                    base_filters=base_filters,
+                )
+            else:
+                descent_capped = []
+                lift = []
+
+            routed_capped: list = []
+            if routing_active:
+                # Reuse the leaf-only filters and add the routed-doc `in` clause.
+                # The routed limit must cover every routed doc's per-doc share
+                # while staying within the union bound.
+                routed_filters = list(leaf_filters) + [
+                    SearchFilter(
+                        property="document_id",
+                        operator="in",
+                        value=list(routed_doc_ids),
+                    )
+                ]
+                routed_limit = min(
+                    per_doc_leaves * len(routed_doc_ids), max_candidates
+                )
+                routed_results = self._do_search(
+                    bm25_query,
+                    query_embedding,
+                    alpha,
+                    routed_limit,
+                    routed_filters or None,
+                )
+                routed_capped = self._apply_doc_diversity_cap(
+                    routed_results, top_per_doc=per_doc_leaves
+                )
+
+            # Merge with uuid (preferred) / chunk_id / text fallback dedup.
+            # Order: flat → descent → lift → routed (flat keeps priority; a
+            # chunk found by multiple sources dedupes to its first occurrence).
+            merged: list = []
+            seen: set[str] = set()
+            for src in (leaf_results, descent_capped, lift, routed_capped):
+                for item in src:
+                    meta = getattr(item, "metadata", None) or {}
+                    key = (
+                        str(getattr(item, "uuid", "") or "")
+                        or str(meta.get("uuid", "") or "")
+                        or str(meta.get("chunk_id", "") or "")
+                        or getattr(item, "text", "")
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+
+            # Bound the union ONLY when routing is active (design §6.2). The
+            # None/empty-routing path is left untouched for byte-identity.
+            if routing_active and len(merged) > max_candidates:
+                merged = merged[:max_candidates]
+
+            _span.set_attribute("candidate_count", len(merged))
+            return merged
+
+    @staticmethod
+    def _apply_doc_diversity_cap(hits: list, top_per_doc: int) -> list:
+        """Keep at most ``top_per_doc`` hits per document_id, in score order.
+
+        Stable: input order is preserved across survivors, so callers that
+        already sorted by score get a top-per-doc-capped list still sorted by
+        score.
+        """
+        kept: list = []
+        per_doc: dict[str, int] = {}
+        for h in hits:
+            doc_id = (h.metadata or {}).get("document_id") or ""
+            count = per_doc.get(doc_id, 0)
+            if count >= top_per_doc:
+                continue
+            per_doc[doc_id] = count + 1
+            kept.append(h)
+        return kept
+
+    # ─── Rerank fusion helpers (R1 — BM25-RRF + heading + anchor) ────────
+    @staticmethod
+    def _candidate_key(item) -> str:
+        """Stable identifier for a candidate across BM25 + CE pools.
+
+        Uses the same precedence as ``_collect_candidates`` dedup so a
+        candidate seen in both pools matches by key.
+        """
+        meta = getattr(item, "metadata", None) or {}
+        return (
+            str(getattr(item, "uuid", "") or "")
+            or str(meta.get("uuid", "") or "")
+            or str(meta.get("chunk_id", "") or "")
+            or getattr(item, "text", "")
+        )
+
+    def _collect_bm25_ranks(
+        self,
+        bm25_query: str,
+        query_embedding,
+        search_limit: int,
+        base_filters: list,
+        candidates: list,
+    ) -> list[Optional[int]]:
+        """Run a BM25-only Weaviate search and assign 0-indexed ranks to ``candidates``.
+
+        Implementation note: Weaviate v4's hybrid query exposes only the
+        fused score (and a free-text ``explain_score``). Rather than parse
+        explain-score we run a parallel ``alpha=0.0`` (BM25-only) hybrid
+        search with the same query and filters. The cost is low because
+        BM25 is the fast path on the inverted index.
+
+        Returns:
+            Same-length list as ``candidates``: a 0-indexed BM25 rank, or
+            ``None`` for candidates that did not appear in the BM25 pool
+            (e.g., descent/lift leaves never seen by BM25).
+        """
+        try:
+            bm25_hits = self._do_search(
+                bm25_query, query_embedding, 0.0, search_limit, base_filters
+            )
+        except Exception as exc:  # pragma: no cover — defensive only
+            logger.warning(
+                "_collect_bm25_ranks: BM25-only search failed (%s); "
+                "ranks will be None for all candidates", exc,
+            )
+            return [None] * len(candidates)
+        rank_by_key: dict[str, int] = {}
+        for rank, hit in enumerate(bm25_hits):
+            key = self._candidate_key(hit)
+            if key and key not in rank_by_key:
+                rank_by_key[key] = rank
+        return [
+            rank_by_key.get(self._candidate_key(c)) for c in candidates
+        ]
+
+    @staticmethod
+    def _heading_scores_for(query: str, candidates: list) -> list[float]:
+        return [
+            heading_match_score(
+                query,
+                ((getattr(c, "metadata", None) or {}).get("heading_path") or []),
+            )
+            for c in candidates
+        ]
+
+    @staticmethod
+    def _anchor_confs_for(candidates: list, anchor_k: int) -> list[float]:
+        out: list[float] = []
+        for c in candidates:
+            meta = getattr(c, "metadata", None) or {}
+            out.append(anchor_confidence(meta.get("_anchor_rank"), anchor_k=anchor_k))
+        return out
+
+    def _apply_rerank_fusion(
+        self,
+        *,
+        query: str,
+        candidates: list,
+        reranked: list[RankedResult],
+        bm25_ranks: list[Optional[int]],
+        rerank_top_k: int,
+    ) -> list[RankedResult]:
+        """Refine reranker output using the fusion module.
+
+        ``reranked`` is the cross-encoder's top-K (already CE-sorted). We
+        rebuild a positional alignment with ``candidates``/``bm25_ranks``
+        by candidate key, compute fused scores, re-sort, and slice. When
+        fusion is disabled, returns ``reranked`` unchanged so behavior is
+        bit-identical to the legacy path.
+        """
+        if not RAG_RERANK_FUSION_ENABLED or not reranked:
+            return reranked
+
+        # Map original candidates → BM25 rank via key.
+        cand_key_to_bm25: dict[str, Optional[int]] = {}
+        for c, br in zip(candidates, bm25_ranks):
+            cand_key_to_bm25[self._candidate_key(c)] = br
+
+        # Build the parallel arrays in CE order (the order of ``reranked``).
+        ce_scores: list[float] = []
+        bm25_aligned: list[Optional[int]] = []
+        heading_aligned: list[float] = []
+        anchor_aligned: list[float] = []
+        for r in reranked:
+            key = self._candidate_key(r)
+            ce_scores.append(float(r.score))
+            bm25_aligned.append(cand_key_to_bm25.get(key))
+            heading_aligned.append(
+                heading_match_score(query, (r.metadata or {}).get("heading_path") or [])
+            )
+            anchor_aligned.append(
+                anchor_confidence(
+                    (r.metadata or {}).get("_anchor_rank"),
+                    anchor_k=RAG_RERANK_ANCHOR_K,
+                )
+            )
+
+        fused = fuse_scores(
+            ce_scores=ce_scores,
+            bm25_ranks=bm25_aligned,
+            heading_scores=heading_aligned,
+            anchor_confs=anchor_aligned,
+            weights={
+                "rrf": RAG_RERANK_RRF_LAMBDA,
+                "heading": RAG_RERANK_HEADING_LAMBDA,
+                "anchor": RAG_RERANK_ANCHOR_LAMBDA,
+            },
+            k_rrf=RAG_RERANK_RRF_K,
+        )
+
+        # Apply fused scores back onto the existing RankedResults and resort.
+        rescored = [
+            RankedResult(text=r.text, score=fused[i], metadata=r.metadata)
+            for i, r in enumerate(reranked)
+        ]
+        rescored.sort(key=lambda r: r.score, reverse=True)
+        # Collapse different renderings of the SAME table (shared table_group_id)
+        # to one best-scoring rep before capping, so two facets of one table
+        # cannot both occupy the top-K (they have different text, so no hash/fuzzy
+        # dedup catches them).
+        rescored = self._collapse_table_groups(rescored)
+        # Diversity cap: stop one document from monopolising the top-K (e.g. a
+        # spreadsheet split into many near-duplicate rows). ``rescored`` is the
+        # FULL candidate pool here, so capping then slicing promotes the next-best
+        # chunks from other documents into the freed slots.
+        return self._apply_doc_diversity(rescored, rerank_top_k)
+
+    @staticmethod
+    def _collapse_table_groups(ranked: list) -> list:
+        """Collapse chunks that are different renderings of the SAME table.
+
+        A table is chunked into multiple representations (a markdown-grid summary
+        and/or per-row-block chunks) that all share one ``table_group_id``.
+        Because those renderings are different text, no content-hash/fuzzy dedup
+        equates them, so two facets of one table can both land in the top-K and
+        read as a duplicate. Keep only the single highest-scoring chunk per
+        ``table_group_id`` (``ranked`` is already score-sorted), carrying the
+        dropped rep's ``table_markdown`` onto the survivor so the full grid stays
+        available for display/reconstruction. Chunks without a ``table_group_id``
+        pass through untouched. No-op when disabled.
+        """
+        if not RAG_TABLE_GROUP_DEDUP_ENABLED:
+            return ranked
+        kept_by_group: dict = {}
+        out: list = []
+        for r in ranked:
+            meta = getattr(r, "metadata", None) or {}
+            gid = str(meta.get("table_group_id") or "").strip()
+            if not gid:
+                out.append(r)
+                continue
+            survivor = kept_by_group.get(gid)
+            if survivor is None:
+                kept_by_group[gid] = r
+                out.append(r)
+            else:
+                # Same table already represented — drop this rep, but preserve its
+                # full-table markdown on the survivor if the survivor lacks it.
+                smeta = getattr(survivor, "metadata", None)
+                if isinstance(smeta, dict) and not str(
+                    smeta.get("table_markdown") or ""
+                ).strip():
+                    md = str(meta.get("table_markdown") or "").strip()
+                    if md:
+                        smeta["table_markdown"] = md
+        return out
+
+    @staticmethod
+    def _apply_doc_diversity(ranked: list, top_k: int) -> list:
+        """Cap how many chunks one ``document_id`` may occupy in the top ``top_k``.
+
+        Greedy by score with backfill: walk the score-sorted candidates keeping
+        at most ``ceil(top_k * RAG_RERANK_MAX_DOC_FRACTION)`` per document; if
+        diversity runs out before ``top_k`` is filled, re-add the highest-scored
+        over-cap chunks so a genuinely single-source answer is never starved and
+        recall is preserved. No-op when disabled, when the pool already fits in
+        ``top_k``, or when the fraction is >= 1.0.
+        """
+        if (
+            not RAG_RERANK_DIVERSITY_ENABLED
+            or top_k <= 0
+            or len(ranked) <= top_k
+            or RAG_RERANK_MAX_DOC_FRACTION >= 1.0
+        ):
+            return ranked[:top_k]
+        max_per_doc = max(1, math.ceil(top_k * RAG_RERANK_MAX_DOC_FRACTION))
+        selected: list = []
+        deferred: list = []
+        per_doc: dict[str, int] = {}
+        for r in ranked:
+            if len(selected) >= top_k:
+                break
+            doc = str((getattr(r, "metadata", None) or {}).get("document_id") or "")
+            if per_doc.get(doc, 0) < max_per_doc:
+                per_doc[doc] = per_doc.get(doc, 0) + 1
+                selected.append(r)
+            else:
+                deferred.append(r)
+        if len(selected) < top_k:
+            selected.extend(deferred[: top_k - len(selected)])
+        # Re-sort by score so the most relevant chunk still leads the context,
+        # regardless of the diversity-driven selection order.
+        selected.sort(key=lambda r: r.score, reverse=True)
+        return selected[:top_k]
+
+    @staticmethod
+    def _stamp_citation_indices(results: list) -> None:
+        """Stamp ``metadata["citation_index"]`` = 1-based position on each result.
+
+        The generator numbers context chunks ``[1..N]`` in this exact order
+        (``build_messages``) and the chain returns this exact list as ``results``,
+        so the index the model cites (``[N]``) maps unambiguously to the Nth
+        returned source. Mutates each result's metadata dict in place; results
+        whose ``metadata`` is not a dict are skipped.
+        """
+        for i, r in enumerate(results):
+            meta = getattr(r, "metadata", None)
+            if isinstance(meta, dict):
+                meta["citation_index"] = i + 1
+
+    # ------------------------------------------------------------------
+    # Deep-research branch helpers
+    # ------------------------------------------------------------------
+
+    def _run_deep_research(
+        self,
+        *,
+        original_question: str,
+        processed_query: str,
+        ignored_doc_ids: Optional[list[str]],
+        source_filter: Optional[str],
+        heading_filter: Optional[str],
+        tenant_id: Optional[str],
+        alpha: float,
+    ) -> DeepResearchResult:
+        """Run the recursive topic-grouped retrieval loop synchronously
+        (one ``asyncio.run`` island contained inside the activity thread)."""
+        import asyncio as _asyncio
+
+        # Build SearchFilter list once — reused for every kb_retrieve call.
+        filters: list[SearchFilter] = []
+        if ignored_doc_ids:
+            filters.append(
+                SearchFilter(
+                    property="document_id",
+                    operator="not_in",
+                    value=list(ignored_doc_ids),
+                )
+            )
+        if source_filter:
+            filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
+        if heading_filter:
+            filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
+        if tenant_id and tenant_id != "default":
+            filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
+        filters_arg = filters or None
+
+        # Capture self in the closures via local refs so we don't hold method
+        # bindings across the async boundary.
+        embeddings = self.embeddings
+        retry_provider = self.retry_provider
+        retry_policy = self.retry_policy
+        do_search = self._do_search
+        kg_expander = self._kg_expander
+        kb_top_per_node = max(1, RAG_DEEP_RESEARCH_KB_TOP_PER_NODE)
+
+        async def kb_retrieve(query: str):
+            def _blocking():
+                emb = embeddings.embed_query(query)
+                # Mirror linear-path BM25 fusion: KG-expanded terms aren't
+                # available per sub-query inside the tree; the KG snippet
+                # comes back via kg_retrieve and feeds graph_context only.
+                results = retry_provider.execute(
+                    operation_name="weaviate_hybrid_search_dr",
+                    fn=lambda: do_search(query, emb, alpha, kb_top_per_node, filters_arg),
+                    policy=retry_policy,
+                    idempotency_key=(
+                        f"dr_search:{query}:{source_filter}:{heading_filter}:{kb_top_per_node}"
+                    ),
+                )
+                return list(results or [])
+
+            return await _asyncio.to_thread(_blocking)
+
+        async def kg_retrieve(query: str):
+            if kg_expander is None:
+                return None
+
+            def _blocking():
+                er = kg_expander.expand(query, depth=1)
+                terms = list(getattr(er, "terms", []) or [])
+                gc = getattr(er, "graph_context", "") or ""
+                return KGSnippet(terms=terms, graph_context=gc)
+
+            try:
+                return await _asyncio.to_thread(_blocking)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("dr kg_retrieve failed for query=%r: %s", query, exc)
+                return None
+
+        budget = DeepResearchBudget(
+            max_nodes=RAG_DEEP_RESEARCH_MAX_NODES,
+            max_llm_calls=RAG_DEEP_RESEARCH_MAX_LLM_CALLS,
+            wall_clock_ms=RAG_STAGE_BUDGET_DEEP_RESEARCH_MS,
+            max_depth=RAG_DEEP_RESEARCH_MAX_DEPTH,
+            max_topics=RAG_DEEP_RESEARCH_MAX_TOPICS,
+            per_topic_questions=RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS,
+            graph_context_max_chars=RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS,
+        )
+
+        orchestrator = DeepResearch(
+            provider=get_llm_provider(),
+            kb_retrieve=kb_retrieve,
+            kg_retrieve=kg_retrieve if kg_expander is not None else None,
+            original_question=original_question,
+            processed_query=processed_query,
+            budget=budget,
+            reranker=self.reranker,
+            model_alias=RAG_DEEP_RESEARCH_MODEL_ALIAS,
+            max_output_tokens=RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS,
+            domain=DOMAIN_DESCRIPTION,
+        )
+
+        return _asyncio.run(orchestrator.research())
+
+    def _rerank_deep_research(
+        self,
+        dr_result: DeepResearchResult,
+        processed_query: str,
+        rerank_top_k: int,
+    ) -> list[RankedResult]:
+        """Convert deep-research topic pools into a final ``list[RankedResult]``.
+
+        Routing rule:
+
+        - Single topic (``is_unified=True``): rerank the merged pool against
+          ``processed_query`` (Option B).
+        - Multiple topics: rerank each topic's pool against its own
+          ``rerank_anchor`` (the topic name / first sub-question), take a
+          per-topic share of ``rerank_top_k``, dedupe, concatenate.
+        """
+        pools = dr_result.topic_pools
+        if not pools:
+            return []
+
+        # If the orchestrator already applied per-topic rerank with the
+        # confidence gate, consume its round-robin merge directly (capped to
+        # rerank_top_k). This is the fast path for confident multi-topic splits.
+        if dr_result.per_topic_rerank_applied and dr_result.per_topic_rerank_merged is not None:
+            return list(dr_result.per_topic_rerank_merged)[:rerank_top_k]
+
+        if dr_result.is_unified or len(pools) == 1:
+            pool = pools[0]
+            chunks = list(pool.chunks_by_id.values())
+            if not chunks:
+                return []
+            return self._safe_rerank(
+                processed_query, chunks, rerank_top_k,
+            )
+
+        # Hybrid: per-topic rerank.
+        per_topic_k = max(1, rerank_top_k // len(pools))
+        seen_ids: set[str] = set()
+        merged: list[RankedResult] = []
+        for pool in pools:
+            chunks = list(pool.chunks_by_id.values())
+            if not chunks:
+                continue
+            ranked = self._safe_rerank(
+                pool.rerank_anchor or processed_query, chunks, per_topic_k,
+            )
+            for r in ranked:
+                # Stable id for dedup across topic pools.
+                md = r.metadata or {}
+                key = (
+                    md.get("object_id")
+                    or md.get("chunk_id")
+                    or f"{md.get('source','?')}|{md.get('heading','')}|{md.get('chunk_index','')}"
+                )
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                merged.append(r)
+        return merged
+
+    def _safe_rerank(
+        self, query: str, chunks: list, top_k: int,
+    ) -> list[RankedResult]:
+        """Rerank ``chunks``, falling back to hybrid score order on any error.
+
+        Generic robustness fix (not specific to the endpoint that surfaced it):
+        the cross-encoder reranker is an EXTERNAL dependency, and its outage or a
+        misrouted endpoint must degrade ranking — never zero out (or 500) the
+        query. Used at EVERY rerank call site (primary hybrid path, standalone
+        fallback, confidence re-retrieval, and deep-research) so one reranker
+        outage can't hard-fail one path while another degrades gracefully. On any
+        reranker error we fall back to the chunks' existing hybrid/retrieval score
+        order (``_ranked_from_search_results``), which is also the measured-stronger
+        ordering when the cross-encoder is net-negative. Fail-open, mirroring the
+        rest of the pipeline.
+        """
+        try:
+            return self.reranker.rerank(query=query, documents=chunks, top_k=top_k)
+        except Exception as exc:  # noqa: BLE001 — external ranker must not nuke a query
+            logger.warning(
+                "reranker unavailable (%s) — falling back to hybrid score order "
+                "for %d chunk(s)", exc, len(chunks),
+            )
+            return self._ranked_from_search_results(chunks, top_k)
+
+    @staticmethod
+    def _retrieved_headings(ranked: list) -> list[str]:
+        """Section headings present in the retrieved results — the in-corpus topics
+        available to ground follow-up-question suggestions. Prefers the full
+        heading_path breadcrumb, falls back to the leaf heading."""
+        out: list[str] = []
+        for r in ranked or []:
+            md = getattr(r, "metadata", None) or {}
+            hp = md.get("heading_path") or []
+            if isinstance(hp, list) and hp:
+                out.append(" > ".join(str(h) for h in hp if h))
+            elif md.get("heading"):
+                out.append(str(md.get("heading")))
+        return out
 
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
@@ -401,6 +1684,352 @@ class RAGChain:
             len(top), len(ranked), (time.perf_counter() - _t0) * 1000,
         )
         return top
+
+    # ------------------------------------------------------------------
+    # Agentic-retrieval branch helper
+    # ------------------------------------------------------------------
+
+    def _run_agentic_retrieval(
+        self,
+        *,
+        original_question: str,
+        processed_query: str,
+        ignored_doc_ids: Optional[list[str]],
+        source_filter: Optional[str],
+        heading_filter: Optional[str],
+        tenant_id: Optional[str],
+        alpha: float,
+        search_limit: int,
+        rerank_top_k: int,
+        max_agentic_rounds: Optional[int],
+        fast_path: bool = False,
+    ):
+        """Run the agentic HyDE/controller/judge loop synchronously.
+
+        One ``asyncio.run`` island contained inside the activity thread, exactly
+        like ``_run_deep_research``. Composes the chain's existing retrieval and
+        rerank primitives (as injected callables) around the orchestrator's two
+        model-driven steps. Returns an ``AgenticResult``.
+        """
+        import asyncio as _asyncio
+
+        # Fail-fast on contradictory agentic config (fail-fast-at-use, matching
+        # validate_document_routing_config / validate_visual_retrieval_config).
+        validate_agentic_retrieval_config()
+
+        # Build the SearchFilter list once — reused for every retrieve call.
+        filters: list[SearchFilter] = []
+        if ignored_doc_ids:
+            filters.append(
+                SearchFilter(property="document_id", operator="not_in", value=list(ignored_doc_ids))
+            )
+        if source_filter:
+            filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
+        if heading_filter:
+            filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
+        if tenant_id and tenant_id != "default":
+            filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
+        filters_arg = filters or None
+
+        # Capture refs so the closures don't hold method bindings across threads.
+        embeddings = self.embeddings
+        retry_provider = self.retry_provider
+        retry_policy = self.retry_policy
+        do_search = self._do_search
+        kb_top = max(1, search_limit)
+
+        async def retrieve(hyde_answer: str, search_terms: list):
+            def _blocking():
+                # Embed the HyDE answer keyed on the HyDE TEXT — never the
+                # processed_query — so the processed_query LRU is not poisoned
+                # with a hypothetical-answer vector. The agentic embed bypasses
+                # self._embedding_cache entirely.
+                emb = embeddings.embed_query(hyde_answer)
+                terms = " ".join(t for t in (search_terms or []) if t)
+                # HyDE asymmetry: the dense vector follows the hypothetical
+                # answer; the BM25/lexical side stays anchored to the user's
+                # processed query (+ the controller's literal search terms).
+                bm25_query = (processed_query + " " + terms).strip() if terms else processed_query
+                results = retry_provider.execute(
+                    operation_name="weaviate_hybrid_search_agentic",
+                    fn=lambda: do_search(bm25_query, emb, alpha, kb_top, filters_arg),
+                    policy=retry_policy,
+                    idempotency_key=(
+                        f"agentic_search:{hyde_answer}:{source_filter}:{heading_filter}:{kb_top}"
+                    ),
+                )
+                return list(results or [])
+
+            return await _asyncio.to_thread(_blocking)
+
+        def thin_filter(items):
+            return _filter_thin_candidates(
+                items,
+                min_chars=RERANK_MIN_CHARS,
+                floor=rerank_top_k,
+            )
+
+        # Effective round ceiling (QFS routing without a surface classifier):
+        #  - explicit per-request override wins (clamped to the configured max);
+        #  - else QFS_AUTO lets the loop run up to max_rounds and the JUDGE's
+        #    sufficiency verdict is the real router — a single-doc query stops at
+        #    round 1 ("sufficient"), a compound/QFS query keeps finding gaps and
+        #    iterates;
+        #  - else a ceiling of 1 reproduces INC-1 single-round behaviour (combine
+        #    with RAG_AGENTIC_RANKER="cross_encoder" to also restore INC-1 order).
+        if fast_path:
+            # fast_path is the latency-first lane — the request schema already
+            # forbids an explicit max_agentic_rounds>1 here, so honour the same
+            # contract for the QFS-auto path: a single round, no iteration.
+            eff_rounds = 1
+        elif isinstance(max_agentic_rounds, int):
+            eff_rounds = max(1, min(RAG_AGENTIC_MAX_ROUNDS, max_agentic_rounds))
+        elif RAG_AGENTIC_QFS_AUTO:
+            eff_rounds = RAG_AGENTIC_MAX_ROUNDS
+        else:
+            eff_rounds = 1
+
+        # A source/heading filter pins retrieval to a single document, so the
+        # distinct-source floor cannot exceed 1 — otherwise the 'sufficient' stop
+        # could never fire and the loop would always burn to the round cap.
+        eff_min_sources = RAG_AGENTIC_MIN_SOURCES
+        if source_filter or heading_filter:
+            eff_min_sources = 1
+
+        budget = AgenticBudget(
+            max_rounds=eff_rounds,
+            max_llm_calls=RAG_AGENTIC_MAX_LLM_CALLS,
+            wall_clock_ms=RAG_AGENTIC_WALL_CLOCK_MS,
+            keep_top_k_per_round=RAG_AGENTIC_KEEP_TOP_K_PER_ROUND,
+            final_max_chunks=RAG_AGENTIC_FINAL_MAX_CHUNKS,
+            min_kept_chunks=RAG_AGENTIC_MIN_KEPT_CHUNKS,
+            min_sources=eff_min_sources,
+            relevance_threshold=RAG_AGENTIC_RELEVANCE_THRESHOLD,
+            faithfulness_threshold=RAG_AGENTIC_FAITHFULNESS_THRESHOLD,
+            sufficiency_target=RAG_AGENTIC_SUFFICIENCY_TARGET,
+            hyde_diversity_max_cosine=RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE,
+            ranker=RAG_AGENTIC_RANKER,
+            judge_pool_max=RAG_AGENTIC_JUDGE_POOL_MAX,
+        )
+
+        orchestrator = AgenticRetrieval(
+            provider=get_llm_provider(),
+            retrieve=retrieve,
+            reranker=self.reranker,
+            thin_filter=thin_filter,
+            doc_diversity=self._apply_doc_diversity,
+            original_question=original_question,
+            processed_query=processed_query,
+            budget=budget,
+            controller_alias=RAG_AGENTIC_CONTROLLER_MODEL_ALIAS,
+            judge_alias=RAG_AGENTIC_JUDGE_MODEL_ALIAS,
+            hyde_max_tokens=RAG_AGENTIC_HYDE_MAX_TOKENS,
+            hyde_temperature=RAG_AGENTIC_HYDE_TEMPERATURE,
+            llm_timeout_s=QUERY_PROCESSING_TIMEOUT,
+            final_top_k=rerank_top_k,
+            json_mode=RAG_AGENTIC_LLM_JSON_MODE,
+            judge_concise=not RAG_AGENTIC_JUDGE_VERBOSE,
+            fill_mode=RAG_AGENTIC_FILL_MODE,
+            role_backstop=RAG_AGENTIC_ROLE_BACKSTOP,
+            excluded_roles=RAG_RETRIEVAL_EXCLUDED_ROLES,
+            domain=DOMAIN_DESCRIPTION,
+        )
+        return _asyncio.run(orchestrator.run())
+
+    # ------------------------------------------------------------------
+    # Turn-loop retrieval primitive (TURN_LOOP_DESIGN.md §3)
+    # ------------------------------------------------------------------
+
+    def retrieve_primitive(
+        self,
+        query_text: str,
+        hyde_text: Optional[str] = None,
+        *,
+        top_k: int,
+        source_filter: Optional[str] = None,
+        heading_filter: Optional[str] = None,
+    ) -> list[dict]:
+        """One idempotent embed -> hybrid-search -> rerank -> filter round.
+
+        The worker-side primitive behind the ``retrieve_ranked`` Temporal
+        activity (turn-level conversation loop). Deliberately minimal: no
+        Stage 1 / LangGraph query processing, no LLM calls, no KG expansion
+        and — by loop-level rule — **no** ``ignored_doc_ids`` suppression
+        (deepening into a previously served document is a first-class move;
+        design §5). Safe under Temporal retries.
+
+        HyDE asymmetry (same contract as the agentic ``retrieve`` closure):
+        the dense vector follows ``hyde_text`` when given, while the
+        BM25/lexical side stays anchored to ``query_text``. The embedding
+        reuses the chain's query-embedding LRU, keyed on the text actually
+        embedded so a hypothetical-answer vector can never be served for the
+        plain query (or vice versa). The cross-encoder rerank is always
+        anchored to ``query_text`` — never the hypothetical answer.
+
+        Args:
+            query_text: The controller's literal search query (BM25 anchor
+                and rerank anchor).
+            hyde_text: Optional hypothetical answer; when given it is the
+                text embedded for the dense side.
+            top_k: Ranked-chunk count to return (> 0).
+            source_filter: Optional exact-match ``source`` filter.
+            heading_filter: Optional exact-match ``heading`` filter.
+
+        Returns:
+            Up to ``top_k`` dicts shaped exactly like
+            ``turn_loop.schemas.EvidenceChunk`` minus ``provenance`` /
+            ``round_added``: ``{chunk_id, document_id, source_key, source,
+            heading, text, score, refactored_char_start,
+            refactored_char_end}``. ``chunk_id`` is the stable Weaviate
+            object uuid (plumbed through search-result metadata by the store
+            layer), with the same deterministic metadata fallback the
+            deep-research/agentic dedup uses when it is absent.
+
+        Raises:
+            ValueError: On empty ``query_text``, non-positive ``top_k`` or
+                unsafe filter values (non-retryable at the activity layer).
+        """
+        if not isinstance(query_text, str) or not query_text.strip():
+            raise ValueError("query_text must be a non-empty string")
+        query_text = query_text.strip()
+        validate_positive_int("top_k", int(top_k))
+        source_filter = validate_filter_value("source_filter", source_filter)
+        heading_filter = validate_filter_value("heading_filter", heading_filter)
+        hyde_text = (hyde_text or "").strip() or None
+
+        _t_start = time.perf_counter()
+        with self.tracer.span(
+            "retrieval.turn_retrieve",
+            {"top_k": int(top_k), "hyde": bool(hyde_text)},
+        ) as span:
+            # Embed the dense-side text through the shared LRU, keyed on the
+            # text actually embedded (never cross-keyed, so no cache poisoning).
+            embed_text = hyde_text if hyde_text else query_text
+            t0 = time.perf_counter()
+            cache_hit = embed_text in self._embedding_cache
+            if cache_hit:
+                embedding = self._embedding_cache[embed_text]
+                self._embedding_cache.move_to_end(embed_text)
+            else:
+                embedding = self.embeddings.embed_query(embed_text)
+                self._embedding_cache[embed_text] = embedding
+                if len(self._embedding_cache) > self._embedding_cache_max:
+                    self._embedding_cache.popitem(last=False)
+            span.set_attribute("embed_cache_hit", cache_hit)
+            embed_ms = (time.perf_counter() - t0) * 1000
+
+            # Optional scoping filters only — never document suppression.
+            filters: list[SearchFilter] = []
+            if source_filter:
+                filters.append(
+                    SearchFilter(property="source", operator="eq", value=source_filter)
+                )
+            if heading_filter:
+                filters.append(
+                    SearchFilter(property="heading", operator="eq", value=heading_filter)
+                )
+
+            # Hybrid search through the single _do_search choke point (config
+            # alpha; candidate pool at least the configured search limit).
+            search_limit = max(SEARCH_LIMIT, int(top_k))
+            t0 = time.perf_counter()
+            search_results = self.retry_provider.execute(
+                operation_name="weaviate_hybrid_search_turn",
+                fn=lambda: self._do_search(
+                    query_text, embedding, HYBRID_SEARCH_ALPHA, search_limit,
+                    filters or None,
+                ),
+                policy=self.retry_policy,
+                idempotency_key=(
+                    f"turn_search:{embed_text}:{source_filter}:"
+                    f"{heading_filter}:{search_limit}"
+                ),
+            )
+            search_results = list(search_results or [])
+            search_ms = (time.perf_counter() - t0) * 1000
+            span.set_attribute("search_result_count", len(search_results))
+
+            # Thin/heading-only filter (same pre-rerank placement + floor as the
+            # linear Stage 4->5). The former query-side navigational drop was
+            # retired (see config.settings); only the thin/heading floor remains.
+            search_results = _filter_thin_candidates(
+                search_results,
+                min_chars=RERANK_MIN_CHARS,
+                floor=int(top_k),
+            )
+
+            # Cross-encoder rerank, anchored to the user's query text. An
+            # unavailable rerank backend (remote endpoint down/missing) must
+            # degrade to hybrid-search order, not zero out retrieval — the
+            # loop's judge re-ranks the pool anyway, so search-order results
+            # remain useful evidence.
+            t0 = time.perf_counter()
+            reranked = []
+            rerank_degraded = False
+            if search_results:
+                try:
+                    reranked = self.reranker.rerank(
+                        query=query_text,
+                        documents=search_results,
+                        top_k=int(top_k),
+                    )
+                except Exception as exc:
+                    rerank_degraded = True
+                    logger.warning(
+                        "retrieve_primitive: rerank backend failed (%s) — "
+                        "degrading to hybrid-search order",
+                        exc,
+                    )
+                    reranked = list(search_results)[: int(top_k)]
+            rerank_ms = (time.perf_counter() - t0) * 1000
+            span.set_attribute("result_count", len(reranked))
+            span.set_attribute("rerank_degraded", rerank_degraded)
+
+            chunks = [self._to_evidence_dict(r) for r in reranked[: int(top_k)]]
+            logger.debug(
+                "retrieve_primitive: %d chunks in %.1fms "
+                "(embed=%.1fms search=%.1fms rerank=%.1fms, hyde=%s)",
+                len(chunks), (time.perf_counter() - _t_start) * 1000,
+                embed_ms, search_ms, rerank_ms, bool(hyde_text),
+            )
+            return chunks
+
+    @staticmethod
+    def _to_evidence_dict(result) -> dict:
+        """Map one ranked hit to the turn-loop evidence-chunk dict shape.
+
+        Shape contract: ``turn_loop.schemas.EvidenceChunk`` minus
+        ``provenance``/``round_added``. ``chunk_id`` prefers the stable
+        Weaviate object uuid carried in metadata by the store layer; the
+        fallback is the same deterministic (source|heading|chunk_index)
+        composite the deep-research/agentic dedup uses, so the id stays
+        stable for any result shape.
+        """
+        md = getattr(result, "metadata", None) or {}
+        chunk_id = str(md.get("chunk_id") or "").strip()
+        if not chunk_id:
+            chunk_id = (
+                f"meta:{md.get('source') or md.get('document_id') or 'unknown'}"
+                f"|{md.get('heading', '')}|{md.get('chunk_index', '')}"
+            )
+
+        def _as_int(value, default: int = -1) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "chunk_id": chunk_id,
+            "document_id": str(md.get("document_id") or ""),
+            "source_key": str(md.get("source_key") or ""),
+            "source": str(md.get("source") or ""),
+            "heading": str(md.get("heading") or ""),
+            "text": getattr(result, "text", "") or "",
+            "score": float(getattr(result, "score", 0.0) or 0.0),
+            "refactored_char_start": _as_int(md.get("refactored_char_start", -1)),
+            "refactored_char_end": _as_int(md.get("refactored_char_end", -1)),
+        }
 
     def run(
         self,
@@ -424,6 +2053,10 @@ class RAGChain:
         mode: str = "query",
         retrieval_sub_mode: str = "auto",
         extra_processing: bool = False,
+        tree_retrieval: Optional[bool] = None,
+        deep_research: bool = False,
+        agentic_retrieval: Optional[bool] = None,
+        max_agentic_rounds: Optional[int] = None,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -463,6 +2096,8 @@ class RAGChain:
             "reranking": int(stage_budget_overrides.get("reranking", RAG_STAGE_BUDGET_RERANKING_MS)),
             "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
             "visual_retrieval": int(stage_budget_overrides.get("visual_retrieval", RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS)),
+            "deep_research": int(stage_budget_overrides.get("deep_research", RAG_STAGE_BUDGET_DEEP_RESEARCH_MS)),
+            "agentic_retrieval": int(stage_budget_overrides.get("agentic_retrieval", RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS)),
         }
         tp = TimingPool(
             overall_budget_ms=float(overall_timeout_ms),
@@ -476,10 +2111,47 @@ class RAGChain:
                 f"{stage}. Please narrow the query or try again."
             )
 
-        with self.tracer.span("rag_chain.run", {"query_length": len(query)}) as root_span:
+        # Per-stage outcomes ledger threaded through to ``decide_terminal``.
+        # Stages append to this as they run (or are skipped). Bail-out sites
+        # consult ``decide_terminal`` rather than authoring action strings.
+        outcomes: list[StageOutcome] = []
+
+        def _decision_to_action_fields(d: TerminalDecision) -> dict:
+            """Translate a TerminalDecision into RAGResponse kwargs.
+
+            Centralises enum -> string serialisation so the RAGResponse
+            wire shape stays string-based (back-compat with the
+            response.action equality check on the consumer side).
+            """
+            return {
+                "action": d.action,
+                "ask_user_reason": (
+                    d.ask_user_reason.value if d.ask_user_reason is not None else None
+                ),
+                "degraded": d.degraded,
+            }
+
+        retrieval_mode = "deep_research" if deep_research else mode
+        with self.tracer.span(
+            "retrieval.rag",
+            {
+                "query_len": len(query),
+                "retrieval_mode": retrieval_mode,
+                "generation_enabled": (not skip_generation) and (mode != "retrieval"),
+                "top_k": rerank_top_k,
+            },
+        ) as root_span:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
             rerank_top_k = validate_positive_int("rerank_top_k", rerank_top_k)
+            # Floor client search_limit/rerank_top_k to the configured retrieval
+            # sizes (RAG_SEARCH_LIMIT/RAG_RERANK_TOP_K). UI clients hardcode small
+            # presets (e.g. 10/5) which truncate the candidate pool and cut body
+            # chunks that rank beyond a small top-K (e.g. an answer chunk at rank
+            # ~10). settings.py is the single source; this enforces it.
+            if RETRIEVAL_ENFORCE_CONFIG_FLOOR:
+                search_limit = max(search_limit, SEARCH_LIMIT)
+                rerank_top_k = max(rerank_top_k, RERANK_TOP_K)
             source_filter = validate_filter_value("source_filter", source_filter)
             heading_filter = validate_filter_value("heading_filter", heading_filter)
             # Retrieval mode never generates an answer regardless of caller intent.
@@ -488,7 +2160,7 @@ class RAGChain:
 
             # Stage 1: Query processing (+ input rails in parallel if NeMo enabled)
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.process_query", parent=root_span):
+            with self.tracer.span("retrieval.rag.process_query", parent=root_span):
                 processing_query = query
                 if memory_context:
                     processing_query = (
@@ -511,7 +2183,7 @@ class RAGChain:
                     from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
 
                     # PII gate: run PII detection synchronously before parallel stage
-                    with self.tracer.span("rag_chain.pii_gate", parent=root_span):
+                    with self.tracer.span("retrieval.rag.pii_gate", parent=root_span):
                         try:
                             redacted_text, pii_detections = redact_pii(query)
                             if pii_detections:
@@ -532,7 +2204,7 @@ class RAGChain:
                             logger.warning("PII gate failed: %s — continuing with original query", e)
                             pii_gated_query = processing_query
 
-                    with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
+                    with _TP(max_workers=RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS, thread_name_prefix="stage1") as stage1_pool:
                         qp_future: _Fut = stage1_pool.submit(
                             process_query,
                             pii_gated_query,
@@ -594,13 +2266,31 @@ class RAGChain:
                     ),
                 }
 
-                # Handle reject/canned responses from merge gate
+                # Handle reject/canned responses from merge gate.
+                # Routed through ``decide_terminal`` so the action choice
+                # (and ask_user_reason on reject) is single-sourced.
                 if merge_decision["action"] in ("reject", "canned"):
+                    # Detect injection vs empty-text by looking at input-rail
+                    # verdicts; sanitiser empty-rejects produce no rail error.
+                    if merge_decision["action"] == "reject":
+                        injection_detected = any(
+                            r.verdict.value not in ("allow", "pass")
+                            for r in (input_rail_result.rail_executions if input_rail_result else [])
+                        )
+                        if injection_detected:
+                            outcomes.append(
+                                StageOutcome("input_rails", StageStatus.ERROR, "injection")
+                            )
+                    decision = decide_terminal(
+                        outcomes=outcomes,
+                        deep_research=bool(deep_research),
+                        has_results=False,
+                        sanitizer_verdict=merge_decision["action"],
+                    )
                     return RAGResponse(
                         query=query,
                         processed_query=query_result.processed_query,
                         query_confidence=query_result.confidence,
-                        action="ask_user" if merge_decision["action"] == "reject" else "canned",
                         clarification_message=merge_decision["message"],
                         stage_timings=tp.entries(),
                         timing_totals=tp.totals(),
@@ -608,37 +2298,89 @@ class RAGChain:
                         budget_exhausted_stage=tp.budget_exhausted_stage,
                         conversation_id=conversation_id,
                         guardrails=guardrails_metadata,
+                        **_decision_to_action_fields(decision),
                     )
 
+            # Bypass the LLM-confidence-loop ask_user gate when the caller has
+            # explicitly opted into deep_research. Rationale: the user has
+            # already accepted DR's latency cost, and DR's recursive decomposer
+            # is designed to recover from messy/terse queries. Without this
+            # bypass, the LLM-confidence loop's "this seems too vague" verdict
+            # (or its exhausted-with-confidence=0.0 path) refuses to retrieve
+            # even though DR could have answered.
+            #
+            # Hard sanitizer rejections (empty/injection_detected) author
+            # specific clarification strings. We still honour those by NOT
+            # bypassing when the message matches one of the sanitizer's
+            # signature strings — the sanitizer fires before the LangGraph loop
+            # and represents a request-level reject (security/empty), not a
+            # retrieval-quality concern.
+            _SANITIZER_REJECT_MESSAGES = (
+                "Your query appears to be empty.",
+                "Your query could not be processed.",
+            )
+            _is_sanitizer_reject = (
+                query_result.clarification_message is not None
+                and any(
+                    s in query_result.clarification_message
+                    for s in _SANITIZER_REJECT_MESSAGES
+                )
+            )
+            _dr_bypass_ask_user = bool(deep_research) and not _is_sanitizer_reject
+            # The LLM-confidence loop's "vague query" verdict is bypassed
+            # under DR (DR's recursive decomposer recovers from vague
+            # queries on its own); ``decide_terminal`` enforces that policy.
             if query_result.action == QueryAction.ASK_USER:
-                return RAGResponse(
-                    query=query,
-                    processed_query=query_result.processed_query,
-                    query_confidence=query_result.confidence,
-                    action="ask_user",
-                    clarification_message=query_result.clarification_message,
-                    stage_timings=tp.entries(),
-                    timing_totals=tp.totals(),
-                    budget_exhausted=tp.budget_exhausted,
-                    budget_exhausted_stage=tp.budget_exhausted_stage,
-                    conversation_id=conversation_id,
-                    guardrails=guardrails_metadata,
+                # Hard sanitizer rejects (empty/injection) can also surface
+                # via QueryAction.ASK_USER; keep their stronger reason.
+                sanitizer_verdict = "reject" if _is_sanitizer_reject else None
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=False,
+                    sanitizer_verdict=sanitizer_verdict,
+                    confidence_ask_user=not _is_sanitizer_reject,
                 )
+                # Under DR the decision may come back as "answer"; only return
+                # early when the centralized brain agrees we should give up.
+                if decision.action != "answer":
+                    return RAGResponse(
+                        query=query,
+                        processed_query=query_result.processed_query,
+                        query_confidence=query_result.confidence,
+                        clarification_message=query_result.clarification_message,
+                        stage_timings=tp.entries(),
+                        timing_totals=tp.totals(),
+                        budget_exhausted=tp.budget_exhausted,
+                        budget_exhausted_stage=tp.budget_exhausted_stage,
+                        conversation_id=conversation_id,
+                        guardrails=guardrails_metadata,
+                        **_decision_to_action_fields(decision),
+                    )
             if tp.budget_exhausted:
-                tp.log_summary()
-                return RAGResponse(
-                    query=query,
-                    processed_query=query_result.processed_query,
-                    query_confidence=query_result.confidence,
-                    action="ask_user",
-                    clarification_message=_budget_clarification("query processing"),
-                    stage_timings=tp.entries(),
-                    timing_totals=tp.totals(),
-                    budget_exhausted=True,
-                    budget_exhausted_stage=tp.budget_exhausted_stage,
-                    conversation_id=conversation_id,
-                    guardrails=guardrails_metadata,
+                outcomes.append(
+                    StageOutcome("query_processing", StageStatus.BUDGET_EXHAUSTED)
                 )
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=False,
+                )
+                if decision.action != "answer":
+                    tp.log_summary()
+                    return RAGResponse(
+                        query=query,
+                        processed_query=query_result.processed_query,
+                        query_confidence=query_result.confidence,
+                        clarification_message=_budget_clarification("query processing"),
+                        stage_timings=tp.entries(),
+                        timing_totals=tp.totals(),
+                        budget_exhausted=True,
+                        budget_exhausted_stage=tp.budget_exhausted_stage,
+                        conversation_id=conversation_id,
+                        guardrails=guardrails_metadata,
+                        **_decision_to_action_fields(decision),
+                    )
 
             # Use PII-redacted query if available from merge gate
             processed_query = (
@@ -654,12 +2396,115 @@ class RAGChain:
                 memory_context = None
                 memory_recent_turns = None
 
+            # Hoisted state used by stages 2–5 OR by the deep-research branch.
+            # When deep_research=True, the recursive loop populates `reranked`
+            # + `graph_context` + `kg_expanded_terms` directly and stages 2–5
+            # are skipped via the `_dr_active` guard.
+            kg_expanded_terms: list[str] = []
+            graph_context: str = ""
+            bm25_query: str = processed_query
+            query_embedding = None
+            search_results: list = []
+            reranked: list[RankedResult] = []
+            dr_result: Optional[DeepResearchResult] = None
+            ag_result = None
+            _dr_active = bool(deep_research)
+            # Agentic retrieval shares the deep-research seam: it is an alternate
+            # orchestrator that REPLACES the linear stages 2-5, populating
+            # `reranked` + `graph_context` directly. Mutually exclusive with
+            # deep_research (enforced at the request schema); resolved defensively
+            # here too so deep_research always wins if both somehow arrive.
+            _agentic_resolved = (
+                agentic_retrieval
+                if isinstance(agentic_retrieval, bool)
+                else RAG_AGENTIC_RETRIEVAL_ENABLED
+            )
+            _agentic_active = bool(_agentic_resolved) and not _dr_active
+            # When EITHER alternate orchestrator owns retrieval, the linear
+            # stage-2..5 guards (`not _alt_active`) skip their work.
+            _alt_active = _dr_active or _agentic_active
+
+            if _dr_active:
+                t0 = time.perf_counter()
+                with self.tracer.span("retrieval.deep_research", parent=root_span) as dr_span:
+                    try:
+                        dr_result = self._run_deep_research(
+                            original_question=query,
+                            processed_query=processed_query,
+                            ignored_doc_ids=ignored_doc_ids,
+                            source_filter=source_filter,
+                            heading_filter=heading_filter,
+                            tenant_id=tenant_id,
+                            alpha=alpha,
+                        )
+                        reranked = self._rerank_deep_research(
+                            dr_result, processed_query, rerank_top_k,
+                        )
+                        graph_context = dr_result.graph_context or ""
+                        dr_span.set_attribute("dr_node_count", dr_result.node_count)
+                        dr_span.set_attribute("dr_llm_calls", dr_result.llm_call_count)
+                        dr_span.set_attribute("dr_topic_count", len(dr_result.topic_pools))
+                        dr_span.set_attribute("dr_is_unified", dr_result.is_unified)
+                        dr_span.set_attribute("dr_budget_exhausted", dr_result.budget_exhausted)
+                        if dr_result.budget_exhausted_reason:
+                            dr_span.set_attribute(
+                                "dr_budget_reason", dr_result.budget_exhausted_reason
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("deep_research branch failed: %s", exc)
+                        dr_span.set_attribute("dr_error", str(exc))
+                        # Fall back to empty pool — generation will see no context
+                        # and emit the standard "no evidence" response.
+                        reranked = []
+                        graph_context = ""
+                        dr_result = None
+                tp.record("deep_research", "retrieval", started_at=t0)
+                if tp.check_stage_budget("deep_research"):
+                    tp.mark_budget_exhausted("deep_research")
+
+            if _agentic_active:
+                t0 = time.perf_counter()
+                with self.tracer.span("retrieval.agentic", parent=root_span) as ag_span:
+                    try:
+                        ag_result = self._run_agentic_retrieval(
+                            original_question=query,
+                            processed_query=processed_query,
+                            ignored_doc_ids=ignored_doc_ids,
+                            source_filter=source_filter,
+                            heading_filter=heading_filter,
+                            tenant_id=tenant_id,
+                            alpha=alpha,
+                            search_limit=search_limit,
+                            rerank_top_k=rerank_top_k,
+                            max_agentic_rounds=max_agentic_rounds,
+                            fast_path=(
+                                RAG_DEFAULT_FAST_PATH if fast_path is None
+                                else bool(fast_path)
+                            ),
+                        )
+                        reranked = ag_result.reranked
+                        graph_context = ag_result.graph_context or ""
+                        ag_span.set_attribute("ag_rounds_run", ag_result.rounds_run)
+                        ag_span.set_attribute("ag_llm_calls", ag_result.llm_calls)
+                        ag_span.set_attribute("ag_judge_calls", ag_result.judge_calls)
+                        ag_span.set_attribute("ag_kept_count", ag_result.kept_count)
+                        ag_span.set_attribute("ag_stop_reason", ag_result.stop_reason)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("agentic_retrieval branch failed: %s", exc)
+                        ag_span.set_attribute("ag_error", str(exc))
+                        # Fall back to empty pool — generation will see no context
+                        # and emit the standard "no evidence" response.
+                        reranked = []
+                        graph_context = ""
+                        ag_result = None
+                tp.record("agentic_retrieval", "retrieval", started_at=t0)
+                if tp.check_stage_budget("agentic_retrieval"):
+                    tp.mark_budget_exhausted("agentic_retrieval")
+
             # Stage 2: KG expansion
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
-                kg_expanded_terms = []
-                graph_context = ""
-                if self._kg_expander:
+            with self.tracer.span("retrieval.kg_expand", parent=root_span) as kg_span:
+                if not _alt_active and self._kg_expander:
                     expansion_result = self._kg_expander.expand(processed_query, depth=1)
                     kg_expanded_terms = (
                         expansion_result.terms
@@ -670,155 +2515,348 @@ class RAGChain:
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
                 kg_span.set_attribute("kg_graph_context_len", len(graph_context))
             tp.record("kg_expansion", "retrieval", started_at=t0)
-            if tp.check_stage_budget("kg_expansion"):
+            if not _alt_active and tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
-            if tp.budget_exhausted:
-                tp.log_summary()
-                return RAGResponse(
-                    query=query,
-                    processed_query=processed_query,
-                    query_confidence=query_result.confidence,
-                    action="ask_user",
-                    clarification_message=_budget_clarification("KG expansion"),
-                    kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=tp.entries(),
-                    timing_totals=tp.totals(),
-                    budget_exhausted=True,
-                    budget_exhausted_stage=tp.budget_exhausted_stage,
-                    conversation_id=conversation_id,
+            # When deep research is active it already consumed the retrieval
+            # budget by design; stages 2-5 are skipped, so don't let their
+            # passive budget checks trip the chain to ask_user.
+            if tp.budget_exhausted and not _alt_active:
+                outcomes.append(
+                    StageOutcome("kg_expansion", StageStatus.BUDGET_EXHAUSTED)
                 )
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=False,
+                )
+                if decision.action != "answer":
+                    tp.log_summary()
+                    return RAGResponse(
+                        query=query,
+                        processed_query=processed_query,
+                        query_confidence=query_result.confidence,
+                        clarification_message=_budget_clarification("KG expansion"),
+                        kg_expanded_terms=kg_expanded_terms or None,
+                        stage_timings=tp.entries(),
+                        timing_totals=tp.totals(),
+                        budget_exhausted=True,
+                        budget_exhausted_stage=tp.budget_exhausted_stage,
+                        conversation_id=conversation_id,
+                        **_decision_to_action_fields(decision),
+                    )
 
-            if kg_expanded_terms:
-                bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
-            else:
-                bm25_query = processed_query
+            if not _alt_active:
+                if kg_expanded_terms:
+                    bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:RAG_KG_BM25_APPEND_TERMS])
+                else:
+                    bm25_query = processed_query
 
             # Stage 3: Query embedding (with LRU cache for exact repeats)
             t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.embed_query", parent=root_span) as embed_span:
-                cache_hit = processed_query in self._embedding_cache
-                if cache_hit:
-                    query_embedding = self._embedding_cache[processed_query]
-                    self._embedding_cache.move_to_end(processed_query)
-                    embed_span.set_attribute("cache_hit", True)
+            with self.tracer.span("retrieval.embed_query", parent=root_span) as embed_span:
+                if not _alt_active:
+                    cache_hit = processed_query in self._embedding_cache
+                    if cache_hit:
+                        query_embedding = self._embedding_cache[processed_query]
+                        self._embedding_cache.move_to_end(processed_query)
+                        embed_span.set_attribute("cache_hit", True)
+                    else:
+                        query_embedding = self.embeddings.embed_query(processed_query)
+                        self._embedding_cache[processed_query] = query_embedding
+                        if len(self._embedding_cache) > self._embedding_cache_max:
+                            self._embedding_cache.popitem(last=False)
+                        embed_span.set_attribute("cache_hit", False)
                 else:
-                    query_embedding = self.embeddings.embed_query(processed_query)
-                    self._embedding_cache[processed_query] = query_embedding
-                    if len(self._embedding_cache) > self._embedding_cache_max:
-                        self._embedding_cache.popitem(last=False)
-                    embed_span.set_attribute("cache_hit", False)
+                    embed_span.set_attribute("skipped_for_deep_research", True)
             tp.record("embedding", "retrieval", started_at=t0)
-            if tp.check_stage_budget("embedding"):
+            if not _alt_active and tp.check_stage_budget("embedding"):
                 tp.mark_budget_exhausted("embedding")
-            if tp.budget_exhausted:
-                tp.log_summary()
-                return RAGResponse(
-                    query=query,
-                    processed_query=processed_query,
-                    query_confidence=query_result.confidence,
-                    action="ask_user",
-                    clarification_message=_budget_clarification("embedding"),
-                    kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=tp.entries(),
-                    timing_totals=tp.totals(),
-                    budget_exhausted=True,
-                    budget_exhausted_stage=tp.budget_exhausted_stage,
-                    conversation_id=conversation_id,
+            if tp.budget_exhausted and not _alt_active:
+                outcomes.append(
+                    StageOutcome("embedding", StageStatus.BUDGET_EXHAUSTED)
                 )
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=False,
+                )
+                if decision.action != "answer":
+                    tp.log_summary()
+                    return RAGResponse(
+                        query=query,
+                        processed_query=processed_query,
+                        query_confidence=query_result.confidence,
+                        clarification_message=_budget_clarification("embedding"),
+                        kg_expanded_terms=kg_expanded_terms or None,
+                        stage_timings=tp.entries(),
+                        timing_totals=tp.totals(),
+                        budget_exhausted=True,
+                        budget_exhausted_stage=tp.budget_exhausted_stage,
+                        conversation_id=conversation_id,
+                        **_decision_to_action_fields(decision),
+                    )
+
+            # Stage 3.5: Document routing (RAPTOR-lite Stage-1, B3).
+            # Gated on RAG_DOCUMENT_ROUTING_ENABLED and skipped for deep_research
+            # (which has its own recursive path and bypasses Stage 4 entirely).
+            # Decompose the query (identity unless decomposition is enabled AND
+            # the query is a comparison), route EACH sub-query over the card index
+            # independently, and union the routed doc_ids into a soft candidate
+            # hint for Stage 4. This NEVER hard-filters: routed_doc_ids only shapes
+            # the candidate pool in _collect_candidates (B2); the single rerank
+            # below stays the final authority (design §6.2/§7). Soft + degrade-to-
+            # flat: when disabled, low-confidence, or on ANY failure here,
+            # routed_doc_ids stays None and Stage 4 runs the byte-identical flat path.
+            routed_doc_ids: Optional[list[str]] = None
+            if RAG_DOCUMENT_ROUTING_ENABLED and not _alt_active:
+                with self.tracer.span(
+                    "retrieval.route_documents", parent=root_span
+                ) as route_span:
+                    routed_doc_ids = self._route_documents_stage1(
+                        processed_query=processed_query,
+                        query_embedding=query_embedding,
+                        span=route_span,
+                    )
 
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
             filters = []
-            if ignored_doc_ids:
-                filters.append(
-                    SearchFilter(
-                        property="document_id",
-                        operator="not_in",
-                        value=list(ignored_doc_ids),
+            if not _alt_active:
+                if ignored_doc_ids:
+                    filters.append(
+                        SearchFilter(
+                            property="document_id",
+                            operator="not_in",
+                            value=list(ignored_doc_ids),
+                        )
                     )
-                )
-            if source_filter:
-                filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
-            if heading_filter:
-                filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
-            if tenant_id and tenant_id != "default":
-                filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
+                if source_filter:
+                    filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
+                if heading_filter:
+                    filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
+                if tenant_id and tenant_id != "default":
+                    filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
-            with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
-                search_results = self.retry_provider.execute(
-                    operation_name="weaviate_hybrid_search",
-                    fn=lambda: self._do_search(
-                        bm25_query, query_embedding, alpha, search_limit, filters or None,
-                    ),
-                    policy=self.retry_policy,
-                    idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
-                )
-                search_span.set_attribute("search_result_count", len(search_results))
+            # Per-request override beats config default (P4 §6).
+            tree_enabled_effective = (
+                RAG_TREE_RETRIEVAL_ENABLED
+                if tree_retrieval is None
+                else bool(tree_retrieval)
+            )
+            with self.tracer.span("retrieval.search.hybrid", parent=root_span) as search_span:
+                if not _alt_active:
+                    search_results = self.retry_provider.execute(
+                        operation_name="weaviate_hybrid_search",
+                        fn=lambda: self._collect_candidates(
+                            bm25_query=bm25_query,
+                            query_embedding=query_embedding,
+                            alpha=alpha,
+                            search_limit=search_limit,
+                            base_filters=filters,
+                            tree_enabled=tree_enabled_effective,
+                            schema_present=RAG_TREE_SCHEMA_PRESENT,
+                            descent_top_k=RAG_TREE_DESCENT_TOP_K,
+                            leaves_per_section=RAG_TREE_DESCENT_LEAVES_PER_SECTION,
+                            lift_seed_k=RAG_TREE_LIFT_SEED_K,
+                            siblings_per_group=RAG_TREE_LIFT_SIBLINGS,
+                            doc_diversity_top_per_doc=RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC,
+                            # Stage-1 routed-doc hint (B2/B3). None on the
+                            # disabled / low-confidence / failure path → Stage 4
+                            # is byte-identical to pre-routing (soft, never a
+                            # hard filter; design §6.2/§7).
+                            routed_doc_ids=routed_doc_ids,
+                        ),
+                        policy=self.retry_policy,
+                        idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}:tree={tree_enabled_effective}",
+                    )
+                    search_span.set_attribute("search_result_count", len(search_results))
+                    search_span.set_attribute("tree_retrieval_enabled", tree_enabled_effective)
+                    search_span.set_attribute(
+                        "tree_retrieval_source",
+                        "request" if tree_retrieval is not None else "config",
+                    )
+                else:
+                    search_span.set_attribute("skipped_for_deep_research", True)
             tp.record("hybrid_search", "retrieval", started_at=t0)
-            if tp.check_stage_budget("hybrid_search"):
+            if not _alt_active and tp.check_stage_budget("hybrid_search"):
                 tp.mark_budget_exhausted("hybrid_search")
-            if tp.budget_exhausted:
+            if tp.budget_exhausted and not _alt_active:
+                outcomes.append(
+                    StageOutcome("hybrid_search", StageStatus.BUDGET_EXHAUSTED)
+                )
+                partial = self._ranked_from_search_results(search_results, rerank_top_k)
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=bool(partial),
+                )
                 tp.log_summary()
+                # Partial results -> action=search; no results -> ask_user.
+                clarif = (
+                    None
+                    if decision.action == "search"
+                    else _budget_clarification("hybrid search")
+                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
-                    action="search",
-                    results=self._ranked_from_search_results(search_results, rerank_top_k),
+                    results=partial,
+                    clarification_message=clarif,
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=True,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
+                    **_decision_to_action_fields(decision),
                 )
 
-            if not search_results:
+            # Degraded fallback: if hybrid_search returned 0 results AND we're
+            # not on the DR path, retry once with BM25-only (alpha=1.0) and
+            # looser top-k. Only if THAT also returns 0 do we route to
+            # ``decide_terminal`` for the NO_RESULTS ask_user.
+            degraded_attempted = False
+            if not _alt_active and not search_results:
+                degraded_attempted = True
+                try:
+                    degraded_results = self._do_search(
+                        bm25_query,
+                        query_embedding,
+                        1.0,
+                        max(search_limit * 2, search_limit),
+                        filters or None,
+                    )
+                    if degraded_results:
+                        search_results = degraded_results
+                        outcomes.append(
+                            StageOutcome("hybrid_search_degraded", StageStatus.OK)
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("degraded BM25-only fallback failed: %s", exc)
+
+            if not _alt_active and not search_results:
+                outcomes.append(StageOutcome("hybrid_search", StageStatus.EMPTY))
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=False,
+                    degraded=degraded_attempted,
+                )
                 tp.log_summary()
+                clarif = (
+                    "Your query did not match any documents in the corpus. "
+                    "Please rephrase or broaden the query."
+                    if decision.ask_user_reason is not None
+                    else None
+                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
-                    action="search",
                     results=[],
+                    clarification_message=clarif,
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=tp.budget_exhausted,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
+                    **_decision_to_action_fields(decision),
                 )
 
-            # Stage 5: Reranking
-            t0 = time.perf_counter()
-            with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
-                reranked = self.reranker.rerank(
-                    query=processed_query,
-                    documents=search_results,
-                    top_k=rerank_top_k,
+            # Drop thin/heading-only chunks (titles, ToC leaders) AND navigational
+            # stubs (ToC dotted-leader entries, chapter/part "read this for a
+            # description of ..." front-matter) that win dense similarity *and*
+            # the cross-encoder reranker but carry no answer content, before they
+            # consume rerank slots. Floor keeps the candidate pool from collapsing.
+            if not _alt_active and search_results:
+                _n_before = len(search_results)
+                search_results = _filter_thin_candidates(
+                    search_results,
+                    min_chars=RERANK_MIN_CHARS,
+                    floor=rerank_top_k,
                 )
+                if len(search_results) != _n_before:
+                    logger.info(
+                        "thin-chunk filter: %d -> %d candidates (min_chars=%d)",
+                        _n_before, len(search_results), RERANK_MIN_CHARS,
+                    )
+
+            # Stage 5: Reranking (cross-encoder + fusion R1)
+            t0 = time.perf_counter()
+            with self.tracer.span("retrieval.rerank", parent=root_span) as rerank_span:
+                if not _alt_active:
+                    # 5a. BM25-only rank lookup, used by the RRF fusion component.
+                    #     Run in parallel-style alongside CE scoring; if fusion is
+                    #     disabled at config level, skip the extra round-trip.
+                    bm25_ranks: list[Optional[int]] = []
+                    if RAG_RERANK_FUSION_ENABLED:
+                        bm25_ranks = self._collect_bm25_ranks(
+                            bm25_query=bm25_query,
+                            query_embedding=query_embedding,
+                            search_limit=search_limit,
+                            base_filters=filters,
+                            candidates=list(search_results),
+                        )
+
+                    # 5b. Cross-encoder rerank — the heavy lifter. Fail-open: a
+                    # reranker outage degrades to hybrid score order, never 500s.
+                    reranked = self._safe_rerank(
+                        processed_query,
+                        search_results,
+                        max(rerank_top_k, len(search_results)) if RAG_RERANK_FUSION_ENABLED else rerank_top_k,
+                    )
+
+                    # 5c. Apply fusion (BM25-RRF + heading + anchor) on top of CE.
+                    if RAG_RERANK_FUSION_ENABLED:
+                        reranked = self._apply_rerank_fusion(
+                            query=processed_query,
+                            candidates=list(search_results),
+                            reranked=reranked,
+                            bm25_ranks=bm25_ranks,
+                            rerank_top_k=rerank_top_k,
+                        )
+                        rerank_span.set_attribute("fusion_enabled", True)
+
                 scores = [r.score for r in reranked]
                 if scores:
                     rerank_span.set_attribute("rerank_score_min", min(scores))
                     rerank_span.set_attribute("rerank_score_max", max(scores))
                     rerank_span.set_attribute("rerank_score_mean", statistics.mean(scores))
+                if _dr_active:
+                    rerank_span.set_attribute("from_deep_research", True)
             tp.record("reranking", "retrieval", started_at=t0)
-            if tp.check_stage_budget("reranking"):
+            if not _alt_active and tp.check_stage_budget("reranking"):
                 tp.mark_budget_exhausted("reranking")
-            if tp.budget_exhausted:
+            if tp.budget_exhausted and not _alt_active:
+                outcomes.append(
+                    StageOutcome("reranking", StageStatus.BUDGET_EXHAUSTED)
+                )
+                decision = decide_terminal(
+                    outcomes=outcomes,
+                    deep_research=bool(deep_research),
+                    has_results=bool(reranked),
+                )
                 tp.log_summary()
+                clarif = (
+                    None
+                    if decision.action == "search"
+                    else _budget_clarification("reranking")
+                )
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
                     query_confidence=query_result.confidence,
-                    action="search",
                     results=reranked,
+                    clarification_message=clarif,
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=tp.entries(),
                     timing_totals=tp.totals(),
                     budget_exhausted=True,
                     budget_exhausted_stage=tp.budget_exhausted_stage,
                     conversation_id=conversation_id,
+                    **_decision_to_action_fields(decision),
                 )
 
             # Classify retrieval quality based on reranker scores (REQ-403)
@@ -843,15 +2881,19 @@ class RAGChain:
                         "is generated from loosely related content and may not be reliable."
                     )
 
-            # REQ-1201: Fallback retrieval on standalone_query when primary is weak
+            # REQ-1201: Fallback retrieval on standalone_query when primary is weak.
+            # Skipped under deep_research — the recursive loop already explored
+            # alternative formulations exhaustively, so a single-shot fallback
+            # adds no signal and burns budget.
             if (
-                retrieval_quality in ("weak", "insufficient")
+                not _alt_active
+                and retrieval_quality in ("weak", "insufficient")
                 and not query_result.suppress_memory
                 and query_result.standalone_query
                 and query_result.standalone_query != processed_query
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.fallback_retrieval", parent=root_span) as fb_span:
+                with self.tracer.span("retrieval.fallback", parent=root_span) as fb_span:
                     # Embed standalone_query (check cache first)
                     fb_query = query_result.standalone_query
                     fb_cache_hit = fb_query in self._embedding_cache
@@ -866,7 +2908,7 @@ class RAGChain:
 
                     # Build BM25 query with KG terms
                     fb_bm25_query = (
-                        fb_query + " " + " ".join(kg_expanded_terms[:3])
+                        fb_query + " " + " ".join(kg_expanded_terms[:RAG_KG_BM25_APPEND_TERMS])
                         if kg_expanded_terms
                         else fb_query
                     )
@@ -881,12 +2923,10 @@ class RAGChain:
                         idempotency_key=f"search_fb:{fb_query}:{source_filter}:{heading_filter}:{search_limit}",
                     )
 
-                    # Rerank fallback results
+                    # Rerank fallback results (fail-open, same as primary)
                     if fb_search_results:
-                        fb_reranked = self.reranker.rerank(
-                            query=fb_query,
-                            documents=fb_search_results,
-                            top_k=rerank_top_k,
+                        fb_reranked = self._safe_rerank(
+                            fb_query, fb_search_results, rerank_top_k,
                         )
 
                         # Compare best reranker scores: primary vs fallback
@@ -919,11 +2959,42 @@ class RAGChain:
                                 )
                 tp.record("fallback_retrieval", "retrieval", started_at=t0)
 
+            # Stage 5.35: Table-aware group expansion (opt-in).
+            # Runs after rerank (and any rerank fallback) and before document
+            # formatting / context assembly so table siblings ride along into
+            # the LLM prompt. No-op when the flag is off or when no result
+            # references a table_group_id.
+            if getattr(self, "enable_table_group_expansion", False) and reranked:
+                t0 = time.perf_counter()
+                with self.tracer.span(
+                    "rag_chain.table_group_expansion", parent=root_span,
+                ) as tg_span:
+                    before = len(reranked)
+                    reranked = self._apply_table_expansion(reranked)
+                    tg_span.set_attribute("hits_before", before)
+                    tg_span.set_attribute("hits_after", len(reranked))
+                tp.record("table_group_expansion", "retrieval", started_at=t0)
+
+            # Stage 5.36: Cross-reference (xref) expansion (opt-in, MVP).
+            # Follows section / section_symbol cross-refs stamped at ingest.
+            # One hop only — does NOT transitively expand. Default-off via
+            # ``RAG_XREF_EXPANSION_ENABLED``.
+            if getattr(self, "xref_expansion_enabled", False) and reranked:
+                t0 = time.perf_counter()
+                with self.tracer.span(
+                    "rag_chain.xref_expansion", parent=root_span,
+                ) as xr_span:
+                    before = len(reranked)
+                    reranked = self._apply_xref_expansion(reranked)
+                    xr_span.set_attribute("hits_before", before)
+                    xr_span.set_attribute("hits_after", len(reranked))
+                tp.record("xref_expansion", "retrieval", started_at=t0)
+
             # Stage 5.4: Visual retrieval (FR-601, FR-615, NFR-905)
             visual_results = None  # None = disabled semantics
             if self._visual_retrieval_enabled:
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.visual_retrieval", parent=root_span) as vr_span:
+                with self.tracer.span("retrieval.visual", parent=root_span) as vr_span:
                     try:
                         visual_results = self._run_visual_retrieval(
                             processed_query, tenant_id
@@ -938,13 +3009,22 @@ class RAGChain:
                         vr_span.set_attribute("visual_error", str(exc))
                 tp.record("visual_retrieval", "retrieval", started_at=t0)
 
+            # Stamp the 1-based citation index onto each reranked result, in the
+            # exact order the generator numbers chunks ([N] in build_messages) and
+            # the order they are returned as ``results`` — so the API response
+            # exposes the SAME N the model cites. Unconditional and authoritative:
+            # the document-formatting stage below also stamps, but it is optional
+            # (RAG_DOCUMENT_FORMATTING_ENABLED defaults off), so the response would
+            # otherwise carry no citation_index at all.
+            self._stamp_citation_indices(reranked)
+
             # Stage 5.5: Document formatting (REQ-501–REQ-503)
             version_conflicts = []
             formatted_context_str = None
             if RAG_DOCUMENT_FORMATTING_ENABLED and reranked:
                 t0 = time.perf_counter()
                 from src.retrieval.generation.nodes import format_context
-                with self.tracer.span("rag_chain.format_context", parent=root_span) as fmt_span:
+                with self.tracer.span("retrieval.generation.format_context", parent=root_span) as fmt_span:
                     formatted = format_context(reranked)
                     formatted_context_str = formatted.context_string
                     version_conflicts = formatted.version_conflicts
@@ -954,12 +3034,13 @@ class RAGChain:
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
+            gen_result = None  # type: ignore[assignment]
             generation_source = None
             if not skip_generation and self._generator and not tp.budget_exhausted and (
                 reranked or (query_result.has_backward_reference and (memory_context or memory_recent_turns))
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.generate", parent=root_span) as generate_span:
+                with self.tracer.span("retrieval.generation", parent=root_span) as generate_span:
                     context_chunks = [r.text for r in reranked]
                     scores = [r.score for r in reranked]
 
@@ -1020,7 +3101,7 @@ class RAGChain:
                     # (skip_generation may be set by fresh-convo guard above)
                     if not skip_generation:
                         if formatted_context_str:
-                            generated_answer = self._generator.generate(
+                            gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=[formatted_context_str],
                                 scores=None,
@@ -1029,13 +3110,18 @@ class RAGChain:
                                 graph_context=graph_context,
                             )
                         else:
-                            generated_answer = self._generator.generate(
+                            gen_result = self._generator.generate(
                                 query=processed_query,
                                 context_chunks=context_chunks,
                                 scores=scores,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
                                 graph_context=graph_context,
+                            )
+                        generated_answer = gen_result.answer or None
+                        if gen_result.error is not None:
+                            generate_span.set_attribute(
+                                "generation_error_kind", gen_result.error.kind.value
                             )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
@@ -1054,7 +3140,7 @@ class RAGChain:
                     model=self._generator.model if self._generator else None,
                 )
                 # Enrich with actual token usage from the LLM response
-                actual_resp = getattr(self._generator, "_last_response", None) if self._generator else None
+                actual_resp = gen_result.raw_response if gen_result is not None else None
                 if actual_resp and actual_resp.prompt_tokens:
                     snapshot = TokenBudgetSnapshot(
                         input_tokens=snapshot.input_tokens,
@@ -1079,7 +3165,7 @@ class RAGChain:
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.output_rails", parent=root_span):
+                with self.tracer.span("retrieval.rag.output_rails", parent=root_span):
                     context_chunks = [r.text for r in reranked]
                     output_rail_result = run_output_rails(
                         answer=generated_answer,
@@ -1129,24 +3215,30 @@ class RAGChain:
             verification_warning = None
             re_retrieval_suggested = False
             re_retrieval_params = None
+            first_composite = None
 
             if (
                 RAG_CONFIDENCE_ROUTING_ENABLED
                 and generated_answer
-                and reranked
+                and (reranked or generation_source == "memory")
                 and not tp.budget_exhausted
+                # The agentic loop's kept pool is already judge-curated; a
+                # confidence-driven RE_RETRIEVE would re-run the linear path and
+                # clobber it, so suppress Stage 7.5 routing on the agentic branch.
+                and not _agentic_active
             ):
                 t0 = time.perf_counter()
-                with self.tracer.span("rag_chain.confidence_routing", parent=root_span) as conf_span:
+                with self.tracer.span("retrieval.confidence.routing", parent=root_span) as conf_span:
                     from src.retrieval.generation.confidence import compute_composite_confidence
                     from src.retrieval.generation.confidence import route_by_confidence
                     from src.retrieval.generation.confidence import PostGuardrailAction
 
+                    # #8: Memory path has no retrieval signal — reranker_scores=[] gives
+                    # retrieval_score=0.0 by design.  Composite still provides meaningful
+                    # signal via LLM self-report and citation marker presence/absence.
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (
-                        self._generator._last_llm_confidence
-                        if self._generator
-                        else "medium"
+                        gen_result.confidence if gen_result is not None else "medium"
                     )
                     context_texts = [r.text for r in reranked]
 
@@ -1195,28 +3287,106 @@ class RAGChain:
                     breakdown.citation_score,
                 )
 
-                # Act on routing decision (non-blocking: return first response
-                # immediately, suggest re-retrieval for caller to request)
+                # Act on routing decision.
                 re_retrieval_suggested = False
                 re_retrieval_params = None
 
                 if action == PostGuardrailAction.RE_RETRIEVE and generation_source != "memory":
-                    # Don't block — return the first answer and suggest re-retrieval.
-                    # The caller (UI/API) can request a second attempt with these
-                    # broader params. The user sees both side-by-side and chooses.
-                    # Skip when generation_source is "memory" — no docs to re-retrieve.
-                    re_retrieval_suggested = True
-                    re_retrieval_params = {
-                        "alpha": max(0.0, alpha - 0.15),
-                        "search_limit": search_limit + 5,
-                        "rerank_top_k": rerank_top_k,
-                        "fast_path": True,
-                    }
-                    verification_warning = (
-                        "This answer has moderate confidence. A broader search "
-                        "may yield better results — re-retrieval is available."
+                    # Bounded internal re-retrieval loop (REQ-706, option B).
+                    # Re-run search + rerank + generate + score with broader params.
+                    # Reuses already-embedded query to avoid redundant model calls.
+                    # Input-rails and PII gate are NOT re-run (query is already clean).
+                    first_composite = breakdown.composite
+                    retry_alpha = max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA)
+                    retry_search_limit = search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA
+                    retry_bm25_query = bm25_query
+
+                    with self.tracer.span("retrieval.re_retrieval", parent=root_span) as rr_span:
+                        rr_span.set_attribute("retry_alpha", retry_alpha)
+                        rr_span.set_attribute("retry_search_limit", retry_search_limit)
+
+                        retry_search_results = self.retry_provider.execute(
+                            operation_name="weaviate_hybrid_search_re_retrieval",
+                            fn=lambda: self._do_search(
+                                retry_bm25_query,
+                                query_embedding,
+                                retry_alpha,
+                                retry_search_limit,
+                                filters or None,
+                            ),
+                            policy=self.retry_policy,
+                            idempotency_key=(
+                                f"re_retrieve:{processed_query}:{source_filter}:"
+                                f"{heading_filter}:{retry_search_limit}"
+                            ),
+                        )
+
+                        if retry_search_results:
+                            retry_reranked = self._safe_rerank(
+                                processed_query, retry_search_results, rerank_top_k,
+                            )
+                        else:
+                            retry_reranked = []
+
+                        retry_answer = generated_answer
+                        if retry_reranked and self._generator:
+                            retry_gen_result = self._generator.generate(
+                                query=processed_query,
+                                context_chunks=[r.text for r in retry_reranked],
+                                scores=[r.score for r in retry_reranked],
+                                memory_context=None,
+                                recent_turns=None,
+                                graph_context=graph_context,
+                            )
+                            retry_answer = retry_gen_result.answer or None
+                            retry_confidence = retry_gen_result.confidence
+                        else:
+                            retry_confidence = "medium"
+
+                        retry_breakdown = None
+                        if retry_reranked and retry_answer:
+                            retry_breakdown = compute_composite_confidence(
+                                reranker_scores=[r.score for r in retry_reranked],
+                                llm_confidence_text=retry_confidence,
+                                answer=retry_answer,
+                                retrieved_texts=[r.text for r in retry_reranked],
+                                retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+                                llm_weight=RAG_CONFIDENCE_LLM_WEIGHT,
+                                citation_weight=RAG_CONFIDENCE_CITATION_WEIGHT,
+                            )
+
+                    if retry_breakdown is not None and retry_breakdown.composite >= breakdown.composite:
+                        reranked = retry_reranked
+                        generated_answer = retry_answer
+                        breakdown = retry_breakdown
+                        composite_confidence = retry_breakdown.composite
+                        confidence_breakdown_dict = {
+                            "retrieval_score": retry_breakdown.retrieval_score,
+                            "llm_score": retry_breakdown.llm_score,
+                            "citation_score": retry_breakdown.citation_score,
+                            "composite": retry_breakdown.composite,
+                            "retrieval_weight": retry_breakdown.retrieval_weight,
+                            "llm_weight": retry_breakdown.llm_weight,
+                            "citation_weight": retry_breakdown.citation_weight,
+                        }
+
+                    action = route_by_confidence(
+                        composite=breakdown.composite,
+                        retry_count=retry_count + 1,
+                        high_threshold=RAG_CONFIDENCE_HIGH_THRESHOLD,
+                        low_threshold=RAG_CONFIDENCE_LOW_THRESHOLD,
+                        max_retries=RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
                     )
-                elif action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
+                    post_guardrail_action = action.value
+
+                    logger.info(
+                        "Re-retrieval loop: first=%.2f second=%.2f final_action=%s",
+                        first_composite,
+                        breakdown.composite,
+                        action.value,
+                    )
+
+                if action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
                     # REQ-1203: Re-retrieval not applicable on memory path — re-route to FLAG
                     verification_warning = (
                         "This answer was generated from conversation history and has limited confidence. "
@@ -1228,6 +3398,19 @@ class RAGChain:
                         f"⚠️ {verification_warning}"
                     )
                     post_guardrail_action = PostGuardrailAction.FLAG.value
+                elif action == PostGuardrailAction.RE_RETRIEVE:
+                    # Retries exhausted — advisory flag for caller-driven broader pass.
+                    re_retrieval_suggested = True
+                    re_retrieval_params = {
+                        "alpha": max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA),
+                        "search_limit": search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
+                        "rerank_top_k": rerank_top_k,
+                        "fast_path": True,
+                    }
+                    verification_warning = (
+                        "This answer has moderate confidence. A broader search "
+                        "may yield better results — re-retrieval is available."
+                    )
                 elif action == PostGuardrailAction.BLOCK:
                     generated_answer = (
                         "Insufficient documentation found to provide a reliable answer. "
@@ -1243,15 +3426,108 @@ class RAGChain:
                         f"---\n"
                         f"⚠️ {verification_warning}"
                     )
+                    if first_composite is not None:
+                        re_retrieval_suggested = True
+                        re_retrieval_params = {
+                            "alpha": max(0.0, alpha - RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA),
+                            "search_limit": search_limit + RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA,
+                            "rerank_top_k": rerank_top_k,
+                            "fast_path": True,
+                        }
 
             # Extract LLM self-reported confidence as structured data.
             # Display formatting is the UI/console layer's responsibility.
-            llm_confidence = None
-            if self._generator:
-                llm_confidence = getattr(self._generator, "_last_llm_confidence", None)
+            llm_confidence = gen_result.confidence if gen_result is not None else None
+            generation_error_payload = (
+                gen_result.error.to_dict()
+                if (gen_result is not None and gen_result.error is not None)
+                else None
+            )
+
+            # Advisory "go deeper" DR-suggestion chip. Computed on every path
+            # EXCEPT when deep-research is already active (suggesting DR while on
+            # DR is noise and risks a UI re-run loop). It IS surfaced on the
+            # agentic path — agentic did iterative HyDE retrieval, but a broad /
+            # compound query can still benefit from DR's topic decomposition, so
+            # the "try Deep Research" affordance stays useful there.
+            dr_suggestion_payload: Optional[dict[str, Any]] = None
+            if not _dr_active:
+                try:
+                    suggest, reason = should_suggest_deep_research(query, reranked)
+                    dr_suggestion_payload = {"suggest": bool(suggest), "reason": reason}
+                except Exception:  # noqa: BLE001 — never let an advisory hint break the response
+                    dr_suggestion_payload = None
+
+            # Suggested "you might also ask…" follow-up questions (advisory,
+            # fail-open). Grounded in the answer + retrieved section headings so
+            # they stay in-corpus. The sync bridge no-ops when disabled / no answer.
+            suggested_questions: Optional[list[str]] = None
+            if generated_answer:
+                _sq = generate_follow_ups_sync(
+                    query, generated_answer, self._retrieved_headings(reranked),
+                )
+                suggested_questions = _sq or None
 
             tp.log_summary()
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
+
+            response_metadata: dict = {}
+            if _dr_active:
+                if dr_result is not None:
+                    response_metadata["deep_research"] = {
+                        "iteration_count": int(dr_result.iteration_count),
+                        "llm_call_count": int(dr_result.llm_call_count),
+                        "node_count": int(dr_result.node_count),
+                        "topic_count": int(dr_result.topic_count),
+                        "decomposed": bool(dr_result.decomposed),
+                        "is_unified": bool(dr_result.is_unified),
+                        "budget_exhausted": bool(dr_result.budget_exhausted),
+                        "budget_exhausted_reason": dr_result.budget_exhausted_reason,
+                        "elapsed_ms": float(dr_result.elapsed_ms),
+                    }
+                else:
+                    # DR was requested but the orchestrator failed/early-exited
+                    # before producing a result. Surface zeros so downstream
+                    # observability (Temporal search attributes) still gets
+                    # consistent shape.
+                    response_metadata["deep_research"] = {
+                        "iteration_count": 0,
+                        "llm_call_count": 0,
+                        "node_count": 0,
+                        "topic_count": 0,
+                        "decomposed": False,
+                        "is_unified": True,
+                        "budget_exhausted": False,
+                        "budget_exhausted_reason": None,
+                        "elapsed_ms": 0.0,
+                    }
+            if _agentic_active:
+                # Free-form telemetry; the metadata dict crosses the Temporal
+                # boundary via asdict() with no wire-schema change (mirrors how
+                # the deep-research branch writes metadata['deep_research']).
+                if ag_result is not None:
+                    response_metadata["agentic_retrieval"] = ag_result.telemetry()
+                else:
+                    response_metadata["agentic_retrieval"] = {
+                        "rounds_run": 0,
+                        "hyde_variants_tried": 0,
+                        "kept_count": 0,
+                        "llm_calls": 0,
+                        "judge_calls": 0,
+                        "ranker": RAG_AGENTIC_RANKER,
+                        "ranker_calls": 0,
+                        "backfilled": 0,
+                        "stop_reason": "error",
+                        "elapsed_ms": 0.0,
+                    }
+
+            # Re-stamp citation indices just before returning. The earlier stamp
+            # (Stage 5.5) runs on the primary ``reranked``, but the confidence-routing
+            # retry path may have reassigned ``reranked = retry_reranked`` (a freshly
+            # reranked list that was never stamped). Re-stamping here unconditionally —
+            # idempotent for the primary path, no-op for an empty list — guarantees the
+            # returned ``results`` always carry the SAME 1-based [N] the model cited.
+            self._stamp_citation_indices(reranked)
 
             return RAGResponse(
                 query=query,
@@ -1282,11 +3558,16 @@ class RAGChain:
                 retrieval_quality_note=retrieval_quality_note,
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
+                first_composite=first_composite if RAG_CONFIDENCE_ROUTING_ENABLED else None,
                 visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
+                generation_error=generation_error_payload,
                 history_decision=query_result.history_decision,
                 history_turns_used=query_result.history_turns_used,
+                dr_suggestion=dr_suggestion_payload,
+                suggested_questions=suggested_questions,
+                metadata=response_metadata,
             )
 
 

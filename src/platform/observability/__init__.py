@@ -12,9 +12,11 @@ This module is the only import surface consumers should use:
 All other modules within this package are implementation details.
 
 Backend selection:
-    OBSERVABILITY_PROVIDER=noop     → NoopBackend (default)
-    OBSERVABILITY_PROVIDER=langfuse → LangfuseBackend
-    Any other value                 → ValueError at first get_tracer() call
+    OBSERVABILITY_PROVIDER (unset or empty) → OTelBackend (default)
+    OBSERVABILITY_PROVIDER=otel             → OTelBackend
+    OBSERVABILITY_PROVIDER=langfuse         → OTelBackend (deprecated alias)
+    OBSERVABILITY_PROVIDER=noop             → NoopBackend
+    Any other value                         → ValueError at first get_tracer() call
 """
 from __future__ import annotations
 
@@ -22,20 +24,20 @@ import functools
 import threading
 from typing import Callable, Optional, TypeVar
 
+from config.settings import RAG_OBSERVABILITY_MAX_CAPTURE_LEN
 from src.platform.observability.backend import (  # noqa: F401
     Generation,
     ObservabilityBackend,
     Span,
     Trace,
 )
+from src.platform.observability.concurrency import submit_with_context  # noqa: F401
 
 F = TypeVar("F", bound=Callable)
 
 # Internal singleton state — do not access directly outside this module
 _backend: Optional[ObservabilityBackend] = None
 _backend_lock = threading.Lock()
-
-_MAX_CAPTURE_LEN = 500
 
 
 def get_tracer() -> ObservabilityBackend:
@@ -94,14 +96,14 @@ def observe(
             backend = get_tracer()
             with backend.span(span_name) as span:
                 if capture_input and args:
-                    span.set_attribute("input", repr(args[1:])[:_MAX_CAPTURE_LEN])
+                    span.set_attribute("input", repr(args[1:])[:RAG_OBSERVABILITY_MAX_CAPTURE_LEN])
                 try:
                     result = func(*args, **kwargs)
                 except Exception as exc:
                     span.set_attribute("error", str(exc))
                     raise
                 if capture_output:
-                    span.set_attribute("output", repr(result)[:_MAX_CAPTURE_LEN])
+                    span.set_attribute("output", repr(result)[:RAG_OBSERVABILITY_MAX_CAPTURE_LEN])
                 return result
         return wrapper  # type: ignore[return-value]
 
@@ -122,10 +124,14 @@ def _init_backend() -> ObservabilityBackend:
 
     Notes:
         Falls back to NoopBackend on any initialization error for the
-        'langfuse' provider, logging a warning with the provider name and
-        exception message.
+        'otel' provider (and its deprecated 'langfuse' alias), logging a
+        warning with the provider name and exception message. The default
+        when the env var is unset/empty is 'otel' — a freshly-cloned repo
+        emits OTLP locally and silently drops spans if no collector is
+        listening (fail-open).
     """
     import logging
+    import warnings
     logger = logging.getLogger("rag.observability")
 
     try:
@@ -133,19 +139,36 @@ def _init_backend() -> ObservabilityBackend:
         provider = (OBSERVABILITY_PROVIDER or "").strip().lower()
     except ImportError:
         import os
-        provider = os.environ.get("OBSERVABILITY_PROVIDER", "noop").strip().lower()
+        provider = os.environ.get("OBSERVABILITY_PROVIDER", "").strip().lower()
 
-    if not provider or provider == "noop":
+    # Default (unset/empty) is OTel — observability "just works" by default.
+    if not provider:
+        provider = "otel"
+
+    if provider == "noop":
         from src.platform.observability.noop import NoopBackend
         return NoopBackend()
 
     if provider == "langfuse":
+        # Backward-compat alias — the langfuse SDK adapter has been retired;
+        # 'langfuse' now routes through the OTel exporter pointed at
+        # Langfuse's OTLP endpoint.
+        warnings.warn(
+            "the `langfuse` provider value now routes through the OTel "
+            "exporter pointed at Langfuse's OTLP endpoint; set "
+            "RAG_OBSERVABILITY_PROVIDER=otel directly",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        provider = "otel"
+
+    if provider == "otel":
         try:
-            from src.platform.observability.langfuse.backend import LangfuseBackend
-            return LangfuseBackend()
+            from src.platform.observability.otel import OTelBackend
+            return OTelBackend()
         except Exception as exc:
             logger.warning(
-                "Failed to initialize langfuse backend (%s); falling back to noop.",
+                "Failed to initialize otel backend (%s); falling back to noop.",
                 exc,
             )
             from src.platform.observability.noop import NoopBackend
@@ -153,14 +176,22 @@ def _init_backend() -> ObservabilityBackend:
 
     raise ValueError(
         f"Unknown OBSERVABILITY_PROVIDER: {provider!r}. "
-        "Valid values: 'noop', 'langfuse'."
+        "Valid values: 'otel', 'langfuse' (deprecated alias for 'otel'), 'noop'."
     )
 
 
 # Backward-compatible alias — use ObservabilityBackend instead
 Tracer = ObservabilityBackend
 
-__all__ = ["get_tracer", "observe", "Tracer", "Span", "Trace", "Generation"]
+__all__ = [
+    "get_tracer",
+    "observe",
+    "Tracer",
+    "Span",
+    "Trace",
+    "Generation",
+    "submit_with_context",
+]
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.platform.observability.schemas import (

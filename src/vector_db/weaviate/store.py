@@ -4,11 +4,13 @@
 # ``config.settings.RAG_WEAVIATE_MODE`` ("embedded" or "networked").
 # All collection-scoped operations accept a collection parameter for multi-collection support.
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
+#          build_table_chunk_id, build_figure_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
 #          delete_documents_by_staging_batch, get_source_hash,
+#          iter_document_ids, fetch_chunks_by_document_id,
 #          aggregate_by_source, get_collection_stats, list_collections,
-#          update_chunk_content
+#          update_chunk_content, TABLE_AWARE_PROPERTIES
 # Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
 """Low-level Weaviate operations: connection, schema, CRUD, and search.
@@ -22,7 +24,9 @@ from __future__ import annotations
 
 
 import hashlib
+import json
 import logging
+import os
 import uuid
 from contextlib import contextmanager
 from typing import Optional
@@ -47,6 +51,154 @@ logger = logging.getLogger("rag.vector_db.weaviate.store")
 tracer = get_tracer()
 
 
+# ---------------------------------------------------------------------------
+# Table-aware + page provenance schema (introduced by PR #100).
+#
+# Extracted as a module-level constant so the schema-migration script
+# (``scripts/migrate_weaviate_table_schema.py``) can backfill these properties
+# on collections that pre-date the PR. The list is the single source of truth;
+# ``ensure_collection`` consumes it below so the two code paths cannot drift.
+# ---------------------------------------------------------------------------
+TABLE_AWARE_PROPERTIES: list[Property] = [
+    # ``chunk_type`` is intentionally free-form TEXT: the adaptive chunker
+    # stamps "table_summary"/"table_row", while the legacy chunking node
+    # stamps "table"/"text". Both must round-trip.
+    Property(
+        name="chunk_type",
+        data_type=DataType.TEXT,
+        description='Free-form chunk kind ("table_summary"|"table_row"|"table"|"text"|...)',
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_id",
+        data_type=DataType.TEXT,
+        description="Parser-stable id for the originating table",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_group_id",
+        data_type=DataType.TEXT,
+        description="Within-document join key linking summary + row chunks",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_row_index",
+        data_type=DataType.INT,
+        description="Zero-based body-row index for table_row chunks",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="table_num_rows",
+        data_type=DataType.INT,
+        description="Total rows in the originating table (incl. header)",
+    ),
+    Property(
+        name="table_num_cols",
+        data_type=DataType.INT,
+        description="Total columns in the originating table",
+    ),
+    Property(
+        name="table_has_header",
+        data_type=DataType.BOOL,
+        description="Whether the originating table has a header row",
+    ),
+    Property(
+        name="table_caption",
+        data_type=DataType.TEXT,
+        description="Caption text of the originating table (query-relevant)",
+        index_filterable=False,
+        index_searchable=True,
+    ),
+    Property(
+        name="table_markdown",
+        data_type=DataType.TEXT,
+        description="Full markdown reconstruction; only set on block 0 of a table's table_row chunks",
+        index_filterable=False,
+        index_searchable=True,
+    ),
+    Property(
+        name="document_id",
+        data_type=DataType.TEXT,
+        description="Stable pointer to the parent document (e.g., file stem)",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    # Model-driven chunk ROLE ("content"|"navigation"|"boilerplate"), stamped at
+    # ingest by the LLM classifier (src.ingest.common.role_classify). Filterable
+    # (the query-time role filter excludes navigation/boilerplate via ``ne``) but
+    # not searchable — it is a categorical tag, never query text. NULL on legacy /
+    # un-backfilled chunks, which the fail-open ``ne`` filter keeps.
+    Property(
+        name="chunk_role",
+        data_type=DataType.TEXT,
+        description='Retrieval role ("content"|"navigation"|"boilerplate"); content is answer-bearing',
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="caption_label",
+        data_type=DataType.TEXT,
+        description="Normalised table caption label (e.g., 'Table 5-2') for xref resolution",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_no",
+        data_type=DataType.INT,
+        description="1-based page number of the chunk origin",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_label",
+        data_type=DataType.TEXT,
+        description="Human-facing page label (e.g. 'vii', 'A-3')",
+        index_filterable=True,
+        index_searchable=False,
+    ),
+    Property(
+        name="page_bbox",
+        data_type=DataType.TEXT,
+        description='JSON-encoded [x0,y0,x1,y1] bbox on the page; "" when absent',
+        index_filterable=False,
+        index_searchable=False,
+    ),
+    # Figure-specific provenance. Empty on non-figure chunks. ``data:`` URIs
+    # are coerced to "" at ingest time (would bloat Weaviate); ``file://`` and
+    # ``http(s)://`` URIs round-trip as-is. Non-indexed — the field is only
+    # consumed by citation/UI rendering, not query-time filtering.
+    Property(
+        name="figure_image_uri",
+        data_type=DataType.TEXT,
+        description=(
+            'Best-effort image URI for figure chunks ("file://"/"http(s)://"). '
+            'Empty for non-figure chunks or data: URIs.'
+        ),
+        index_filterable=False,
+        index_searchable=False,
+    ),
+    # xref_targets stores a JSON-encoded ``list[{type, value}]`` produced by
+    # ``src.ingest.common.shared.cross_refs``. Weaviate has no native list-of-
+    # struct type, so we serialise as TEXT and decode on the retrieval side
+    # (``src.retrieval.xref_expansion``). Encoding is JSON (not csv/yaml) so
+    # values like "§3.1" round-trip without escape hassles.
+    Property(
+        name="xref_targets",
+        data_type=DataType.TEXT,
+        description=(
+            'JSON-encoded list[{type,value}] of cross-references detected in '
+            'the chunk text; empty list "[]" when no refs.'
+        ),
+        index_filterable=False,
+        index_searchable=False,
+    ),
+]
+
+
 def _connect() -> weaviate.WeaviateClient:
     """Open a Weaviate client based on ``RAG_WEAVIATE_MODE``.
 
@@ -64,13 +216,19 @@ def _connect() -> weaviate.WeaviateClient:
                 host=RAG_WEAVIATE_HOST,
                 port=RAG_WEAVIATE_HTTP_PORT,
                 grpc_port=RAG_WEAVIATE_GRPC_PORT,
+                # Opt-in skip of startup health-checks: needed when reaching a
+                # remote Weaviate over an SSH tunnel / LB where the gRPC readiness
+                # probe can't complete. Default off → unchanged local behavior.
+                skip_init_checks=os.environ.get(
+                    "RAG_WEAVIATE_SKIP_INIT_CHECKS", "false"
+                ).lower() in ("true", "1", "yes"),
             )
         return weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
 
 
 def create_persistent_client() -> weaviate.WeaviateClient:
     """Create a long-lived Weaviate client (embedded or networked)."""
-    span = tracer.start_span("vector_store.create_persistent_client")
+    span = tracer.span("vector_store.create_persistent_client")
     client: Optional[weaviate.WeaviateClient] = None
     try:
         client = _connect()
@@ -86,7 +244,7 @@ def create_persistent_client() -> weaviate.WeaviateClient:
 @contextmanager
 def get_weaviate_client():
     """Context manager for a short-lived Weaviate client (embedded or networked)."""
-    span = tracer.start_span("vector_store.get_weaviate_client")
+    span = tracer.span("vector_store.get_weaviate_client")
     client = _connect()
     try:
         yield client
@@ -100,7 +258,7 @@ def ensure_collection(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> None:
     """Create the named collection if it does not exist (idempotent)."""
-    span = tracer.start_span("vector_store.ensure_collection", {"collection": collection})
+    span = tracer.span("vector_store.ensure_collection", {"collection": collection})
     if client.collections.exists(collection):
         span.end(status="ok")
         return
@@ -134,7 +292,45 @@ def ensure_collection(
             Property(name="heading", data_type=DataType.TEXT),
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
-            Property(name="document_id", data_type=DataType.TEXT),
+            # NOTE: ``document_id`` is declared in ``TABLE_AWARE_PROPERTIES``
+            # (above) and intentionally not redeclared here — Weaviate rejects
+            # duplicate property names with HTTP 422.
+            # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3.1) --
+            Property(
+                name="node_kind",
+                data_type=DataType.TEXT,
+                description='"chunk" (leaf) or "section" (internal tree node)',
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="tree_level",
+                data_type=DataType.INT,
+                description="Depth in the heading hierarchy; len(heading_path) for leaves",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="heading_path",
+                data_type=DataType.TEXT_ARRAY,
+                description="Ordered ancestor headings from root to this node",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="parent_section_id",
+                data_type=DataType.TEXT,
+                description="Stable hash(document_id, heading_path[:-1]); enables sibling lookup",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="child_count",
+                data_type=DataType.INT,
+                description="(sections only) Number of direct children; 0 for leaf chunks",
+                index_filterable=True,
+                index_searchable=False,
+            ),
             # -- Cross-document dedup (FR-3430, FR-3431, FR-3432, FR-3433) --
             Property(
                 name="content_hash",
@@ -175,6 +371,11 @@ def ensure_collection(
                 index_filterable=True,
                 index_searchable=False,
             ),
+            # -- Table-aware chunking + page provenance --
+            # Defined as a module-level constant (TABLE_AWARE_PROPERTIES) so
+            # the schema-migration script can backfill collections created
+            # before PR #100 without duplicating these declarations.
+            *TABLE_AWARE_PROPERTIES,
         ],
     )
     span.end(status="ok")
@@ -184,6 +385,68 @@ def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
     """Deterministic UUID chunk ID for idempotent upserts."""
     payload = f"{source}:{chunk_index}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def build_table_chunk_id(
+    source: str,
+    table_group_id: str,
+    chunk_type: str,
+    table_row_index: object = None,
+) -> str:
+    """Deterministic UUID for table-derived chunks (summary + rows).
+
+    Derives from ``(source, table_group_id, chunk_type, table_row_index)`` so
+    re-ingesting a document with edited table content updates the same vectors
+    rather than orphaning the prior ones. ``table_row_index`` may be ``None``
+    for ``table_summary`` chunks; it is substituted with ``-1`` in the payload
+    so the summary id never collides with row 0.
+    """
+    try:
+        row = int(table_row_index) if table_row_index is not None else -1
+    except (TypeError, ValueError):
+        row = -1
+    payload = f"{source}|tbl|{table_group_id}|{chunk_type}|{row}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def build_figure_chunk_id(source: str, self_ref: str) -> str:
+    """Deterministic UUID for figure-derived chunks.
+
+    Derives from ``(source, self_ref)`` so re-ingesting a document with
+    identical Docling picture positional refs (``#/pictures/N``) updates
+    the same vector rather than orphaning the prior one. Mirrors
+    :func:`build_table_chunk_id` (memory ``project_chunk_id_idempotency``).
+    """
+    payload = f"{source}|fig|{self_ref}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def build_parent_section_id(document_id: str, heading_path: list[str]) -> str:
+    """Stable hash for a section's parent — `(document_id, heading_path[:-1])`.
+
+    Used by tree-retrieval Stage 4c (lift) for sibling lookup. Returns "" for
+    root-level chunks (no parent section). See TREE_RETRIEVAL_DESIGN.md §3.1.
+    """
+    if not heading_path:
+        return ""
+    parent_path = heading_path[:-1]
+    if not parent_path:
+        return ""
+    payload = f"{document_id}:{'>'.join(parent_path)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def build_section_node_id(document_id: str, heading_path: list[str]) -> str:
+    """Stable id for the section node owning ``heading_path``.
+
+    A leaf chunk under section S has ``parent_section_id ==
+    build_section_node_id(doc, S.heading_path)`` (= S's own ``chunk_id``).
+    See TREE_RETRIEVAL_DESIGN.md §3.2/§4.1.
+    """
+    if not heading_path:
+        return ""
+    payload = f"{document_id}:{'>'.join(heading_path)}>__SECTION__"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
 def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text: str) -> str:
@@ -205,7 +468,7 @@ def add_documents(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Add documents with pre-computed embeddings to the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.add_documents",
         {"count": len(texts), "collection": collection},
     )
@@ -227,8 +490,41 @@ def add_documents(
             source = str(metadata.get("source") or "").strip() or "unknown"
             source_identity = str(metadata.get("source_key") or "").strip() or source
             chunk_index = metadata.get("chunk_index", 0)
+            # Table-aware chunk_id: for ``table_summary``/``table_row`` chunks
+            # with a non-empty ``table_group_id`` we derive the UUID from the
+            # stable (group_id, chunk_type, row_index) tuple so re-ingests of
+            # the same document update the same vectors even when chunk_index
+            # or text drifts. Explicit ``chunk_id`` in metadata still wins via
+            # ``_normalize_chunk_uuid``.
+            explicit_chunk_id = metadata.get("chunk_id")
+            chunk_type_meta = str(metadata.get("chunk_type") or "")
+            table_group_meta = str(metadata.get("table_group_id") or "").strip()
+            candidate_id: object = explicit_chunk_id
+            if (
+                candidate_id in (None, "")
+                and chunk_type_meta.startswith("table_")
+                and table_group_meta
+            ):
+                candidate_id = build_table_chunk_id(
+                    source_identity,
+                    table_group_meta,
+                    chunk_type_meta,
+                    metadata.get("table_row_index"),
+                )
+            # Figure chunks: derive from (source, self_ref) so re-ingests of
+            # the same Docling positional refs (``#/pictures/N``) overwrite
+            # the prior vector rather than orphaning it.
+            self_ref_meta = str(metadata.get("self_ref") or "").strip()
+            if (
+                candidate_id in (None, "")
+                and chunk_type_meta == "figure"
+                and self_ref_meta
+            ):
+                candidate_id = build_figure_chunk_id(
+                    source_identity, self_ref_meta
+                )
             chunk_id = _normalize_chunk_uuid(
-                metadata.get("chunk_id"), source_identity, chunk_index, text
+                candidate_id, source_identity, chunk_index, text
             )
             properties = {
                 "text": text,
@@ -262,6 +558,66 @@ def add_documents(
                 "staging_batch_id": metadata.get("staging_batch_id", ""),
                 "source_hash": metadata.get("source_hash", ""),
             }
+            # Tree-retrieval fields. Backfilled here from existing chunk metadata
+            # so legacy ingests gain `node_kind`/`tree_level`/`heading_path`/
+            # `parent_section_id` without code changes upstream. Tree-aware ingest
+            # nodes can override `node_kind` and `child_count` explicitly.
+            heading_path_meta = metadata.get("heading_path") or []
+            if not isinstance(heading_path_meta, list):
+                heading_path_meta = []
+            # Table-aware chunking + page provenance fields. ``page_bbox`` is
+            # JSON-encoded so a tuple/list survives as TEXT; "" means absent.
+            raw_bbox = metadata.get("page_bbox")
+            if raw_bbox is None:
+                bbox_str = ""
+            elif isinstance(raw_bbox, str):
+                bbox_str = raw_bbox
+            else:
+                try:
+                    bbox_str = json.dumps(list(raw_bbox))
+                except (TypeError, ValueError):
+                    bbox_str = ""
+            optional.update(
+                {
+                    "chunk_type": metadata.get("chunk_type", ""),
+                    "table_id": metadata.get("table_id", ""),
+                    "table_group_id": metadata.get("table_group_id", ""),
+                    "table_row_index": int(metadata.get("table_row_index", -1)),
+                    "table_num_rows": int(metadata.get("table_num_rows", 0)),
+                    "table_num_cols": int(metadata.get("table_num_cols", 0)),
+                    "table_has_header": bool(metadata.get("table_has_header", False)),
+                    "table_caption": metadata.get("table_caption", ""),
+                    "table_markdown": metadata.get("table_markdown", ""),
+                    "page_no": int(metadata.get("page_no", 0)),
+                    "page_label": metadata.get("page_label", ""),
+                    "page_bbox": bbox_str,
+                    # Figure-only field; non-figure chunks pass through as "".
+                    # ``data:`` URIs are coerced upstream by the figure
+                    # transformer to keep payloads small.
+                    "figure_image_uri": str(metadata.get("figure_image_uri") or ""),
+                }
+            )
+            optional.update(
+                {
+                    "node_kind": metadata.get("node_kind", "chunk"),
+                    "tree_level": int(
+                        metadata.get("tree_level", len(heading_path_meta))
+                    ),
+                    "heading_path": [str(h) for h in heading_path_meta],
+                    # Legacy-fallback: a leaf's parent_section_id is the
+                    # canonical section-node id for its heading_path
+                    # (TREE_RETRIEVAL_DESIGN §4.1). Tree-aware ingest nodes
+                    # set this explicitly for sections (their *own* parent).
+                    "parent_section_id": metadata.get(
+                        "parent_section_id",
+                        build_section_node_id(
+                            str(metadata.get("document_id", "")),
+                            [str(h) for h in heading_path_meta],
+                        ),
+                    ),
+                    "child_count": int(metadata.get("child_count", 0)),
+                }
+            )
             for key, val in optional.items():
                 if key in collection_props:
                     properties[key] = val
@@ -285,7 +641,7 @@ def hybrid_search(
     Returns:
         List of dicts with ``text``, ``metadata``, and ``score`` keys.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.hybrid_search",
         {"alpha": alpha, "limit": limit, "collection": collection, "has_filters": filters is not None},
     )
@@ -329,12 +685,40 @@ def hybrid_search(
                 "heading": obj.properties.get("heading", ""),
                 "heading_level": obj.properties.get("heading_level", 0),
                 "tenant_id": obj.properties.get("tenant_id", "default"),
+                # Tree retrieval fields (TREE_RETRIEVAL_DESIGN.md §3.1).
+                # Default to "chunk" when absent so legacy collections behave like leaves.
+                "node_kind": obj.properties.get("node_kind", "chunk"),
+                "tree_level": obj.properties.get("tree_level", 0),
+                "heading_path": obj.properties.get("heading_path", []) or [],
+                "parent_section_id": obj.properties.get("parent_section_id", ""),
+                "child_count": obj.properties.get("child_count", 0),
+                "document_id": obj.properties.get("document_id", ""),
+                # Stable Weaviate object uuid, duplicated INTO metadata so it
+                # survives the SearchResult -> RankedResult mapping (which
+                # carries metadata only). Purely additive — the top-level
+                # "uuid" key below is unchanged for existing consumers.
+                # Consumed by RAGChain.retrieve_primitive (turn-loop chunk_id)
+                # and the turn-context chunk refs (TURN_LOOP_DESIGN.md §7).
+                "chunk_id": str(obj.uuid) if getattr(obj, "uuid", None) else "",
             },
             "score": obj.metadata.score if obj.metadata else 0.0,
+            "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",
         })
     span.set_attribute("result_count", len(documents))
     span.end(status="ok")
     return documents
+
+
+def collection_exists(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> bool:
+    """Return True iff the named collection exists on the server.
+
+    Thin wrapper around ``client.collections.exists(name)`` used by callers
+    that want to branch on collection presence without a full schema fetch.
+    """
+    return bool(client.collections.exists(collection))
 
 
 def delete_collection(
@@ -342,7 +726,7 @@ def delete_collection(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> None:
     """Drop the named collection."""
-    span = tracer.start_span("vector_store.delete_collection", {"collection": collection})
+    span = tracer.span("vector_store.delete_collection", {"collection": collection})
     if client.collections.exists(collection):
         client.collections.delete(collection)
     span.end(status="ok")
@@ -354,7 +738,7 @@ def delete_documents_by_source(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Delete chunks by source metadata value from the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_source",
         {"source": source, "collection": collection},
     )
@@ -378,7 +762,7 @@ def delete_documents_by_staging_batch(
     through. Matches only the active batch; chunks from prior successful
     ingests have a different (or empty) staging_batch_id and are left alone.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_staging_batch",
         {"staging_batch_id": staging_batch_id, "collection": collection},
     )
@@ -421,6 +805,224 @@ def get_source_hash(
         return None
 
 
+def fetch_chunks_by_parent_section(
+    client: weaviate.WeaviateClient,
+    parent_section_ids: list[str],
+    limit_per_section: int = 4,
+    extra_filters: Optional[Filter] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> list[dict]:
+    """Fetch leaf chunks under each given parent_section_id (Stage 4c lift).
+
+    One filtered fetch per parent_section_id, capped at ``limit_per_section``.
+    Always restricts to ``node_kind="chunk"`` so section nodes never leak into
+    lift results. Returns the same dict shape as ``hybrid_search``, but with
+    score=0.0 (lift results are unscored — the reranker computes the score).
+
+    Args:
+        client: Live Weaviate client.
+        parent_section_ids: Parent section ids to fetch siblings for. Empty
+            strings are skipped.
+        limit_per_section: Max siblings per parent section.
+        extra_filters: Optional Filter combined via AND with the parent and
+            node_kind clauses (e.g. tenant_id, source_filter).
+        collection: Target collection.
+    """
+    span = tracer.span(
+        "vector_store.fetch_chunks_by_parent_section",
+        {"parent_count": len(parent_section_ids), "limit_per": limit_per_section},
+    )
+    try:
+        if not client.collections.exists(collection):
+            span.end(status="ok")
+            return []
+        col = client.collections.get(collection)
+        documents: list[dict] = []
+        seen_uuids: set[str] = set()
+        for psid in parent_section_ids:
+            if not psid:
+                continue
+            base = (
+                Filter.by_property("parent_section_id").equal(psid)
+                & Filter.by_property("node_kind").equal("chunk")
+            )
+            flt = base & extra_filters if extra_filters is not None else base
+            response = col.query.fetch_objects(filters=flt, limit=limit_per_section)
+            for obj in response.objects:
+                obj_uuid = str(obj.uuid) if getattr(obj, "uuid", None) else ""
+                if obj_uuid and obj_uuid in seen_uuids:
+                    continue
+                if obj_uuid:
+                    seen_uuids.add(obj_uuid)
+                documents.append({
+                    "text": obj.properties.get("text", ""),
+                    "metadata": {
+                        "source": obj.properties.get("source", "unknown"),
+                        "source_key": obj.properties.get("source_key", ""),
+                        "source_uri": obj.properties.get("source_uri", ""),
+                        "title": obj.properties.get("title", ""),
+                        "author": obj.properties.get("author", ""),
+                        "date": obj.properties.get("date", ""),
+                        "tags": obj.properties.get("tags", ""),
+                        "chunk_index": obj.properties.get("chunk_index", 0),
+                        "total_chunks": obj.properties.get("total_chunks", 0),
+                        "section_path": obj.properties.get("section_path", ""),
+                        "heading": obj.properties.get("heading", ""),
+                        "heading_level": obj.properties.get("heading_level", 0),
+                        "tenant_id": obj.properties.get("tenant_id", "default"),
+                        "node_kind": "chunk",
+                        "tree_level": obj.properties.get("tree_level", 0),
+                        "heading_path": obj.properties.get("heading_path", []) or [],
+                        "parent_section_id": obj.properties.get("parent_section_id", ""),
+                        "child_count": obj.properties.get("child_count", 0),
+                        "document_id": obj.properties.get("document_id", ""),
+                    },
+                    "score": 0.0,
+                    "uuid": obj_uuid,
+                })
+        span.set_attribute("result_count", len(documents))
+        span.end(status="ok")
+        return documents
+    except Exception:
+        span.end(status="error")
+        raise
+
+
+def iter_document_ids(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+):
+    """Yield each distinct ``document_id`` present in ``collection``.
+
+    Uses the same server-side group-by aggregation idiom as
+    :func:`aggregate_by_source` (which groups on ``source_key``) but groups on
+    ``document_id`` instead. The grouping happens entirely on the Weaviate
+    server — there is no client-side full-object scan — so this is the
+    lightest correct way to enumerate documents in a large (e.g. 475k-object)
+    chunk collection. Empty document_ids are skipped.
+
+    Args:
+        client: Live Weaviate client.
+        collection: Source chunk collection.
+
+    Yields:
+        Each non-empty distinct ``document_id`` (order is the aggregation's).
+    """
+    span = tracer.span("vector_store.iter_document_ids", {"collection": collection})
+    col = client.collections.get(collection)
+    response = col.aggregate.over_all(
+        group_by=weaviate.classes.aggregate.GroupByAggregate(prop="document_id"),
+        total_count=True,
+    )
+    seen = 0
+    for group in response.groups:
+        value = str(getattr(group.grouped_by, "value", "") or "")
+        if not value:
+            continue
+        seen += 1
+        yield value
+    span.set_attribute("document_count", seen)
+    span.end(status="ok")
+
+
+def fetch_chunks_by_document_id(
+    client: weaviate.WeaviateClient,
+    document_id: str,
+    page_size: int = 500,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+    include_text: bool = False,
+) -> list[dict]:
+    """Fetch ALL chunks for one ``document_id`` (cursor-paginated).
+
+    Reuses the canonical ``col.query.fetch_objects(filters=..., limit=...)``
+    read idiom (see :func:`fetch_chunks_by_parent_section` /
+    :func:`get_source_hash`) but pages with the v4 cursor (``after=`` the last
+    returned object's UUID) so a document with more chunks than ``page_size``
+    is fully read without loading the whole collection into memory. Memory stays
+    bounded at one page regardless of collection size (safe for 475k objects).
+
+    Returns the same ``{"text", "metadata", "uuid"}`` dict shape as
+    :func:`hybrid_search`, carrying the fields a routing card needs
+    (``document_id``, ``title``, ``source``, ``heading_path``, ``heading``,
+    ``section_path``, ``node_kind``). ``metadata`` is what ``build_document_card``
+    consumes via its dict accessor.
+
+    Args:
+        client: Live Weaviate client.
+        document_id: The document whose chunks to fetch.
+        page_size: Max objects per cursor page.
+        collection: Source chunk collection.
+        include_text: When False (default — the document-card use case) the
+            (large) chunk ``text`` is NOT requested and ``"text"`` is ``""``,
+            keeping the payload tiny. When True, request and populate the chunk
+            ``text`` and the current ``chunk_role`` (``metadata["chunk_role"]``)
+            so a caller that classifies/tags chunks (e.g. the role backfill) sees
+            the real text and can skip already-tagged chunks idempotently.
+
+    Returns:
+        All chunk dicts for the document (possibly empty).
+    """
+    span = tracer.span(
+        "vector_store.fetch_chunks_by_document_id",
+        {
+            "document_id": document_id,
+            "page_size": page_size,
+            "collection": collection,
+            "include_text": include_text,
+        },
+    )
+    col = client.collections.get(collection)
+    flt = Filter.by_property("document_id").equal(document_id)
+    # Only the fields a routing card needs — NOT the (large) chunk `text`. Keeps
+    # the payload tiny so big docs page quickly even over a slow/tunneled link.
+    # The role backfill opts into the text (and existing role) via include_text.
+    card_props = [
+        "document_id", "title", "source", "source_key",
+        "heading_path", "heading", "section_path", "node_kind",
+    ]
+    fetch_props = list(card_props)
+    if include_text:
+        fetch_props += ["text", "chunk_role"]
+    documents: list[dict] = []
+    # Offset pagination (NOT the cursor `after`): Weaviate forbids combining the
+    # cursor with a `where` filter ("cursor api: where cannot be set with after").
+    # offset+limit IS allowed with a filter; per-document chunk counts sit well
+    # under the QUERY_MAXIMUM_RESULTS offset ceiling.
+    offset = 0
+    while True:
+        response = col.query.fetch_objects(
+            filters=flt, limit=page_size, offset=offset, return_properties=fetch_props
+        )
+        objects = list(getattr(response, "objects", []) or [])
+        for obj in objects:
+            props = obj.properties or {}
+            metadata = {
+                "document_id": props.get("document_id", ""),
+                "title": props.get("title", ""),
+                "source": props.get("source", ""),
+                "source_key": props.get("source_key", ""),
+                "heading_path": props.get("heading_path", []) or [],
+                "heading": props.get("heading", ""),
+                "section_path": props.get("section_path", ""),
+                "node_kind": props.get("node_kind", "chunk"),
+            }
+            if include_text:
+                # Surface the existing role so the backfill can stay idempotent
+                # (skip already-tagged chunks) without re-fetching.
+                metadata["chunk_role"] = props.get("chunk_role") or ""
+            documents.append({
+                "text": str(props.get("text") or "") if include_text else "",
+                "metadata": metadata,
+                "uuid": str(obj.uuid) if getattr(obj, "uuid", None) else "",
+            })
+        if len(objects) < page_size:
+            break
+        offset += page_size
+    span.set_attribute("result_count", len(documents))
+    span.end(status="ok")
+    return documents
+
+
 def delete_documents_by_source_key(
     client: weaviate.WeaviateClient,
     source_key: str,
@@ -428,7 +1030,7 @@ def delete_documents_by_source_key(
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Delete chunks by stable source_key from the named collection."""
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.delete_documents_by_source_key",
         {"source_key": source_key, "collection": collection},
     )
@@ -468,7 +1070,7 @@ def aggregate_by_source(
         KeyError: if the collection does not exist.
         weaviate.exceptions.WeaviateQueryError: on query failure.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.aggregate_by_source",
         {"collection": collection},
     )
@@ -520,7 +1122,7 @@ def get_collection_stats(
     Raises:
         weaviate.exceptions.WeaviateQueryError: on unexpected query failure.
     """
-    span = tracer.start_span("vector_store.get_collection_stats", {"collection": collection})
+    span = tracer.span("vector_store.get_collection_stats", {"collection": collection})
     if not client.collections.exists(collection):
         span.end(status="not_found")
         return None
@@ -558,7 +1160,7 @@ def list_collections(
     Raises:
         weaviate.exceptions.WeaviateConnectionError: if client is not connected.
     """
-    span = tracer.start_span("vector_store.list_collections")
+    span = tracer.span("vector_store.list_collections")
     all_cols = client.collections.list_all(simple=True)
     results: list[dict] = []
     for name in all_cols:
@@ -603,7 +1205,7 @@ def update_chunk_content(
     Returns:
         True on success, False on error.
     """
-    span = tracer.start_span(
+    span = tracer.span(
         "vector_store.update_chunk_content",
         {"collection": collection, "chunk_uuid": chunk_uuid},
     )
@@ -627,3 +1229,41 @@ def update_chunk_content(
         )
         span.end(status="error")
         return False
+
+
+def update_chunk_role(
+    client: weaviate.WeaviateClient,
+    chunk_uuid: str,
+    *,
+    role: str,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> None:
+    """Set ``chunk_role`` on an existing chunk in place (role backfill).
+
+    Single-property partial update via the same ``col.data.update(uuid=...,
+    properties=...)`` idiom as :func:`update_chunk_content`. Only ``chunk_role``
+    is written, so re-running the backfill is idempotent (it just re-stamps the
+    same role) and no other field is disturbed.
+
+    Unlike :func:`update_chunk_content`, this does NOT swallow errors: the role
+    backfill needs to know which chunks failed so it can record them and remain
+    resumable. The caller isolates per-chunk failures; letting the exception
+    propagate keeps the fail/skip accounting honest at that layer.
+
+    Args:
+        client: Weaviate client handle.
+        chunk_uuid: UUID of the chunk to tag.
+        role: The role string to store in ``chunk_role``.
+        collection: Target collection name.
+    """
+    span = tracer.span(
+        "vector_store.update_chunk_role",
+        {"collection": collection, "chunk_uuid": chunk_uuid, "role": role},
+    )
+    try:
+        col = client.collections.get(collection)
+        col.data.update(uuid=chunk_uuid, properties={"chunk_role": role})
+        span.end(status="ok")
+    except Exception:
+        span.end(status="error")
+        raise

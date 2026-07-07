@@ -18,6 +18,7 @@ from typing import Any, Optional
 from src.ingest.common import Runtime
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.embedding.workflow import build_embedding_graph
+from src.platform.observability import get_tracer
 
 _GRAPH = build_embedding_graph()
 
@@ -32,8 +33,9 @@ def run_embedding_pipeline(
     source_version: str,
     clean_text: str,
     clean_hash: str,
-    refactored_text: Optional[str] = None,
     docling_document: Optional[Any] = None,
+    parse_result: Optional[Any] = None,
+    parser_instance: Optional[Any] = None,
     trace_id: str = "",
     batch_id: str = "",
     staging_batch_id: str = "",
@@ -51,11 +53,16 @@ def run_embedding_pipeline(
         source_version: Source version string.
         clean_text: Clean Markdown text from CleanDocumentStore.
         clean_hash: SHA-256 of ``clean_text`` for change detection.
-        refactored_text: LLM-refactored text from Phase 1, if available.
         docling_document: Retained for backward compatibility. No longer injected
-            into EmbeddingPipelineState (Phase 3.2 removed that field). Parser
-            selection and chunk generation are now handled by structure_detection_node
-            via the ParserRegistry. Passing a value here has no effect.
+            into EmbeddingPipelineState (Phase 3.2 removed that field). Passing a
+            value here has no effect.
+        parse_result: ParseResult produced by structure_detection_node (Phase 1)
+            via the ParserRegistry. Forwarded in-memory by ingest_directory so
+            chunking_node can use the native / markdown parser-abstraction path.
+            None → chunking_node falls back to the legacy markdown chunker.
+        parser_instance: The live parser used in Phase 1 (e.g. DoclingParser).
+            Transient (never serialised); passed in-process so chunking_node can
+            call ``parser_instance.chunk(parse_result)`` for native chunking.
         trace_id: UUID v4 trace ID propagated from Phase 1 (FR-3052). Empty
             string when not provided (backward-compatible default).
         batch_id: Optional batch grouping ID (FR-3053). Empty string when not
@@ -81,15 +88,17 @@ def run_embedding_pipeline(
         "source_version": source_version,
         "raw_text": clean_text,
         "cleaned_text": clean_text,
-        "refactored_text": refactored_text,
         "clean_hash": clean_hash,
-        # parse_result and parser_instance are populated by structure_detection_node
-        # at runtime via the ParserRegistry — not set here.
+        # parse_result + parser_instance are produced by structure_detection_node
+        # in Phase 1 and forwarded in-memory by ingest_directory. When present,
+        # chunking_node uses the native/markdown parser-abstraction path; when
+        # None it falls back to the legacy markdown chunker.
+        "parse_result": parse_result,
+        "parser_instance": parser_instance,
         "chunks": [],
         "metadata_summary": "",
         "metadata_keywords": [],
         "cross_references": [],
-        "kg_triples": [],
         "stored_count": 0,
         "errors": [],
         "processing_log": [],
@@ -101,10 +110,20 @@ def run_embedding_pipeline(
         "staged_minio": None,
         "staged_weaviate_records": [],
         "staged_weaviate_delete_old": False,
-        "staged_kg_chunks": [],
     }
-    try:
-        final_state = _GRAPH.invoke(initial_state)
-    except Exception as exc:
-        final_state = {**initial_state, "errors": [f"embedding_graph:{exc}"], "stored_count": 0}
+    tracer = get_tracer()
+    with tracer.trace(
+        "ingest.embedding",
+        {
+            "source_key": source_key,
+            "source_name": source_name,
+            "connector": connector,
+            "trace_id": trace_id,
+            "batch_id": batch_id,
+        },
+    ):
+        try:
+            final_state = _GRAPH.invoke(initial_state)
+        except Exception as exc:
+            final_state = {**initial_state, "errors": [f"embedding_graph:{exc}"], "stored_count": 0}
     return final_state

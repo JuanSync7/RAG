@@ -1,6 +1,6 @@
 # @summary
 # Abstract parser protocol and unified data contracts for the Document Parsing Abstraction.
-# Exports: DocumentParser, ParseResult, Chunk, chunk_with_markdown, validate_extra_metadata
+# Exports: DocumentParser, ParseResult, Chunk, TableArtifact, FigureArtifact, PageRef, chunk_with_markdown, validate_extra_metadata
 # Deps: dataclasses, pathlib, typing, src.ingest.support.markdown
 # @end-summary
 
@@ -24,6 +24,117 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class PageRef:
+    """Reference to a single source page. FR-3212.
+
+    Carried by chunks and table artifacts when the parser exposes per-element
+    page provenance (Docling does; regex/text fallback does not). Consumers
+    use this for citation rendering and per-page retrieval filtering.
+
+    Attributes:
+        page_no: 1-based page number within the source document.
+        page_label: Display label (e.g., "iv", "12a"). Empty when unknown.
+        bbox: Optional bounding box ``(x0, y0, x1, y1)`` in PDF coordinates;
+            ``None`` when not available.
+    """
+
+    page_no: int
+    page_label: str = ""
+    bbox: tuple[float, float, float, float] | None = None
+
+
+@dataclass
+class TableArtifact:
+    """Structured table extracted from a parsed document. FR-3211.
+
+    A first-class artifact independent of the chunk stream. Surfaces the
+    table's markdown rendering for embedding/display alongside a structured
+    cell grid for typed retrieval (e.g., column lookups, programmatic joins).
+
+    Tables are emitted by DoclingParser via DoclingDocument.tables. Parsers
+    that do not produce structured tables (text/code/markdown) leave
+    ``ParseResult.tables`` empty.
+
+    Attributes:
+        table_id: Stable per-document identifier (e.g., "table-1").
+        markdown: GitHub-flavored markdown rendering of the table; safe to
+            embed directly into a chunk.
+        cells: Row-major 2D cell grid as plain strings. First row is typically
+            the header row when ``has_header`` is True.
+        num_rows: Total row count (including header if present).
+        num_cols: Column count (max across rows).
+        has_header: True when the parser identified a header row at index 0.
+        section_path: Hierarchical breadcrumb of headings containing this
+            table. Empty when no enclosing heading exists.
+        caption: Caption text if the parser detected one; empty otherwise.
+        caption_label: Normalised caption label extracted from ``caption``
+            (e.g., ``"Table 5-2"``); empty when no prefix could be parsed.
+            Surfaced into chunk metadata for xref resolution.
+        self_ref: Parser-internal stable reference (e.g., Docling
+            ``TableItem.self_ref``) used to join sibling chunks emitted from
+            the same source table. Empty string when the parser does not
+            expose one.
+        document_id: Stable pointer to the parent document (e.g., the source
+            file's stem). Empty string when the parser/caller did not stamp
+            one — backward compatible with callers that pre-date the field.
+    """
+
+    table_id: str
+    markdown: str
+    cells: list[list[str]]
+    num_rows: int
+    num_cols: int
+    has_header: bool = False
+    section_path: str = ""
+    caption: str = ""
+    caption_label: str = ""
+    page_ref: PageRef | None = None
+    self_ref: str = ""
+    document_id: str = ""
+
+
+@dataclass
+class FigureArtifact:
+    """Structured figure/picture extracted from a parsed document.
+
+    Sibling to :class:`TableArtifact`, surfaced for xref expansion ("see Figure
+    4-1") and citation/UI rendering. Lightweight by design — image bytes are
+    not embedded; ``image_uri`` carries a best-effort pointer to where the
+    image lives (data URI, file URI, or empty when Docling did not surface
+    one).
+
+    Emitted by :class:`DoclingParser` from ``DoclingDocument.pictures``.
+    Parsers without figure support leave ``ParseResult.figures`` empty.
+
+    Attributes:
+        document_id: Stable pointer to the parent document (typically the
+            source file's stem). Empty when not stamped by the caller.
+        caption: Caption text extracted from the figure's caption refs;
+            empty when no caption was detected.
+        caption_label: Normalised caption label (e.g. ``"Figure 4-1"``)
+            parsed from ``caption``. Empty when no prefix matched.
+        section_path: Hierarchical breadcrumb of enclosing headings,
+            joined with ``" > "``. Empty when no enclosing heading exists.
+        page_no: 1-based page number from the figure's provenance.
+            ``0`` when unknown.
+        self_ref: Parser-internal stable reference (e.g. Docling
+            ``PictureItem.self_ref``). Empty when the parser does not
+            expose one.
+        image_uri: Best-effort URI for the figure image (data URI, file
+            URI, or http(s)). Empty when Docling did not attach an image
+            ref to this picture.
+    """
+
+    document_id: str = ""
+    caption: str = ""
+    caption_label: str = ""
+    section_path: str = ""
+    page_no: int = 0
+    self_ref: str = ""
+    image_uri: str = ""
+
+
+@dataclass
 class ParseResult:
     """Unified output of parser.parse(). FR-3201.
 
@@ -36,12 +147,18 @@ class ParseResult:
         headings: Heading text in document order.
         has_figures: Whether the parser detected figures or images.
         page_count: Total pages in source. 0 for code/text files.
+        tables: Structured table artifacts extracted by the parser. Empty
+            for parsers without structured-table support. FR-3211.
+        figures: Structured figure artifacts extracted by the parser. Empty
+            for parsers without figure support.
     """
 
     markdown: str
     headings: list[str]
     has_figures: bool
     page_count: int
+    tables: list[TableArtifact] = field(default_factory=list)
+    figures: list[FigureArtifact] = field(default_factory=list)
 
 
 @dataclass
@@ -71,6 +188,8 @@ class Chunk:
     heading_level: int
     chunk_index: int
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+    heading_path: list[str] = field(default_factory=list)
+    page_ref: PageRef | None = None
 
 
 @runtime_checkable
@@ -181,14 +300,18 @@ def chunk_with_markdown(parse_result: ParseResult, config: Any) -> list[Chunk]:
     chunks: list[Chunk] = []
     for idx, raw in enumerate(raw_chunks):
         section_meta = _build_section_metadata(raw.get("header_metadata", {}))
+        section_path = section_meta["section_path"]
+        heading_path = [h for h in section_path.split(" > ") if h] if section_path else []
         chunks.append(
             Chunk(
                 text=raw["text"],
-                section_path=section_meta["section_path"],
+                section_path=section_path,
                 heading=section_meta["heading"],
                 heading_level=section_meta["heading_level"],
                 chunk_index=idx,
                 extra_metadata={},
+                heading_path=heading_path,
+                page_ref=None,
             )
         )
     return chunks

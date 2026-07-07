@@ -21,6 +21,11 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from config.settings import (
+    RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD,
+    RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S,
+)
+
 logger = logging.getLogger("rag.guardrails.intent")
 
 # Keyword-based fallback patterns for when LLM is unavailable
@@ -74,7 +79,7 @@ class IntentClassifier:
     ``runtime=None``, only keyword matching is used.
     """
 
-    def __init__(self, confidence_threshold: float = 0.5, runtime=None) -> None:
+    def __init__(self, confidence_threshold: float = RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD, runtime=None) -> None:
         """Initialize an intent classifier.
 
         Args:
@@ -132,7 +137,7 @@ class IntentClassifier:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, runtime.generate_async(messages))
-                    response = future.result(timeout=10)
+                    response = future.result(timeout=RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S)
             else:
                 response = asyncio.run(runtime.generate_async(messages))
         except RuntimeError:

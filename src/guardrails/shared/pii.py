@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from config.settings import RAG_GUARDRAILS_PII_SCORE_THRESHOLD
+
 logger = logging.getLogger("rag.guardrails.pii")
 
 # ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ class PIIDetector:
     def __init__(
         self,
         extended: bool = False,
-        score_threshold: float = 0.4,
+        score_threshold: float = RAG_GUARDRAILS_PII_SCORE_THRESHOLD,
         use_gliner: bool = False,
     ) -> None:
         """Initialize a PII detector.

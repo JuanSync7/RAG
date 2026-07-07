@@ -375,3 +375,131 @@ def test_noop_provider_doc_state_methods(monkeypatch):
     assert provider.get_seen_doc_ids(
         tenant_id="t", subject="s", project_id=None, conversation_id="conv_noop",
     ) == []
+
+
+# ---------------------------------------------------------------------------
+# Newline preservation — stored turn content must keep its markdown structure
+# (lists/paragraphs) so a reloaded conversation doesn't render as a wall of
+# text. Regression for the chat-switch \n-collapse bug.
+# ---------------------------------------------------------------------------
+
+def test_sanitize_default_collapses_all_whitespace():
+    from src.platform.memory.utils import sanitize_memory_text
+    out = sanitize_memory_text("a:\n\n- x\n- y\n\nend")
+    assert "\n" not in out
+    assert out == "a: - x - y end"
+
+
+def test_sanitize_preserve_newlines_keeps_structure():
+    from src.platform.memory.utils import sanitize_memory_text
+    md = "Intro:\n\n- a\n- b\n\nOutro."
+    assert sanitize_memory_text(md, preserve_newlines=True) == "Intro:\n\n- a\n- b\n\nOutro."
+
+
+def test_sanitize_preserve_newlines_collapses_midline_ws_caps_blanklines_keeps_indent():
+    from src.platform.memory.utils import sanitize_memory_text
+    # mid-line runs collapse, blank-line runs cap at one, trailing ws trimmed,
+    # but LEADING indentation (nested list / code) is preserved.
+    md = "a   b\t c\n\n\n\nd  \n  e"
+    assert sanitize_memory_text(md, preserve_newlines=True) == "a b c\n\nd\n  e"
+
+
+def test_sanitize_preserve_newlines_keeps_indented_code():
+    from src.platform.memory.utils import sanitize_memory_text
+    md = "Run:\n\n```bash\n    ./build.sh --opt\n```\n"
+    # the 4-space code indentation survives (no leading-space stripping)
+    assert (
+        sanitize_memory_text(md, preserve_newlines=True)
+        == "Run:\n\n```bash\n    ./build.sh --opt\n```"
+    )
+
+
+def test_append_turn_preserves_markdown_newlines(monkeypatch):
+    provider = _make_provider(monkeypatch)
+    meta = provider.ensure_conversation(
+        tenant_id="t", subject="u", project_id="p", title="c",
+    )
+    md = "Steps:\n\n- one\n- two\n\nAll done."
+    provider.append_turn(
+        tenant_id="t", subject="u", project_id="p",
+        conversation_id=meta.conversation_id, role="assistant",
+        content=md, query_id="wf1",
+    )
+    turns = provider.get_turns(
+        tenant_id="t", subject="u", project_id="p",
+        conversation_id=meta.conversation_id,
+    )
+    assert turns and turns[-1].content == md  # newlines survive the round-trip
+
+
+# ---------------------------------------------------------------------------
+# Factory resilience: Redis-down must NOT permanently latch to no-op
+# ---------------------------------------------------------------------------
+
+
+class _PingRedis:
+    """A redis client stub whose ``ping()`` succeeds or raises on demand."""
+
+    def __init__(self, ok):
+        self._ok = ok
+        self.ping_calls = 0
+
+    def ping(self):
+        self.ping_calls += 1
+        if not self._ok:
+            raise ConnectionError("redis down")
+        return True
+
+
+class _TogglableRedisModule:
+    """A fake ``redis`` module whose next client's ping is controlled by ``ok``.
+    Records how many times ``from_url`` was called so the retry-throttle can be
+    asserted."""
+
+    def __init__(self):
+        self.ok = True
+        self.from_url_calls = 0
+
+    def from_url(self, _url, decode_responses=True, **_kw):
+        self.from_url_calls += 1
+        return _PingRedis(self.ok)
+
+
+def test_get_conversation_memory_recovers_when_redis_returns(monkeypatch):
+    """Redis down at the first call must NOT latch to no-op for the process
+    lifetime: the no-op is uncached, so once Redis is reachable again the next
+    call reconnects and caches the Redis provider — no restart required."""
+    from src.platform.memory import provider as pmod
+
+    monkeypatch.setattr(pmod, "_MEMORY", None)
+    monkeypatch.setattr(pmod, "_last_redis_attempt_at", None)
+    monkeypatch.setattr(pmod, "MEMORY_ENABLED", True)
+    monkeypatch.setattr(pmod, "MEMORY_PROVIDER", "redis")
+
+    mod = _TogglableRedisModule()
+    monkeypatch.setitem(__import__("sys").modules, "redis", mod)
+
+    # 1) Redis DOWN -> uncached no-op (singleton not latched).
+    mod.ok = False
+    m1 = pmod.get_conversation_memory()
+    assert isinstance(m1, NoopConversationMemory)
+    assert pmod._MEMORY is None  # crucial: NOT cached, so it will retry
+
+    # 2) Throttle: an immediate retry must skip the (blocking) connect attempt.
+    calls = mod.from_url_calls
+    m2 = pmod.get_conversation_memory()
+    assert isinstance(m2, NoopConversationMemory)
+    assert mod.from_url_calls == calls  # skipped by the retry interval
+
+    # 3) Redis BACK and the throttle window has elapsed -> reconnect + cache.
+    mod.ok = True
+    monkeypatch.setattr(pmod, "_last_redis_attempt_at", None)
+    m3 = pmod.get_conversation_memory()
+    assert isinstance(m3, RedisConversationMemory)
+    assert pmod._MEMORY is m3  # cached only on success
+
+    # 4) Once connected it is the cached singleton (no further reconnects).
+    calls = mod.from_url_calls
+    m4 = pmod.get_conversation_memory()
+    assert m4 is m3
+    assert mod.from_url_calls == calls

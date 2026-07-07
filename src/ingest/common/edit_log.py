@@ -1,20 +1,22 @@
 # @summary
-# Edit log for mapping refactored-text offsets back to original-text offsets.
-# Built post-hoc via difflib.SequenceMatcher; the LLM refactor step is opaque,
-# so per-transform tracking is not possible — we diff the endpoints instead.
+# Edit log for mapping cleaned-text offsets back to raw-text offsets.
+# Built post-hoc via difflib.SequenceMatcher between raw_text and cleaned_text.
 # Exports: EditLog
 # Deps: difflib
 # @end-summary
 
-"""Bidirectional offset mapper between original and refactored text.
+"""Bidirectional offset mapper between original (raw) and post-cleaning text.
 
-The ingest pipeline rewrites ``raw_text`` into ``refactored_text`` via a
-mechanical-clean stage followed by an LLM rewrite. The LLM is a black box, so
-we recover the original<->refactored coordinate mapping by diffing the two
-strings with :class:`difflib.SequenceMatcher` and indexing the resulting
-opcodes.
+The ingest pipeline transforms ``raw_text`` → ``cleaned_text`` via the
+text_cleaning stage (boilerplate stripping, unicode normalisation). We recover
+the original<->cleaned coordinate mapping by diffing the two strings with
+:class:`difflib.SequenceMatcher` and indexing the resulting opcodes.
 
-A chunk's offsets in refactored space can then be projected back to original
+Historical naming: parameters are still called ``refactored_text`` for
+backward compatibility — they refer to the chunker's input text (now
+``cleaned_text`` after the LLM refactoring stage was removed in PR1).
+
+A chunk's offsets in chunker-input space can then be projected back to raw
 space exactly when the chunk lies within an ``equal`` block, and approximately
 (by interpolation across edits) when it straddles edits.
 """

@@ -61,12 +61,16 @@ def _fail_open(default: dict):
 @action()
 @_fail_open({"valid": True, "length": 0, "reason": ""})
 async def check_query_length(query: str) -> dict:
-    """Validate query length: min 3 chars, max 2000 chars."""
+    """Validate query length: min/max chars (operator-tunable, defaults 3/2000)."""
+    from config.settings import (
+        RAG_GUARDRAILS_QUERY_MIN_CHARS,
+        RAG_GUARDRAILS_QUERY_MAX_CHARS,
+    )
     length = len(query.strip())
-    if length < 3:
+    if length < RAG_GUARDRAILS_QUERY_MIN_CHARS:
         return {"valid": False, "length": length, "reason": "Query too short. Please provide at least a few words."}
-    if length > 2000:
-        return {"valid": False, "length": length, "reason": "Query too long. Please keep your question under 2000 characters."}
+    if length > RAG_GUARDRAILS_QUERY_MAX_CHARS:
+        return {"valid": False, "length": length, "reason": f"Query too long. Please keep your question under {RAG_GUARDRAILS_QUERY_MAX_CHARS} characters."}
     return {"valid": True, "length": length, "reason": ""}
 
 
@@ -99,16 +103,20 @@ async def check_query_clarity(query: str) -> dict:
 @action()
 @_fail_open({"abusive": False, "reason": ""})
 async def check_abuse_pattern(query: str, context: dict = None) -> dict:
-    """Track query rate per session. Flag if > 20 queries in rapid succession."""
+    """Track query rate per session. Flag if too many queries in rapid succession (operator-tunable, default > 20 within 60s)."""
     import time
+    from config.settings import (
+        RAG_NEMO_ABUSE_WINDOW_SECONDS,
+        RAG_NEMO_ABUSE_MAX_QUERIES,
+    )
     session_id = context.get("session_id", "default") if context else "default"
     now = time.time()
-    window = 60  # 1 minute window
+    window = RAG_NEMO_ABUSE_WINDOW_SECONDS  # rate-limit window in seconds
     if session_id not in _abuse_session_state:
         _abuse_session_state[session_id] = []
     _abuse_session_state[session_id] = [t for t in _abuse_session_state[session_id] if now - t < window]
     _abuse_session_state[session_id].append(now)
-    if len(_abuse_session_state[session_id]) > 20:
+    if len(_abuse_session_state[session_id]) > RAG_NEMO_ABUSE_MAX_QUERIES:
         return {"abusive": True, "reason": "Rate limit exceeded"}
     return {"abusive": False, "reason": ""}
 
@@ -161,11 +169,15 @@ async def prepend_low_confidence_note(answer: str) -> dict:
 @action()
 @_fail_open({"valid": True, "reason": ""})
 async def check_answer_length(answer: str) -> dict:
-    """Validate answer length: min 20 chars, max 5000 chars."""
+    """Validate answer length: min/max chars (operator-tunable, defaults 20/5000)."""
+    from config.settings import (
+        RAG_GUARDRAILS_ANSWER_MIN_CHARS,
+        RAG_GUARDRAILS_ANSWER_MAX_CHARS,
+    )
     length = len(answer.strip())
-    if length < 20:
+    if length < RAG_GUARDRAILS_ANSWER_MIN_CHARS:
         return {"valid": False, "reason": "too short"}
-    if length > 5000:
+    if length > RAG_GUARDRAILS_ANSWER_MAX_CHARS:
         return {"valid": False, "reason": "too long"}
     return {"valid": True, "reason": ""}
 
@@ -174,8 +186,9 @@ async def check_answer_length(answer: str) -> dict:
 @_fail_open({"answer": ""})
 async def adjust_answer_length(answer: str, reason: str) -> dict:
     """Truncate overly long answers or flag terse ones."""
+    from config.settings import RAG_GUARDRAILS_ANSWER_MAX_CHARS
     if reason == "too long":
-        return {"answer": answer[:5000] + "..."}
+        return {"answer": answer[:RAG_GUARDRAILS_ANSWER_MAX_CHARS] + "..."}
     return {"answer": answer}
 
 
@@ -248,7 +261,11 @@ async def check_role_boundary(query: str) -> dict:
 @action()
 @_fail_open({"escalation_level": "none"})
 async def check_jailbreak_escalation(query: str, context: dict = None) -> dict:
-    """Track jailbreak attempt count per session. Thresholds: 1-2 -> warn, 3+ -> block."""
+    """Track jailbreak attempt count per session. Thresholds operator-tunable (defaults: warn at 1, block at 3)."""
+    from config.settings import (
+        RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD,
+        RAG_NEMO_JAILBREAK_WARN_THRESHOLD,
+    )
     session_id = context.get("session_id", "default") if context else "default"
     violation_patterns = [
         r"ignore\s+(previous|all|your)\s+instructions",
@@ -262,9 +279,9 @@ async def check_jailbreak_escalation(query: str, context: dict = None) -> dict:
         _jailbreak_session_state[session_id] = _jailbreak_session_state.get(session_id, 0) + 1
 
     count = _jailbreak_session_state.get(session_id, 0)
-    if count >= 3:
+    if count >= RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD:
         return {"escalation_level": "block"}
-    elif count >= 1:
+    elif count >= RAG_NEMO_JAILBREAK_WARN_THRESHOLD:
         return {"escalation_level": "warn"}
     return {"escalation_level": "none"}
 

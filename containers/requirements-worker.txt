@@ -3,6 +3,7 @@
 # in docker-compose.yml); sentence-transformers is NOT installed here. For
 # the in-process fallback used by dev venvs, install the `local-embed`
 # pyproject extra instead: `uv sync --extra local-embed`.
+# Shared deps live in requirements-base.txt.
 #
 # NOTE: docling (our PDF parser) transitively requires torch + torchvision.
 # The Dockerfile pre-installs the CPU-only wheels from the pytorch.org CPU
@@ -10,25 +11,10 @@
 # resolver finds torch already satisfied and docling doesn't pull the CUDA
 # build from PyPI (which adds ~2.7 GB of nvidia/* + ~640 MB triton we never
 # touch in this container — no GPU code runs here).
-# API server deps are in requirements-api.txt.
-httpx
-numpy
+-r requirements-base.txt
+
+# --- Worker-only ---
 docling>=2.82.0
-weaviate-client
-langchain-core
-langchain-text-splitters
-langgraph
-networkx
-nemoguardrails>=0.21.0
 tree-sitter
 tree-sitter-verilog
 pyverilog
-temporalio>=1.23,<2
-redis
-langfuse
-pyyaml
-orjson
-minio
-langdetect
-prometheus-client
-litellm

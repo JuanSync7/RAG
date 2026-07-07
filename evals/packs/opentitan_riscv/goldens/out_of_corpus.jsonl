@@ -1,0 +1,6 @@
+{"qid": "ooc001", "qtype": "out_of_corpus", "query": "What is the size of the ARM Cortex-M4's instruction cache?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "ooc002", "qtype": "out_of_corpus", "query": "How many general-purpose registers does the x86-64 architecture expose?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "ooc003", "qtype": "out_of_corpus", "query": "What is the latency of a CAS instruction on PowerPC e500?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "ooc004", "qtype": "out_of_corpus", "query": "Describe the MIPS R4000 branch-delay-slot semantics.", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "ooc005", "qtype": "out_of_corpus", "query": "What is the address of the GPIO direction register on the STM32F4?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}
+{"qid": "ooc006", "qtype": "out_of_corpus", "query": "Which SPARC instruction sets the trap-base register?", "expected_source_docs": [], "expected_behavior": "refuse_or_state_unknown"}

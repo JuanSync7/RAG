@@ -49,6 +49,13 @@ def format_context(
 
     formatted_chunks = []
     for i, result in enumerate(results):
+        # Stamp the 1-based citation index onto the result's metadata so the API
+        # response exposes the SAME number the model cites ([N]). This function is
+        # the single numbering authority; the response returns these same objects,
+        # so source N in the answer maps unambiguously to the Nth returned source.
+        meta = getattr(result, "metadata", None)
+        if isinstance(meta, dict):
+            meta["citation_index"] = i + 1
         chunk_str = _format_chunk(i + 1, result, include_scores)
         formatted_chunks.append(chunk_str)
 

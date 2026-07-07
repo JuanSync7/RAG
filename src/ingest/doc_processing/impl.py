@@ -9,11 +9,29 @@
 
 from __future__ import annotations
 
+from threading import Lock
+from typing import Any
+
 from src.ingest.common import Runtime
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.doc_processing.workflow import build_document_processing_graph
+from src.platform.observability import get_tracer
 
-_GRAPH = build_document_processing_graph()
+# Lazy singleton: the graph is compiled on first use, not at import time.
+# Compiling at import couples module import to LangGraph node-import success
+# and makes worker boot fragile. The lock guards concurrent first-call init.
+_GRAPH: Any = None
+_GRAPH_LOCK = Lock()
+
+
+def _get_graph() -> Any:
+    """Return the compiled Document Processing graph, building it on first use."""
+    global _GRAPH
+    if _GRAPH is None:
+        with _GRAPH_LOCK:
+            if _GRAPH is None:
+                _GRAPH = build_document_processing_graph()
+    return _GRAPH
 
 
 def run_document_processing(
@@ -67,10 +85,19 @@ def run_document_processing(
         "structure": {},
         "multimodal_notes": [],
         "cleaned_text": "",
-        "refactored_text": None,
         "errors": [],
         "processing_log": [],
         "trace_id": trace_id,
         "raw_bytes": raw_bytes,
     }
-    return _GRAPH.invoke(initial_state)
+    tracer = get_tracer()
+    with tracer.trace(
+        "ingest.doc_processing",
+        {
+            "source_key": source_key,
+            "source_name": source_name,
+            "connector": connector,
+            "trace_id": trace_id,
+        },
+    ):
+        return _get_graph().invoke(initial_state)

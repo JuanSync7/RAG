@@ -11,3 +11,4 @@ Tests for the server layer, currently focused on the Pydantic schema contracts d
 | Path | Purpose |
 | --- | --- |
 | `test_document_management_schemas.py` | Contract tests for `DocumentSummary`, `DocumentListResponse`, `DocumentDetailResponse`, `DocumentUrlResponse`, `SourceSummary`, `SourceListResponse`, `CollectionItem`, `CollectionStatsResponse`, and `CollectionListResponse` |
+| `test_turn_loop_endpoint.py` | Turn-loop branch of the query routes + `server/turn_loop_runner.py`: flag resolution, SSE frame ordering, clarify terminals, memory write-back, trace metadata, non-loop path untouched |

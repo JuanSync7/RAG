@@ -63,6 +63,30 @@ When you modify source files:
 
 Use these conventions for all new implementation work (especially pipeline-style systems).
 
+### 0) Generic-Fix Principle (solve the class, not the instance)
+
+**No fix may be specific to the example that surfaced it. Always solve the general
+problem the example is an instance of.** When a bad case appears (a junk chunk, a
+wrong answer, a failing input), do not pattern-match that case away — identify the
+*class* it belongs to and fix the mechanism that lets the whole class through.
+
+- **Forbidden:** enumerating surface patterns to suppress observed bad cases —
+  hardcoded strings/regex for specific vendors, document families, phrasings, or
+  entities (e.g. matching `"Arm publications"` or `"Proprietary Notice"` to drop
+  boilerplate). These overfit the corpus in front of you and silently fail on the
+  next one.
+- **Required:** target the underlying property that defines the class
+  (e.g. "low information-content / non-answer-bearing chunk", "near-duplicate
+  template text repeated across documents", "context insufficient to ground the
+  answer"). Prefer corpus-driven, model-driven, or information-theoretic signals
+  over literal matching. If a heuristic is unavoidable, make it a measurable,
+  configurable property of the data — not an allowlist/denylist of known cases.
+- **Test:** before writing a fix, ask "would this also catch the equivalent
+  problem in a document/vendor/language I have never seen?" If no, it is a
+  specific fix — generalize it. State the class you are solving for in the
+  code/PR, and add a test that covers a *different* instance of the same class
+  than the one that triggered the work.
+
 ### 1) Python Style (PEP-oriented)
 
 - Follow PEP 8 naming/layout conventions.

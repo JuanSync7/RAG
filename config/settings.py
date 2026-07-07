@@ -1,8 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
-# Exports (retrieval): RAG_KG_RETRIEVAL_EDGE_TYPES, RAG_KG_RETRIEVAL_PATH_PATTERNS,
-#   RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET, RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_CONCISE, RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_LOOP_LLM_MAX_TOKENS, RAG_TURN_LOOP_MIN_CALL_BUDGET_MS, RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS, RAG_TURN_LOOP_FALLBACK_POOL_SIZE, RAG_TURN_LOOP_CITATION_TARGET, RAG_TURN_LOOP_FACET_COMMIT_ENABLED, RAG_TURN_LOOP_ROUTER_ENABLED, RAG_TURN_LOOP_FAST_LANE_ENABLED, RAG_TURN_LOOP_FAST_LANE_MAX_WORDS, RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE, RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED, RAG_TURN_LOOP_EFFORT_FAST_SCALE, RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -70,12 +68,49 @@ if RAG_WEAVIATE_MODE not in ("embedded", "networked"):
 # --- Hybrid Search ---
 # Alpha: 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
 HYBRID_SEARCH_ALPHA = 0.5
-SEARCH_LIMIT = 10
-RERANK_TOP_K = 5
+# Single source of truth for retrieval sizing. Env-driven so a deployment can
+# raise them; server request schemas (server/schemas.py) derive their defaults
+# from these, and rag_chain floors client-supplied values up to them.
+SEARCH_LIMIT = int(os.environ.get("RAG_SEARCH_LIMIT", "10"))
+RERANK_TOP_K = int(os.environ.get("RAG_RERANK_TOP_K", "5"))
+# Drop thin / heading-only candidates (titles, ToC leaders) shorter than this
+# many chars before rerank. 0 = disabled. These chunks win dense cosine on
+# topical queries but carry no answer content; see rag_chain thin-chunk filter.
+RERANK_MIN_CHARS = int(os.environ.get("RAG_RERANK_MIN_CHARS", "0"))
+# NOTE: the former query-side navigational drop (RAG_RERANK_DROP_NAVIGATIONAL /
+# RAG_RERANK_NAV_MAX_CHARS) has been retired. Navigational/boilerplate suppression
+# now happens via the ingest-time chunk_role metadata + query-time role filter
+# (RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT / RAG_RETRIEVAL_EXCLUDED_ROLES). Only the
+# thin/heading-only floor (RERANK_MIN_CHARS above) remains query-side.
+# Floor client-supplied search_limit/rerank_top_k up to the configured
+# SEARCH_LIMIT/RERANK_TOP_K so UI clients that hardcode small values (e.g. the
+# console presets 10/5) still retrieve enough candidates for the reranker to
+# surface body chunks that rank beyond a small top-K. No-op at repo defaults
+# (10/5); active when a deployment sets SEARCH_LIMIT/RERANK_TOP_K higher.
+RETRIEVAL_ENFORCE_CONFIG_FLOOR = os.environ.get(
+    "RAG_RETRIEVAL_ENFORCE_CONFIG_FLOOR", "true"
+).lower() in ("true", "1", "yes")
 
 # --- Document Processing ---
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
+# CHUNK_SIZE / CHUNK_OVERLAP apply to the **LangChain fallback** chunker
+# (RecursiveCharacterTextSplitter). They are CHARACTER counts, not token
+# counts. Kept roughly equivalent in tokens to the Docling HybridChunker
+# default RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS=1024 at ~3.5 chars/token
+# for English (BGE-M3 tokenizer). If you change one, check the other.
+# Docling's HybridChunker has no overlap parameter — it splits at structural
+# boundaries and uses heading breadcrumbs to bridge context, so overlap only
+# matters for the char-window fallback path.
+CHUNK_SIZE = 3500
+CHUNK_OVERLAP = 350
+# Minimum chunk size (chars) for the markdown/semantic chunker's coalescing
+# pass. Semantic chunking splits a section wherever consecutive-sentence cosine
+# drops below RAG_SEMANTIC_THRESHOLD; on heterogeneous, table-dense content
+# (e.g. ARM spec coherency tables) nearly every adjacent pair is dissimilar, so
+# without a floor it emits one tiny chunk per sentence — one CHI spec section
+# exploded to 13,758 ~90-char fragments vs 1,488 clean chunks non-semantic.
+# Adjacent sub-min segments are merged (up to CHUNK_SIZE) so no sub-min chunk is
+# emitted unless it is the only content of its section.
+MIN_CHUNK_CHARS = int(os.environ.get("RAG_MIN_CHUNK_CHARS", "512"))
 
 # --- Query Processing (LangGraph) ---
 QUERY_CONFIDENCE_THRESHOLD = float(
@@ -84,73 +119,32 @@ QUERY_CONFIDENCE_THRESHOLD = float(
 MAX_SANITIZATION_ITERATIONS = int(
     os.environ.get("RAG_MAX_QUERY_ITERATIONS", "3")
 )
-QUERY_PROCESSING_MODEL = os.environ.get("RAG_QUERY_MODEL", None)  # defaults to OLLAMA_MODEL (set below)
 QUERY_PROCESSING_TEMPERATURE = float(
     os.environ.get("RAG_QUERY_TEMPERATURE", "0.15")
 )
-QUERY_MAX_LENGTH = int(os.environ.get("RAG_QUERY_MAX_LENGTH", "500"))
 QUERY_PROCESSING_TIMEOUT = int(
     os.environ.get("RAG_QUERY_PROCESSING_TIMEOUT", "30")
 )
 QUERY_LOG_DIR = PROJECT_ROOT / "logs"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
+# Corpus domain hint, injected into query-processing, HyDE, and deep-research
+# prompts so the LLM resolves domain-ambiguous acronyms in-corpus. The DEFAULT is
+# deliberately domain-NEUTRAL: an unconfigured deployment gets harmless "use the
+# in-corpus meaning" guidance rather than a concrete-but-wrong domain that would
+# actively misdirect retrieval (e.g. an AI/ML default reading "DFT" as Density
+# Functional Theory on a silicon-design corpus). Set RAG_DOMAIN_DESCRIPTION to the
+# actual corpus domain per deployment.
 DOMAIN_DESCRIPTION = os.environ.get(
     "RAG_DOMAIN_DESCRIPTION",
-    "This knowledge base covers information retrieval, NLP, machine learning, "
-    "embeddings, vector search, language models, and related AI/ML topics. "
-    "Interpret all acronyms and abbreviations in this domain context.",
+    "Interpret all acronyms and abbreviations according to how they are used in "
+    "this corpus's documents, not their most common meaning in unrelated fields.",
 )
 
-# --- Knowledge Graph ---
-# Set to False to disable KG query expansion (pure hybrid search only)
+# --- Knowledge Graph (retrieval-side flag) ---
+# Set to False to disable KG query expansion at retrieval time (pure hybrid search only).
+# Ingest-side KG behavior lives in KGWeave; see RAG_INGESTION_ENABLE_KG_PHASE2B for the
+# RagWeave→KGWeave Temporal handoff toggle.
 KG_ENABLED = os.environ.get("RAG_KG_ENABLED", "true").lower() in ("true", "1", "yes")
-KG_PATH = PROJECT_ROOT / ".knowledge_graph.json"
-KG_OBSIDIAN_EXPORT_DIR = PROJECT_ROOT / "obsidian_graph"
-
-# KG Retrieval enhancements (REQ-KG-1200..1206)
-# Edge type whitelist for typed traversal. Comma-separated in env; empty = untyped.
-RAG_KG_RETRIEVAL_EDGE_TYPES: list[str] = [
-    e.strip()
-    for e in os.environ.get("RAG_KG_RETRIEVAL_EDGE_TYPES", "").split(",")
-    if e.strip()
-]
-# Path patterns: JSON-encoded list of edge-type sequences, e.g. '[["instantiates","specified_by"]]'.
-# Empty list = no pattern matching.
-import json as _json
-try:
-    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = _json.loads(
-        os.environ.get("RAG_KG_RETRIEVAL_PATH_PATTERNS", "[]")
-    )
-except (ValueError, TypeError):
-    logging.getLogger(__name__).warning(
-        "RAG_KG_RETRIEVAL_PATH_PATTERNS is not valid JSON; defaulting to []"
-    )
-    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = []
-# Max tokens for the graph context block injected into the generation prompt.
-RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET: int = int(
-    os.environ.get("RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET", "500")
-)
-# Master toggle for graph context injection. False = skip all retrieval enhancements.
-RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION: bool = os.environ.get(
-    "RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION", "false"
-).lower() in ("true", "1", "yes")
-# Community context token budget (REQ-KG-1320). 0 = community context disabled.
-RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET: int = int(
-    os.environ.get("RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET", "200")
-)
-# Graph context section marker style (REQ-KG-1322). "markdown" | "xml" | "plain".
-RAG_KG_GRAPH_CONTEXT_MARKER_STYLE: str = os.environ.get(
-    "RAG_KG_GRAPH_CONTEXT_MARKER_STYLE", "markdown"
-)
-# Max entities explored per hop in path pattern evaluation (REQ-KG-1324).
-RAG_KG_MAX_HOP_FANOUT: int = int(
-    os.environ.get("RAG_KG_MAX_HOP_FANOUT", "50")
-)
-# LLM extraction rate-limit retry policy
-RAG_KG_LLM_RATE_LIMIT_RETRIES = int(os.environ.get("RAG_KG_LLM_RATE_LIMIT_RETRIES", "3"))
-RAG_KG_LLM_RATE_LIMIT_BACKOFF_S = float(os.environ.get("RAG_KG_LLM_RATE_LIMIT_BACKOFF_S", "1.0"))
-# GLiNER entity prediction confidence threshold
-RAG_KG_GLINER_THRESHOLD = float(os.environ.get("RAG_KG_GLINER_THRESHOLD", "0.5"))
 
 # --- Semantic Chunking ---
 SEMANTIC_CHUNKING_ENABLED = os.environ.get(
@@ -160,18 +154,12 @@ SEMANTIC_SIMILARITY_THRESHOLD = float(
     os.environ.get("RAG_SEMANTIC_THRESHOLD", "0.75")
 )
 
-# --- GLiNER Entity Extraction ---
-GLINER_ENABLED = os.environ.get(
-    "RAG_GLINER_ENABLED", "true"
-).lower() in ("true", "1", "yes")
+# --- GLiNER (PII detector) ---
+# Used only by the NeMo Guardrails PII shim (src/guardrails/shared/gliner_pii.py).
 GLINER_MODEL_PATH = os.environ.get(
     "RAG_GLINER_MODEL",
     os.path.expanduser("~/models/gliner/gliner_medium-v2.1"),
 )
-GLINER_ENTITY_LABELS = [
-    "technology", "algorithm", "framework", "concept",
-    "programming language", "data structure",
-]
 
 # --- Service Ports (canonical defaults — override via .env) ---
 _OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
@@ -186,6 +174,12 @@ OLLAMA_BASE_URL = os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_OLLAMA_P
 OLLAMA_MODEL = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
 GENERATION_MAX_TOKENS = int(os.environ.get("RAG_GENERATION_MAX_TOKENS", "1024"))
 GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3"))
+# When false, do NOT send a JSON response_format to the LLM. Reasoning models
+# (e.g. qwopus) emit a degenerate "{}" under guided-JSON decoding; free-text
+# generation + free-text answer parsing is the reliable path.
+GENERATION_STRUCTURED_OUTPUT = os.environ.get(
+    "RAG_GENERATION_STRUCTURED_OUTPUT", "true"
+).lower() in ("true", "1", "yes")
 
 # --- LLM Provider (LiteLLM) ─────────────────────────────────────────
 # Unified config. Falls back to legacy Ollama vars for backward compat.
@@ -226,6 +220,11 @@ TOKEN_BUDGET_WARN_PERCENT = int(
 TOKEN_BUDGET_CRITICAL_PERCENT = int(
     os.environ.get("RAG_TOKEN_BUDGET_CRITICAL_PERCENT", "90")
 )
+# Assumed prompt-template overhead (chars) reserved by calculate_budget
+# (src/platform/token_budget/provider.py). Default 200.
+TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS = int(
+    os.environ.get("RAG_TOKEN_BUDGET_TEMPLATE_OVERHEAD_CHARS", "200")
+)
 
 # Query-processing model alias — defaults to the primary LLM model.
 # Used by the retrieval query processor for reformulation/evaluation.
@@ -235,9 +234,18 @@ LLM_QUERY_MODEL = os.environ.get(
     f"ollama/{_legacy_query_model}" if _legacy_query_model else LLM_MODEL,
 )
 
-# Resolve forward reference: query processing model defaults to generation model
-if QUERY_PROCESSING_MODEL is None:
-    QUERY_PROCESSING_MODEL = OLLAMA_MODEL
+# Agentic-loop model aliases. Empty (default) => the router aliases
+# ``controller``/``judge`` to the primary model so the loop works with zero new
+# deployment (the controller/judge fall back to the default/qwopus model). Set a
+# dedicated instruct model here later (e.g. a small JSON-reliable instruct model)
+# to upgrade judge quality without any code change. See AGENTIC_RETRIEVAL_DESIGN.md.
+LLM_CONTROLLER_MODEL = os.environ.get("RAG_LLM_CONTROLLER_MODEL", "")
+LLM_JUDGE_MODEL = os.environ.get("RAG_LLM_JUDGE_MODEL", "")
+# Optional per-alias API base — lets the controller/judge run on a DIFFERENT
+# endpoint than the default/gen model (e.g. a fast local instruct judge on its own
+# vLLM port), instead of sharing RAG_LLM_API_BASE. Empty = share the default base.
+LLM_CONTROLLER_API_BASE = os.environ.get("RAG_LLM_CONTROLLER_API_BASE", "")
+LLM_JUDGE_API_BASE = os.environ.get("RAG_LLM_JUDGE_API_BASE", "")
 
 # --- Reliability / Retry ---
 RETRY_PROVIDER = os.environ.get("RAG_RETRY_PROVIDER", "local")
@@ -259,6 +267,17 @@ RAG_INGEST_TEMPORAL_DOC_TIMEOUT_MIN = int(os.environ.get("RAG_INGEST_TEMPORAL_DO
 RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN = int(os.environ.get("RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN", "30"))
 RAG_INGEST_TEMPORAL_RETRY_MAX = int(os.environ.get("RAG_INGEST_TEMPORAL_RETRY_MAX", "3"))
 RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S = int(os.environ.get("RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S", "5"))
+# Status-ledger activity retry/timeout (src/ingest/temporal/workflows.py:_LEDGER_RETRY
+# and the schedule_to_close_timeout on record_phase_status_activity). Defaults 3 / 30s.
+RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX = int(os.environ.get("RAG_INGEST_TEMPORAL_LEDGER_RETRY_MAX", "3"))
+RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S = int(os.environ.get("RAG_INGEST_TEMPORAL_LEDGER_TIMEOUT_S", "30"))
+# In-memory ingest-job registry knobs (server/routes/ingest.py): max recent jobs
+# retained, finished-job retention window, stale-job reaping window, and sweeper
+# sleep interval. Defaults 50 / 3600s / 1800s / 60s.
+RAG_INGEST_MAX_RECENT_JOBS = int(os.environ.get("RAG_INGEST_MAX_RECENT_JOBS", "50"))
+RAG_INGEST_JOB_RETENTION_SECONDS = int(os.environ.get("RAG_INGEST_JOB_RETENTION_SECONDS", "3600"))
+RAG_INGEST_STALE_JOB_SECONDS = int(os.environ.get("RAG_INGEST_STALE_JOB_SECONDS", "1800"))
+RAG_INGEST_SWEEP_INTERVAL_SECONDS = int(os.environ.get("RAG_INGEST_SWEEP_INTERVAL_SECONDS", "60"))
 
 # --- Server ---
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
@@ -410,6 +429,27 @@ RAG_INGESTION_DOCLING_STRICT = os.environ.get(
 RAG_INGESTION_DOCLING_AUTO_DOWNLOAD = os.environ.get(
     "RAG_INGESTION_DOCLING_AUTO_DOWNLOAD", "true"
 ).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_OCR: bool = os.environ.get(
+    "RAG_INGESTION_ENABLE_OCR", "true"
+).lower() in ("true", "1", "yes")
+"""Enable Docling OCR auto-trigger for image-only pages. Default: True.
+Uses RapidOCR with force_full_page_ocr=False so text-native pages are not
+re-OCR'd. Set False to disable OCR entirely (faster, but image-only pages
+yield empty text)."""
+RAG_INGESTION_OCR_ENGINE: str = os.environ.get(
+    "RAG_INGESTION_OCR_ENGINE", "rapidocr"
+)
+"""OCR engine identifier. Only "rapidocr" is wired today; reserved for
+forward-compat with easyocr/tesseract. Informational."""
+RAG_INGESTION_TABLEFORMER_MODE: str = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_MODE", "accurate"
+)
+"""TableFormer mode: "accurate" (TF v2, higher quality) or "fast" (TF v1)."""
+RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING: bool = os.environ.get(
+    "RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING", "true"
+).lower() in ("true", "1", "yes")
+"""When True, TableFormer matches PDF text cells to detected table cells
+(higher fidelity). Disable to fall back to OCR-only cell content."""
 RAG_INGESTION_EXPORT_EXTENSIONS = os.environ.get(
     "RAG_INGESTION_EXPORT_EXTENSIONS",
     ".txt,.md,.markdown,.rst,.html,.htm,.pdf,.docx,.pptx",
@@ -461,20 +501,34 @@ RAG_INGESTION_VISION_API_PATH = os.environ.get(
     "RAG_INGESTION_VISION_API_PATH",
     "/v1/chat/completions",
 ).strip()
-RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING = os.environ.get(
-    "RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING", "false"
-).lower() in ("true", "1", "yes")
 RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION = os.environ.get(
     "RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION", "true"
-).lower() in ("true", "1", "yes")
-RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION = os.environ.get(
-    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION", "true"
 ).lower() in ("true", "1", "yes")
 RAG_INGESTION_ENABLE_QUALITY_VALIDATION = os.environ.get(
     "RAG_INGESTION_ENABLE_QUALITY_VALIDATION", "true"
 ).lower() in ("true", "1", "yes")
-RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE = os.environ.get(
-    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE", "true"
+# Lossless verification: after chunking, check the emitted chunks losslessly
+# cover the golden source (parsed Docling markdown). Warn-by-default; STRICT
+# escalates a coverage shortfall to a hard failure of the document.
+RAG_INGESTION_VERIFY_LOSSLESS = os.environ.get(
+    "RAG_INGESTION_VERIFY_LOSSLESS", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_LOSSLESS_MIN_COVERAGE = float(
+    os.environ.get("RAG_INGESTION_LOSSLESS_MIN_COVERAGE", "0.98")
+)
+RAG_INGESTION_LOSSLESS_STRICT = os.environ.get(
+    "RAG_INGESTION_LOSSLESS_STRICT", "false"
+).lower() in ("true", "1", "yes")
+# Shingle (token-window) size used by the lossless coverage check
+# (src/ingest/support/lossless.py:coverage_report). Default 5.
+RAG_INGESTION_LOSSLESS_SHINGLE_SIZE: int = int(
+    os.environ.get("RAG_INGESTION_LOSSLESS_SHINGLE_SIZE", "5")
+)
+# Production default: KG runs via Temporal handoff (KGWeave worker fleet on
+# KG_TASK_QUEUE). Set to false to skip the KG phase entirely — used by the
+# offline CLI ingest and benchmark scripts that don't run a Temporal cluster.
+RAG_INGESTION_ENABLE_KG_PHASE2B = os.environ.get(
+    "RAG_INGESTION_ENABLE_KG_PHASE2B", "true"
 ).lower() in ("true", "1", "yes")
 RAG_INGESTION_VERBOSE_STAGE_LOGS = os.environ.get(
     "RAG_INGESTION_VERBOSE_STAGE_LOGS", "false"
@@ -496,9 +550,89 @@ Valid values: "disabled", "builtin", "external".
 """
 
 RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS: int = int(
-    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "512")
+    os.environ.get("RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS", "1024")
 )
-"""Maximum token count per chunk for HybridChunker (bge-m3 limit is 512)."""
+"""Maximum token count per chunk for HybridChunker.
+
+Default 1024 — empirical sweet spot for technical-doc retrieval. BGE-M3
+itself accepts inputs up to 8192 tokens, but past ~1500–2000 the embedding
+loses specificity (a single dense vector covers too many subtopics) and
+single-sentence chunks (under ~50 tokens) lack contextual grounding.
+1024 keeps natural section units whole while staying comfortably below
+the dilution threshold."""
+
+RAG_INGESTION_CHUNKER: str = os.environ.get("RAG_INGESTION_CHUNKER", "native").lower()
+"""Selects the chunking backend used by the embedding pipeline (chunking_node).
+
+- ``"native"`` (default): each parser's own structure-aware chunker — for
+  documents this is Docling's HybridChunker (``merge_peers=True``, token-bounded)
+  plus adaptive table chunking (``table_summary``/``table_row`` with captions)
+  and heading-breadcrumb ``contextualize()``. Requires ``parse_result`` +
+  ``parser_instance`` to be threaded from Phase 1 into Phase 2.
+- ``"markdown"``: parser-abstraction markdown chunker over ``parse_result``.
+- ``"legacy"``: the pre-parser-abstraction MarkdownHeaderTextSplitter +
+  semantic/character fallback on ``cleaned_text`` (no table awareness, no
+  contextualize). The historical default-by-accident — used whenever
+  ``parse_result`` was absent.
+
+NOTE: until the Phase-1->Phase-2 handoff was fixed to forward
+``parse_result``/``parser_instance``, ``"native"``/``"markdown"`` were
+unreachable and every document silently fell back to ``"legacy"``. Set this to
+``"legacy"`` to restore the old behavior."""
+
+RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH: bool = os.environ.get(
+    "RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), prepend the section-heading breadcrumb to the EMBEDDED text
+of table_summary / table_row / figure chunks, mirroring what HybridChunker's
+contextualize() already does for prose chunks. Without it these structured chunks
+embed heading-blind (only ``Columns:.../Rows:N`` or a bare caption), so on
+topical/heading queries (e.g. "GPIO pin multiplexing") the prose paragraph — which
+carries its embedded breadcrumb — outranks the table that actually holds the
+answer, at BOTH the dense and reranker stages. ``table_markdown`` metadata is left
+unchanged. Changes embedded text -> chunk_id, so flipping this requires a
+re-ingest / collection recreate."""
+
+RAG_INGESTION_TABLE_DOMINANT_FRACTION: float = float(
+    os.environ.get("RAG_INGESTION_TABLE_DOMINANT_FRACTION", "0.6")
+)
+"""Fraction of chunk text that must be table markdown for a chunk to count as
+table-dominant (src/ingest/support/docling.py:_is_table_dominant). Such chunks
+have their prose dropped and are replaced by table-summary / table-row chunks.
+Default 0.6 (>=60%). Changing this alters which chunks are dropped -> chunk_ids
+change, so a re-ingest / recreate is required (same caveat as sibling table knobs)."""
+
+RAG_INGESTION_DROP_NAVIGATIONAL: bool = os.environ.get(
+    "RAG_INGESTION_DROP_NAVIGATIONAL", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), drop table-of-contents / index / front-matter pointer chunks
+at INGEST time (not just at query time). ~17% of the spec corpus is navigational
+ToC/front-matter that out-scores real answer chunks on both dense cosine and the
+reranker (a ToC stub scored 0.95 vs the answer's 0.51), causing "I cannot answer"
+refusals. This ingest-time regex drop is the LEGACY path (used when
+RAG_INGESTION_NAV_CLASSIFY is off); the current default tags chunk_role via the LLM
+classifier and the query-side role filter excludes navigation/boilerplate. Stripping
+at ingest still shrinks the index and protects consumers that bypass the query filter
+(eval harnesses, alternate rerankers). Uses the shared ``is_navigational`` predicate.
+A per-document over-prune guard never removes a document's entire chunk set."""
+
+RAG_INGESTION_NAV_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGESTION_NAV_MAX_CHARS", "320")
+)
+"""Length cap (chars) below which the front-matter pointer-phrase branch of the
+navigational test fires at the legacy ingest-time drop. The dotted-leader (ToC)
+branch is length-independent and unaffected by this cap."""
+
+# Adaptive table-chunking knobs (env-wired so they can be tuned on the live
+# Temporal worker; previously hardcoded dataclass defaults — audit
+# F6-adaptive-table-knobs-no-env-wiring).
+RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING: bool = os.environ.get(
+    "RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), DoclingParser.chunk() replaces the raw table-dominant chunk
+with token-budget row-block chunks: each chunk restates the header and packs as
+many whole rows as fit ``RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS``, so every row is
+captured (no row/col gate, no summary cap, no truncation)."""
 
 RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
     "RAG_INGESTION_PERSIST_DOCLING_DOCUMENT", "true"
@@ -533,13 +667,11 @@ RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
 """Parser selection strategy: "auto" | "document" | "code" | "text".
 "auto" routes by file extension via ParserRegistry. FR-3301."""
 
-RAG_INGESTION_CHUNKER: str = os.environ.get(
-    "RAG_INGESTION_CHUNKER", "native"
-)
-"""Chunker override: "native" | "markdown".
-"native" uses each parser's own chunker (DoclingParser HybridChunker,
-CodeParser tree-sitter, PlainTextParser markdown). "markdown" forces
-the shared chunk_with_markdown() fallback for all parsers. FR-3320."""
+# NOTE: RAG_INGESTION_CHUNKER is defined once, above (with ``.lower()`` so an
+# uppercase env value like "Native" normalizes instead of failing
+# verify_core_design's value check). A second, lower-casing-less definition used
+# to live here and silently won by being later in the module — removed (audit
+# F3-chunker-double-def-no-lower).
 
 # --- Ingestion Hardening: Data Lifecycle — MinIO Clean Store + GC ---
 RAG_INGESTION_CLEAN_STORE_BUCKET: str = os.environ.get(
@@ -564,26 +696,10 @@ RAGWEAVE_ENABLE_CROSS_DOC_DEDUP: bool = os.environ.get(
 """Master toggle for cross-document dedup (Tier 1 exact + optional Tier 2).
 Default True. FR-3400."""
 
-RAGWEAVE_ENABLE_FUZZY_DEDUP: bool = os.environ.get(
-    "RAGWEAVE_ENABLE_FUZZY_DEDUP", "false"
-).lower() in ("true", "1", "yes")
-"""Enable Tier 2 MinHash fuzzy matching. Default False (Tier 1 only).
-Requires the datasketch package. FR-3420."""
-
-RAGWEAVE_FUZZY_THRESHOLD: float = float(
-    os.environ.get("RAGWEAVE_FUZZY_THRESHOLD", "0.95")
-)
-"""Jaccard similarity threshold for Tier 2 fuzzy dedup. Default 0.95. FR-3421."""
-
-RAGWEAVE_FUZZY_SHINGLE_SIZE: int = int(
-    os.environ.get("RAGWEAVE_FUZZY_SHINGLE_SIZE", "3")
-)
-"""Word n-gram size for MinHash shingles. Default 3."""
-
-RAGWEAVE_FUZZY_NUM_HASHES: int = int(
-    os.environ.get("RAGWEAVE_FUZZY_NUM_HASHES", "128")
-)
-"""MinHash permutation count. Higher = better accuracy, more RAM. Default 128."""
+# NOTE: The Tier-2 MinHash fuzzy-dedup knobs (formerly RAGWEAVE_ENABLE_FUZZY_DEDUP
+# / RAGWEAVE_FUZZY_THRESHOLD / _SHINGLE_SIZE / _NUM_HASHES) were removed — they
+# were never read by any code. The live fuzzy-dedup path uses RAG_INGEST_FUZZY_*
+# (see below).
 
 # --- Ingestion Hardening: Orchestration Dual Queue + Priority ---
 RAG_INGEST_USER_TASK_QUEUE: str = os.environ.get(
@@ -663,6 +779,15 @@ RAG_NEMO_FAITHFULNESS_THRESHOLD = float(
 RAG_NEMO_FAITHFULNESS_ACTION = os.environ.get(
     "RAG_NEMO_FAITHFULNESS_ACTION", "flag"
 )
+# Router alias for the LLM faithfulness/self-check scorer. The rail's own system
+# prompt already frames the model as a faithfulness evaluator; this selects WHICH
+# model runs it. Defaults to "judge" (the instruct model) rather than "default"
+# (the reasoning/gen model): a compact instruct model scores groundedness more
+# cheaply and does not spend the short output budget inside a hidden reasoning
+# block. Any alias the router knows is valid ("default", "query", "judge", ...).
+RAG_FAITHFULNESS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_FAITHFULNESS_MODEL_ALIAS", "judge"
+).strip() or "judge"
 RAG_NEMO_OUTPUT_PII_ENABLED = os.environ.get(
     "RAG_NEMO_OUTPUT_PII_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
@@ -707,6 +832,57 @@ RAG_NEMO_FAITHFULNESS_SELF_CHECK = os.environ.get(
 RAG_NEMO_PII_GLINER_ENABLED = os.environ.get(
     "RAG_NEMO_PII_GLINER_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
+# GLiNER entity-confidence threshold gating which PII entities are detected
+# (config/guardrails/shared/gliner_pii.py:GLiNERPIIDetector). Default 0.5.
+RAG_NEMO_PII_GLINER_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_PII_GLINER_THRESHOLD", "0.5")
+)
+
+# Abuse / jailbreak rate heuristics (config/guardrails/actions.py).
+# check_abuse_pattern: more than MAX_QUERIES within WINDOW_SECONDS flags abuse.
+# check_jailbreak_escalation: BLOCK at/above the block threshold, WARN at/above warn.
+RAG_NEMO_ABUSE_WINDOW_SECONDS = int(
+    os.environ.get("RAG_NEMO_ABUSE_WINDOW_SECONDS", "60")
+)
+RAG_NEMO_ABUSE_MAX_QUERIES = int(
+    os.environ.get("RAG_NEMO_ABUSE_MAX_QUERIES", "20")
+)
+RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD = int(
+    os.environ.get("RAG_NEMO_JAILBREAK_BLOCK_THRESHOLD", "3")
+)
+RAG_NEMO_JAILBREAK_WARN_THRESHOLD = int(
+    os.environ.get("RAG_NEMO_JAILBREAK_WARN_THRESHOLD", "1")
+)
+
+# Faithfulness hallucination-penalty scoring (src/guardrails/shared/faithfulness.py).
+# overall score is reduced by min(CAP, n_hallucinated_entities * PER_ENTITY).
+RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY = float(
+    os.environ.get("RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY", "0.1")
+)
+RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP = float(
+    os.environ.get("RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP", "0.3")
+)
+
+# --- Guardian classifier (shared judge model used by multiple rails) ---
+# RAG_GUARDIAN_PROVIDER picks the judge model. Valid: "granite", "self_check", "".
+# Granite Guardian is preferred in production; self_check uses the project LLM.
+RAG_GUARDIAN_ENABLED = os.environ.get(
+    "RAG_GUARDIAN_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+RAG_GUARDIAN_PROVIDER = os.environ.get("RAG_GUARDIAN_PROVIDER", "granite")
+# "transformers" loads the model locally; "vllm" calls an OpenAI-compat endpoint.
+RAG_GUARDIAN_MODE = os.environ.get("RAG_GUARDIAN_MODE", "vllm")
+RAG_GUARDIAN_MODEL_ID = os.environ.get(
+    "RAG_GUARDIAN_MODEL_ID", "ibm-granite/granite-guardian-3.2-5b"
+)
+RAG_GUARDIAN_ENDPOINT = os.environ.get("RAG_GUARDIAN_ENDPOINT", "")
+RAG_GUARDIAN_API_KEY = os.environ.get("RAG_GUARDIAN_API_KEY", "")
+RAG_GUARDIAN_TIMEOUT_S = float(os.environ.get("RAG_GUARDIAN_TIMEOUT_S", "5.0"))
+RAG_GUARDIAN_THRESHOLD = float(os.environ.get("RAG_GUARDIAN_THRESHOLD", "0.5"))
+# Number of top log-probabilities requested per decode position in the
+# Granite Guardian HTTP classify request (src/guardrails/models/granite_guardian.py).
+# The yes/no token scan only inspects this many candidates. Default 5.
+RAG_GUARDIAN_TOP_LOGPROBS = int(os.environ.get("RAG_GUARDIAN_TOP_LOGPROBS", "5"))
 
 # --- Composite Confidence Routing ---
 RAG_CONFIDENCE_ROUTING_ENABLED = os.environ.get(
@@ -730,6 +906,15 @@ RAG_CONFIDENCE_CITATION_WEIGHT = float(
 RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES = int(
     os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES", "1")
 )
+# Broadening deltas applied on low-confidence re-retrieval (Stage 7.5,
+# src/retrieval/pipeline/rag_chain.py): alpha is decreased by ALPHA_DELTA
+# (toward BM25) and search_limit increased by LIMIT_DELTA.
+RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA = float(
+    os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_ALPHA_DELTA", "0.15")
+)
+RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA = int(
+    os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_LIMIT_DELTA", "5")
+)
 
 # --- Retrieval quality classification thresholds ---
 # Reranker best-score thresholds that map to the four retrieval_quality
@@ -745,33 +930,61 @@ RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD = float(
 )
 
 # --- Inference Backend ---
-# "local": BGE models run in-process (dev venv path; requires the `local-embed`
-#          pyproject extra — torch + sentence-transformers + transformers).
-# "tei":   BGE models served by separate TEI containers (rag-embed / rag-rerank)
-#          via direct HTTP. Compose default. Worker image does NOT ship torch.
+# Selects WHERE embed/rerank run. Behind "http" the transport is just whatever
+# URL you point RAG_EMBED_URL / RAG_RERANK_URL at — a tunnel to a remote vLLM
+# (the dev / ai01 path), a self-hosted TEI pool (the optional `self-host`
+# compose profile), or any other OpenAI-compatible API. One direct setting per
+# service; no default→override repointing.
+#   "local": BGE models run in-process (requires the `local-embed` pyproject
+#            extra — torch + sentence-transformers). Worker image omits torch.
+#   "http":  embed/rerank served over HTTP by an OpenAI-compatible endpoint.
+#            ("tei" is accepted as a deprecated alias of "http".)
 INFERENCE_BACKEND: str = os.environ.get("RAG_INFERENCE_BACKEND", "local").strip().lower()
-_VALID_INFERENCE_BACKENDS = {"local", "tei"}
+if INFERENCE_BACKEND == "tei":  # deprecated alias — the client is generic HTTP, not TEI-specific
+    INFERENCE_BACKEND = "http"
+_VALID_INFERENCE_BACKENDS = {"local", "http"}
 if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     raise ValueError(
-        f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; "
-        f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
+        f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; must be one of "
+        f"{sorted(_VALID_INFERENCE_BACKENDS)} (or 'tei', a deprecated alias of 'http')"
     )
 
-# TEI service URLs — used when INFERENCE_BACKEND="tei".
-# Default routes through rag-nginx so replicas can be scaled horizontally
-# (`docker compose up -d --scale rag-embed=N`). Override to direct service DNS
-# (http://rag-embed:80) for single-replica dev or to bypass the LB.
-TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-nginx:8081")
-TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-nginx:8082")
 
-# Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
-# mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.
-TEI_EMBEDDING_MODEL: str = os.environ.get("RAG_TEI_EMBEDDING_MODEL", "BAAI/bge-m3")
-TEI_RERANKER_MODEL: str = os.environ.get("RAG_TEI_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+def _embed_rerank_env(name: str, legacy_name: str, default: str) -> str:
+    """Read an embed/rerank endpoint setting, honouring the deprecated RAG_TEI_* name.
 
-# Timeout for HTTP inference calls (embed + rerank). Should exceed the
-# model's p99 latency, including GPU warm-up on first call.
-TEI_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_TEI_TIMEOUT_SECONDS", "30"))
+    The canonical RAG_EMBED_*/RAG_RERANK_* var wins; the old RAG_TEI_* var is
+    still read as a fallback for one release so live deployments keep working
+    through the rename.
+    """
+    return os.environ.get(name, os.environ.get(legacy_name, default))
+
+
+# Embed / rerank endpoints (used when INFERENCE_BACKEND="http"). Set each one
+# directly to wherever the service lives — a tunnel, an external API, or a local
+# server. Live deployments override these explicitly; the defaults follow the
+# vLLM tunnel used by the dev stack.
+RAG_EMBED_URL: str = _embed_rerank_env("RAG_EMBED_URL", "RAG_TEI_EMBED_URL", "http://rag-vllm-tunnel:18002")
+RAG_RERANK_URL: str = _embed_rerank_env("RAG_RERANK_URL", "RAG_TEI_RERANK_URL", "http://rag-vllm-tunnel:18005")
+
+# Model name sent in the request body (the OpenAI "model" field); must match the
+# name the endpoint serves. Defaults follow the dev vLLM stack (Qwen3).
+RAG_EMBED_MODEL: str = _embed_rerank_env("RAG_EMBED_MODEL", "RAG_TEI_EMBEDDING_MODEL", "qwen3-embed-4b")
+RAG_RERANK_MODEL: str = _embed_rerank_env("RAG_RERANK_MODEL", "RAG_TEI_RERANKER_MODEL", "qwen3-reranker-4b")
+
+# Timeout for HTTP embed/rerank calls. Should exceed the model's p99 latency,
+# including GPU warm-up on first call.
+RAG_INFERENCE_TIMEOUT_SECONDS: int = int(
+    _embed_rerank_env("RAG_INFERENCE_TIMEOUT_SECONDS", "RAG_TEI_TIMEOUT_SECONDS", "30")
+)
+
+# Deprecated symbol aliases (one release) — keep old `TEI_*` import names working
+# while callers migrate to the RAG_EMBED_*/RAG_RERANK_* names above.
+TEI_EMBED_URL = RAG_EMBED_URL
+TEI_RERANK_URL = RAG_RERANK_URL
+TEI_EMBEDDING_MODEL = RAG_EMBED_MODEL
+TEI_RERANKER_MODEL = RAG_RERANK_MODEL
+TEI_TIMEOUT_SECONDS = RAG_INFERENCE_TIMEOUT_SECONDS
 
 # --- Reranker ---
 RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))
@@ -846,6 +1059,52 @@ RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(
     "RAG_DOCUMENT_FORMATTING_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
 
+# --- Cross-reference (xref) expansion (MVP, default-off) ---
+# One-hop expansion that resolves chunk-text cross-references (e.g. "§3.1",
+# "see Section 4") into adjacent chunks at retrieval time. Mirrors the
+# table-group expansion architecture (src.retrieval.xref_expansion).
+# Scoped MVP: only ``section`` / ``section_symbol`` ref types are resolved;
+# table/figure/appendix refs require a caption registry and remain TODO.
+#
+# Default flipped to ON 2026-05-23 after the ESP32-S3 datasheet soak:
+# table refs resolved 98.8% (559/566), confirming the expander is safe to
+# enable by default. Operators can still disable it via env var.
+RAG_XREF_EXPANSION_ENABLED: bool = os.environ.get(
+    "RAG_XREF_EXPANSION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_XREF_MAX_PER_HIT: int = int(os.environ.get("RAG_XREF_MAX_PER_HIT", "2"))
+RAG_XREF_MAX_TOTAL: int = int(os.environ.get("RAG_XREF_MAX_TOTAL", "6"))
+
+# Whether ingest-time xref extraction emits ``figure`` refs. FIG-4
+# (2026-05-24) flipped the default to "true" after the forward-walked
+# caption-binding fallback (``_build_unbound_caption_fallback``) lifted
+# the ESP32-S3 resolvable_rate from 28.57% to 85.71% (well above the 30%
+# bar). The remaining unresolved cases are prose section-references like
+# "Figure 4.1.2 …" miscategorised by ``cross_refs`` — tracked as a
+# follow-up in ``docs/soak/figure_artifacts_esp32_2026-05-24_triage.md``.
+# Operators can still disable via env var.
+RAG_XREF_EXTRACT_FIGURE_REFS: bool = os.environ.get(
+    "RAG_XREF_EXTRACT_FIGURE_REFS", "true"
+).lower() in ("true", "1", "yes")
+
+# --- Table-group expansion (retrieval-time) ---
+# Mirrors the RAG_XREF_* budget pattern above. Controls the table-group
+# expansion performed by src.retrieval.pipeline.rag_chain at retrieval time.
+RAG_TABLE_EXPANSION_ENABLED: bool = os.environ.get(
+    "RAG_TABLE_EXPANSION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for retrieval-time table-group expansion. Default True."""
+
+RAG_TABLE_EXPANSION_MAX_ROWS: int = int(
+    os.environ.get("RAG_TABLE_EXPANSION_MAX_ROWS", "0")
+)
+"""Max rows pulled per expanded table group. 0 = no row cap (default)."""
+
+RAG_TABLE_EXPANSION_MAX_GROUPS: int = int(
+    os.environ.get("RAG_TABLE_EXPANSION_MAX_GROUPS", "8")
+)
+"""Max number of table groups expanded for a single query. Default 8."""
+
 # --- Visual Embedding Pipeline ---
 RAG_INGESTION_ENABLE_VISUAL_EMBEDDING: bool = os.environ.get(
     "RAG_INGESTION_ENABLE_VISUAL_EMBEDDING", "false"
@@ -903,8 +1162,1695 @@ RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS: int = int(
     os.environ.get("RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS", "10000")
 )  # FR-617
 
+# ---------------------------------------------------------------------------
+# Deep research (recursive topic-grouped retrieval) — opt-in alternative to
+# the linear kg_expand → embed → hybrid_search → rerank stages. See
+# src/retrieval/pipeline/deep_research.py for the orchestrator.
+# ---------------------------------------------------------------------------
+
+RAG_STAGE_BUDGET_DEEP_RESEARCH_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_DEEP_RESEARCH_MS", "30000")
+)
+RAG_DEEP_RESEARCH_MAX_NODES: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_NODES", "12")
+)
+RAG_DEEP_RESEARCH_MAX_LLM_CALLS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_LLM_CALLS", "24")
+)
+# Router alias for the deep-research controller LLM (topic decomposition +
+# sufficiency checks). Historically hard-coded to "default" (the reasoning/gen
+# model); made configurable so deep research can run on the faster instruct model
+# ("judge") whose JSON is more reliable and whose decode does not burn the budget
+# inside a hidden reasoning block. Any alias the router knows is valid
+# ("default", "query", "controller", "judge").
+RAG_DEEP_RESEARCH_MODEL_ALIAS: str = os.environ.get(
+    "RAG_DEEP_RESEARCH_MODEL_ALIAS", "default"
+).strip() or "default"
+# Output-token cap for the deep-research controller's JSON calls (sufficiency
+# verdict + topic decomposition). These are SMALL structured outputs, so this is
+# deliberately modest. Critically it must NOT inherit RAG_GENERATION_MAX_TOKENS
+# (16384): on a compact instruct model whose full context is ~16k, requesting the
+# whole window as OUTPUT leaves no room for the prompt → ContextWindowExceededError.
+RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", "2048")
+)
+
+# --- Suggested follow-up questions ---
+# After an answer is generated, an instruct-model call proposes a few specific,
+# in-corpus follow-up questions the user could ask next (rendered as clickable
+# chips). Targets vague / multi-factor queries where the user hasn't supplied
+# enough context to decompose intent — good suggestions let them narrow in one
+# click. Grounded in the answer + retrieved section headings so it never suggests
+# a question the corpus cannot answer. Fail-open: any error yields no chips.
+RAG_SUGGESTED_QUESTIONS_ENABLED: bool = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_SUGGESTED_QUESTIONS_COUNT: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_COUNT", "3")
+)
+# Router alias for the generator (defaults to the fast instruct model, like the
+# agentic judge/HyDE) — a short JSON list, so it must NOT inherit the generation
+# max_tokens (same context-overflow rationale as deep research).
+RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS: str = os.environ.get(
+    "RAG_SUGGESTED_QUESTIONS_MODEL_ALIAS", "judge"
+).strip() or "judge"
+RAG_SUGGESTED_QUESTIONS_MAX_TOKENS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", "256")
+)
+RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", "20")
+)
+
+RAG_DEEP_RESEARCH_MAX_DEPTH: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_DEPTH", "3")
+)
+RAG_DEEP_RESEARCH_MAX_TOPICS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_MAX_TOPICS", "3")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_QUESTIONS", "3")
+)
+RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_GRAPH_CONTEXT_MAX_CHARS", "4000")
+)
+RAG_DEEP_RESEARCH_KB_TOP_PER_NODE: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_KB_TOP_PER_NODE", "10")
+)
+RAG_DEEP_RESEARCH_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_WALL_CLOCK_MS", "30000")
+)
+RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS", "3")
+)
+RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EARLY_STOP_MIN_SOURCES", "2")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE: float = float(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_RERANK_MIN_CONFIDENCE", "0.6")
+)
+RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_PER_TOPIC_TOP_K", "3")
+)
+
+# ─── Agentic retrieval (AGENTIC_RETRIEVAL_DESIGN.md) ──────────────────────
+# A controller LLM drives retrieval as a *tool*: it writes a hypothetical
+# answer (HyDE), the host retrieves with it, a separate LLM judge scores each
+# chunk for relevance + faithfulness + set-sufficiency, judge-approved chunks
+# accumulate across rounds, and the controller retries a DIFFERENT HyDE until
+# the kept set is sufficient or a budget caps the loop. Like deep_research it
+# REPLACES the linear kg_expand → embed → hybrid_search → rerank stages with
+# its own orchestrator. Single-document queries converge in round 1; multi-doc
+# (QFS) queries iterate. All judging is a generic, model-driven property — no
+# regex / vendor / phrase matching (CLAUDE.md §0).
+RAG_AGENTIC_RETRIEVAL_ENABLED: bool = os.environ.get(
+    "RAG_AGENTIC_RETRIEVAL_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master gate for the agentic HyDE/controller/judge retrieval loop, AND the
+system's default retrieval orchestrator. 2026-07-07 decision: agentic is the
+best-measured mode on the eval basket (highest per-class quality and lowest
+latency of the alternates), so a no-flag query resolves to it via rag_chain's
+``_agentic_resolved`` (= this setting when ``agentic_retrieval`` is unset). The
+per-request ``agentic_retrieval`` override forces it on/off for one request;
+``deep_research`` and opt-in ``turn_loop`` (RAG_TURN_LOOP_ENABLED) take
+precedence when set. PROD CAVEAT: prod vLLM endpoints must be corrected before
+this default reaches prod (prod agentic is currently misconfigured — see the
+ai01 vllm portmap notes); dev is unaffected."""
+
+RAG_AGENTIC_MAX_ROUNDS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MAX_ROUNDS", "3")
+))
+"""Hard cap on HyDE-retry rounds (= max distinct HyDE variants tried). A
+single-document query converges in 1; QFS uses up to this."""
+
+RAG_AGENTIC_MAX_LLM_CALLS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MAX_LLM_CALLS", "10")
+))
+"""Combined controller + judge + diversity-reprompt call budget across the
+whole request (the DeepResearchBudget.max_llm_calls analog)."""
+
+RAG_AGENTIC_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_AGENTIC_WALL_CLOCK_MS", "45000")
+)
+"""Loop wall-clock budget in ms. Must stay strictly below the activity
+start_to_close timeout so Temporal never retries the whole nondeterministic
+loop; also enforced via the TimingPool agentic_retrieval stage budget."""
+
+RAG_AGENTIC_KEEP_TOP_K_PER_ROUND: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_KEEP_TOP_K_PER_ROUND", "8")
+))
+"""Cross-encoder pre-narrow cap: how many reranked-to-anchor candidates per
+round are shown to the LLM judge (judge-input token guard)."""
+
+RAG_AGENTIC_FINAL_MAX_CHUNKS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_FINAL_MAX_CHUNKS", "8")
+))
+"""Hard upper bound on accumulated kept chunks fed to Stage-6 generation — the
+generation context-window guard."""
+
+RAG_AGENTIC_MIN_KEPT_CHUNKS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MIN_KEPT_CHUNKS", "3")
+))
+"""Kept-chunk floor before a 'sufficient' verdict may stop the loop, AND the
+anti-refusal fallback floor (sibling of RAG_DEEP_RESEARCH_EARLY_STOP_MIN_CHUNKS)."""
+
+RAG_AGENTIC_MIN_SOURCES: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_MIN_SOURCES", "1")
+))
+"""Distinct-source-document floor for a 'sufficient' stop. QFS auto-raises it;
+1 permits single-document convergence."""
+
+RAG_AGENTIC_RELEVANCE_THRESHOLD: float = float(
+    os.environ.get("RAG_AGENTIC_RELEVANCE_THRESHOLD", "0.5")
+)
+"""Min judge relevance [0,1] to keep a chunk. A measurable property, not a
+pattern list. Permissive default to avoid over-filter refusals."""
+
+RAG_AGENTIC_FAITHFULNESS_THRESHOLD: float = float(
+    os.environ.get("RAG_AGENTIC_FAITHFULNESS_THRESHOLD", "0.5")
+)
+"""Min judge faithfulness/groundedness [0,1] to keep a chunk."""
+
+RAG_AGENTIC_SUFFICIENCY_TARGET: float = float(
+    os.environ.get("RAG_AGENTIC_SUFFICIENCY_TARGET", "0.7")
+)
+"""Min pool-level judge confidence (with is_sufficient=True) required to stop
+the loop as 'satisfied'."""
+
+RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE: float = float(
+    os.environ.get("RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE", "0.92")
+)
+"""Embedding-cosine ceiling between a new HyDE variant and any prior one; above
+it the controller would be re-prompted once to diversify. An information-theoretic
+redundancy guard (class-level), not phrase matching.
+
+RESERVED / DORMANT: the cosine re-prompt is intentionally NOT wired in the first
+INC-2 landing. HyDE repetition is already handled twice — the controller prompt
+diversifies on ``prior_hyde_answers`` + the named gap, and a recycled HyDE that
+retrieves only already-seen chunks ends the loop cleanly via the ``no_progress``
+stop. This key is kept for a later increment that adds the embedding-cosine
+re-prompt once telemetry shows frequent high-cosine-yet-still-fresh recycling."""
+
+RAG_AGENTIC_HYDE_MAX_TOKENS: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_HYDE_MAX_TOKENS", "256")
+))
+"""Max tokens per generated HyDE hypothetical answer — it is embedded, never
+shown to the user, so it is kept short and cheap."""
+
+RAG_AGENTIC_HYDE_TEMPERATURE: float = float(
+    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.4")
+)
+"""Controller sampling temperature; higher = more diverse HyDE across rounds."""
+
+RAG_AGENTIC_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
+    "RAG_AGENTIC_CONTROLLER_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the controller (next-HyDE / finalize). Falls
+back to 'query' → 'default' when the alias model env is unset.
+
+MUST resolve to an INSTRUCT model, not a reasoning model. HyDE is short
+structured generation under a small token budget (``RAG_AGENTIC_HYDE_MAX_TOKENS``,
+default 256); a reasoning model spends that entire budget inside its hidden
+``<think>`` block and emits EMPTY content, so HyDE returns None and the loop
+silently degrades to embedding the literal query (forfeiting the answer-space
+HyDE that lifts answer-bearing chunks into the keep window). Point this alias at
+a fast instruct model (the same one as ``RAG_AGENTIC_JUDGE_MODEL_ALIAS`` is a
+fine default) and watch ``hyde_failures`` in the agentic telemetry — a nonzero
+count means the controller is mis-provisioned."""
+
+RAG_AGENTIC_JUDGE_MODEL_ALIAS: str = os.environ.get(
+    "RAG_AGENTIC_JUDGE_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias for the per-chunk judge. Distinct from the
+controller to avoid correlated over-optimism; falls back to 'query' → 'default'."""
+
+RAG_AGENTIC_QFS_AUTO: bool = os.environ.get(
+    "RAG_AGENTIC_QFS_AUTO", "true"
+).lower() in ("true", "1", "yes")
+"""When the master gate is on, auto-engage the multi-round path for QFS-shaped
+(compound) queries and let single-document-shaped queries converge in round 1,
+even without an explicit per-request round override. The judge's sufficiency
+gate remains the real convergence authority regardless of this classifier."""
+
+RAG_AGENTIC_RANKER: str = os.environ.get(
+    "RAG_AGENTIC_RANKER", "judge"
+).strip().lower()
+"""Which component ORDERS the agentic candidate pool (INC-2 reframe).
+
+- ``"judge"`` (default): bypass the cross-encoder and let the LLM judge rank the
+  RAW hybrid pool directly (a listwise best->worst ordering), keeping pointwise
+  relevance/faithfulness only as the keep/drop gate. This reflects the measured
+  finding that the cross-encoder is net-negative (nDCG@12 0.408) while an LLM
+  ranking the raw pool is near-ideal (0.958). With a flaky judge the ordering
+  fails open to RAW-HYBRID order (~0.671), which still beats the cross-encoder
+  in aggregate — so enabling the loop never silently underperforms hybrid.
+- ``"cross_encoder"``: the INC-1 path — the cross-encoder narrows + orders the
+  pool. Kept for A/B and for the narrow query class (broad cross-protocol
+  comparison) where the cross-encoder measured net-positive.
+
+NOTE: ``"judge"`` only realises the near-ideal ordering with a JSON-reliable
+judge behind ``RAG_AGENTIC_JUDGE_MODEL_ALIAS``; the default reasoning model
+fails JSON often and falls open to hybrid order (see the design guide)."""
+
+RAG_AGENTIC_JUDGE_POOL_MAX: int = max(1, int(
+    os.environ.get("RAG_AGENTIC_JUDGE_POOL_MAX", "40")
+))
+"""Max raw-hybrid candidates shown to the judge per round when
+``RAG_AGENTIC_RANKER="judge"`` (token guard). Defaults to the typical
+``search_limit`` so the whole retrieved pool is judged and no candidate is
+truncated. Only the chunks actually judged are marked 'seen' — a truncated tail
+is NOT burned, so a gold chunk buried deep in the hybrid pool can still surface
+in a later round (guards the deep-rank-burial recall regression)."""
+
+RAG_AGENTIC_FILL_MODE: str = os.environ.get(
+    "RAG_AGENTIC_FILL_MODE", "hybrid"
+).strip().lower()
+"""How the judge-as-ranker finalize fills the generation top-K (the promote-vs-drop
+decision). MEASURED: a cautious judge (e.g. a 7B) keeps too few chunks, so
+*dropping* the rest loses recall (nDCG 0.37) while *promoting its picks and filling
+the remainder from the hybrid order* recovers it (0.77).
+
+- ``"hybrid"`` (default): always fill the top-K from the hybrid reservoir with the
+  judge's picks on top — the safety net for a low-recall judge.
+- ``"none"``: trust the judge; only the anti-refusal floor backfills. Right for a
+  strong, high-recall judge whose set is already complete (a cleaner, more precise
+  context).
+- ``"adaptive"``: per query, behave as ``none`` when the judge says the kept set is
+  sufficient AND its confidence ≥ the sufficiency target (trust it), else ``hybrid``
+  (fill). Needs a model with *calibrated* confidence — use only with a stronger
+  judge, not the default 7B which under-claims confidence."""
+
+RAG_AGENTIC_JUDGE_VERBOSE: bool = os.environ.get(
+    "RAG_AGENTIC_JUDGE_VERBOSE", "false"
+).lower() in ("true", "1", "yes")
+"""When False (default) the judge uses the CONCISE output: it reasons then emits
+only a ranked id-list (+ sufficiency), collapsing the keep-gate and rank into one
+short output. Measured: the judge's latency is output-token-bound, so the concise
+list is ~3x faster than the verbose per-chunk-scored-with-reasons output for the
+same ranking. Set True for the verbose judge (per-chunk relevance/faithfulness +
+reason strings) when you need that observability for debugging."""
+
+RAG_AGENTIC_LLM_JSON_MODE: bool = os.environ.get(
+    "RAG_AGENTIC_LLM_JSON_MODE", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the controller (HyDE) and judge calls request guided ``json_object``
+output. Default **false**: a reasoning model (qwopus) frequently emits ``{}`` /
+malformed output under the hard JSON constraint, so the loop instead lets it
+generate freely — reason then emit JSON — and recovers the object with a
+``<think>``-stripping salvage parser (mirroring why ``RAG_GENERATION_STRUCTURED_OUTPUT``
+is off for generation). Set **true** only when the ``judge``/``controller`` alias
+points at a JSON-reliable instruct model that benefits from the constraint."""
+
+RAG_AGENTIC_ROLE_BACKSTOP: bool = os.environ.get(
+    "RAG_AGENTIC_ROLE_BACKSTOP", "true"
+).lower() in ("true", "1", "yes")
+"""Run-time metadata fast-path backstop in the agentic loop: drop any retrieved
+chunk whose metadata ``chunk_role`` is in ``RAG_RETRIEVAL_EXCLUDED_ROLES`` BEFORE
+it reaches the judge. This is a cheap (no-LLM) defense for a chunk that was TAGGED
+navigation/boilerplate at ingest but slipped the query-time role filter (e.g. the
+filter was off, the schema flag was off, or the chunk was retrieved by a path that
+did not apply it). Fail-open: a chunk with no/unknown role (NULL, legacy, or
+"content") is always kept — only an explicit excluded role is dropped. The LLM
+judge remains the authoritative gate (a leaked nav chunk that lacks the tag is
+still caught by the judge-prompt awareness line)."""
+
+RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS", "45000")
+)
+"""TimingPool per-stage budget for the agentic_retrieval stage (ms)."""
+
+# ─── Turn-level conversation loop (TURN_LOOP_DESIGN.md) ──────────────────
+# One controller LLM per turn iterates RETRIEVE / DEEP_STUDY / CLARIFY /
+# ANSWER actions in the API process until a final-answer confidence gate
+# passes, composing the agentic primitives (HyDE/judge) under its OWN single
+# budget ledger. Mutually exclusive with deep_research / agentic_retrieval /
+# tree_retrieval per request. Validated lazily by
+# validate_turn_loop_config() when the loop activates.
+
+RAG_TURN_LOOP_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master gate for the turn-level agentic conversation loop. When False
+(default) the loop never runs; the per-request ``turn_loop`` override
+(server/schemas.py QueryRequest) may still force it on/off for a single
+request. Consulted by the query route (server/routes/query.py) when resolving
+whether a turn runs the loop."""
+
+RAG_TURN_LOOP_MAX_ACTIONS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_ACTIONS", "6")
+))
+"""Hard cap on controller iterations (actions dispatched) per turn. Consumed
+via ``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py
+and enforced by the loop orchestrator (turn_loop/orchestrator.py)."""
+
+RAG_TURN_LOOP_MAX_LLM_CALLS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_LLM_CALLS", "16")
+))
+"""Combined LLM-call budget for the whole turn — controller decisions, HyDE,
+judge, deep-study reads, clarify authoring, answer drafts and self-scores all
+charge ONE ledger (no double-budgeting with RAG_AGENTIC_MAX_LLM_CALLS; the
+loop composes agentic primitives under its own budget). Consumed via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_WALL_CLOCK_MS: int = int(
+    os.environ.get("RAG_TURN_LOOP_WALL_CLOCK_MS", "90000")
+)
+"""Turn wall-clock budget in ms. Must stay strictly below
+``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS`` (enforced by validate_turn_loop_config(),
+invoked fail-fast whenever the loop activates — server/turn_loop_runner.py).
+The per-retrieve activity timeout is derived per call as the REMAINING turn
+budget by ``build_retrieve_ranked`` (server/turn_loop_runner.py), so it is
+always strictly below this wall clock. Consumed via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD: float = float(
+    os.environ.get("RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD", "0.62")
+)
+"""Answer-gate pass threshold in (0, 1]: an ANSWER draft whose weighted
+composite (judge pool confidence / LLM self-score / citation coverage) falls
+below this is rejected and its GateFeedback returned to the controller.
+Consumed by the answer gate (turn_loop/answer.py) via
+``TurnBudget.from_settings()``. NOTE: the loop deliberately does NOT reuse
+``compute_composite_confidence`` — see TURN_LOOP_DESIGN.md §5 confidence
+semantics."""
+
+RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS: tuple[float, ...] = tuple(
+    float(w.strip())
+    for w in os.environ.get(
+        "RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS", "0.5,0.3,0.2"
+    ).split(",")
+    if w.strip()
+)
+"""Answer-gate component weights as ``judge,self,citation`` (comma-separated;
+must be exactly 3 non-negative floats summing to 1.0 — enforced by
+validate_turn_loop_config()). Order: judge pool confidence, LLM self-score,
+citation coverage. Consumed by the answer gate (turn_loop/answer.py) via
+``TurnBudget.from_settings()`` in src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS", "2")
+))
+"""How many gated ANSWER drafts a turn may attempt before the loop exits
+best-effort (low-confidence warning appended, never an empty response).
+Consumed via ``TurnBudget.from_settings()`` in
+src/retrieval/pipeline/turn_loop/schemas.py."""
+
+RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
+    "RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the loop controller (action decisions, HyDE,
+deep-study reads, clarify authoring). Falls back 'query' → 'default' when the
+alias model env is unset; should resolve to a fast, JSON-reliable INSTRUCT
+model (same rationale as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS). Consumed by the
+controller module (turn_loop/controller.py)."""
+
+RAG_TURN_LOOP_JUDGE_MODEL_ALIAS: str = os.environ.get(
+    "RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias for the loop's judge calls (retrieved-chunk
+keep/rank + answer self-score). Distinct from the controller alias to avoid
+correlated over-optimism (same rationale as RAG_AGENTIC_JUDGE_MODEL_ALIAS).
+Consumed by turn_loop/retrieve.py and turn_loop/answer.py."""
+
+RAG_TURN_LOOP_JUDGE_CONCISE: bool = os.environ.get(
+    "RAG_TURN_LOOP_JUDGE_CONCISE", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the loop's round judge uses the agentic CONCISE judge (reasons then
+emits only a ranked id-list + sufficiency) instead of a scored-object-per-chunk.
+Default true to MATCH the agentic path (which runs concise): the shared 7B judge
+model emits a short ranked list far more reliably than per-chunk JSON, so the
+verbose mode over-rejects good chunks and pays a longer decode. Concise collapses
+gate+rank into one short output — cheaper and better-calibrated on the same model.
+Consumed by turn_loop/retrieve.py `_judge_round`."""
+
+RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether a follow-up turn's back-references are resolved into a self-contained
+retrieval query before retrieval. Default true: the turn loop runs in the API
+process and so does NOT inherit the query-processor coreference rewrite the
+legacy/agentic paths get via rag_chain, so a follow-up like "how does it compare
+to X?" would otherwise embed the pronoun verbatim and drift (confirmed
+multi-turn-memory-poisons-retrieval regression). Reuses the shared
+``retrieval_query_rewriter`` prompt through the turn's charged LLM wrapper; the
+seed is history-stripped while GENERATION still receives the full TurnContext.
+Off restores the verbatim-follow-up behavior. No LLM call on a fresh first turn.
+Consumed by turn_loop/standalone.py `resolve_standalone_query`."""
+
+RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", "2")
+))
+"""Max distinct documents a single turn may DEEP_STUDY (each study is a
+windowed full-document read — the most expensive action). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS", "6000")
+))
+"""Character size of each deep-study read window over the full refactored
+markdown. Must be strictly greater than the window overlap (enforced by
+validate_turn_loop_config()). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS: int = int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS", "400")
+)
+"""Character overlap between consecutive deep-study windows so an answer
+spanning a window boundary is not cut in half. Consumed via
+``TurnBudget.from_settings()`` by turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS", "8")
+))
+"""Max windows read per studied document (caps LLM read calls for very long
+documents). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/deep_study.py."""
+
+RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES: int = max(2, int(
+    os.environ.get("RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES", "4")
+))
+"""Max sub-queries a single DECOMPOSE action fans out (bounds the parallel
+retrieval-wave width and the merged-pool size). The controller splits a broad /
+compound question into up to this many focused sub-queries, retrieved
+concurrently. Consumed by turn_loop/decompose.py."""
+
+RAG_TURN_LOOP_CLARIFY_MAX_HINTS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_CLARIFY_MAX_HINTS", "3")
+))
+"""Max clickable hint chips a CLARIFY response may carry (console renders them
+as resubmit chips). Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/clarify.py."""
+
+RAG_TURN_LOOP_STREAM_EVENTS: bool = os.environ.get(
+    "RAG_TURN_LOOP_STREAM_EVENTS", "true"
+).lower() in ("true", "1", "yes")
+"""When True (default) every typed loop event (turn_action, hyde_query,
+retrieve_result, judge_verdict, deep_study, llm_call, draft, gate, clarify) is
+emitted live on the SSE stream; when False events are only collected into the
+result trace (metadata.turn_loop.trace). Consumed by the event emitter bridge
+(turn_loop/events.py and server/routes/query.py)."""
+
+RAG_TURN_LOOP_RETRIEVE_TOP_K: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_RETRIEVE_TOP_K", "12")
+))
+"""Ranked-chunk count requested from each ``retrieve_ranked`` activity call
+(per RETRIEVE action, before pool dedup/judge). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/retrieve.py."""
+
+RAG_TURN_LOOP_LLM_MAX_TOKENS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_LLM_MAX_TOKENS", "512")
+))
+"""Default completion-token cap for turn-loop LLM calls that pass no explicit
+cap (controller decide, judge, self-score, deep-study read, clarify). Without
+a cap litellm requests the endpoint's full context window as output tokens
+and vLLM rejects the call with a 400 ContextWindowExceededError (observed
+live). Consumed via ``TurnBudget.from_settings()`` by turn_loop/events.py."""
+
+RAG_TURN_LOOP_MIN_CALL_BUDGET_MS: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_MIN_CALL_BUDGET_MS", "8000")
+))
+"""Minimum remaining wall-clock (ms) required to start another loop action or
+LLM call. Below this the loop goes straight to its best-effort exit instead
+of firing calls whose derived timeout is near zero (observed live: doomed
+1-2s controller/judge calls at the budget tail). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/events.py and orchestrator.py."""
+
+RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS", "2")
+))
+"""Consecutive evidence-gathering rounds (RETRIEVE / DECOMPOSE / DEEP_STUDY)
+that may add ZERO new chunks before the loop deterministically forces an ANSWER
+attempt from the pool gathered so far. Guards the observed pathology where a
+weak controller keeps re-retrieving already-pooled chunks after the judge marked
+the pool sufficient — wasting actions/latency and risking a max_actions
+best-effort exit instead of a clean gated answer. 0 disables the guard. Consumed
+via ``TurnBudget.from_settings()`` by turn_loop/orchestrator.py."""
+
+RAG_TURN_LOOP_FALLBACK_POOL_SIZE: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_FALLBACK_POOL_SIZE", "8")
+))
+"""Target generation-pool size AND how many best-scored RAW retrieved chunks the
+turn loop retains per turn as a judge-INDEPENDENT grounding floor. Two uses of the
+same set: (1) when the round judge rejects an entire fresh batch the judged pool
+is empty — the ANSWER stage grounds on these top chunks so a refusal is evidenced;
+(2) when the judged pool is merely THIN (judge kept only 1-2 chunks on a low-yield
+query), the ANSWER stage FILLS the generation pool toward this size with the best
+raw chunks (kept chunks stay first, so citation indices are stable). The fill is
+agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS): a generator handed only the
+strictly-judged chunk(s) lacks the surrounding context needed to disambiguate a
+near-miss (e.g. "that's the Cortex-M7, not the M4 you asked about") or to cover
+both sides of a comparison — the judge over-prunes for precision and starves
+generation. Generic property (judged-pool-thin), never a query/content match
+(CLAUDE.md §0). 0 disables both the floor and the fill (judge-kept-only). Consumed
+via ``TurnBudget.from_settings()`` by turn_loop/{retrieve,answer,orchestrator}.py."""
+
+RAG_TURN_LOOP_CITATION_TARGET: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_CITATION_TARGET", "5")
+))
+"""Distinct-source count at which the answer-gate's citation-coverage component
+SATURATES to 1.0 (denominator = min(pool_size, target)). Coverage measures whether
+the draft grounded itself in the evidence — citing this many distinct sources is
+"fully grounded"; it must NOT require citing EVERY pooled chunk, because the pool
+is filled toward RAG_TURN_LOOP_FALLBACK_POOL_SIZE with context chunks the answer
+need not all cite (dividing by the full filled size would spuriously fail a valid
+grounded refusal). Consumed by turn_loop/answer.py `run_answer`."""
+
+RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW: bool = os.environ.get(
+    "RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW", "true"
+).lower() in ("true", "1", "yes")
+"""Whether a DECOMPOSE round retrieves the RAW turn query as an additive anchor
+leg alongside its sub-queries (RRF/union). When True (default), the pool is the
+UNION of the raw-query hits and the sub-query hits, so a decomposition can only
+ADD candidates — never DROP a document the raw query matched. Fixes the observed
+query-transform variance where DECOMPOSE rewrote the query into sub-queries that
+drifted off a perfectly-matched doc (mode D: raw-query top hit lost). Mirrors the
+agentic loop's HyDE asymmetry (BM25 stays anchored to the raw query; the rewrite
+only adds dense candidates), which is purely additive. False reverts to
+sub-queries-only (the substitutive behavior). Generic (union property), never a
+query/content match (CLAUDE.md §0). Consumed via ``TurnBudget.from_settings()``
+by turn_loop/decompose.py."""
+
+RAG_TURN_LOOP_FACET_COMMIT_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_FACET_COMMIT_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the deterministic facet-commit guard is armed. When True (default),
+once a multi-way DECOMPOSE has split a compound question into facets AND every
+facet has >=1 judge-kept chunk, the loop forces an ANSWER from the pool instead
+of gathering further — the fix for the DECOMPOSE spiral where the controller
+(or a judge that always names a fresh gap) keeps exploring a comparison it can
+already synthesize, never committing. Deterministic because a prompt nudge alone
+will not make a small controller stop (the a3dffdd lesson); complements the
+no-progress guard (RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS), which fires on the
+opposite signal — gathering that has stopped producing new evidence. Generic
+property (all-facets-covered), never a query/content match (CLAUDE.md §0). False
+disables the guard (the controller alone decides when to answer). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/{decompose,orchestrator}.py."""
+
+# --- Pre-flight confidence router + fast lane + effort dial (Phase 3) ---
+# A cheap, LLM-free router runs once before the loop and seeds the first action
+# + effort as an ADVISORY hint (fail-open): a short/high-confidence/self-contained
+# factoid may take the fast lane (skip the first controller call). A compound
+# query gets NO router seed — its DECOMPOSE is now the controller's query_shape
+# coercion (RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED), not a router regex seed;
+# has_compound_marker survives here only as a conservative fast-lane exclusion.
+# Signals are the heuristics the codebase already owns (query_shape.has_compound_marker,
+# query_processor.heuristic_confidence / has_backward_reference) — no new inference.
+# Consumed by turn_loop/router.py + the runner (server/turn_loop_runner.py).
+
+RAG_TURN_LOOP_ROUTER_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_ROUTER_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master gate for the pre-flight router. When True (default) the router seeds
+the first action/effort as advice (the fast-lane opening + effort dial); when
+False :func:`turn_loop.router.route` returns the neutral hint and the loop runs
+exactly as pre-router. Safe to leave on: the seed is advisory (the controller
+may override) and the whole path fails open. Only takes effect when the turn
+loop itself runs (RAG_TURN_LOOP_ENABLED / per-request override)."""
+
+RAG_TURN_LOOP_FAST_LANE_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_FAST_LANE_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the router's fast lane may fire. Defaults False because skipping the
+first controller LLM call is the router's one non-advisory move: it stays
+opt-in until the routing eval confirms fast-lane p50/p95 matches the linear
+path (blueprint Phase 3 gate). Even enabled it degrades safely — a fast-lane
+answer that fails the confidence gate hands control back to the controller.
+Consumed by turn_loop/router.py via RouteConfig.from_settings()."""
+
+RAG_TURN_LOOP_FAST_LANE_MAX_WORDS: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_FAST_LANE_MAX_WORDS", "24")
+))
+"""Upper query length (whitespace tokens) for the fast lane — excludes long,
+likely multi-part questions even at high heuristic confidence. Consumed by
+turn_loop/router.py."""
+
+RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE: float = float(
+    os.environ.get("RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE", "0.8")
+)
+"""Minimum heuristic query confidence [0,1] for the fast lane. At the default,
+``heuristic_confidence``'s word-count buckets admit only well-formed (>5-word)
+questions and exclude ultra-short ambiguous ones (<=2 words -> 0.4). Must be in
+[0,1] (validate_turn_loop_config()). Consumed by turn_loop/router.py."""
+
+RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED: bool = os.environ.get(
+    "RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Whether the controller's ``query_shape=compound`` label coerces the OPENING
+turn move to DECOMPOSE. The LLM-driven replacement for the removed
+RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND regex seed (regex→LLM, CLAUDE.md §0):
+a query the controller itself calls compound but opens with a single RETRIEVE is
+rewritten to the DECOMPOSE parallel fan-out (the c002 fix). Safe only because
+DECOMPOSE is additive (RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW) — the coercion
+self-disables when that anchor is off (it would otherwise force a substitutive
+fan-out that could drop a raw-query match). Consumed by turn_loop/controller.py
+via TurnBudget.shape_decompose_enabled."""
+
+RAG_TURN_LOOP_EFFORT_FAST_SCALE: float = float(
+    os.environ.get("RAG_TURN_LOOP_EFFORT_FAST_SCALE", "0.5")
+)
+"""Multiplier the ``fast`` effort applies to ``max_actions`` / ``max_llm_calls``
+(the wall clock is never scaled). Must be > 0 (validate_turn_loop_config()).
+Consumed by ``TurnBudget.from_settings(effort=...)``."""
+
+RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE: float = float(
+    os.environ.get("RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", "1.5")
+)
+"""Multiplier the ``thorough`` effort applies to ``max_actions`` /
+``max_llm_calls`` (the wall clock is never scaled). Must be > 0
+(validate_turn_loop_config()). Consumed by
+``TurnBudget.from_settings(effort=...)``."""
+
+RAG_TURN_CONTEXT_MAX_CHUNK_REFS: int = max(1, int(
+    os.environ.get("RAG_TURN_CONTEXT_MAX_CHUNK_REFS", "24")
+))
+"""Cap on served-chunk references carried in the cross-turn TurnContext
+(newest first) — bounds both the Redis record and the controller-prompt
+digest. Consumed by the TurnContext assembly (turn_loop/context.py) and the
+memory persistence layer."""
+
+RAG_TURN_CONTEXT_PREVIEW_CHARS: int = max(1, int(
+    os.environ.get("RAG_TURN_CONTEXT_PREVIEW_CHARS", "320")
+))
+"""Character cap for the per-chunk ``preview`` stored on a turn's chunk refs
+(replaces uncapped full chunk text — the 8dfb367 memory-growth fix; full text
+stays recoverable by chunk uuid). Consumed by turn_loop/context.py and the
+memory persistence layer."""
+
+RAG_TURN_CONTEXT_STORE_FULL_TEXT: bool = os.environ.get(
+    "RAG_TURN_CONTEXT_STORE_FULL_TEXT", "false"
+).lower() in ("true", "1", "yes")
+"""When False (default) turn chunk refs persist only the capped ``preview``
+(RAG_TURN_CONTEXT_PREVIEW_CHARS); True restores full-chunk-text storage for
+debugging at the cost of unbounded Redis growth. Consumed by
+turn_loop/context.py and the memory persistence layer."""
+
+# --- Chunk-role classification (model-driven nav/boilerplate tagging) ---
+# Replaces the legacy regex DROP of navigational chunks with an LLM that TAGS
+# every chunk's role at ingest (content|navigation|boilerplate); retrieval then
+# *filters* by role at query time. Role is decided ONLY by the classifier — no
+# regex/keyword matching (CLAUDE.md §0/§2). The whole subsystem fails OPEN to
+# RAG_NAV_ROLE_DEFAULT ("content") so a flaky model never silently drops real
+# content. Shared by both the ingest tagger and the backfill script.
+
+RAG_INGESTION_NAV_CLASSIFY: bool = os.environ.get(
+    "RAG_INGESTION_NAV_CLASSIFY", "true"
+).lower() in ("true", "1", "yes")
+"""Enable LLM role-tagging at ingest (replaces the regex DROP in the chunking
+node). When True, each chunk is labelled with ``metadata["chunk_role"]`` and
+NOTHING is dropped; when False, the chunking node leaves roles untagged (and the
+legacy off-by-default regex fallback, if any, governs)."""
+
+RAG_NAV_CLASSIFY_MODEL_ALIAS: str = os.environ.get(
+    "RAG_NAV_CLASSIFY_MODEL_ALIAS", "judge"
+)
+"""LLMProvider router alias used to classify chunk roles. Should resolve to a
+fast, JSON-reliable instruct model (the same class as the agentic judge)."""
+
+RAG_NAV_CLASSIFY_BATCH_SIZE: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_BATCH_SIZE", "40")
+)
+"""Number of chunks sent per classification call (>= 1). Larger batches cut call
+count but raise per-call output size; a failing batch fails open in isolation."""
+
+RAG_NAV_CLASSIFY_PREFIX_CHARS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_PREFIX_CHARS", "350")
+)
+"""Only the first N chars of each chunk's text are sent to the classifier
+(>= 1). A chunk's role (ToC vs data table vs body) is determined by its head, so
+capping bounds token cost without losing the role signal."""
+
+RAG_NAV_CLASSIFY_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_TIMEOUT_SECONDS", "120")
+)
+"""Per-call timeout (seconds, >= 1) forwarded to the provider for each
+classification batch."""
+
+RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS", "1500")
+)
+"""Max output tokens per classification call (>= 1). Must comfortably fit one
+JSON entry per chunk in a full batch."""
+
+RAG_NAV_CLASSIFY_JSON_MODE: bool = os.environ.get(
+    "RAG_NAV_CLASSIFY_JSON_MODE", "true"
+).lower() in ("true", "1", "yes")
+"""Whether to request guided ``json_object`` output from the classifier. Keep
+True for a JSON-reliable instruct model; set False when the alias points at a
+reasoning model that emits malformed JSON under the constraint (the salvage
+parser recovers the object either way)."""
+
+# --- Chunk-role vocabulary (SINGLE SOURCE OF TRUTH) ---
+RAG_CHUNK_ROLES: tuple[str, ...] = tuple(
+    r.strip()
+    for r in os.environ.get(
+        "RAG_CHUNK_ROLES", "content,navigation,boilerplate"
+    ).split(",")
+    if r.strip()
+)
+"""Canonical chunk-role vocabulary — the closed set the LLM classifier may assign
+and the query-time filter reasons over. This is the ONE place the vocabulary is
+defined; the classifier (``src.ingest.common.role_classify``), the ingest tagger,
+the query filter, and :func:`validate_nav_role_config` all reference it instead of
+re-listing the literals. Roles are FUNCTIONAL (judged by what a chunk does, never
+by vendor/heading/phrasing — CLAUDE.md §0):
+
+- ``content``     — answer-bearing: facts, specs, values, steps, definitions, and
+                    any data table (even sparse/delimited). The kept role.
+- ``navigation``  — table-of-contents / index / bare-heading list / cross-reference
+                    pointer ("see chapter X"). Excluded at query time by default.
+- ``boilerplate`` — title page / copyright / legal / trademark / document-metadata
+                    front-matter. Excluded at query time by default.
+
+The prompt ``prompts/chunk_role_classify.md`` carries the human-readable semantics
+for each role; this tuple is the machine-enforced vocabulary (out-of-vocab labels
+fail open to ``RAG_NAV_ROLE_DEFAULT``). Override via the ``RAG_CHUNK_ROLES`` env
+(comma-separated) only alongside a matching prompt + excluded-set change."""
+
+RAG_NAV_ROLE_DEFAULT: str = os.environ.get("RAG_NAV_ROLE_DEFAULT", "content")
+"""Role assigned to a chunk on ANY classifier failure/ambiguity (parse failure,
+missing index, unknown role, provider exception). MUST be the answer-bearing
+role so a failure never silently drops real content — defaulting to a filtered
+role would be the exact regression this subsystem prevents. Validated to be a
+member of :data:`RAG_CHUNK_ROLES`."""
+
+# --- Retrieval: query-time role filter ---
+RAG_RETRIEVAL_ROLE_FILTER: bool = os.environ.get(
+    "RAG_RETRIEVAL_ROLE_FILTER", "true"
+).lower() in ("true", "1", "yes")
+"""Inject the query-time role exclusion filter into every retrieval mode. Only
+takes effect when RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT is also True (so it is a
+no-op against a collection that has not yet been migrated/backfilled)."""
+
+RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT: bool = os.environ.get(
+    "RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT", "false"
+).lower() in ("true", "1", "yes")
+"""Gate (mirrors RAG_TREE_SCHEMA_PRESENT): only inject the role filter when the
+active collection actually has the ``chunk_role`` property. Set True after the
+schema migration + backfill so the filter never references a missing field."""
+
+RAG_RETRIEVAL_EXCLUDED_ROLES: list[str] = [
+    r.strip()
+    for r in os.environ.get(
+        "RAG_RETRIEVAL_EXCLUDED_ROLES", "navigation,boilerplate"
+    ).split(",")
+    if r.strip()
+]
+"""Comma-separated roles excluded at query time. The filter uses ``ne`` per
+role (fail-open: NULL/legacy chunks and any role not listed — notably
+"content" — are kept), so an un-backfilled chunk is never dropped."""
+
+# --- Ingest: Embedding pipeline ---
+RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES: int = int(
+    os.environ.get("RAG_INGEST_EMBEDDING_BATCH_MAX_RETRIES", "3")
+)
+RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S: float = float(
+    os.environ.get("RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S", "0.3")
+)
+
+# --- Ingest: LLM metadata extraction ---
+RAG_INGEST_LLM_METADATA_MAX_CHARS: int = int(
+    os.environ.get("RAG_INGEST_LLM_METADATA_MAX_CHARS", "10000")
+)
+RAG_INGEST_LLM_SUMMARY_MAX_LEN: int = int(
+    os.environ.get("RAG_INGEST_LLM_SUMMARY_MAX_LEN", "240")
+)
+
+# --- Ingest: Document structure detection ---
+RAG_INGEST_STRUCTURE_MAX_FIGURES: int = int(
+    os.environ.get("RAG_INGEST_STRUCTURE_MAX_FIGURES", "32")
+)
+
+# --- Ingest: Quality scoring heuristic ---
+RAG_INGEST_QUALITY_BASE: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_BASE", "0.4")
+)
+RAG_INGEST_QUALITY_BONUS: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_BONUS", "0.2")
+)
+RAG_INGEST_QUALITY_MIN_BONUS_LEN: int = int(
+    os.environ.get("RAG_INGEST_QUALITY_MIN_BONUS_LEN", "120")
+)
+RAG_INGEST_QUALITY_PER_CHAR: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_PER_CHAR", "0.01")
+)
+RAG_INGEST_QUALITY_MAX: float = float(
+    os.environ.get("RAG_INGEST_QUALITY_MAX", "1.0")
+)
+RAG_INGEST_ANCHOR_PREVIEW_LEN: int = int(
+    os.environ.get("RAG_INGEST_ANCHOR_PREVIEW_LEN", "220")
+)
+RAG_INGEST_PARA_PREVIEW_LEN: int = int(
+    os.environ.get("RAG_INGEST_PARA_PREVIEW_LEN", "600")
+)
+RAG_INGEST_MIN_PARA_SIMILARITY: float = float(
+    os.environ.get("RAG_INGEST_MIN_PARA_SIMILARITY", "0.45")
+)
+
+# --- Ingest: Clean store ---
+RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS: int = int(
+    os.environ.get("RAG_INGEST_CLEAN_STORE_MAX_ATTEMPTS", "10")
+)
+
+# --- Ingest: Fuzzy dedup (MinHash) ---
+RAG_INGEST_FUZZY_SHINGLE_SIZE: int = int(
+    os.environ.get("RAG_INGEST_FUZZY_SHINGLE_SIZE", "3")
+)
+RAG_INGEST_FUZZY_NUM_HASHES: int = int(
+    os.environ.get("RAG_INGEST_FUZZY_NUM_HASHES", "128")
+)
+RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD: float = float(
+    os.environ.get("RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD", "0.95")
+)
+
+# --- Ingest: Chunk floors ---
+# Native (Docling HybridChunker) min-chunk COALESCE floor (chars). HybridChunker's
+# merge_peers pass only merges chunks that share the SAME heading path and only up
+# to the token budget — it has no minimum-size floor, so a leaf section with a tiny
+# body (a one-line cross-pointer, a stub paragraph, an isolated sentence) is emitted
+# as its own heading-dominated chunk that pollutes retrieval (the "title-only chunk"
+# pathology). After chunking, DoclingParser merges adjacent sub-floor BODIES into the
+# neighbour sharing the longest heading-path prefix (same chapter/parent), capped at
+# CHUNK_SIZE chars, preserving the host chunk's breadcrumb/page/xref provenance.
+# 0 disables the pass. Distinct from RAG_INGEST_MIN_CHUNK_CHARS (a post-coalesce DROP
+# backstop for truly-orphan stubs, measured on the body) and RAG_MIN_CHUNK_CHARS
+# (the legacy markdown/semantic-path coalesce floor).
+RAG_INGEST_NATIVE_MIN_CHUNK_CHARS: int = int(
+    os.environ.get("RAG_INGEST_NATIVE_MIN_CHUNK_CHARS", "512")
+)
+
+# --- Ingest: Temporal workflow (KG phase 2b) ---
+RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_TIMEOUT_MIN", "10")
+)
+RAG_INGEST_TEMPORAL_KG_RETRY_MAX: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_RETRY_MAX", "5")
+)
+RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S: int = int(
+    os.environ.get("RAG_INGEST_TEMPORAL_KG_RETRY_INTERVAL_S", "10")
+)
+
+# --- Retrieval: Query processor (rewriter / evaluator) ---
+RAG_RETRIEVAL_REWRITER_MAX_TOKENS: int = int(
+    os.environ.get("RAG_RETRIEVAL_REWRITER_MAX_TOKENS", "400")
+)
+RAG_QUERY_PRONOUN_DENSITY_THRESHOLD: float = float(
+    os.environ.get("RAG_QUERY_PRONOUN_DENSITY_THRESHOLD", "0.15")
+)
+RAG_QUERY_EVALUATOR_MAX_TOKENS: int = int(
+    os.environ.get("RAG_QUERY_EVALUATOR_MAX_TOKENS", "256")
+)
+
+# --- Retrieval: Generation / sanitization ---
+RAG_GENERATION_MIN_FRAGMENT_LEN: int = int(
+    os.environ.get("RAG_GENERATION_MIN_FRAGMENT_LEN", "40")
+)
+
+# --- Retrieval: Query suggestion heuristic ---
+RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES: int = int(
+    os.environ.get("RAG_QUERY_SUGGESTION_MIN_UNIQUE_SOURCES", "2")
+)
+
+# --- Core: Embedding batch sizes ---
+RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS: int = int(
+    os.environ.get("RAG_EMBEDDING_BATCH_SIZE_DOCUMENTS", "32")
+)
+RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING: int = int(
+    os.environ.get("RAG_EMBEDDING_BATCH_SIZE_SEMANTIC_CHUNKING", "64")
+)
+
+# --- Platform: LLM defaults & probes ---
+RAG_LLM_DEFAULT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_LLM_DEFAULT_MAX_TOKENS", "2048")
+)
+RAG_LLM_DEFAULT_TEMPERATURE: float = float(
+    os.environ.get("RAG_LLM_DEFAULT_TEMPERATURE", "0.2")
+)
+# Alias of LLM_NUM_RETRIES (env RAG_LLM_NUM_RETRIES) — single source for the LLM
+# call retry count, shared by the LLMConfig default and the provider call default.
+RAG_LLM_DEFAULT_NUM_RETRIES: int = LLM_NUM_RETRIES
+RAG_LLM_RATE_LIMIT_RETRY_DELAY_S: int = int(
+    os.environ.get("RAG_LLM_RATE_LIMIT_RETRY_DELAY_S", "5")
+)
+RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS: int = int(
+    os.environ.get("RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS", "1")
+)
+RAG_LLM_ONESHOT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_LLM_ONESHOT_MAX_TOKENS", "256")
+)
+# Default max concurrency (ThreadPoolExecutor workers / asyncio.Semaphore size)
+# for the LLM batch/abatch helpers (src/common/llm/batch.py). Default 10.
+RAG_LLM_BATCH_MAX_CONCURRENCY: int = int(
+    os.environ.get("RAG_LLM_BATCH_MAX_CONCURRENCY", "10")
+)
+
+# --- Platform: Memory text limits ---
+RAG_MEMORY_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SUMMARY_MAX_CHARS", "2400")
+)
+RAG_MEMORY_TURN_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_TURN_MAX_CHARS", "1200")
+)
+RAG_MEMORY_SNIPPET_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SNIPPET_MAX_CHARS", "220")
+)
+
+# --- Platform: Observability ---
+RAG_OBSERVABILITY_MAX_CAPTURE_LEN: int = int(
+    os.environ.get("RAG_OBSERVABILITY_MAX_CAPTURE_LEN", "500")
+)
+
+# --- Web Console ---
+# Provenance-trust floor above which a citation highlight range is trusted
+# (server/console/routes.py:_resolve_highlight_range). Default 0.9.
+RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD: float = float(
+    os.environ.get("RAG_CONSOLE_PROVENANCE_TRUST_THRESHOLD", "0.9")
+)
+# Source-document preview clamp bounds (server/console/services.py:
+# build_source_preview_payload). MIN/MAX cap the user-supplied max_chars; the
+# CONTEXT_MIN/CONTEXT_CAP cap the surrounding context window. Defaults 200 /
+# 20000 / 100 / 5000.
+RAG_CONSOLE_PREVIEW_MIN_CHARS: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_MIN_CHARS", "200")
+)
+RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_MAX_CHARS_CAP", "20000")
+)
+RAG_CONSOLE_PREVIEW_CONTEXT_MIN: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_CONTEXT_MIN", "100")
+)
+RAG_CONSOLE_PREVIEW_CONTEXT_CAP: int = int(
+    os.environ.get("RAG_CONSOLE_PREVIEW_CONTEXT_CAP", "5000")
+)
+
+# --- Platform: Reliability / retry defaults ---
+# Single-sourced from the RETRY_* knobs above (env RAG_RETRY_*). These aliases
+# remain so src/platform/schemas/reliability.py keeps importing the same names,
+# but there is now ONE env-var family (RAG_RETRY_*) controlling retry behavior
+# across both the reliability schemas and the rag-chain retry policy. The former
+# RAG_RELIABILITY_* env vars were duplicates with identical defaults; no
+# deployment set them.
+RAG_RELIABILITY_DEFAULT_MAX_ATTEMPTS: int = RETRY_MAX_ATTEMPTS
+RAG_RELIABILITY_INITIAL_BACKOFF_S: float = RETRY_INITIAL_BACKOFF_SECONDS
+RAG_RELIABILITY_MAX_BACKOFF_S: float = RETRY_MAX_BACKOFF_SECONDS
+RAG_RELIABILITY_BACKOFF_MULTIPLIER: float = RETRY_BACKOFF_MULTIPLIER
+
+# --- DB: MinIO ---
+RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS: int = int(
+    os.environ.get("RAG_MINIO_PRESIGNED_URL_EXPIRY_SECONDS", "3600")
+)
+RAG_MINIO_LIST_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MINIO_LIST_DEFAULT_LIMIT", "1000")
+)
+RAG_MINIO_LIST_DEFAULT_OFFSET: int = int(
+    os.environ.get("RAG_MINIO_LIST_DEFAULT_OFFSET", "0")
+)
+RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY: int = int(
+    os.environ.get("RAG_INGEST_PAGE_IMAGE_JPEG_QUALITY", "85")
+)
+
+# --- Guardrails ---
+# Alias of RAG_NEMO_PII_SCORE_THRESHOLD — single source. The shared PII detector
+# (src/guardrails/shared/pii.py) uses this as its default; the NeMo backend passes
+# RAG_NEMO_PII_SCORE_THRESHOLD explicitly. Identical defaults, one knob now.
+RAG_GUARDRAILS_PII_SCORE_THRESHOLD: float = RAG_NEMO_PII_SCORE_THRESHOLD
+RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_INTENT_CONFIDENCE_THRESHOLD", "0.5")
+)
+RAG_GUARDRAILS_SELF_CHECK_THRESHOLD: float = float(
+    os.environ.get("RAG_GUARDRAILS_SELF_CHECK_THRESHOLD", "0.5")
+)
+RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S: int = int(
+    os.environ.get("RAG_GUARDRAILS_INTENT_ASYNC_TIMEOUT_S", "10")
+)
+RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_INPUT_RAIL_POOL_MAX_WORKERS", "5")
+)
+RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_OUTPUT_RAIL_POOL_MAX_WORKERS", "3")
+)
+RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS", "2")
+)
+# Aliases of the RAG_NEMO_INJECTION_* thresholds — single source. The shared
+# injection detector uses these as defaults; the NeMo backend passes the NEMO
+# ones explicitly. Identical defaults, so this removes the duplicate knobs.
+RAG_GUARDRAILS_INJECTION_LP_THRESHOLD: float = RAG_NEMO_INJECTION_LP_THRESHOLD
+RAG_GUARDRAILS_INJECTION_PS_PPL_THRESHOLD: float = RAG_NEMO_INJECTION_PS_PPL_THRESHOLD
+# Query-length input rail bounds (config/guardrails/actions.py:check_query_length).
+# Queries shorter than MIN or longer than MAX are aborted by the first input rail.
+RAG_GUARDRAILS_QUERY_MIN_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_QUERY_MIN_CHARS", "3")
+)
+RAG_GUARDRAILS_QUERY_MAX_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_QUERY_MAX_CHARS", "2000")
+)
+# Answer-length output rail bounds (config/guardrails/actions.py:check_answer_length
+# / adjust_answer_length). MAX also drives the truncation cap so the check and the
+# clamp share one constant.
+RAG_GUARDRAILS_ANSWER_MIN_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_ANSWER_MIN_CHARS", "20")
+)
+RAG_GUARDRAILS_ANSWER_MAX_CHARS: int = int(
+    os.environ.get("RAG_GUARDRAILS_ANSWER_MAX_CHARS", "5000")
+)
+
+# --- Ingest: misc support helpers ---
+RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS: int = int(
+    os.environ.get("RAG_INGEST_STRIP_TRAILING_SHORT_LINES_MAX_WORDS", "4")
+)
+RAG_INGEST_LLM_DEFAULT_MAX_TOKENS: int = int(
+    os.environ.get("RAG_INGEST_LLM_DEFAULT_MAX_TOKENS", "300")
+)
+RAG_INGEST_SCORER_PYTEST_TIMEOUT_S: int = int(
+    os.environ.get("RAG_INGEST_SCORER_PYTEST_TIMEOUT_S", "300")
+)
+
+# --- Platform: Memory (extended) ---
+RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_SANITIZE_DEFAULT_MAX_CHARS", "1600")
+)
+RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_HEURISTIC_SUMMARY_MAX_CHARS", "1800")
+)
+# Number of most-recent turns folded into the heuristic-summary fallback
+# (src/platform/memory/utils.py:summarize_heuristic). Default 12.
+RAG_MEMORY_HEURISTIC_SUMMARY_TURNS: int = int(
+    os.environ.get("RAG_MEMORY_HEURISTIC_SUMMARY_TURNS", "12")
+)
+RAG_MEMORY_CONTEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_CONTEXT_MAX_CHARS", "5000")
+)
+RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS: int = int(
+    os.environ.get("RAG_MEMORY_LLM_SUMMARIZER_MAX_TOKENS", "512")
+)
+RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_LLM_SUMMARY_SANITIZED_MAX_CHARS", "2600")
+)
+RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_CONVERSATION_TITLE_MAX_CHARS", "200")
+)
+# Condensation cap (chars) for auto-derived conversation titles
+# (server/routes/query.py:_derive_title_from_query). Distinct from the 200-char
+# storage clamp above. Default 60.
+RAG_MEMORY_TITLE_DERIVE_MAX_CHARS: int = int(
+    os.environ.get("RAG_MEMORY_TITLE_DERIVE_MAX_CHARS", "60")
+)
+RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT", "100")
+)
+# Default page size for list_conversations across memory providers
+# (src/platform/memory/provider.py). Mirrors RAG_MEMORY_GET_TURNS_DEFAULT_LIMIT.
+RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT: int = int(
+    os.environ.get("RAG_MEMORY_LIST_CONVERSATIONS_DEFAULT_LIMIT", "50")
+)
+
+# --- Platform: Token budget ---
+RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S: int = int(
+    os.environ.get("RAG_TOKEN_BUDGET_URLOPEN_TIMEOUT_S", "5")
+)
+
+# --- Platform: LLM cache ---
+RAG_LLM_CACHE_DEFAULT_TTL_S: int = int(
+    os.environ.get("RAG_LLM_CACHE_DEFAULT_TTL_S", "3600")
+)
+
+# --- Retrieval: query/pipeline (extended) ---
+RAG_QUERY_KG_MATCH_MAX_TERMS: int = int(
+    os.environ.get("RAG_QUERY_KG_MATCH_MAX_TERMS", "20")
+)
+# Number of KG-expanded terms appended to the BM25 query in the primary and
+# fallback retrieval paths (src/retrieval/pipeline/rag_chain.py). Default 3.
+RAG_KG_BM25_APPEND_TERMS: int = int(
+    os.environ.get("RAG_KG_BM25_APPEND_TERMS", "3")
+)
+RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS: int = int(
+    os.environ.get("RAG_DEEP_RESEARCH_EVIDENCE_TEXT_MAX_CHARS", "8000")
+)
+RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_RETRIEVAL_INIT_POOL_MAX_WORKERS", "3")
+)
+RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS: int = int(
+    os.environ.get("RAG_RETRIEVAL_STAGE1_POOL_MAX_WORKERS", "2")
+)
+RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE: int = int(
+    os.environ.get("RAG_RETRIEVAL_EMBEDDING_CACHE_MAX_SIZE", "128")
+)
+
 # NOTE: RAG_INGESTION_COLQWEN_MODEL is reused for retrieval-time model
 # selection (FR-109). No separate retrieval model key exists.
+
+# ─── Tree retrieval (TREE_RETRIEVAL_DESIGN.md §5) ─────────────────────────
+RAG_TREE_RETRIEVAL_ENABLED: bool = os.environ.get(
+    "RAG_TREE_RETRIEVAL_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Enable Stage 4b (descent) and Stage 4c (lift) sub-stages. When False
+(default), retrieval behaviour matches pre-1.2.0 — leaf-only hybrid search."""
+
+RAG_TREE_DESCENT_TOP_K: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_TOP_K", "5")
+))
+"""Top-K section nodes returned by Stage 4b descent search."""
+
+RAG_TREE_DESCENT_LEAVES_PER_SECTION: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_LEAVES_PER_SECTION", "3")
+))
+"""Number of leaf chunks pulled from each top-K section during descent expansion."""
+
+RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC: int = max(1, int(
+    os.environ.get("RAG_TREE_DESCENT_DOC_DIVERSITY_TOP_PER_DOC", "2")
+))
+"""Per-document cap applied to descent section hits before expansion. Prevents
+one verbose document from dominating cross-document descent."""
+
+RAG_TREE_LIFT_SEED_K: int = max(1, int(
+    os.environ.get("RAG_TREE_LIFT_SEED_K", "5")
+))
+"""Number of top Stage 4 chunk hits used as seeds for Stage 4c sibling lift."""
+
+RAG_TREE_LIFT_SIBLINGS: int = max(1, int(
+    os.environ.get("RAG_TREE_LIFT_SIBLINGS", "2")
+))
+"""Per-seed cap on sibling chunks fetched during lift. Chip-design profile
+recommends 4 (see TREE_RETRIEVAL_DESIGN.md §4.2.1)."""
+
+RAG_STAGE_BUDGET_TREE_DESCENT_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_TREE_DESCENT_MS", "200")
+)
+RAG_STAGE_BUDGET_TREE_LIFT_MS: int = int(
+    os.environ.get("RAG_STAGE_BUDGET_TREE_LIFT_MS", "200")
+)
+
+# ─── Rerank fusion (R1 — BM25-RRF + heading-aware + anchor confidence) ─────
+# These knobs control the post-CE fusion layer in
+# ``src.retrieval.query.nodes.rerank_fusion``. Disabling fusion (or setting
+# every weight to 0) returns the rerank stage to pure cross-encoder behavior.
+
+RAG_RERANK_FUSION_ENABLED: bool = os.environ.get(
+    "RAG_RERANK_FUSION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for rerank-time fusion. When False, the rerank stage uses
+pure cross-encoder scores (legacy behavior). Defaults True."""
+
+RAG_RERANK_DIVERSITY_ENABLED: bool = os.environ.get(
+    "RAG_RERANK_DIVERSITY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Master switch for the per-document diversity cap applied to the final
+reranked top-K. When True (default), no single ``document_id`` may occupy more
+than ``ceil(rerank_top_k * RAG_RERANK_MAX_DOC_FRACTION)`` of the returned
+chunks; the freed slots go to the next-best chunks from OTHER documents.
+Greedy-by-score with backfill, so a genuinely single-source answer is never
+starved (over-cap chunks are re-added when no diverse candidates remain).
+
+Motivation: a single multi-sheet spreadsheet chunked into many near-duplicate
+rows could win every reranked slot for a topical query, evicting the prose
+chunk that actually answered it (one document crowding out all others). The
+ingest-side bounded-block table chunking is the primary cure; this cap is the
+query-side safety net so no document can ever monopolise retrieval again."""
+
+RAG_RERANK_MAX_DOC_FRACTION: float = float(
+    os.environ.get("RAG_RERANK_MAX_DOC_FRACTION", "0.75")
+)
+"""Maximum fraction of the reranked top-K that one ``document_id`` may occupy
+when ``RAG_RERANK_DIVERSITY_ENABLED`` is True. 0.75 → at most 9 of 12 (or 3 of
+5) from a single document: enough cross-document diversity to surface a second
+source (validated to recover questions whose answer lived in a non-dominant
+doc) while still letting a strongly-relevant document supply most of the
+context (a tighter 0.6 starved depth-heavy comparison answers). Set to 1.0 to
+disable the cap without touching the master switch."""
+
+RAG_TABLE_GROUP_DEDUP_ENABLED: bool = os.environ.get(
+    "RAG_TABLE_GROUP_DEDUP_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+"""Collapse chunks that are different renderings of the SAME table (they share a
+``table_group_id``) to a single best-scoring hit in the reranked result set. A
+table is chunked into multiple representations — a markdown-grid summary and/or
+per-row-block chunks — whose text differs, so content-hash/fuzzy dedup never
+equates them, letting two facets of one table both occupy the top-K and read as
+a duplicate. Keeps the highest-scoring rep and carries the dropped rep's
+``table_markdown`` onto it so the full grid is still available for display. Keys
+on the structural ``table_group_id`` so it works for any table in any document."""
+
+RAG_RERANK_RRF_K: int = max(1, int(
+    os.environ.get("RAG_RERANK_RRF_K", "60")
+))
+"""Reciprocal Rank Fusion dampening constant ``k``. 60 is the canonical default."""
+
+RAG_RERANK_RRF_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_RRF_LAMBDA", "1.0")
+)
+"""Weight applied to the BM25-RRF component when fusion is enabled."""
+
+RAG_RERANK_HEADING_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_HEADING_LAMBDA", "0.15")
+)
+"""Weight applied to heading-match score (lambda_heading)."""
+
+RAG_RERANK_ANCHOR_LAMBDA: float = float(
+    os.environ.get("RAG_RERANK_ANCHOR_LAMBDA", "0.10")
+)
+"""Weight applied to anchor-confidence (tree-mode only). Ignored when
+the candidate is not a tree-retrieved leaf (``_anchor_rank is None``)."""
+
+RAG_RERANK_ANCHOR_K: int = max(1, int(
+    os.environ.get("RAG_RERANK_ANCHOR_K", "10")
+))
+"""Anchor-confidence dampening constant: ``confidence = 1 / (k + rank)``."""
+
+
+# ─── Document Routing (RAPTOR-lite) — DOCUMENT_ROUTING_DESIGN.md §6, §7 ───
+# Stage-1 card-index routing. All OFF / no-op by default: when
+# RAG_DOCUMENT_ROUTING_ENABLED is False, retrieval behaviour is byte-identical
+# to pre-routing. Routing is SOFT (top-N, never top-1; never a hard filter) and
+# falls back to pure flat retrieval on low confidence (design §6.2, §7).
+
+RAG_DOCUMENT_ROUTING_ENABLED: bool = os.environ.get(
+    "RAG_DOCUMENT_ROUTING_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master switch for Stage-1 document routing. When False (default), the router
+is never invoked and retrieval is unchanged."""
+
+RAG_DOCUMENT_ROUTING_TOP_N: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_TOP_N", "6")
+)
+"""Number of routed documents per query (design §7: never top-1).
+Validated >= 2 by ``validate_document_routing_config``."""
+
+RAG_DOCUMENT_ROUTING_MIN_SCORE: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_MIN_SCORE", "0.0")
+)
+"""Card-similarity floor below which routing yields an empty set (→ pure flat
+retrieval). Default 0.0 = accept any card hit."""
+
+RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES", "5")
+)
+"""Chunks fetched per routed document during the routed-doc candidate union."""
+
+RAG_DOCUMENT_ROUTING_MAX_CANDIDATES: int = int(
+    os.environ.get("RAG_DOCUMENT_ROUTING_MAX_CANDIDATES", "60")
+)
+"""Upper bound on the unioned candidate set (design §6.2). Validated
+>= RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES by ``validate_document_routing_config``."""
+
+RAG_DOCUMENT_ROUTING_BOOST: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_BOOST", "0.0")
+)
+"""Tiny optional tie-break boost for routed-doc candidates. Default 0.0 = no
+score influence (rerank decides). Soft only — never a hard filter."""
+
+RAG_DOCUMENT_ROUTING_ALPHA: float = float(
+    os.environ.get("RAG_DOCUMENT_ROUTING_ALPHA", "1.0")
+)
+"""Hybrid-search alpha used by the Stage-1 card router
+(src/retrieval/routing/router.py). 1.0 = pure-vector card routing (default,
+an intentional invariant); lower values blend in the BM25 component."""
+
+RAG_DOCUMENT_CARD_COLLECTION: str = os.environ.get(
+    "RAG_DOCUMENT_CARD_COLLECTION", "RAGDocumentCards"
+)
+"""Vector collection holding routing-only document cards (NEVER sent to the
+LLM). Shared between ingest (card emission) and retrieval (the router)."""
+
+# ─── Comparison Decomposition — DOCUMENT_ROUTING_DESIGN.md §8 ─────────────
+# Tier-1 regex + Tier-2 glossary-LLM query decomposition for comparison
+# queries. OFF by default; identity transform (query unchanged) when disabled.
+
+RAG_DECOMPOSITION_ENABLED: bool = os.environ.get(
+    "RAG_DECOMPOSITION_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Master switch for comparison-query decomposition. When False (default),
+``decompose_query`` is an identity transform (returns ``[query]``)."""
+
+RAG_DECOMPOSITION_LLM_PRIMARY: bool = os.environ.get(
+    "RAG_DECOMPOSITION_LLM_PRIMARY", "true"
+).lower() in ("true", "1", "yes")
+"""When True (default) and decomposition is enabled, Tier-2 glossary-LLM
+decomposition is the primary path, with Tier-1 regex as fallback."""
+
+RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS: int = int(
+    os.environ.get("RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS", "8")
+)
+"""Per-call timeout for the Tier-2 decomposition LLM call."""
+
+RAG_DECOMPOSITION_LLM_MAX_TOKENS: int = int(
+    os.environ.get("RAG_DECOMPOSITION_LLM_MAX_TOKENS", "256")
+)
+"""Max output tokens for the Tier-2 decomposition LLM call. Tight by design —
+the response is a short sub-query list, and a low cap keeps latency down."""
+
+RAG_DECOMPOSITION_LLM_TEMPERATURE: float = float(
+    os.environ.get("RAG_DECOMPOSITION_LLM_TEMPERATURE", "0.0")
+)
+"""Sampling temperature for the Tier-2 decomposition LLM call. 0.0 =
+deterministic extraction (default)."""
+
+RAG_DECOMPOSITION_MIN_SUBQUERIES: int = int(
+    os.environ.get("RAG_DECOMPOSITION_MIN_SUBQUERIES", "2")
+)
+"""Minimum sub-queries a valid decomposition must yield. Validated >= 2 and
+<= RAG_DECOMPOSITION_MAX_SUBQUERIES by ``validate_document_routing_config``."""
+
+RAG_DECOMPOSITION_MAX_SUBQUERIES: int = int(
+    os.environ.get("RAG_DECOMPOSITION_MAX_SUBQUERIES", "5")
+)
+"""Maximum sub-queries a valid decomposition may yield."""
+
+# ─── Document Cards (ingest) — DOCUMENT_ROUTING_DESIGN.md §11 ─────────────
+# Ingest-side card emission. Mirrored onto IngestionConfig fields in
+# src/ingest/common/types.py. OFF by default (no card collection written).
+
+RAG_INGESTION_BUILD_DOCUMENT_CARDS: bool = os.environ.get(
+    "RAG_INGESTION_BUILD_DOCUMENT_CARDS", "false"
+).lower() in ("true", "1", "yes")
+"""When True, ingest emits one routing-only document card per document into
+RAG_DOCUMENT_CARD_COLLECTION. Default False = no card collection written."""
+
+RAG_INGESTION_CARD_LLM_SUMMARY: bool = os.environ.get(
+    "RAG_INGESTION_CARD_LLM_SUMMARY", "false"
+).lower() in ("true", "1", "yes")
+"""When True, card text includes an LLM-generated summary. Default False =
+baseline card text is title + section headings only (no LLM call)."""
+
+RAG_INGESTION_CARD_MAX_HEADINGS: int = int(
+    os.environ.get("RAG_INGESTION_CARD_MAX_HEADINGS", "60")
+)
+"""Cap on the number of section headings included in a card. Guards against
+xlsx-style documents with hundreds of header rows (design §11)."""
+
+
+def validate_document_routing_config() -> None:
+    """Validate document-routing / decomposition / card configuration.
+
+    Checks for contradictory or unsafe settings and raises ``ValueError`` with
+    a descriptive message naming the offending key(s). Invoked lazily by
+    callers (the router / decomposition orchestrator) rather than at import,
+    matching ``validate_visual_retrieval_config``'s fail-fast-at-use pattern —
+    importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If ``RAG_DOCUMENT_ROUTING_TOP_N < 2`` (design §7: never
+            top-1); if ``RAG_DECOMPOSITION_MIN_SUBQUERIES`` is < 2 or exceeds
+            ``RAG_DECOMPOSITION_MAX_SUBQUERIES``; or if
+            ``RAG_DOCUMENT_ROUTING_MAX_CANDIDATES`` is below
+            ``RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES``.
+    """
+    if RAG_DOCUMENT_ROUTING_TOP_N < 2:
+        raise ValueError(
+            f"RAG_DOCUMENT_ROUTING_TOP_N={RAG_DOCUMENT_ROUTING_TOP_N} must be "
+            ">= 2 (design §7: route to top-N documents, never top-1)"
+        )
+    if RAG_DECOMPOSITION_MIN_SUBQUERIES < 2:
+        raise ValueError(
+            f"RAG_DECOMPOSITION_MIN_SUBQUERIES={RAG_DECOMPOSITION_MIN_SUBQUERIES} "
+            "must be >= 2 (a decomposition needs at least two sub-queries)"
+        )
+    if RAG_DECOMPOSITION_MIN_SUBQUERIES > RAG_DECOMPOSITION_MAX_SUBQUERIES:
+        raise ValueError(
+            f"RAG_DECOMPOSITION_MIN_SUBQUERIES={RAG_DECOMPOSITION_MIN_SUBQUERIES} "
+            "must be <= RAG_DECOMPOSITION_MAX_SUBQUERIES="
+            f"{RAG_DECOMPOSITION_MAX_SUBQUERIES}"
+        )
+    if RAG_DOCUMENT_ROUTING_MAX_CANDIDATES < RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES:
+        raise ValueError(
+            f"RAG_DOCUMENT_ROUTING_MAX_CANDIDATES={RAG_DOCUMENT_ROUTING_MAX_CANDIDATES} "
+            "must be >= RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES="
+            f"{RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES} (the union bound cannot be "
+            "smaller than the per-document leaf fetch)"
+        )
+
+
+def validate_agentic_retrieval_config() -> None:
+    """Validate agentic-retrieval-loop configuration.
+
+    Checks for contradictory or out-of-range settings and raises ``ValueError``
+    with a descriptive message naming the offending key(s). Invoked lazily by
+    the agentic orchestrator when the loop activates (fail-fast-at-use), so
+    importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If any threshold/target is outside ``[0.0, 1.0]``; if any
+            count budget is < 1; if ``RAG_AGENTIC_MIN_KEPT_CHUNKS`` exceeds
+            ``RAG_AGENTIC_FINAL_MAX_CHUNKS`` (the kept floor cannot exceed the
+            hard cap); or if ``RAG_AGENTIC_WALL_CLOCK_MS`` is not positive.
+    """
+    errors: list[str] = []
+    for name, val in [
+        ("RAG_AGENTIC_RELEVANCE_THRESHOLD", RAG_AGENTIC_RELEVANCE_THRESHOLD),
+        ("RAG_AGENTIC_FAITHFULNESS_THRESHOLD", RAG_AGENTIC_FAITHFULNESS_THRESHOLD),
+        ("RAG_AGENTIC_SUFFICIENCY_TARGET", RAG_AGENTIC_SUFFICIENCY_TARGET),
+        ("RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE", RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE),
+    ]:
+        if not (0.0 <= val <= 1.0):
+            errors.append(f"{name}={val} must be in [0.0, 1.0]")
+    for name, val in [
+        ("RAG_AGENTIC_MAX_ROUNDS", RAG_AGENTIC_MAX_ROUNDS),
+        ("RAG_AGENTIC_MAX_LLM_CALLS", RAG_AGENTIC_MAX_LLM_CALLS),
+        ("RAG_AGENTIC_KEEP_TOP_K_PER_ROUND", RAG_AGENTIC_KEEP_TOP_K_PER_ROUND),
+        ("RAG_AGENTIC_FINAL_MAX_CHUNKS", RAG_AGENTIC_FINAL_MAX_CHUNKS),
+        ("RAG_AGENTIC_MIN_KEPT_CHUNKS", RAG_AGENTIC_MIN_KEPT_CHUNKS),
+        ("RAG_AGENTIC_MIN_SOURCES", RAG_AGENTIC_MIN_SOURCES),
+        ("RAG_AGENTIC_HYDE_MAX_TOKENS", RAG_AGENTIC_HYDE_MAX_TOKENS),
+        ("RAG_AGENTIC_JUDGE_POOL_MAX", RAG_AGENTIC_JUDGE_POOL_MAX),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+    # Fail-fast on a mistyped ranker selector (a typo like "ce"/"Judge" would
+    # otherwise silently fall through to the cross-encoder branch).
+    _valid_rankers = ("judge", "cross_encoder")
+    if RAG_AGENTIC_RANKER not in _valid_rankers:
+        errors.append(
+            f"RAG_AGENTIC_RANKER={RAG_AGENTIC_RANKER!r} must be one of "
+            f"{_valid_rankers}"
+        )
+    _valid_fill = ("hybrid", "none", "adaptive")
+    if RAG_AGENTIC_FILL_MODE not in _valid_fill:
+        errors.append(
+            f"RAG_AGENTIC_FILL_MODE={RAG_AGENTIC_FILL_MODE!r} must be one of "
+            f"{_valid_fill}"
+        )
+    if RAG_AGENTIC_MIN_KEPT_CHUNKS > RAG_AGENTIC_FINAL_MAX_CHUNKS:
+        errors.append(
+            f"RAG_AGENTIC_MIN_KEPT_CHUNKS={RAG_AGENTIC_MIN_KEPT_CHUNKS} must be "
+            f"<= RAG_AGENTIC_FINAL_MAX_CHUNKS={RAG_AGENTIC_FINAL_MAX_CHUNKS} "
+            "(the kept floor cannot exceed the hard cap fed to generation)"
+        )
+    if RAG_AGENTIC_WALL_CLOCK_MS <= 0:
+        errors.append(
+            f"RAG_AGENTIC_WALL_CLOCK_MS={RAG_AGENTIC_WALL_CLOCK_MS} must be > 0"
+        )
+    if errors:
+        raise ValueError(
+            "Agentic-retrieval configuration validation failed:\n  "
+            + "\n  ".join(errors)
+        )
+
+
+def validate_turn_loop_config() -> None:
+    """Validate turn-level conversation-loop configuration.
+
+    Checks for contradictory or out-of-range ``RAG_TURN_LOOP_*`` /
+    ``RAG_TURN_CONTEXT_*`` settings and raises ``ValueError`` with a
+    descriptive message naming the offending key(s). Invoked lazily when the
+    loop activates (fail-fast-at-use, the validate_agentic_retrieval_config
+    pattern), so importing ``config.settings`` with default env never raises.
+
+    Raises:
+        ValueError: If the answer threshold is outside ``(0.0, 1.0]``; if the
+            gate weights are not exactly 3 non-negative floats summing to 1.0
+            (tolerance 1e-6); if the deep-study window is not strictly larger
+            than its overlap (or the overlap is negative); if any count budget
+            is < 1; if ``RAG_TURN_LOOP_WALL_CLOCK_MS`` < 1000; if the wall
+            clock is not strictly below ``RAG_WORKFLOW_DEFAULT_TIMEOUT_MS``
+            (the budget hierarchy TurnBudget < workflow timeout must hold); or
+            if a model alias is empty.
+    """
+    errors: list[str] = []
+    if RAG_TURN_LOOP_MIN_CALL_BUDGET_MS >= RAG_TURN_LOOP_WALL_CLOCK_MS:
+        errors.append(
+            "RAG_TURN_LOOP_MIN_CALL_BUDGET_MS "
+            f"({RAG_TURN_LOOP_MIN_CALL_BUDGET_MS}) must be strictly below "
+            f"RAG_TURN_LOOP_WALL_CLOCK_MS ({RAG_TURN_LOOP_WALL_CLOCK_MS}) — "
+            "the loop needs headroom for at least one meaningful LLM call"
+        )
+    threshold = RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD
+    if not (0.0 < threshold <= 1.0):
+        errors.append(
+            f"RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD={threshold} must be "
+            "in (0.0, 1.0]"
+        )
+    weights = RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS
+    if len(weights) != 3:
+        errors.append(
+            f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must contain exactly "
+            "3 comma-separated floats (judge,self,citation)"
+        )
+    else:
+        if any(w < 0.0 for w in weights):
+            errors.append(
+                f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must all be >= 0"
+            )
+        if abs(sum(weights) - 1.0) > 1e-6:
+            errors.append(
+                f"RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS={weights} must sum to 1.0 "
+                f"(got {sum(weights)})"
+            )
+    for name, val in [
+        ("RAG_TURN_LOOP_MAX_ACTIONS", RAG_TURN_LOOP_MAX_ACTIONS),
+        ("RAG_TURN_LOOP_MAX_LLM_CALLS", RAG_TURN_LOOP_MAX_LLM_CALLS),
+        ("RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS", RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS),
+        ("RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS", RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS),
+        (
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS",
+            RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS,
+        ),
+        (
+            "RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS",
+            RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS,
+        ),
+        ("RAG_TURN_LOOP_CLARIFY_MAX_HINTS", RAG_TURN_LOOP_CLARIFY_MAX_HINTS),
+        ("RAG_TURN_LOOP_RETRIEVE_TOP_K", RAG_TURN_LOOP_RETRIEVE_TOP_K),
+        ("RAG_TURN_CONTEXT_MAX_CHUNK_REFS", RAG_TURN_CONTEXT_MAX_CHUNK_REFS),
+        ("RAG_TURN_CONTEXT_PREVIEW_CHARS", RAG_TURN_CONTEXT_PREVIEW_CHARS),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+    if RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS < 0:
+        errors.append(
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS} must be >= 0"
+        )
+    if (
+        RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS
+        <= RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS
+    ):
+        errors.append(
+            "RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS} must be strictly greater "
+            "than RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS="
+            f"{RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS} "
+            "(a window must advance past its overlap)"
+        )
+    if RAG_TURN_LOOP_WALL_CLOCK_MS < 1000:
+        errors.append(
+            f"RAG_TURN_LOOP_WALL_CLOCK_MS={RAG_TURN_LOOP_WALL_CLOCK_MS} must "
+            "be >= 1000"
+        )
+    # Budget hierarchy: the loop's wall clock must sit strictly inside the
+    # workflow default timeout so a retrieve_ranked activity can never outlive
+    # the turn budget that scheduled it. Guarded lookup: tolerate the key being
+    # absent (e.g. a trimmed settings build) rather than NameError-ing here.
+    workflow_timeout_ms = globals().get("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS")
+    if (
+        workflow_timeout_ms is not None
+        and RAG_TURN_LOOP_WALL_CLOCK_MS >= int(workflow_timeout_ms)
+    ):
+        errors.append(
+            f"RAG_TURN_LOOP_WALL_CLOCK_MS={RAG_TURN_LOOP_WALL_CLOCK_MS} must "
+            "be strictly less than RAG_WORKFLOW_DEFAULT_TIMEOUT_MS="
+            f"{workflow_timeout_ms} (TurnBudget must sit inside the workflow "
+            "timeout)"
+        )
+    for name, val in [
+        (
+            "RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS",
+            RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS,
+        ),
+        ("RAG_TURN_LOOP_JUDGE_MODEL_ALIAS", RAG_TURN_LOOP_JUDGE_MODEL_ALIAS),
+    ]:
+        if not val.strip():
+            errors.append(f"{name} must not be empty")
+    # Router / fast-lane / effort dial (Phase 3).
+    if not (0.0 <= RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE <= 1.0):
+        errors.append(
+            "RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE="
+            f"{RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE} must be in [0.0, 1.0]"
+        )
+    if RAG_TURN_LOOP_FAST_LANE_MAX_WORDS < 1:
+        errors.append(
+            "RAG_TURN_LOOP_FAST_LANE_MAX_WORDS="
+            f"{RAG_TURN_LOOP_FAST_LANE_MAX_WORDS} must be >= 1"
+        )
+    for name, val in [
+        ("RAG_TURN_LOOP_EFFORT_FAST_SCALE", RAG_TURN_LOOP_EFFORT_FAST_SCALE),
+        ("RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE", RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE),
+    ]:
+        if val <= 0.0:
+            errors.append(f"{name}={val} must be > 0")
+    if errors:
+        raise ValueError(
+            "Turn-loop configuration validation failed:\n  "
+            + "\n  ".join(errors)
+        )
+
+
+def validate_nav_role_config() -> None:
+    """Validate chunk-role classification + role-filter configuration.
+
+    Checks for contradictory or out-of-range settings and raises ``ValueError``
+    naming the offending key(s). Wired into :func:`validate_all_config` so a
+    mis-set default role (which would silently drop content) or a non-positive
+    batch/prefix/timeout budget fails fast at startup rather than at first ingest.
+
+    Raises:
+        ValueError: If any of ``RAG_NAV_CLASSIFY_BATCH_SIZE``,
+            ``RAG_NAV_CLASSIFY_PREFIX_CHARS``, ``RAG_NAV_CLASSIFY_TIMEOUT_SECONDS``
+            or ``RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS`` is < 1; if
+            ``RAG_NAV_ROLE_DEFAULT`` is empty or not one of the roles declared in
+            ``RAG_CHUNK_ROLES`` (default ``content``/``navigation``/``boilerplate``);
+            if ``RAG_CHUNK_ROLES`` is empty; if any role in
+            ``RAG_RETRIEVAL_EXCLUDED_ROLES`` is not a valid role; or if the
+            default role is itself excluded by the query filter (which would drop
+            every fail-open chunk — the inverse of the intended safety net).
+    """
+    valid_roles = RAG_CHUNK_ROLES
+    errors: list[str] = []
+
+    if not valid_roles:
+        errors.append(
+            "RAG_CHUNK_ROLES must define at least one role "
+            "(the chunk-role vocabulary is empty)"
+        )
+
+    for name, val in [
+        ("RAG_NAV_CLASSIFY_BATCH_SIZE", RAG_NAV_CLASSIFY_BATCH_SIZE),
+        ("RAG_NAV_CLASSIFY_PREFIX_CHARS", RAG_NAV_CLASSIFY_PREFIX_CHARS),
+        ("RAG_NAV_CLASSIFY_TIMEOUT_SECONDS", RAG_NAV_CLASSIFY_TIMEOUT_SECONDS),
+        ("RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS", RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS),
+    ]:
+        if val < 1:
+            errors.append(f"{name}={val} must be >= 1")
+
+    if not RAG_NAV_ROLE_DEFAULT:
+        errors.append("RAG_NAV_ROLE_DEFAULT must be a non-empty role")
+    elif RAG_NAV_ROLE_DEFAULT not in valid_roles:
+        errors.append(
+            f"RAG_NAV_ROLE_DEFAULT={RAG_NAV_ROLE_DEFAULT!r} must be one of "
+            f"{valid_roles}"
+        )
+
+    for role in RAG_RETRIEVAL_EXCLUDED_ROLES:
+        if role not in valid_roles:
+            errors.append(
+                f"RAG_RETRIEVAL_EXCLUDED_ROLES contains {role!r}, "
+                f"not one of {valid_roles}"
+            )
+
+    # The fail-open default must never be in the excluded set, else the query
+    # filter would drop exactly the chunks the classifier defaulted to keep.
+    if (
+        RAG_NAV_ROLE_DEFAULT in valid_roles
+        and RAG_NAV_ROLE_DEFAULT in RAG_RETRIEVAL_EXCLUDED_ROLES
+    ):
+        errors.append(
+            f"RAG_NAV_ROLE_DEFAULT={RAG_NAV_ROLE_DEFAULT!r} must NOT appear in "
+            f"RAG_RETRIEVAL_EXCLUDED_ROLES={RAG_RETRIEVAL_EXCLUDED_ROLES} "
+            "(the fail-open role cannot be the one filtered out)"
+        )
+
+    if errors:
+        raise ValueError(
+            "Chunk-role configuration validation failed:\n  "
+            + "\n  ".join(errors)
+        )
 
 
 def validate_visual_retrieval_config() -> None:
@@ -999,6 +2945,10 @@ def validate_all_config() -> None:
         ("RATE_LIMIT_WINDOW_SECONDS", RATE_LIMIT_WINDOW_SECONDS),
         ("RERANKER_BATCH_SIZE", RERANKER_BATCH_SIZE),
         ("RAG_INGESTION_LLM_MAX_KEYWORDS", RAG_INGESTION_LLM_MAX_KEYWORDS),
+        ("RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS", RAG_DEEP_RESEARCH_MAX_OUTPUT_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_COUNT", RAG_SUGGESTED_QUESTIONS_COUNT),
+        ("RAG_SUGGESTED_QUESTIONS_MAX_TOKENS", RAG_SUGGESTED_QUESTIONS_MAX_TOKENS),
+        ("RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS", RAG_SUGGESTED_QUESTIONS_TIMEOUT_SECONDS),
     ]:
         if val <= 0:
             errors.append(f"{name}={val} must be > 0")
@@ -1019,6 +2969,14 @@ def validate_all_config() -> None:
                 "RAG_INGESTION_VISION_ENABLED=true requires "
                 "RAG_INGESTION_VISION_MODEL to be set"
             )
+
+    # --- Chunk-role classification / role-filter contradictions ---
+    # Delegate to the dedicated validator and fold its message in (defaults are
+    # all valid, so this never trips on a default-env import).
+    try:
+        validate_nav_role_config()
+    except ValueError as exc:
+        errors.append(str(exc))
 
     if errors:
         raise ValueError(

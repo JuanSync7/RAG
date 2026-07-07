@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+from config.settings import RAG_INGEST_SCORER_PYTEST_TIMEOUT_S
+
 ROOT = Path(__file__).resolve().parent  # src/ingest/
 PROJECT_ROOT = ROOT.parent.parent  # RagWeave/
 SUPPORT_DIR = ROOT / "support"
@@ -29,7 +31,6 @@ PHASE1_NODES = [
     ROOT / "doc_processing/nodes/structure_detection.py",
     ROOT / "doc_processing/nodes/multimodal_processing.py",
     ROOT / "doc_processing/nodes/text_cleaning.py",
-    ROOT / "doc_processing/nodes/document_refactoring.py",
 ]
 
 PHASE2_NODES = [
@@ -39,12 +40,10 @@ PHASE2_NODES = [
     ROOT / "embedding/nodes/chunk_enrichment.py",
     ROOT / "embedding/nodes/metadata_generation.py",
     ROOT / "embedding/nodes/cross_reference_extraction.py",
-    ROOT / "embedding/nodes/knowledge_graph_extraction.py",
     ROOT / "embedding/nodes/quality_validation.py",
     ROOT / "embedding/nodes/cross_document_dedup.py",
     ROOT / "embedding/nodes/embedding_storage.py",
     ROOT / "embedding/nodes/visual_embedding.py",
-    ROOT / "embedding/nodes/knowledge_graph_storage.py",
 ]
 
 ALL_NODES = PHASE1_NODES + PHASE2_NODES
@@ -58,8 +57,6 @@ DOC_INGESTION = ROOT / "doc_processing/nodes/document_ingestion.py"
 EMBEDDING_IMPL = ROOT / "embedding/impl.py"
 METADATA_GEN = ROOT / "embedding/nodes/metadata_generation.py"
 EMBEDDING_STORAGE = ROOT / "embedding/nodes/embedding_storage.py"
-KG_EXTRACTION = ROOT / "embedding/nodes/knowledge_graph_extraction.py"
-KG_STORAGE = ROOT / "embedding/nodes/knowledge_graph_storage.py"
 DOC_STORAGE = ROOT / "embedding/nodes/document_storage_node.py"
 CHUNKING = ROOT / "embedding/nodes/chunking.py"
 QUALITY_VALIDATION = ROOT / "embedding/nodes/quality_validation.py"
@@ -181,14 +178,19 @@ def check_single_file_read() -> CheckResult:
 
 def check_retry_delay() -> CheckResult:
     """Embedding retry delay is <=0.5s to limit event-loop blocking."""
-    src = _read(EMBEDDING_STORAGE)
-    match = re.search(r'_BATCH_RETRY_DELAY\s*=\s*([\d.]+)', src)
+    settings_src = (PROJECT_ROOT / "config/settings.py").read_text(encoding="utf-8")
+    match = re.search(
+        r'"RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S"\s*,\s*"([\d.]+)"',
+        settings_src,
+    )
     if match:
         delay = float(match.group(1))
         if delay <= 0.5:
             return CheckResult("speed:retry_delay", True, f"retry delay={delay}s (<=0.5s)")
         return CheckResult("speed:retry_delay", False, f"retry delay={delay}s blocks event loop")
-    return CheckResult("speed:retry_delay", False, "could not find _BATCH_RETRY_DELAY")
+    return CheckResult(
+        "speed:retry_delay", False, "could not find RAG_INGEST_EMBEDDING_BATCH_RETRY_DELAY_S default"
+    )
 
 
 def check_paragraph_early_exit() -> CheckResult:
@@ -220,26 +222,6 @@ def check_manifest_write_frequency() -> CheckResult:
                            f"{count} save_manifest calls (reduced from 3)")
     return CheckResult("speed:manifest_writes", False,
                        f"{count} save_manifest calls — per-doc writes cause unnecessary I/O")
-
-
-def check_kg_extractor_reuse() -> CheckResult:
-    """KG extraction reuses EntityExtractor instead of creating per-document."""
-    src = _read(KG_EXTRACTION)
-    # Bad: EntityExtractor() called inside the node function
-    # Good: pulled from state["runtime"] or passed in
-    if "EntityExtractor()" in src:
-        # Check if it's inside the function (not at module level)
-        in_func = False
-        for line in src.split("\n"):
-            if "def knowledge_graph_extraction_node" in line:
-                in_func = True
-            if in_func and "EntityExtractor()" in line:
-                return CheckResult("speed:kg_extractor_reuse", False,
-                                   "creates new EntityExtractor() per document invocation")
-        return CheckResult("speed:kg_extractor_reuse", True,
-                           "EntityExtractor at module level")
-    return CheckResult("speed:kg_extractor_reuse", True,
-                       "no per-invocation EntityExtractor construction")
 
 
 # ── Code quality checks ──────────────────────────────────────────────
@@ -284,8 +266,6 @@ def check_deprecated_params() -> CheckResult:
 
 # Nodes that have except blocks returning errors to state without logging
 _ERROR_PATH_NODES = [
-    (KG_EXTRACTION, "knowledge_graph_extraction"),
-    (KG_STORAGE, "knowledge_graph_storage"),
     (DOC_STORAGE, "document_storage"),
     (CHUNKING, "chunking"),
     (EMBEDDING_STORAGE, "embedding_storage"),
@@ -467,7 +447,7 @@ def run_correctness_guard() -> tuple[bool, str]:
             capture_output=True,
             text=True,
             cwd=str(project_root),
-            timeout=300,
+            timeout=RAG_INGEST_SCORER_PYTEST_TIMEOUT_S,
         )
         last_lines = result.stdout.strip().split("\n")[-5:]
         summary = "\n".join(last_lines)
@@ -475,7 +455,7 @@ def run_correctness_guard() -> tuple[bool, str]:
             return True, f"PASS: {summary}"
         return False, f"FAIL (rc={result.returncode}):\n{summary}\n{result.stderr[-500:]}"
     except subprocess.TimeoutExpired:
-        return False, "FAIL: test suite timed out (300s)"
+        return False, f"FAIL: test suite timed out ({RAG_INGEST_SCORER_PYTEST_TIMEOUT_S}s)"
     except Exception as exc:
         return False, f"FAIL: could not run tests: {exc}"
 
@@ -502,7 +482,6 @@ def score() -> tuple[int, int, list[CheckResult]]:
     results.append(check_retry_delay())
     results.append(check_paragraph_early_exit())
     results.append(check_manifest_write_frequency())
-    results.append(check_kg_extractor_reuse())
 
     # Code quality checks (3)
     results.append(check_metadata_state_contract())

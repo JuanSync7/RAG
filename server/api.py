@@ -52,6 +52,7 @@ from src.platform.security import Principal
 from src.platform.security import get_tenant_quota
 from src.platform.security import require_role
 from server.console import create_console_router
+from server.observability_middleware import install_observability_middleware
 from server.routes import (
     create_admin_router,
     create_documents_router,
@@ -168,9 +169,11 @@ async def lifespan(app: FastAPI):
             await sweeper_task
         except (asyncio.CancelledError, Exception):
             pass
-        if _temporal_client is not None:
-            await _temporal_client.close()
-            _temporal_client = None
+        # temporalio.client.Client has no close(); the underlying gRPC channel
+        # is torn down with the process. Dropping the reference is the correct
+        # shutdown behavior (calling a nonexistent close() fails the whole
+        # FastAPI shutdown sequence).
+        _temporal_client = None
         logger.info("API server shutting down")
 
 
@@ -188,6 +191,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Observability middleware: starts a root trace per request and extracts the
+# W3C traceparent header so external client traces link into backend traces.
+# Installed after CORS so CORS preflights are not traced, and before the
+# request_id middleware so the trace's lifetime envelops request_id handling.
+install_observability_middleware(app)
 
 
 @app.middleware("http")
@@ -229,6 +238,27 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
+def _jsonsafe_validation_errors(exc: RequestValidationError) -> list[dict]:
+    """Make ``exc.errors()`` JSON-serializable.
+
+    Pydantic v2 puts the raw raised exception in ``ctx['error']`` for
+    ``model_validator``/field-validator failures (e.g. the orchestrator
+    mutual-exclusion check). A raw ``ValueError`` is not JSON-serializable, so
+    without stringifying it the 422 handler itself raises ``TypeError`` and the
+    catch-all turns a clean client error into a 500. Stringify any non-primitive
+    ``ctx`` value so the 422 payload always renders.
+    """
+    safe: list[dict] = []
+    _prim = (str, int, float, bool, type(None))
+    for err in exc.errors():
+        e = dict(err)
+        ctx = e.get("ctx")
+        if isinstance(ctx, dict):
+            e["ctx"] = {k: (v if isinstance(v, _prim) else str(v)) for k, v in ctx.items()}
+        safe.append(e)
+    return safe
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
@@ -240,7 +270,7 @@ async def request_validation_exception_handler(
             request,
             code="REQUEST_VALIDATION_ERROR",
             message="Request validation failed",
-            details={"errors": exc.errors()},
+            details={"errors": _jsonsafe_validation_errors(exc)},
         ),
     )
 
@@ -327,6 +357,9 @@ app.include_router(
         release_request_slot=_release_request_slot,
         emit_stream_observability=_emit_stream_observability_async,
         logger=logger,
+        # Same MinIO-backed handle the documents router uses — the turn
+        # loop's DEEP_STUDY action fetches clean documents through it.
+        db_client=_db_client,
     )
 )
 app.include_router(create_admin_router())

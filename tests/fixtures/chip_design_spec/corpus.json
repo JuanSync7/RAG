@@ -1,0 +1,78 @@
+{
+  "documents": [
+    {
+      "document_id": "axi_spec",
+      "chunks": [
+        {
+          "chunk_id": "sec_axi",
+          "text": "AXI Protocol — defines memory-mapped read and write transactions over five independent channels.",
+          "node_kind": "section",
+          "heading_path": ["AXI Protocol"],
+          "child_count": 2
+        },
+        {
+          "chunk_id": "sec_read",
+          "text": "Read Channel — address, burst length, data, response signals for AXI read transactions.",
+          "node_kind": "section",
+          "heading_path": ["AXI Protocol", "Read Channel"],
+          "child_count": 4
+        },
+        {
+          "chunk_id": "sec_write",
+          "text": "Write Channel — address, data, strobe, response signals for AXI write transactions.",
+          "node_kind": "section",
+          "heading_path": ["AXI Protocol", "Write Channel"],
+          "child_count": 4
+        },
+        {
+          "chunk_id": "w_awaddr",
+          "text": "AWADDR carries the destination of an outgoing memory transfer to the slave.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Write Channel"]
+        },
+        {
+          "chunk_id": "w_wdata",
+          "text": "WDATA presents the payload beats produced by the master each cycle.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Write Channel"]
+        },
+        {
+          "chunk_id": "w_wstrb",
+          "text": "WSTRB selects which byte lanes within the data word are valid on a beat.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Write Channel"]
+        },
+        {
+          "chunk_id": "w_bresp",
+          "text": "BRESP returns OKAY, EXOKAY, SLVERR, or DECERR after the slave commits.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Write Channel"]
+        },
+        {
+          "chunk_id": "r_araddr",
+          "text": "ARADDR carries the start address of an incoming transfer from the master.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Read Channel"]
+        },
+        {
+          "chunk_id": "r_arlen",
+          "text": "ARLEN encodes the burst length minus one across the transaction.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Read Channel"]
+        },
+        {
+          "chunk_id": "r_rdata",
+          "text": "RDATA presents the requested payload one beat at a time to the master.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Read Channel"]
+        },
+        {
+          "chunk_id": "r_rresp",
+          "text": "RRESP returns OKAY, EXOKAY, SLVERR, or DECERR for the completed beat.",
+          "node_kind": "chunk",
+          "heading_path": ["AXI Protocol", "Read Channel"]
+        }
+      ]
+    }
+  ]
+}

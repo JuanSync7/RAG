@@ -28,14 +28,13 @@ def _make_chunk(text: str = "Sample chunk text.", heading: str = "Intro") -> Pro
     )
 
 
-def _make_state(chunks=None, enable_refactoring: bool = False) -> dict:
+def _make_state(chunks=None) -> dict:
     """Return a minimal ingest state dict for chunk_enrichment_node tests."""
-    config = IngestionConfig(enable_document_refactoring=enable_refactoring)
+    config = IngestionConfig()
     runtime = Runtime(
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     return {
         "chunks": chunks if chunks is not None else [],
@@ -47,7 +46,6 @@ def _make_state(chunks=None, enable_refactoring: bool = False) -> dict:
         "source_version": "1",
         "raw_text": "raw content",
         "cleaned_text": "cleaned content",
-        "refactored_text": "",
         "errors": [],
         "processing_log": [],
         "runtime": runtime,
@@ -159,25 +157,15 @@ class TestSourceFieldPropagation:
 # ---------------------------------------------------------------------------
 
 class TestRetrievalTextOrigin:
-    """retrieval_text_origin reflects the enable_document_refactoring config flag."""
+    """retrieval_text_origin is always 'original' after PR1 removed refactoring."""
 
-    def test_retrieval_text_origin_original_when_refactoring_disabled(self):
-        """retrieval_text_origin == 'original' when enable_document_refactoring=False."""
+    def test_retrieval_text_origin_is_always_original(self):
         from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
 
-        state = _make_state(chunks=[_make_chunk("Body.")], enable_refactoring=False)
+        state = _make_state(chunks=[_make_chunk("Body.")])
         result = chunk_enrichment_node(state)
         chunk = _get_chunks(result, state)[0]
         assert chunk.metadata.get("retrieval_text_origin") == "original"
-
-    def test_retrieval_text_origin_refactored_when_enabled(self):
-        """retrieval_text_origin == 'refactored' when enable_document_refactoring=True."""
-        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
-
-        state = _make_state(chunks=[_make_chunk("Body.")], enable_refactoring=True)
-        result = chunk_enrichment_node(state)
-        chunk = _get_chunks(result, state)[0]
-        assert chunk.metadata.get("retrieval_text_origin") == "refactored"
 
 
 # ---------------------------------------------------------------------------
@@ -225,20 +213,6 @@ class TestEmptyChunksNoOp:
 class TestPartialStateResilience:
     """chunk_enrichment_node must handle None/absent optional fields gracefully."""
 
-    def test_refactored_text_none_no_error(self):
-        """refactored_text=None must not raise KeyError or AttributeError."""
-        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
-
-        state = _make_state(chunks=[_make_chunk("body text")])
-        state["refactored_text"] = None  # absent optional upstream field
-
-        result = chunk_enrichment_node(state)
-        errors = result.get("errors", state.get("errors", []))
-        assert errors == []
-        chunks = _get_chunks(result, state)
-        assert len(chunks) == 1
-        assert "chunk_id" in chunks[0].metadata
-
     def test_cleaned_text_absent_no_error(self):
         """When cleaned_text is absent from state, node must not raise KeyError."""
         from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
@@ -261,3 +235,82 @@ class TestPartialStateResilience:
         chunk = _get_chunks(result, state)[0]
         # document_id must be present in metadata and be an empty string (not raise)
         assert chunk.metadata.get("document_id") == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: body-aware provenance (perf fix — map the BODY, not the breadcrumb)
+# ---------------------------------------------------------------------------
+
+class TestBodyAwareProvenance:
+    """Provenance maps the breadcrumb-stripped BODY so exact str.find() hits.
+
+    Regression for the O(n_chunks x doc_len) ingest stall: HybridChunker text is
+    contextualized (breadcrumb prepended), which is NOT contiguous in source, so
+    mapping chunk.text directly forces the difflib fuzzy fallback for every
+    chunk. Mapping the body restores the exact-find fast path.
+    """
+
+    def test_body_located_exactly_when_breadcrumb_stripped(self):
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        body = "The AWVALID signal indicates a valid write address phase here."
+        source = f"Some preamble paragraph.\n\n{body}\n\nTrailing paragraph text."
+        hp = ["Chapter 5 Transactions", "5.1 Write Address Channel"]
+        chunk = ProcessedChunk(
+            text="\n".join(hp) + "\n" + body,
+            metadata={"heading_path": hp, "source_name": "doc.txt"},
+        )
+        state = _make_state(chunks=[chunk])
+        state["raw_text"] = source
+        state["cleaned_text"] = source
+
+        result = chunk_enrichment_node(state)
+        meta = _get_chunks(result, state)[0].metadata
+        # Body found contiguously in source -> exact match, not the fuzzy fallback.
+        assert meta["refactored_char_start"] >= 0
+        assert "exact" in meta["provenance_method"]
+
+    def test_contextualized_text_without_stripping_misses_exact_find(self):
+        """Control: mapping the breadcrumb-prefixed text directly fails exact find."""
+        from src.ingest.common.shared import map_chunk_provenance
+
+        body = "The AWVALID signal indicates a valid write address phase here."
+        source = f"Some preamble.\n\n{body}\n\nTrailing."
+        contextualized = "Chapter 5 Transactions\n5.1 Write Address Channel\n" + body
+        prov, _, _ = map_chunk_provenance(contextualized, source, source, 0, 0)
+        # Breadcrumb is not contiguous in source -> not found in refactored text.
+        assert prov["refactored_char_start"] < 0
+
+    def test_fuzzy_fallback_disabled_never_returns_paragraph_fuzzy(self):
+        """With fuzzy_fallback=False a non-verbatim body is left unmapped rather than
+        approximated by the O(doc) difflib paragraph match — the perf guarantee that
+        keeps chunk_enrichment from stalling on big, table-heavy specs."""
+        from src.ingest.common.shared import map_chunk_provenance
+
+        source = "Para one.\n\n" + ("x" * 400) + "\n\nPara three."
+        reformatted = "Field: AWVALID, Value = 1. Field: AWREADY, Value = 0."  # not in source
+        prov, _, _ = map_chunk_provenance(
+            reformatted, source, source, 0, 0, fuzzy_fallback=False
+        )
+        assert "paragraph_fuzzy" not in prov["provenance_method"]
+        assert prov["original_char_start"] == -1
+
+    def test_node_skips_edit_log_and_fuzzy_on_large_doc(self):
+        """A large raw_text must not trigger the per-document SequenceMatcher diff
+        nor the per-chunk fuzzy match; verbatim prose chunks still map by exact-find."""
+        from src.ingest.embedding.nodes import chunk_enrichment as ce
+
+        body = "The reset value of the STATUS register is 0x00 in this block."
+        big = ("filler paragraph. " * 50)  # padding
+        source = big + "\n\n" + body + "\n\n" + big
+        # Force the large-doc path.
+        source = source + ("z" * (ce._EDIT_LOG_MAX_CHARS + 10))
+        chunk = ProcessedChunk(text=body, metadata={"heading_path": []})
+        state = _make_state(chunks=[chunk])
+        state["raw_text"] = source
+        state["cleaned_text"] = source  # identical -> edit_log skipped regardless
+
+        result = ce.chunk_enrichment_node(state)
+        meta = _get_chunks(result, state)[0].metadata
+        assert "paragraph_fuzzy" not in meta["provenance_method"]
+        assert meta["original_char_start"] >= 0  # exact-find still maps the verbatim body

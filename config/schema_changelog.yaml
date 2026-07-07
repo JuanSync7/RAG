@@ -51,3 +51,22 @@ schema_versions:
     fields_added: []
     fields_removed: []
     fields_renamed: []
+
+  - version: "1.2.0"
+    date: "2026-05-08"
+    description: >
+      Tree retrieval scaffolding (TREE_RETRIEVAL_DESIGN.md §3.1). Adds
+      node_kind, tree_level, heading_path, parent_section_id, child_count
+      to Weaviate chunk metadata. Existing rows backfill via metadata_only:
+      node_kind="chunk", tree_level=len(heading_path), parent_section_id
+      derived from (document_id, heading_path[:-1]), child_count=0.
+      No re-embedding required. Section nodes are added in a later release.
+    migration_strategy: "metadata_only"
+    fields_added:
+      - "node_kind"
+      - "tree_level"
+      - "heading_path"
+      - "parent_section_id"
+      - "child_count"
+    fields_removed: []
+    fields_renamed: []

@@ -6,12 +6,16 @@
   "scripts": {
     "build": "node ./build.mjs",
     "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "watch": "node ./build.mjs --watch"
+    "watch": "node ./build.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "dompurify": "^3.0.0",
     "esbuild": "^0.28.0",
+    "jsdom": "^29.1.1",
     "marked": "^15.0.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.8"
   }
 }

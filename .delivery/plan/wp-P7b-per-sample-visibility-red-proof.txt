@@ -1,0 +1,20 @@
+P7b — Red proof captured before implementation.
+
+$ uv run pytest tests/eval/test_per_sample_visibility.py -x
+...
+>       assert isinstance(q1.samples, tuple), f"samples must be tuple, got {type(q1.samples)}"
+                          ^^^^^^^^^^
+E       AttributeError: 'QueryFaithfulnessResult' object has no attribute 'samples'
+
+tests/eval/test_per_sample_visibility.py:98: AttributeError
+FAILED tests/eval/test_per_sample_visibility.py::test_score_goldens_populates_samples_field_with_N_judgments
+
+Mutation A (samples=tuple(samples) -> samples=()):
+  FAILED test_score_goldens_populates_samples_field_with_N_judgments
+  E   AssertionError: expected 3 samples for f1, got 0
+  Reverted; suite re-green.
+
+Mutation B (_emit_json ignores show_samples flag):
+  FAILED test_cli_show_samples_flag_includes_per_query_samples_in_json
+  E   AssertionError: expected per_query_samples in payload; got keys [...] (no per_query_samples)
+  Reverted; suite re-green.

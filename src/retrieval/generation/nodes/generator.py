@@ -1,15 +1,22 @@
 # @summary
 # LLM generator for RAG answer synthesis, backed by LiteLLM Router.
-# Main exports: OllamaGenerator, get_system_prompt.
-# Deps: typing, config.settings, src.platform.llm
+# Main exports: OllamaGenerator, get_system_prompt, reload_system_prompt,
+#   GenerationResult, GenerationError, GenerationErrorKind,
+#   StreamEvent, TokenEvent, ReasoningEvent, ErrorEvent.
+# Deps: typing, dataclasses, enum, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
+from __future__ import annotations
+
 import logging
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, List, Optional, Tuple, Union
 
 from config.settings import (
     GENERATION_MAX_TOKENS,
+    GENERATION_STRUCTURED_OUTPUT,
     GENERATION_TEMPERATURE,
     PROMPTS_DIR,
 )
@@ -51,6 +58,15 @@ def get_system_prompt() -> str:
     return _SYSTEM_PROMPT
 
 
+def reload_system_prompt() -> str:
+    """Clear the in-memory prompt cache and re-read it from disk.
+
+    Used as a hot-reload hook so prompt edits are picked up without restarting
+    the process. Returns the freshly-loaded prompt.
+    """
+    global _SYSTEM_PROMPT
+    _SYSTEM_PROMPT = None
+    return get_system_prompt()
 
 
 # Known confidence levels — the only valid values for the confidence field.
@@ -78,29 +94,225 @@ _RAG_RESPONSE_FORMAT_STRICT = {
 # The prompt instructs the schema; validation catches bad values.
 _RAG_RESPONSE_FORMAT_BASIC = {"type": "json_object"}
 
+
+# ── Prompt fence markers ──────────────────────────────────────────────────
+# These delimiters wrap retrieved context so the LLM treats the inner block
+# as opaque content. They prevent collisions when documents/graph content
+# happen to contain "Question:" or "Answer:" markers (issue #12).
+# The fences are intentionally unlikely to appear in real prose, so the LLM
+# can use them as structural boundaries without us parsing them in code.
+_GRAPH_FENCE_BEGIN = "<<<GRAPH_CONTEXT_BEGIN>>>"
+_GRAPH_FENCE_END = "<<<GRAPH_CONTEXT_END>>>"
+_DOC_FENCE_BEGIN = "<<<DOCUMENT_CONTEXT_BEGIN>>>"
+_DOC_FENCE_END = "<<<DOCUMENT_CONTEXT_END>>>"
+
+
+# ── Typed result + error contract ─────────────────────────────────────────
+
+
+class GenerationErrorKind(str, Enum):
+    """Discriminator for `GenerationError`. String-valued for easy serialization."""
+
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    AUTH_FAILED = "auth_failed"
+    CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+    RATE_LIMITED = "rate_limited"
+    TIMEOUT = "timeout"
+    MALFORMED_RESPONSE = "malformed_response"
+    REFUSED = "refused"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class GenerationError:
+    """Typed failure surface from `OllamaGenerator.generate`.
+
+    `user_message` is safe to surface in UIs; `internal_detail` is for logs.
+    """
+
+    kind: GenerationErrorKind
+    user_message: str
+    internal_detail: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "kind": self.kind.value,
+            "user_message": self.user_message,
+            "internal_detail": self.internal_detail,
+        }
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    """Return value of `OllamaGenerator.generate`.
+
+    Always populated — generate() never raises and never returns None.
+    On failure, `answer` is "" and `error` carries the typed reason.
+    """
+
+    answer: str
+    confidence: str
+    raw_response: Any
+    error: Optional[GenerationError] = None
+
+
+# ── Stream events ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class TokenEvent:
+    """A single streamed token chunk."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ReasoningEvent:
+    """A streamed chain-of-thought (reasoning) chunk from a reasoning model.
+
+    Surfaced to clients as a live "thinking" indicator. It is never part of the
+    answer text and is never persisted to conversation memory.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ErrorEvent:
+    """Terminal error event for streaming."""
+
+    error: GenerationError
+
+
+StreamEvent = Union[TokenEvent, ReasoningEvent, ErrorEvent]
+
+
+# ── Default user-facing messages per error kind ───────────────────────────
+
+_DEFAULT_USER_MESSAGES: dict[GenerationErrorKind, str] = {
+    GenerationErrorKind.PROVIDER_UNAVAILABLE: (
+        "The language model service is currently unreachable. Please try again shortly."
+    ),
+    GenerationErrorKind.AUTH_FAILED: (
+        "The language model rejected our credentials. Please contact an administrator."
+    ),
+    GenerationErrorKind.CONTEXT_LENGTH_EXCEEDED: (
+        "The model couldn't process the request because the input was too long. "
+        "Please ask a more focused question or reduce the retrieved context."
+    ),
+    GenerationErrorKind.RATE_LIMITED: (
+        "The language model is rate-limiting requests. Please wait a moment and try again."
+    ),
+    GenerationErrorKind.TIMEOUT: (
+        "The language model took too long to respond. Please try again."
+    ),
+    GenerationErrorKind.MALFORMED_RESPONSE: (
+        "The language model returned an unexpected response. Please try again."
+    ),
+    GenerationErrorKind.REFUSED: (
+        "The language model declined to answer this query."
+    ),
+    GenerationErrorKind.UNKNOWN: (
+        "Answer generation failed due to an unexpected error. Please try again."
+    ),
+}
+
+
+def _classify_provider_exception(exc: BaseException) -> GenerationErrorKind:
+    """Map a provider/litellm exception to a `GenerationErrorKind`.
+
+    Falls back to UNKNOWN when the exception type is unrecognized.
+    """
+    # TimeoutError from stdlib — and litellm's Timeout subclass of openai.APIError
+    if isinstance(exc, TimeoutError):
+        return GenerationErrorKind.TIMEOUT
+    try:
+        import litellm.exceptions as lex
+    except Exception:
+        return GenerationErrorKind.UNKNOWN
+
+    if isinstance(exc, lex.ContextWindowExceededError):
+        return GenerationErrorKind.CONTEXT_LENGTH_EXCEEDED
+    if isinstance(exc, lex.AuthenticationError):
+        return GenerationErrorKind.AUTH_FAILED
+    if isinstance(exc, lex.PermissionDeniedError):
+        return GenerationErrorKind.AUTH_FAILED
+    if isinstance(exc, lex.RateLimitError):
+        return GenerationErrorKind.RATE_LIMITED
+    if isinstance(exc, lex.BudgetExceededError):
+        return GenerationErrorKind.RATE_LIMITED
+    if isinstance(exc, lex.ContentPolicyViolationError):
+        return GenerationErrorKind.REFUSED
+    if isinstance(exc, lex.RejectedRequestError):
+        return GenerationErrorKind.REFUSED
+    if isinstance(exc, (lex.ServiceUnavailableError, lex.BadGatewayError, lex.InternalServerError, lex.APIConnectionError)):
+        return GenerationErrorKind.PROVIDER_UNAVAILABLE
+    if isinstance(exc, lex.NotFoundError):
+        return GenerationErrorKind.PROVIDER_UNAVAILABLE
+    if isinstance(exc, (lex.JSONSchemaValidationError, lex.APIResponseValidationError)):
+        return GenerationErrorKind.MALFORMED_RESPONSE
+    # Generic timeout flavours from litellm/openai
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return GenerationErrorKind.TIMEOUT
+    return GenerationErrorKind.UNKNOWN
+
+
+def _make_error(exc: BaseException) -> GenerationError:
+    kind = _classify_provider_exception(exc)
+    return GenerationError(
+        kind=kind,
+        user_message=_DEFAULT_USER_MESSAGES[kind],
+        internal_detail=f"{type(exc).__name__}: {exc}",
+    )
+
+
+def _empty_context_error() -> GenerationError:
+    return GenerationError(
+        kind=GenerationErrorKind.UNKNOWN,
+        user_message="No context was available to answer the question.",
+        internal_detail="generate() called with empty context_chunks",
+    )
+
+
 def _render_graph_context_section(graph_context: str) -> str:
-    """Render graph context for prompt injection.
+    """Render graph context for prompt injection, fenced as an opaque block.
 
     REQ-KG-794: Positioned before document chunks.
     REQ-KG-796: When empty, returns "" — no placeholder, no heading.
 
     The graph_context string already includes section markers from
-    GraphContextFormatter (e.g. "## Graph Context\\n### Entities\\n..."),
-    so this helper simply passes it through when non-empty.
+    GraphContextFormatter. We wrap it in `<<<GRAPH_CONTEXT_BEGIN>>>` /
+    `<<<GRAPH_CONTEXT_END>>>` so the LLM treats inner content as opaque
+    even if it contains tokens that resemble prompt scaffolding such as
+    "Question:" or "Answer:" (issue #12).
     """
     if not graph_context:
         return ""
-    return graph_context
+    return f"{_GRAPH_FENCE_BEGIN}\n{graph_context}\n{_GRAPH_FENCE_END}"
 
 
 def _build_user_prompt(context: str, question: str) -> str:
     """Build user prompt via concatenation — safe against curly braces in documents.
 
-    Using string concatenation instead of .format() prevents KeyError/IndexError
-    when retrieved documents contain Python format specifiers like {variable},
-    JSON examples, or template syntax (REQ-602).
+    The retrieved document context is fenced in an opaque block; the question
+    sits outside the fence so prompt scaffolding markers ("Question:" /
+    "Answer:") cannot collide with content inside the fence (issue #12).
+    Using string concatenation instead of .format() also prevents
+    KeyError/IndexError when documents contain Python format specifiers
+    like {variable}, JSON examples, or template syntax (REQ-602).
     """
-    return "Context:\n" + context + "\n\nQuestion: " + question + "\n\nAnswer:"
+    return (
+        _DOC_FENCE_BEGIN
+        + "\n"
+        + context
+        + "\n"
+        + _DOC_FENCE_END
+        + "\n\nQuestion: "
+        + question
+        + "\n\nAnswer:"
+    )
+
 
 logger = logging.getLogger("rag.generator")
 
@@ -111,6 +323,10 @@ class OllamaGenerator:
     Retains the OllamaGenerator name for backward compatibility — callers
     continue to use the same class, but all HTTP calls now go through
     LLMProvider instead of raw urllib to Ollama's /api/chat.
+
+    Instances are safe to share across concurrent requests: `generate()`
+    returns a `GenerationResult` instead of stashing per-call state on the
+    instance (issue #6).
     """
 
     def __init__(
@@ -121,23 +337,24 @@ class OllamaGenerator:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self._provider = get_llm_provider()
-        # Expose model name for logging (matches old interface)
         self.model = self._provider.config.model
-        # Last LLM response — populated after generate() for token tracking
-        self._last_response = None
-        # Last LLM self-reported confidence — read by rag_chain.py for composite scoring
-        self._last_llm_confidence: str = "medium"
-        # Auto-detect structured output support for this model
-        try:
-            import litellm
-            if litellm.supports_response_schema(self.model):
-                self._response_format = _RAG_RESPONSE_FORMAT_STRICT
-                logger.info("Model %s supports json_schema — using strict response format", self.model)
-            else:
+        if not GENERATION_STRUCTURED_OUTPUT:
+            # Free-text generation: reasoning models (qwopus) return "{}" under
+            # guided-JSON decoding. Skip response_format and let
+            # _parse_structured_response() fall back to free-text extraction.
+            self._response_format = None
+            logger.info("Structured output disabled — using free-text generation for %s", self.model)
+        else:
+            try:
+                import litellm
+                if litellm.supports_response_schema(self.model):
+                    self._response_format = _RAG_RESPONSE_FORMAT_STRICT
+                    logger.info("Model %s supports json_schema — using strict response format", self.model)
+                else:
+                    self._response_format = _RAG_RESPONSE_FORMAT_BASIC
+                    logger.info("Model %s uses json_object — using basic response format", self.model)
+            except Exception:
                 self._response_format = _RAG_RESPONSE_FORMAT_BASIC
-                logger.info("Model %s uses json_object — using basic response format", self.model)
-        except Exception:
-            self._response_format = _RAG_RESPONSE_FORMAT_BASIC
 
     @property
     def system_prompt(self) -> str:
@@ -169,28 +386,28 @@ class OllamaGenerator:
             doc_context = "\n\n".join(
                 f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
             )
-        # REQ-KG-794: graph context section positioned before document chunks.
-        # REQ-KG-796: omitted entirely when empty — no placeholder or heading.
         graph_section = _render_graph_context_section(graph_context)
         if graph_section:
             context = graph_section + "\n\n" + doc_context
         else:
             context = doc_context
         user_message = _build_user_prompt(context, query)
-        messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
+        # qwopus/vLLM chat template allows exactly ONE system message and it must
+        # be the first message. Merge memory context into that single leading
+        # system message instead of appending a SECOND system message (which made
+        # vLLM reject the request with "System message must be at the beginning.").
+        system_content = get_system_prompt()
         if memory_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Use the conversation context below only as supporting context for follow-up intent.\n"
-                        + memory_context
-                    ),
-                }
+            system_content = (
+                system_content
+                + "\n\n--- Conversation context (supporting context for follow-up intent only) ---\n"
+                + memory_context
             )
+        messages: list[dict] = [{"role": "system", "content": system_content}]
         for turn in recent_turns or []:
             role = str(turn.get("role", "user"))
-            if role not in {"user", "assistant", "system"}:
+            # Exclude 'system' so the single leading system message stays first.
+            if role not in {"user", "assistant"}:
                 continue
             content = str(turn.get("content", "")).strip()
             if not content:
@@ -207,23 +424,19 @@ class OllamaGenerator:
         memory_context: Optional[str] = None,
         recent_turns: Optional[List[dict]] = None,
         graph_context: str = "",
-    ) -> Optional[str]:
+    ) -> GenerationResult:
         """Generate an answer using retrieved context chunks.
 
-        Args:
-            query: The user's question.
-            context_chunks: List of relevant text chunks from retrieval.
-            scores: Optional reranker scores (0.0-1.0) for each chunk.
-            graph_context: Optional pre-formatted KG context string.
-                When non-empty it is placed before document chunks in the
-                prompt (REQ-KG-794).  When empty, it is omitted entirely
-                with no placeholder or heading (REQ-KG-796).
-
-        Returns:
-            Generated answer string, or None if generation fails.
+        Returns a `GenerationResult` in all cases — never raises, never None.
+        On failure the result has `error` set and `answer == ""`.
         """
         if not context_chunks:
-            return None
+            return GenerationResult(
+                answer="",
+                confidence="medium",
+                raw_response=None,
+                error=_empty_context_error(),
+            )
 
         messages = self.build_messages(
             query,
@@ -235,10 +448,13 @@ class OllamaGenerator:
         )
 
         with get_tracer().span(
-            "generator.generate",
+            "retrieval.generation.answer",
             {
-                "model": self.model,
+                "gen_ai.system": "ollama",
+                "gen_ai.request.model": self.model,
                 "context_chunk_count": len(context_chunks),
+                "context_len": sum(len(c) for c in context_chunks),
+                "doc_count": len(context_chunks),
             },
         ) as span:
             try:
@@ -249,61 +465,139 @@ class OllamaGenerator:
                     max_tokens=self.max_tokens,
                     response_format=self._response_format,
                 )
-                self._last_response = response
-                raw_content = response.content or None
-                if raw_content:
-                    answer, confidence = self._parse_structured_response(raw_content)
-                    self._last_llm_confidence = confidence
-                    span.set_attribute("llm_confidence", confidence)
-                    return answer
-                return None
-            except Exception as e:
-                logger.warning("LLM generation failed: %s", e)
-                return None
+            except Exception as exc:
+                err = _make_error(exc)
+                logger.warning(
+                    "LLM generation failed: kind=%s detail=%s",
+                    err.kind.value,
+                    err.internal_detail,
+                )
+                span.set_attribute("generation_error_kind", err.kind.value)
+                return GenerationResult(
+                    answer="",
+                    confidence="medium",
+                    raw_response=None,
+                    error=err,
+                )
+
+            raw_content = response.content or None
+            if not raw_content:
+                # Empty-after-think: reasoning models (qwopus) can spend the entire
+                # token budget inside the <think> block and emit no final answer,
+                # so the provider returns empty content. Retry ONCE, nudging a
+                # direct answer, before giving up (fixes the silent blank on hard
+                # questions, e.g. the illegal-clock-cell Q08).
+                span.set_attribute("empty_after_think", True)
+                try:
+                    retry_messages = list(messages) + [{
+                        "role": "user",
+                        "content": (
+                            "Provide your final answer now: direct, concise, and "
+                            "grounded in the context above with [n] citations. Do "
+                            "not include extended step-by-step reasoning."
+                        ),
+                    }]
+                    response = self._provider.generate(
+                        retry_messages,
+                        model_alias="default",
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        response_format=self._response_format,
+                    )
+                    raw_content = response.content or None
+                    if raw_content:
+                        span.set_attribute("empty_after_think_recovered", True)
+                except Exception as exc:
+                    logger.warning("empty-after-think retry failed: %s", exc)
+            if not raw_content:
+                err = GenerationError(
+                    kind=GenerationErrorKind.MALFORMED_RESPONSE,
+                    user_message=_DEFAULT_USER_MESSAGES[GenerationErrorKind.MALFORMED_RESPONSE],
+                    internal_detail="provider returned empty content (incl. empty-after-think retry)",
+                )
+                span.set_attribute("generation_error_kind", err.kind.value)
+                return GenerationResult(
+                    answer="",
+                    confidence="medium",
+                    raw_response=response,
+                    error=err,
+                )
+
+            answer, confidence = self._parse_structured_response(raw_content)
+            span.set_attribute("llm_confidence", confidence)
+            return GenerationResult(
+                answer=answer,
+                confidence=confidence,
+                raw_response=response,
+                error=None,
+            )
 
     @staticmethod
     def _parse_structured_response(response_text: str) -> Tuple[str, str]:
         """Parse the LLM response as structured JSON with answer + confidence.
 
-        The LLM is called with response_format=json_schema, which constrains
-        the output to {"answer": str, "confidence": "high"|"medium"|"low"}.
-        Falls back to text extraction if JSON parsing fails (e.g., provider
-        doesn't support structured output).
-
-        Args:
-            response_text: Raw LLM response (expected JSON).
+        Strategy (issue #5):
+          1) try direct json.loads,
+          2) strip ```json fences and retry,
+          3) extract the first balanced {...} block (brace-depth scan that
+             ignores braces inside string literals),
+          4) fall back to free-text confidence extraction.
 
         Returns:
             Tuple of (answer_text, confidence_level).
             Confidence defaults to "medium" if not parseable.
         """
         import json
-        try:
-            data = json.loads(response_text)
-            answer = data.get("answer", "").strip()
-            confidence = data.get("confidence", "medium").strip().lower()
-            return answer or response_text, confidence
-        except (json.JSONDecodeError, AttributeError):
-            # Fallback: provider didn't return JSON — extract from text
-            return OllamaGenerator._extract_confidence_from_text(response_text)
+
+        candidates = []
+        text = response_text.strip()
+        candidates.append(text)
+        stripped = _strip_code_fences(text)
+        if stripped != text:
+            candidates.append(stripped)
+        balanced = _extract_first_json_object(stripped)
+        if balanced and balanced not in candidates:
+            candidates.append(balanced)
+
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            answer = str(data.get("answer", "")).strip()
+            confidence = str(data.get("confidence", "medium")).strip().lower()
+            if confidence not in _CONFIDENCE_LEVELS:
+                confidence = "medium"
+            return (answer or response_text, confidence)
+
+        return OllamaGenerator._extract_confidence_from_text(response_text)
 
     @staticmethod
     def _extract_confidence_from_text(response_text: str) -> Tuple[str, str]:
         """Fallback extraction when structured output is not available.
 
-        Scans for "CONFIDENCE: high|medium|low" anywhere in the text and
-        strips it from the answer.
+        Scans for "confidence: high|medium|low" anywhere in a line (issue #5),
+        tolerating leading prose, markdown bold (`**Confidence:** ...`),
+        labelled variants ("Confidence level: high"), and trailing punctuation.
+        Strips matching lines from the answer text.
         """
         confidence = "medium"
         lines = response_text.splitlines()
-        clean_lines = []
+        clean_lines: list[str] = []
         for line in lines:
-            stripped = line.strip().lower().replace("*", "")
-            if stripped.startswith("confidence:"):
-                level = stripped.split(":", 1)[1].strip()
-                if level in _CONFIDENCE_LEVELS:
-                    confidence = level
-                continue
+            normalized = line.strip().lower().replace("*", "")
+            # match if "confidence" appears and there's a colon to split on
+            if "confidence" in normalized and ":" in normalized:
+                # take the tail after the LAST ':' so "Confidence level: high" works
+                tail = normalized.rsplit(":", 1)[1].strip()
+                # strip trailing punctuation/whitespace
+                tail = tail.rstrip(" .,;!?")
+                # drop a leading "level " if any leftovers slipped through
+                if tail in _CONFIDENCE_LEVELS:
+                    confidence = tail
+                    continue  # drop this line from the answer
             clean_lines.append(line)
         return "\n".join(clean_lines).strip(), confidence
 
@@ -316,13 +610,14 @@ class OllamaGenerator:
         recent_turns: Optional[List[dict]] = None,
         graph_context: str = "",
     ):
-        """Stream tokens from LLM. Yields content strings as they arrive.
+        """Stream tokens from LLM as discriminated `StreamEvent` values.
 
-        Same prompt as generate(), but uses streaming mode so callers
-        can display tokens incrementally.  Accepts graph_context for
-        consistency with generate() (REQ-KG-794, REQ-KG-796).
+        Yields `TokenEvent(text=...)` for each answer chunk, `ReasoningEvent(text=...)`
+        for chain-of-thought chunks (reasoning models), and on failure a final
+        `ErrorEvent(error=...)` so callers can surface a typed error to the UI.
         """
         if not context_chunks:
+            yield ErrorEvent(error=_empty_context_error())
             return
 
         messages = self.build_messages(
@@ -334,21 +629,118 @@ class OllamaGenerator:
             graph_context=graph_context,
         )
 
-        try:
-            for chunk in self._provider.generate_stream(
-                messages,
-                model_alias="default",
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            ):
-                yield chunk
-        except Exception as e:
-            logger.warning("LLM streaming failed: %s", e)
+        with get_tracer().span(
+            "retrieval.generation.stream",
+            {
+                "gen_ai.system": "ollama",
+                "gen_ai.request.model": self.model,
+                "context_chunk_count": len(context_chunks),
+                "context_len": sum(len(c) for c in context_chunks),
+                "doc_count": len(context_chunks),
+            },
+        ) as span:
+            chunk_count = 0
+            try:
+                for kind, text in self._provider.generate_stream(
+                    messages,
+                    model_alias="default",
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    include_reasoning=True,
+                ):
+                    if kind == "reasoning":
+                        yield ReasoningEvent(text=text)
+                        continue
+                    chunk_count += 1
+                    yield TokenEvent(text=text)
+                span.set_attribute("stream_chunk_count", chunk_count)
+            except Exception as exc:
+                err = _make_error(exc)
+                logger.warning(
+                    "LLM streaming failed: kind=%s detail=%s",
+                    err.kind.value,
+                    err.internal_detail,
+                )
+                span.set_attribute("generation_error_kind", err.kind.value)
+                yield ErrorEvent(error=err)
 
     def is_available(self) -> bool:
         """Check if the LLM provider is reachable."""
-        with get_tracer().span("generator.is_available", {"model": self.model}):
+        with get_tracer().span(
+            "retrieval.generation.is_available",
+            {"gen_ai.system": "ollama", "gen_ai.request.model": self.model},
+        ):
             try:
                 return self._provider.is_available(model_alias="default")
             except Exception:
                 return False
+
+
+# ── helpers used by _parse_structured_response ────────────────────────────
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove leading/trailing ```json``` or ``` fences if present.
+
+    Pure string operations — no regex.
+    """
+    s = text.strip()
+    if not s.startswith("```"):
+        return s
+    # drop the opening fence line (``` or ```json)
+    newline = s.find("\n")
+    if newline == -1:
+        return s
+    body = s[newline + 1 :]
+    # drop the trailing fence
+    if body.endswith("```"):
+        body = body[:-3]
+    return body.strip()
+
+
+def _extract_first_json_object(text: str) -> Optional[str]:
+    """Return the first balanced {...} block in `text`, or None.
+
+    Brace-depth scan that ignores braces inside JSON string literals
+    (handles escaped quotes). Pure string ops — no regex.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+__all__ = [
+    "OllamaGenerator",
+    "GenerationResult",
+    "GenerationError",
+    "GenerationErrorKind",
+    "StreamEvent",
+    "TokenEvent",
+    "ReasoningEvent",
+    "ErrorEvent",
+    "get_system_prompt",
+    "reload_system_prompt",
+]

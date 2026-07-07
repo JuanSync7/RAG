@@ -25,14 +25,14 @@ services:
     container_name: rag-postgres
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
-      POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: litellm
-      POSTGRES_DB: litellm
+      POSTGRES_USER: ${RAG_POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${RAG_POSTGRES_PASSWORD:-litellm}
+      POSTGRES_DB: ${RAG_POSTGRES_DB:-litellm}
     volumes:
       - rag-postgres-data:/var/lib/postgresql/data
       - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      test: ["CMD-SHELL", "pg_isready -U ${RAG_POSTGRES_USER:-litellm}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -44,10 +44,10 @@ services:
     image: postgres:16-alpine
     container_name: rag-pg-maintenance
     environment:
-      - PGPASSWORD=litellm
+      - PGPASSWORD=${RAG_POSTGRES_PASSWORD:-litellm}
       - PGHOST=rag-postgres
-      - PGUSER=litellm
-      - PGDATABASE=litellm
+      - PGUSER=${RAG_POSTGRES_USER:-litellm}
+      - PGDATABASE=${RAG_POSTGRES_DB:-litellm}
       - LITELLM_LOG_RETENTION_DAYS=${LITELLM_LOG_RETENTION_DAYS:-90}
     volumes:
       - ./ops/postgres/litellm-maintenance.sh:/litellm-maintenance.sh:ro
@@ -62,14 +62,14 @@ services:
     container_name: rag-temporal-db
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
-      POSTGRES_DB: temporal
+      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal}
+      POSTGRES_DB: ${TEMPORAL_POSTGRES_DB:-temporal}
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
       - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -83,8 +83,8 @@ services:
     environment:
       - DB=postgres12
       - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
+      - POSTGRES_USER=${TEMPORAL_POSTGRES_USER:-temporal}
+      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD:-temporal}
       - POSTGRES_SEEDS=temporal-db
       # Workflow history retention. Temporal auto-deletes histories older than this.
       # Default is 72h (3 days); 720h = 30 days is typical for production.
@@ -100,7 +100,7 @@ services:
     ports:
       - "${RAG_TEMPORAL_UI_PORT:-8080}:8080"
     environment:
-      - TEMPORAL_ADDRESS=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:${LANGFUSE_PORT:-3000}
     depends_on:
       - temporal
@@ -108,10 +108,12 @@ services:
 
   rag-api:
     profiles: ["app"]
-    image: ghcr.io/juansync7/ragweave-api:${RAG_API_IMAGE_TAG:-latest}
+    image: ${RAG_API_IMAGE_REF:-ghcr.io/juansync7/ragweave-api}:${RAG_API_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.api
+      additional_contexts:
+        kgweave: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
@@ -120,7 +122,7 @@ services:
       - "${RAG_API_HOST_PORT:-8000}:${RAG_API_PORT:-8000}"
     environment:
       - RAG_API_PORT=${RAG_API_PORT:-8000}
-      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
       # API stream-generation needs Ollama access too.
       - RAG_OLLAMA_URL=http://rag-ollama:11434
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
@@ -128,9 +130,9 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
       - RAG_MEMORY_PROVIDER=redis
-      - RAG_MEMORY_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_MEMORY_REDIS_URL=redis://rag-redis:6379/0
       - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
       - DATABASE_URL=postgresql://litellm:litellm@rag-postgres:5432/litellm
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
@@ -144,12 +146,16 @@ services:
       - RAG_WEAVIATE_HOST=rag-weaviate
       - RAG_WEAVIATE_HTTP_PORT=8080
       - RAG_WEAVIATE_GRPC_PORT=50051
-      # TEI-backed embed + rerank, fronted by rag-nginx for replica load
-      # balancing. Direct service DNS (rag-embed:80 / rag-rerank:80) also works
-      # at scale=1 but caches DNS — at scale>1, clients pin to one replica.
-      - RAG_INFERENCE_BACKEND=tei
-      - RAG_TEI_EMBED_URL=http://rag-nginx:8081
-      - RAG_TEI_RERANK_URL=http://rag-nginx:8082
+      # Embed + rerank over HTTP (OpenAI-compatible), env-driven so each env
+      # overlay points it wherever it likes (remote vLLM tunnel, a self-hosted
+      # TEI pool, any compatible API). Defaults preserve the self-hosted TEI pool
+      # fronted by rag-nginx (run with `--profile self-host`); the dev/prod
+      # overlays override these to the qwen3 vLLM tunnel.
+      - RAG_INFERENCE_BACKEND=${RAG_INFERENCE_BACKEND:-tei}
+      - RAG_EMBED_URL=${RAG_EMBED_URL:-http://rag-nginx:8081}
+      - RAG_RERANK_URL=${RAG_RERANK_URL:-http://rag-nginx:8082}
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-BAAI/bge-m3}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
       # Allow the console to serve source documents ingested by the local worker.
       # The worker records absolute host paths; mount them at the same path above.
       # Override via RAG_CONSOLE_SOURCE_ROOTS in .env to add more dirs.
@@ -163,10 +169,9 @@ services:
         condition: service_healthy
       rag-weaviate:
         condition: service_healthy
-      rag-nginx:
-        condition: service_healthy
-      rag-ollama:
-        condition: service_healthy
+      # NOTE: rag-nginx + rag-ollama deps removed — the default http inference
+      # path needs neither (embed/rerank/gen are reached via RAG_*_URL). They
+      # belong to the optional `self-host` profile.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -187,30 +192,34 @@ services:
 
   rag-worker:
     profiles: ["workers"]
-    image: ghcr.io/juansync7/ragweave-worker:${RAG_WORKER_IMAGE_TAG:-latest}
+    image: ${RAG_WORKER_IMAGE_REF:-ghcr.io/juansync7/ragweave-worker}:${RAG_WORKER_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
+      additional_contexts:
+        kgweave: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
     command: python -m server.worker
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
       # Ollama is expected to run on the host in this setup.
       # The proxy port forwards to the actual Ollama port on 127.0.0.1.
       - RAG_OLLAMA_URL=http://rag-ollama:11434
-      # Embed + rerank are served by TEI containers, not in-process. The worker
-      # image ships without torch/transformers; hitting the local path here would
-      # raise ImportError (by design — install the `local-embed` extra in a venv
-      # if you need in-process models for dev iteration).
-      - RAG_INFERENCE_BACKEND=tei
-      - RAG_TEI_EMBED_URL=http://rag-nginx:8081
-      - RAG_TEI_RERANK_URL=http://rag-nginx:8082
-      - RAG_WORKER_CONCURRENCY=4
+      # Embed + rerank over HTTP (OpenAI-compatible), env-driven (see rag-api).
+      # Defaults to the self-hosted TEI pool via rag-nginx; dev/prod overlays
+      # override to the qwen3 vLLM tunnel. The worker image ships no torch, so
+      # the in-process ("local") backend is venv-only (`local-embed` extra).
+      - RAG_INFERENCE_BACKEND=${RAG_INFERENCE_BACKEND:-tei}
+      - RAG_EMBED_URL=${RAG_EMBED_URL:-http://rag-nginx:8081}
+      - RAG_RERANK_URL=${RAG_RERANK_URL:-http://rag-nginx:8082}
+      - RAG_EMBED_MODEL=${RAG_EMBED_MODEL:-BAAI/bge-m3}
+      - RAG_RERANK_MODEL=${RAG_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RAG_WORKER_CONCURRENCY=${RAG_WORKER_CONCURRENCY:-4}
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
       - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
       - RAG_STAGE_BUDGET_EMBEDDING_MS=${RAG_STAGE_BUDGET_EMBEDDING_MS:-8000}
       - RAG_STAGE_BUDGET_RERANKING_MS=${RAG_STAGE_BUDGET_RERANKING_MS:-15000}
@@ -226,10 +235,7 @@ services:
         condition: service_started
       rag-weaviate:
         condition: service_healthy
-      rag-nginx:
-        condition: service_healthy
-      rag-ollama:
-        condition: service_healthy
+      # rag-nginx + rag-ollama deps removed (see rag-api) — `self-host` profile only.
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -237,6 +243,58 @@ services:
       # Ad-hoc ingest source: host-cloned OpenTitan repo visible inside worker
       # so `ingest_directory(/app/opentitan_data/...)` finds the files.
       - ./opentitan_data:/app/opentitan_data:ro
+
+  # KGWeave Phase 2b worker — separate image, separate Temporal queue
+  # (kgweave-default). RagWeave's IngestDocumentWorkflow dispatches by
+  # activity name to this worker, so the two fleets scale independently.
+  # By default the build context is a git URL pinned to a KGWeave SHA, so a
+  # fresh clone needs no sibling checkout. Override with KGWEAVE_BUILD_CONTEXT
+  # (path or git URL) for KGWeave co-development. Legacy KGWEAVE_REPO_PATH
+  # is honoured as a fallback. See docs/kgweave_deployment.md.
+  kgweave-worker:
+    profiles: ["workers", "kgweave"]
+    image: ghcr.io/juansync7/kgweave-worker:${KGWEAVE_IMAGE_TAG:-latest}
+    build:
+      context: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
+      dockerfile: containers/Dockerfile.kgweave-worker
+    environment:
+      # Shared Temporal cluster — same host:port as the RagWeave worker.
+      - TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
+      # Slot budget — independent of RAG_WORKER_CONCURRENCY (FR-3562 spirit:
+      # KGWeave never starves the RagWeave worker and vice versa).
+      - KG_WORKER_SLOTS=${KG_WORKER_SLOTS:-4}
+      # Regex extractor by default; flip to 1 to enable GLiNER (image must
+      # have been built with --build-arg KGWEAVE_EXTRAS=gliner).
+      - KG_USE_GLINER=${KG_USE_GLINER:-0}
+    depends_on:
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  # KGWeave HTTP API — read-side query service (Step C). Stateless, scales
+  # horizontally; intended for non-Python consumers and external access.
+  # Writes still flow through the Temporal worker above.
+  kgweave-api:
+    profiles: ["kgweave", "kgweave-api"]
+    image: ghcr.io/juansync7/kgweave-api:${KGWEAVE_IMAGE_TAG:-latest}
+    build:
+      context: ${KGWEAVE_BUILD_CONTEXT:-${KGWEAVE_REPO_PATH:-https://github.com/JuanSync7/KGWeave.git#d4c474b4d6ff9da0053eadcb55343eab057b1739}}
+      dockerfile: containers/Dockerfile.kgweave-api
+    ports:
+      - "${KGWEAVE_API_HOST_PORT:-8090}:8080"
+    environment:
+      - KG_GRAPH_PATH=${KG_GRAPH_PATH:-/data/graph.json}
+      - KGWEAVE_API_TOKEN=${KGWEAVE_API_TOKEN:-}
+      - KGWEAVE_API_WORKERS=${KGWEAVE_API_WORKERS:-1}
+    volumes:
+      - kgweave-graph:/data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/v1/health', timeout=2).status == 200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   dozzle:
     # Always-on: web UI for container visibility + start/stop/restart actions.
@@ -283,16 +341,39 @@ services:
       - "${RAG_WEAVIATE_HTTP_HOST_PORT:-8090}:8080"
       - "${RAG_WEAVIATE_GRPC_HOST_PORT:-50051}:50051"
     environment:
-      QUERY_DEFAULTS_LIMIT: "25"
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      QUERY_DEFAULTS_LIMIT: "${RAG_WEAVIATE_QUERY_LIMIT:-25}"
+      # SECURITY: anonymous access is enabled by default for local dev. Set to
+      # "false" and configure AUTHENTICATION_APIKEY_* / AUTHORIZATION_ADMINLIST_*
+      # below for any non-local deployment.
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "${RAG_WEAVIATE_ANON_ACCESS:-true}"
+      AUTHENTICATION_APIKEY_ENABLED: "${RAG_WEAVIATE_APIKEY_ENABLED:-false}"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: "${RAG_WEAVIATE_APIKEY_ALLOWED:-}"
+      AUTHENTICATION_APIKEY_USERS: "${RAG_WEAVIATE_APIKEY_USERS:-}"
+      AUTHORIZATION_ADMINLIST_ENABLED: "${RAG_WEAVIATE_ADMIN_ENABLED:-false}"
+      AUTHORIZATION_ADMINLIST_USERS: "${RAG_WEAVIATE_ADMIN_USERS:-}"
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       DEFAULT_VECTORIZER_MODULE: "none"
       ENABLE_MODULES: ""
       CLUSTER_HOSTNAME: "node1"
+      # Memory policy (durable, box-agnostic): the single knob is a PERCENT of the
+      # memory this container can see (cgroup limit if enforced, else host RAM).
+      # The memwrap.sh entrypoint turns it into a GOMEMLIMIT soft cap at startup so
+      # the heap can't balloon and OOM the host. Self-adapts to any box / cgroup
+      # version (incl. cgroup v1 rootless, where mem_limit is silently ignored).
+      # NOTE: GOMEMLIMIT is SOFT — it bounds spikes/transients, it cannot shrink a
+      # working set larger than the cap (that needs vector quantization or a bigger
+      # box). See docs/ops/MEMORY_TUNING.md for tuning + the structural fix.
+      RAG_WEAVIATE_MEM_FRACTION: "${RAG_WEAVIATE_MEM_FRACTION:-50}"
+      RAG_WEAVIATE_GOGC: "${RAG_WEAVIATE_GOGC:-75}"
+    # Self-computing memory bound (see env above). String entrypoint + explicit
+    # command so it works under both docker compose and podman-compose.
+    entrypoint: /memwrap.sh
+    command: ["--host", "0.0.0.0", "--port", "8080", "--scheme", "http"]
     volumes:
       # Existing on-disk data from the previous embedded setup is mounted directly
       # so no re-ingest is needed on first boot.
       - ./.weaviate_data:/var/lib/weaviate
+      - ./ops/weaviate/memwrap.sh:/memwrap.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/.well-known/ready || exit 1"]
       interval: 10s
@@ -304,7 +385,20 @@ services:
     profiles: ["app", "workers", "monitoring"]
     image: redis:7-alpine
     container_name: rag-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    # If RAG_REDIS_AUTH is set, enforce password auth. Default empty = no auth
+    # (preserves prior behavior). When auth is enabled, RAG_CACHE_REDIS_URL /
+    # RAG_MEMORY_REDIS_URL must include the password: redis://:PWD@host:port/0
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$RAG_REDIS_AUTH" ]; then
+          exec redis-server --appendonly yes --requirepass "$$RAG_REDIS_AUTH"
+        else
+          exec redis-server --appendonly yes
+        fi
+    environment:
+      - RAG_REDIS_AUTH=${RAG_REDIS_AUTH:-}
     ports:
       - "${RAG_REDIS_PORT:-6379}:6379"
     volumes:
@@ -428,7 +522,7 @@ services:
     volumes:
       - langfuse-minio-data:/data
     ports:
-      - "${MINIO_HOST_PORT:-9090}:9000"
+      - "${LANGFUSE_MINIO_HOST_PORT:-9090}:9000"
     restart: unless-stopped
 
   langfuse-worker:
@@ -489,6 +583,11 @@ services:
         condition: service_healthy
     environment:
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
+      # LANGFUSE_INIT_ORG_ID is the gate that enables the entire init block.
+      # Without it, Langfuse v3 ignores LANGFUSE_INIT_PROJECT_PUBLIC_KEY etc.
+      # and the keys in .env never register on first bootstrap.
+      - LANGFUSE_INIT_ORG_ID=${LANGFUSE_INIT_ORG_ID:-ragweave}
+      - LANGFUSE_INIT_PROJECT_ID=${LANGFUSE_INIT_PROJECT_ID:-rag-observability}
       - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-RAG Local}
       - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-rag-observability}
       - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
@@ -538,6 +637,10 @@ services:
     # binds to all available GPUs; for true horizontal scale on AWS, run one
     # replica per GPU node and let ALB target groups distribute (compose's GPU
     # reservation on a single host means N replicas share one device).
+    # Opt-in self-hosted local inference (BGE via TEI). Off by default — the
+    # default inference path is remote HTTP (see rag-api). Start with
+    # `--profile self-host` for an all-local stack.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_IMAGE_TAG:-turing-1.5}
     environment:
       - MODEL_ID=${RAG_TEI_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -549,13 +652,17 @@ services:
     # warmup pass preallocates activation memory at max-batch-tokens, so
     # 8192 spikes to ~5 GB — too tight when Windows is co-tenant on the card.
     # 2048 keeps peak ~2 GB (weights ~1.1 GB + activations ~800 MB + CUDA
-    # ctx ~400 MB). Raise on dedicated GPUs. Auto-truncate avoids 413s.
+    # ctx ~400 MB). Raise on dedicated GPUs via env. Auto-truncate avoids 413s.
     command: >
-      --max-batch-tokens 2048
-      --max-concurrent-requests 8
+      --max-batch-tokens ${RAG_TEI_EMBED_MAX_BATCH_TOKENS:-2048}
+      --max-concurrent-requests ${RAG_TEI_EMBED_MAX_CONCURRENT:-8}
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution (see comment on rag-rerank for rationale).
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -580,19 +687,27 @@ services:
     #     freeing the GPU for latency-sensitive queries.
     # Cold start is seconds (no GPU init), so this scales fast for spikes.
     # Scalable: `docker compose up -d --scale rag-embed-cpu=N`.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
     environment:
       - MODEL_ID=${RAG_TEI_EMBEDDING_MODEL:-BAAI/bge-m3}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
       - HF_ENDPOINT=https://huggingface.co
     command: >
-      --max-batch-tokens 1024
-      --max-concurrent-requests 4
+      --max-batch-tokens ${RAG_TEI_EMBED_CPU_MAX_BATCH_TOKENS:-1024}
+      --max-concurrent-requests ${RAG_TEI_EMBED_CPU_MAX_CONCURRENT:-4}
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution (see comment on rag-rerank for rationale).
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
+      # TEI cpu-1.5 image ships without curl/wget/nc, so use bash's /dev/tcp
+      # builtin to probe the embedding HTTP port. Once the port is open the
+      # router is serving traffic.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/80"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -607,6 +722,7 @@ services:
     #
     # Scalable: `docker compose up -d --scale rag-rerank=N`. Fronted by rag-nginx
     # on port 8082. See rag-embed for the GPU-replica caveat.
+    profiles: ["self-host"]
     image: ghcr.io/huggingface/text-embeddings-inference:${RAG_TEI_RERANK_IMAGE_TAG:-turing-1.8}
     environment:
       - MODEL_ID=${RAG_TEI_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -616,11 +732,18 @@ services:
     # VRAM stays bounded when both share the 6 GB card with Ollama.
     # Fall back to cpu-1.8 + remove deploy block if VRAM contention OOMs.
     command: >
-      --max-batch-tokens 2048
-      --max-concurrent-requests 4
+      --max-batch-tokens ${RAG_TEI_RERANK_MAX_BATCH_TOKENS:-2048}
+      --max-concurrent-requests ${RAG_TEI_RERANK_MAX_CONCURRENT:-4}
       --auto-truncate
     volumes:
       - ./.tei_cache:/data
+    # Force IPv4-only DNS resolution. huggingface.co serves AAAA-heavy CDN
+    # records from many regions; Docker's default bridge has no IPv6 route,
+    # so TEI's startup probe (download_artifacts) hangs on TCP-connect for
+    # ~9 min before timing out. v4-only resolves in milliseconds.
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -640,6 +763,7 @@ services:
     # Ollama serves generative LLMs (qwen2.5:3b for "default"/"query",
     # qwen2.5vl:3b for "vision"). Bind-mounts the host's pre-pulled
     # model dir so we don't re-download ~3 GB per clean stack.
+    profiles: ["self-host"]
     image: ollama/ollama:latest
     container_name: rag-ollama
     # Host systemd ollama was removed and .ollama_data migrated into the repo,
@@ -671,12 +795,15 @@ services:
               count: all
               capabilities: [gpu]
 
-  rag-nginx:
-    # Always-on: fronts rag-api on 80/443 (TLS) AND load-balances TEI embed
-    # (8081) / rerank (8082) replicas. Profile-less so rag-worker (workers
-    # profile) can also route TEI traffic through it.
+  # Self-host only: load-balances the local TEI embed (8081) / rerank (8082)
+  # pools for the `self-host` inference path. The default http path bypasses it
+  # (embed/rerank go straight to RAG_*_URL), so it is gated to the `self-host`
+  # profile. NOTE: the API-front nginx (TLS → rag-api) is a separate service
+  # named `rag-nginx`, supplied by each deployment overlay (e.g. docker-compose.ai03.yml).
+  rag-tei-nginx:
+    profiles: ["self-host"]
     image: nginx:alpine
-    container_name: rag-nginx
+    container_name: rag-tei-nginx
     ports:
       - "${RAG_NGINX_HTTP_PORT:-80}:80"
       - "${RAG_NGINX_HTTPS_PORT:-443}:443"
@@ -724,3 +851,4 @@ volumes:
   langfuse-minio-data:
   prometheus-data:
   grafana-data:
+  kgweave-graph:

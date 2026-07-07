@@ -14,5 +14,7 @@ provides common fixture utilities (such as `load_json_fixture`) consumed by all 
 | Path | Purpose |
 | --- | --- |
 | `conftest.py` | Shared pytest fixtures and helpers used across all eval sub-packages |
+| `calibration/` | Versioned ground-truth fixtures for judge calibration (the `"pass"`/`"fail"` reference set) |
+| `conversation/` | Multi-turn conversation eval for the turn-level agentic loop (marker `eval_conversation`; offline scripted-fake mode by default, opt-in live SSE mode) |
 | `knowledge_graph/` | Eval suite for knowledge-graph extraction, entity resolution, relationship quality, and KG-based retrieval |
 | `retrieval/` | Standalone retrieval eval suite (golden-query harness, separate from KG evals) |

@@ -43,7 +43,6 @@ def _make_runtime(vlm_mode: str = "disabled", **config_kwargs) -> Runtime:
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
 
 
@@ -717,38 +716,38 @@ class TestCheckDoclingChunkingConfigWarnings:
         combined = " ".join(warnings)
         assert "skip" in combined.lower() or "skipped" in combined.lower()
 
-    def test_max_tokens_above_512_produces_warning(self):
-        """hybrid_chunker_max_tokens=1024: warning contains 'hybrid_chunker_max_tokens'."""
+    def test_max_tokens_above_8192_produces_warning(self):
+        """hybrid_chunker_max_tokens=9000: warning contains 'hybrid_chunker_max_tokens'."""
         from src.ingest.impl import _check_docling_chunking_config
 
-        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=1024)
+        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=9000)
         _, warnings = _check_docling_chunking_config(config)
         assert len(warnings) > 0
         combined = " ".join(warnings)
         assert "hybrid_chunker_max_tokens" in combined
 
-    def test_max_tokens_warning_mentions_512(self):
-        """Warning for max_tokens > 512 references the 512 limit."""
+    def test_max_tokens_warning_mentions_8192(self):
+        """Warning for max_tokens > 8192 references the 8192 limit."""
         from src.ingest.impl import _check_docling_chunking_config
 
-        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=1024)
+        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=9000)
         _, warnings = _check_docling_chunking_config(config)
         combined = " ".join(warnings)
-        assert "512" in combined
+        assert "8192" in combined
 
-    def test_max_tokens_at_513_produces_warning(self):
-        """hybrid_chunker_max_tokens=513: exactly one step above limit triggers warning."""
+    def test_max_tokens_at_8193_produces_warning(self):
+        """hybrid_chunker_max_tokens=8193: exactly one step above limit triggers warning."""
         from src.ingest.impl import _check_docling_chunking_config
 
-        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=513)
+        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=8193)
         _, warnings = _check_docling_chunking_config(config)
         assert any("hybrid_chunker_max_tokens" in w for w in warnings)
 
     def test_max_tokens_warning_is_not_an_error(self):
-        """hybrid_chunker_max_tokens > 512 is a warning only, not an error."""
+        """hybrid_chunker_max_tokens > 8192 is a warning only, not an error."""
         from src.ingest.impl import _check_docling_chunking_config
 
-        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=1024)
+        config = IngestionConfig(vlm_mode="disabled", hybrid_chunker_max_tokens=9000)
         errors, _ = _check_docling_chunking_config(config)
         assert not any("hybrid_chunker_max_tokens" in e for e in errors)
 
@@ -781,7 +780,7 @@ class TestCheckDoclingChunkingConfigBoundary:
         # Rule A (builtin-requires-docling) should NOT also fire since the vlm_mode
         # string "BUILTIN" != "builtin". But if we use "builtin" with no docling,
         # Rule 0 passes and Rule A fires. Combine: invalid mode + max_tokens:
-        config = IngestionConfig(vlm_mode="wrong_mode", hybrid_chunker_max_tokens=1024)
+        config = IngestionConfig(vlm_mode="wrong_mode", hybrid_chunker_max_tokens=9000)
         errors, warnings = _check_docling_chunking_config(config)
         # At minimum: one error (invalid mode).
         assert len(errors) >= 1
@@ -860,7 +859,7 @@ class TestVerifyCoreDesignDoclingChecks:
 
         config = IngestionConfig(
             vlm_mode="disabled",
-            hybrid_chunker_max_tokens=1024,
+            hybrid_chunker_max_tokens=9000,
             chunk_size=512,
             chunk_overlap=50,
         )

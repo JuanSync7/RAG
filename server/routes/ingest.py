@@ -29,7 +29,13 @@ from temporalio.exceptions import CancelledError as TemporalCancelledError  # py
 from temporalio.service import RPCError  # pyright: ignore[reportMissingImports]
 from urllib.parse import urlparse
 
-from config.settings import PROJECT_ROOT
+from config.settings import (
+    PROJECT_ROOT,
+    RAG_INGEST_JOB_RETENTION_SECONDS,
+    RAG_INGEST_MAX_RECENT_JOBS,
+    RAG_INGEST_STALE_JOB_SECONDS,
+    RAG_INGEST_SWEEP_INTERVAL_SECONDS,
+)
 from src.ingest import IngestionConfig
 from src.ingest.temporal.activities import SourceArgs
 from src.ingest.temporal.constants import TRIGGER_SINGLE, trigger_to_queue
@@ -41,15 +47,15 @@ logger = logging.getLogger("rag.server.ingest")
 _STAGING_DIR = PROJECT_ROOT / "documents" / "_uploads"
 _STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-_MAX_RECENT_JOBS = 50
-_JOB_RETENTION_SECONDS = 3600
+_MAX_RECENT_JOBS = RAG_INGEST_MAX_RECENT_JOBS
+_JOB_RETENTION_SECONDS = RAG_INGEST_JOB_RETENTION_SECONDS
 _SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md", ".html", ".htm"}
 
 # Stale-job sweeper: jobs that haven't emitted any event in this window while
 # still in pending/running are assumed dead (worker crashed, lost cancel, etc.)
 # and flipped to failed so the UI doesn't lie about ghost in-flight work.
-_STALE_JOB_SECONDS = 1800  # 30 minutes
-_SWEEP_INTERVAL_SECONDS = 60
+_STALE_JOB_SECONDS = RAG_INGEST_STALE_JOB_SECONDS  # default 30 minutes
+_SWEEP_INTERVAL_SECONDS = RAG_INGEST_SWEEP_INTERVAL_SECONDS
 
 
 @dataclass

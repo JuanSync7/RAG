@@ -1,0 +1,22 @@
+[
+  {
+    "qid": "q_read_qfs",
+    "text": "Summarize the AXI Read Channel signals.",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_write_qfs",
+    "text": "Describe the AXI Write Channel signals.",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_arlen_factoid",
+    "text": "What does ARLEN encode?",
+    "qtype": "factoid"
+  },
+  {
+    "qid": "q_wstrb_factoid",
+    "text": "What does WSTRB do?",
+    "qtype": "factoid"
+  }
+]

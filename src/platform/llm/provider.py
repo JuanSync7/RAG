@@ -21,7 +21,11 @@ from litellm import Router
 from config.settings import (
     LLM_API_BASE,
     LLM_API_KEY,
+    LLM_CONTROLLER_API_BASE,
+    LLM_CONTROLLER_MODEL,
     LLM_FALLBACK_MODELS,
+    LLM_JUDGE_API_BASE,
+    LLM_JUDGE_MODEL,
     LLM_MAX_TOKENS,
     LLM_MODEL,
     LLM_NUM_RETRIES,
@@ -29,8 +33,12 @@ from config.settings import (
     LLM_ROUTER_CONFIG,
     LLM_TEMPERATURE,
     LLM_VISION_MODEL,
+    RAG_LLM_ONESHOT_MAX_TOKENS,
+    RAG_LLM_RATE_LIMIT_RETRY_DELAY_S,
+    RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS,
 )
 from src.platform.llm.schemas import LLMConfig, LLMResponse
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -123,10 +131,28 @@ def _build_router_from_env(config: LLMConfig) -> Router:
             },
         })
 
+    # Agentic-loop aliases ("controller", "judge"). Each resolves to its own
+    # model when one is configured, otherwise it is aliased to the default model
+    # so the agentic loop works with zero new deployment (controller/judge fall
+    # back to the default model). Mirrors the "query" alias handling above.
+    for alias_name, alias_model, alias_base in (
+        ("controller", config.controller_model, config.controller_api_base),
+        ("judge", config.judge_model, config.judge_api_base),
+    ):
+        _base = alias_base or config.api_base
+        model_list.append({
+            "model_name": alias_name,
+            "litellm_params": {
+                "model": alias_model or config.model,
+                **({"api_base": _base} if _base else {}),
+                **({"api_key": config.api_key} if config.api_key else {}),
+            },
+        })
+
     return Router(
         model_list=model_list,
         num_retries=config.num_retries,
-        retry_after=5,
+        retry_after=RAG_LLM_RATE_LIMIT_RETRY_DELAY_S,
     )
 
 
@@ -167,6 +193,10 @@ class LLMProvider:
             fallback_models=LLM_FALLBACK_MODELS,
             vision_model=LLM_VISION_MODEL or None,
             query_model=LLM_QUERY_MODEL or None,
+            controller_model=LLM_CONTROLLER_MODEL or None,
+            judge_model=LLM_JUDGE_MODEL or None,
+            controller_api_base=LLM_CONTROLLER_API_BASE or None,
+            judge_api_base=LLM_JUDGE_API_BASE or None,
         )
 
         if router:
@@ -243,23 +273,41 @@ class LLMProvider:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        response = self._router.completion(**kwargs)
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.generate",
+            model=self.config.model,
+            input=repr(messages),
+            metadata={
+                "gen_ai.system": "litellm",
+                "model_alias": model_alias,
+                "temperature": kwargs.get("temperature"),
+            },
+        ) as gen:
+            response = self._router.completion(**kwargs)
 
-        cost = 0.0
-        try:
-            cost = litellm.completion_cost(completion_response=response)
-        except Exception:
-            pass  # Local models have no pricing data
+            cost = 0.0
+            try:
+                cost = litellm.completion_cost(completion_response=response)
+            except Exception:
+                pass  # Local models have no pricing data
 
-        usage = response.usage
-        return LLMResponse(
-            content=response.choices[0].message.content or "",
-            model=response.model or self.config.model,
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
-            total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
-            cost_usd=cost,
-        )
+            usage = response.usage
+            result = LLMResponse(
+                content=response.choices[0].message.content or "",
+                model=response.model or self.config.model,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
+                cost_usd=cost,
+            )
+            gen.set_output(result.content)
+            if result.prompt_tokens or result.completion_tokens:
+                gen.set_token_counts(
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                )
+            return result
 
     def generate_stream(
         self,
@@ -270,6 +318,7 @@ class LLMProvider:
         max_tokens: Optional[int] = None,
         timeout: Optional[int] = None,
         user_id: Optional[str] = None,
+        include_reasoning: bool = False,
     ) -> Any:
         """Run a synchronous streaming completion.
 
@@ -280,9 +329,18 @@ class LLMProvider:
             max_tokens: Optional max completion tokens override.
             timeout: Optional per-call timeout in seconds.
             user_id: Optional end-user identifier for per-user cost attribution.
+            include_reasoning: When True, also surface chain-of-thought deltas.
 
         Yields:
-            Content chunks (strings).
+            By default, content chunks (plain strings) — the backward-compatible
+            contract relied on by the LangChain adapter and other string callers.
+
+            When ``include_reasoning`` is True, yields ``(kind, text)`` tuples
+            where ``kind`` is ``"reasoning"`` for chain-of-thought deltas
+            (``delta.reasoning_content``, emitted by reasoning models such as
+            deepseek-r1 / qwen when vLLM runs with a reasoning parser) and
+            ``"content"`` for final-answer deltas (``delta.content``). This lets
+            a UI show the model "thinking" live, distinctly from the answer.
         """
         kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id, stream=True)
         kwargs["messages"] = messages
@@ -296,7 +354,15 @@ class LLMProvider:
         response = self._router.completion(**kwargs)
         for chunk in response:
             delta = chunk.choices[0].delta
-            if delta and delta.content:
+            if not delta:
+                continue
+            if include_reasoning:
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield ("reasoning", reasoning)
+                if delta.content:
+                    yield ("content", delta.content)
+            elif delta.content:
                 yield delta.content
 
     async def agenerate(
@@ -335,23 +401,41 @@ class LLMProvider:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        response = await self._router.acompletion(**kwargs)
+        tracer = get_tracer()
+        with tracer.generation(
+            name="llm.agenerate",
+            model=self.config.model,
+            input=repr(messages),
+            metadata={
+                "gen_ai.system": "litellm",
+                "model_alias": model_alias,
+                "temperature": kwargs.get("temperature"),
+            },
+        ) as gen:
+            response = await self._router.acompletion(**kwargs)
 
-        cost = 0.0
-        try:
-            cost = litellm.completion_cost(completion_response=response)
-        except Exception:
-            pass
+            cost = 0.0
+            try:
+                cost = litellm.completion_cost(completion_response=response)
+            except Exception:
+                pass
 
-        usage = response.usage
-        return LLMResponse(
-            content=response.choices[0].message.content or "",
-            model=response.model or self.config.model,
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
-            total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
-            cost_usd=cost,
-        )
+            usage = response.usage
+            result = LLMResponse(
+                content=response.choices[0].message.content or "",
+                model=response.model or self.config.model,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                total_tokens=getattr(usage, "total_tokens", 0) if usage else 0,
+                cost_usd=cost,
+            )
+            gen.set_output(result.content)
+            if result.prompt_tokens or result.completion_tokens:
+                gen.set_token_counts(
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                )
+            return result
 
     async def agenerate_stream(
         self,
@@ -488,7 +572,7 @@ class LLMProvider:
             self.generate(
                 [{"role": "user", "content": "ping"}],
                 model_alias=model_alias,
-                max_tokens=1,
+                max_tokens=RAG_LLM_TOKEN_COUNTING_PROBE_TOKENS,
             )
             return True
         except Exception:
@@ -517,7 +601,7 @@ def call_oneshot(
     system: str = "",
     model_alias: str = "query",
     temperature: Optional[float] = None,
-    max_tokens: Optional[int] = 256,
+    max_tokens: Optional[int] = RAG_LLM_ONESHOT_MAX_TOKENS,
 ) -> Optional[str]:
     """One-shot text completion: build messages from (system, prompt), call the
     provider, return content or None on failure.

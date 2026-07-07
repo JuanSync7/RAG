@@ -1,0 +1,57 @@
+[
+  {
+    "qid": "q_reception_qfs",
+    "text": "How does the UART receiver oversample and recover data?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_baud_qfs",
+    "text": "How is the UART baud rate computed and configured?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_frame_err_qfs",
+    "text": "Describe the rx_frame_err interrupt and its conditions.",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_init_qfs",
+    "text": "How is the UART initialized in software for a given baud rate?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_tx_qfs",
+    "text": "How does the UART transmit data through the TX FIFO?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_fifo_ctrl_qfs",
+    "text": "How does FIFO_CTRL configure RX/TX FIFO trigger levels and resets?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_intr_handling_qfs",
+    "text": "How are UART interrupts enabled and handled in software?",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_tx_example_qfs",
+    "text": "Show the code pattern to send a string of characters over UART.",
+    "qtype": "qfs"
+  },
+  {
+    "qid": "q_wdata_factoid",
+    "text": "What is the WDATA register offset and reset default?",
+    "qtype": "factoid"
+  },
+  {
+    "qid": "q_parity_en_factoid",
+    "text": "What does CTRL.PARITY_EN do?",
+    "qtype": "factoid"
+  },
+  {
+    "qid": "q_status_factoid",
+    "text": "What is the UART STATUS register?",
+    "qtype": "factoid"
+  }
+]

@@ -1,0 +1,24 @@
+# Shared dependencies for BOTH the API and worker containers.
+# Pulled in via `-r requirements-base.txt` from requirements-api.txt and
+# requirements-worker.txt so each shared package's version lives in ONE place.
+# Container-specific deps stay in requirements-{api,worker}.txt.
+#
+# langgraph + langchain-* are shared because BOTH surfaces execute the rag-chain
+# graph in-process (the API's /query/stream endpoint and the Temporal worker).
+httpx
+numpy
+networkx
+orjson
+pyyaml
+redis
+minio
+litellm
+langfuse
+langdetect
+prometheus-client
+temporalio>=1.23,<2
+weaviate-client
+langgraph
+langchain-core
+langchain-text-splitters
+nemoguardrails>=0.21.0

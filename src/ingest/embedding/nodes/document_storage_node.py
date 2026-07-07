@@ -14,11 +14,13 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.document_storage")
 
-from src.db import build_document_id, put_document  # noqa: F401 — put_document kept for legacy refs
+from src.db import build_document_id
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 
+@node_span("document_storage")
 def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Compute a stable document_id and STAGE the MinIO write into pipeline state.
 
@@ -48,7 +50,21 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "processing_log": append_processing_log(state, f"document_storage:{reason}"),
         }
 
-    content = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
+    # Persist the GOLDEN source the chunks are derived from: the parsed Docling
+    # markdown. On the native path the chunks come straight from this parse
+    # (uncleaned), so storing cleaned_text would diverge the stored doc from the
+    # retrieved chunks — and from what lossless_verification checks against.
+    # Storing the parse makes object storage the true golden. Falls back to
+    # cleaned_text / raw_text when no parse is present (legacy path).
+    parse_result = state.get("parse_result")
+    parsed_markdown = (
+        getattr(parse_result, "text_markdown", "") if parse_result is not None else ""
+    )
+    content = (
+        parsed_markdown
+        if parsed_markdown and parsed_markdown.strip()
+        else (state.get("cleaned_text") or state.get("raw_text", ""))
+    )
     metadata = {
         "source_key": state["source_key"],
         "source_name": state["source_name"],

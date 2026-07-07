@@ -1,6 +1,7 @@
 # @summary
 # Temporal worker that preloads RAGChain at startup, then processes query
-# activities. Models load once (~22s) and stay in GPU memory for all requests.
+# activities (execute_rag_query + the turn-loop retrieve_ranked primitive).
+# Models load once (~22s) and stay in GPU memory for all requests.
 # Exports: main
 # Deps: temporalio, server.activities, server.workflows, config.settings
 # @end-summary
@@ -16,7 +17,6 @@ Usage:
 
 import asyncio
 import logging
-import os
 import signal
 import sys
 import time
@@ -29,9 +29,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from config.settings import TEMPORAL_TARGET_HOST
-from server.activities import execute_rag_query, init_rag_chain, shutdown_rag_chain
-from server.workflows import RAGQueryWorkflow, RAG_QUERY_TASK_QUEUE
+from config.settings import RAG_WORKER_CONCURRENCY, TEMPORAL_TARGET_HOST
+from server.activities import (
+    execute_rag_query,
+    init_rag_chain,
+    retrieve_ranked,
+    shutdown_rag_chain,
+)
+from server.workflows import (
+    RAGQueryWorkflow,
+    TurnRetrieveWorkflow,
+    RAG_QUERY_TASK_QUEUE,
+)
 
 def _configure_console_logging() -> None:
     """Use uvicorn-style console logs for consistent output."""
@@ -55,7 +64,7 @@ def _configure_console_logging() -> None:
 _configure_console_logging()
 logger = logging.getLogger("rag.server.worker")
 
-MAX_CONCURRENT_ACTIVITIES = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
+MAX_CONCURRENT_ACTIVITIES = RAG_WORKER_CONCURRENCY
 
 
 async def main() -> None:
@@ -85,8 +94,8 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=RAG_QUERY_TASK_QUEUE,
-        workflows=[RAGQueryWorkflow],
-        activities=[execute_rag_query],
+        workflows=[RAGQueryWorkflow, TurnRetrieveWorkflow],
+        activities=[execute_rag_query, retrieve_ranked],
         activity_executor=activity_executor,
         max_concurrent_activities=MAX_CONCURRENT_ACTIVITIES,
         graceful_shutdown_timeout=timedelta(seconds=10),

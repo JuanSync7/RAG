@@ -248,6 +248,37 @@ class ObservabilityBackend(ABC):
             Any exception raised by the underlying SDK shutdown operation.
         """
 
+    def start_trace_from_carrier(
+        self,
+        name: str,
+        carrier: dict,
+        metadata: Optional[dict] = None,
+    ) -> Trace:
+        """Start a trace whose parent context is extracted from a W3C carrier.
+
+        If the carrier contains a valid ``traceparent`` header (per the W3C
+        trace-context specification), the returned Trace shares its trace_id
+        with the inbound span and is parented under it. If the header is
+        absent, malformed, or extraction is unsupported, this method falls
+        back to :meth:`trace` (a fresh root).
+
+        Subclasses with real propagator support (e.g. OTel) override this.
+        The default implementation is the fallback path used by NoopBackend
+        and any backend that does not implement carrier propagation.
+
+        Args:
+            name: Trace name. Convention: "api.<resource>.<verb>".
+            carrier: Request header mapping (e.g. ``dict(request.headers)``)
+                conforming to W3C trace-context (``traceparent`` /
+                ``tracestate``). Case-insensitive lookup is the
+                implementation's responsibility.
+            metadata: Optional metadata dict attached to the trace root.
+
+        Returns:
+            A Trace instance. Never raises — fail-open contract.
+        """
+        return self.trace(name, metadata)
+
     def start_span(
         self,
         name: str,

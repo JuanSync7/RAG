@@ -1,7 +1,7 @@
 # @summary
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
 # Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, PIPELINE_NODE_NAMES
-# Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
+# Deps: config.settings, src.core.embeddings, src.ingest.common.schemas
 # IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
 #   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
 #   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
@@ -9,7 +9,9 @@
 #   gc_retention_days (int), gc_schedule (str)
 # IngestionConfig new fields (Parser Abstraction Phase 2.2): parser_strategy (str), chunker (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
-# PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
+# KG ingest is owned by KGWeave; in-pipeline KG extraction/storage nodes were removed.
+# IngestionConfig new fields (Document Routing S0b): build_document_cards (bool), card_llm_summary (bool),
+#   card_max_headings (int), card_collection (str) — mirror config.settings RAG_INGESTION_* / RAG_DOCUMENT_CARD_COLLECTION
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
 # IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
 # IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
@@ -39,9 +41,11 @@ from config.settings import (
     RAG_INGESTION_DOCLING_ENABLED,
     RAG_INGESTION_DOCLING_MODEL,
     RAG_INGESTION_DOCLING_STRICT,
-    RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING,
-    RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION,
-    RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE,
+    RAG_INGESTION_ENABLE_OCR,
+    RAG_INGESTION_OCR_ENGINE,
+    RAG_INGESTION_TABLEFORMER_MODE,
+    RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING,
+    RAG_INGESTION_ENABLE_KG_PHASE2B,
     RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING,
     RAG_INGESTION_ENABLE_QUALITY_VALIDATION,
     RAG_INGESTION_VISION_AUTO_PULL,
@@ -68,7 +72,17 @@ from config.settings import (
     SEMANTIC_CHUNKING_ENABLED,
     RAG_INGESTION_VLM_MODE,
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
+    RAG_INGESTION_CHUNKER,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
+    RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH,
+    RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING,
+    RAG_INGESTION_VERIFY_LOSSLESS,
+    RAG_INGESTION_LOSSLESS_MIN_COVERAGE,
+    RAG_INGESTION_LOSSLESS_STRICT,
+    RAG_INGESTION_DROP_NAVIGATIONAL,
+    RAG_INGESTION_NAV_MAX_CHARS,
+    RAG_INGESTION_NAV_CLASSIFY,
+    RAG_NAV_ROLE_DEFAULT,
     RAG_INGESTION_STORE_FIGURES_IN_DB,
     RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN,
     RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
@@ -78,9 +92,16 @@ from config.settings import (
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
     RAG_INGESTION_EMBEDDING_BATCH_SIZE,
+    RAG_INGEST_NATIVE_MIN_CHUNK_CHARS,
+    RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD,
+    RAG_INGEST_FUZZY_SHINGLE_SIZE,
+    RAG_INGEST_FUZZY_NUM_HASHES,
+    RAG_INGESTION_BUILD_DOCUMENT_CARDS,
+    RAG_INGESTION_CARD_LLM_SUMMARY,
+    RAG_INGESTION_CARD_MAX_HEADINGS,
+    RAG_DOCUMENT_CARD_COLLECTION,
 )
-from src.core import LocalBGEEmbeddings
-from src.core import KnowledgeGraphBuilder
+from src.core.embeddings import LocalBGEEmbeddings
 from src.ingest.common.schemas import ProcessedChunk
 
 PIPELINE_NODE_NAMES = [
@@ -88,17 +109,14 @@ PIPELINE_NODE_NAMES = [
     "structure_detection",
     "multimodal_processing",
     "text_cleaning",
-    "document_refactoring",
     "chunking",
     "vlm_enrichment",
     "chunk_enrichment",
     "metadata_generation",
     "cross_reference_extraction",
-    "knowledge_graph_extraction",
     "quality_validation",
     "embedding_storage",
     "visual_embedding",
-    "knowledge_graph_storage",
 ]
 
 
@@ -126,6 +144,17 @@ class IngestionConfig:
     docling_artifacts_path: str = RAG_INGESTION_DOCLING_ARTIFACTS_PATH
     docling_strict: bool = RAG_INGESTION_DOCLING_STRICT
     docling_auto_download: bool = RAG_INGESTION_DOCLING_AUTO_DOWNLOAD
+    enable_ocr: bool = RAG_INGESTION_ENABLE_OCR
+    """Enable Docling OCR auto-trigger for image-only pages (RapidOCR with
+    force_full_page_ocr=False). Default: True. Env: RAG_INGESTION_ENABLE_OCR."""
+    ocr_engine: str = RAG_INGESTION_OCR_ENGINE
+    """OCR engine identifier (informational). Default: "rapidocr"."""
+    tableformer_mode: str = RAG_INGESTION_TABLEFORMER_MODE
+    """TableFormer mode: "accurate" (TF v2, default) or "fast" (TF v1).
+    Env: RAG_INGESTION_TABLEFORMER_MODE."""
+    tableformer_do_cell_matching: bool = RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING
+    """Match PDF text cells to detected table cells. Default: True.
+    Env: RAG_INGESTION_TABLEFORMER_DO_CELL_MATCHING."""
     semantic_chunking: bool = SEMANTIC_CHUNKING_ENABLED
     chunk_size: int = CHUNK_SIZE
     chunk_overlap: int = CHUNK_OVERLAP
@@ -145,18 +174,34 @@ class IngestionConfig:
     vision_api_base_url: str = RAG_INGESTION_VISION_API_BASE_URL
     vision_api_key: str = RAG_INGESTION_VISION_API_KEY
     vision_api_path: str = RAG_INGESTION_VISION_API_PATH
-    enable_document_refactoring: bool = RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING
     enable_cross_reference_extraction: bool = (
         RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION
     )
-    enable_knowledge_graph_extraction: bool = (
-        RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION
-    )
     enable_quality_validation: bool = RAG_INGESTION_ENABLE_QUALITY_VALIDATION
-    enable_knowledge_graph_storage: bool = RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE
-    min_chunk_chars: int = 40
-    min_quality_score: float = 0.45
-    build_kg: bool = True
+    verify_lossless: bool = RAG_INGESTION_VERIFY_LOSSLESS
+    """If True (default), the lossless_verification node checks that the emitted
+    chunks losslessly cover the golden source (parsed Docling markdown) via
+    content word-shingles. Warn-by-default. Env: RAG_INGESTION_VERIFY_LOSSLESS."""
+    lossless_min_coverage: float = RAG_INGESTION_LOSSLESS_MIN_COVERAGE
+    """Coverage floor [0..1] for lossless verification. Below it, the node warns
+    (or fails when strict). Env: RAG_INGESTION_LOSSLESS_MIN_COVERAGE (default 0.98)."""
+    lossless_strict: bool = RAG_INGESTION_LOSSLESS_STRICT
+    """If True, a coverage shortfall below ``lossless_min_coverage`` RAISES and
+    fails the document instead of merely warning. Env:
+    RAG_INGESTION_LOSSLESS_STRICT (default False)."""
+    enable_kg_phase2b: bool = RAG_INGESTION_ENABLE_KG_PHASE2B
+    """When True (production default), KG ingest is dispatched to the KGWeave
+    worker fleet via Temporal (KG_PHASE2B_ACTIVITY on KG_TASK_QUEUE). When
+    False, KG ingest is skipped entirely — kept as an opt-out for offline
+    CLI / bench runs that don't run a Temporal cluster.
+    Env var: RAG_INGESTION_ENABLE_KG_PHASE2B."""
+    native_min_chunk_chars: int = RAG_INGEST_NATIVE_MIN_CHUNK_CHARS
+    """Native (HybridChunker) min-chunk COALESCE floor in chars. After chunking,
+    DoclingParser.chunk() merges adjacent sub-floor chunk BODIES into the
+    neighbour sharing the longest heading-path prefix (same chapter/parent),
+    capped at ``chunk_size`` chars, preserving the host's breadcrumb/page/xref.
+    0 disables. Env: RAG_INGEST_NATIVE_MIN_CHUNK_CHARS (default 512). Distinct
+    from ``min_chunk_chars`` (post-coalesce DROP backstop, measured on body)."""
     export_processed: bool = False
     update_mode: bool = False
     verbose_stage_logs: bool = RAG_INGESTION_VERBOSE_STAGE_LOGS
@@ -173,6 +218,45 @@ class IngestionConfig:
     """VLM mode: "disabled" | "builtin" | "external". Default: "disabled"."""
     hybrid_chunker_max_tokens: int = RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
     """Max tokens per HybridChunker chunk. Default: 512 (bge-m3 limit)."""
+    hybrid_chunker_tokenizer_model: str | None = None
+    """HF tokenizer repo id (or local path) used by HybridChunker for token
+    counting. When None (default), the chunker resolves the tokenizer from
+    ``EMBEDDING_MODEL_PATH`` so token counts match what the embedder will
+    actually consume. Final fallback is ``BAAI/bge-m3``. Env-driven override
+    is intentionally not wired — set this on IngestionConfig directly when a
+    different tokenizer is desired."""
+    enable_adaptive_table_chunking: bool = RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING
+    """If True, ``DoclingParser.chunk()`` replaces the raw table-dominant chunk with
+    token-budget row-block chunks: each restates the header and packs as many whole
+    rows as fit ``hybrid_chunker_max_tokens`` — every row captured, no row/col gate,
+    no summary cap, no truncation. Env: RAG_INGESTION_ENABLE_ADAPTIVE_TABLE_CHUNKING
+    (default True)."""
+    table_embed_prepend_section_path: bool = RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH
+    """If True (default), prepend the heading breadcrumb to the EMBEDDED text of
+    table_row/figure chunks (mirrors prose contextualize()), so structured chunks
+    are not heading-blind at dense + rerank time. table_markdown metadata is
+    untouched. Env: RAG_INGESTION_TABLE_EMBED_PREPEND_SECTION_PATH."""
+    nav_classify: bool = RAG_INGESTION_NAV_CLASSIFY
+    """If True (default), TAG every chunk's retrieval role at ingest via the LLM
+    classifier (``src.ingest.common.role_classify``) and write it to
+    ``metadata["chunk_role"]`` — NOTHING is dropped. This replaces the legacy
+    regex DROP (``drop_navigational``), which is now reachable only as a
+    back-compat escape hatch when ``nav_classify`` is False AND
+    ``drop_navigational`` is True. Env: RAG_INGESTION_NAV_CLASSIFY."""
+    nav_role_default: str = RAG_NAV_ROLE_DEFAULT
+    """Role assigned to a chunk on ANY classifier failure/ambiguity (fail-open).
+    MUST be the answer-bearing role ("content") so a failure never silently drops
+    real content. Env: RAG_NAV_ROLE_DEFAULT."""
+    drop_navigational: bool = RAG_INGESTION_DROP_NAVIGATIONAL
+    """Legacy regex DROP of ToC/front-matter chunks at ingest (the shared
+    ``is_navigational`` predicate, with a per-document over-prune guard). Now an
+    OFF-by-default-effect escape hatch: it only fires when ``nav_classify`` is
+    False. When ``nav_classify`` is True the classifier TAGS instead (drops
+    nothing) and this flag is ignored. Env: RAG_INGESTION_DROP_NAVIGATIONAL.
+    Query-time role filter stays as defense-in-depth."""
+    nav_max_chars: int = RAG_INGESTION_NAV_MAX_CHARS
+    """Length cap for the front-matter pointer-phrase branch of the ingest-time
+    navigational test. Env: RAG_INGESTION_NAV_MAX_CHARS."""
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
     use_docling_chunker_for_markdown: bool = RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN
@@ -220,11 +304,11 @@ class IngestionConfig:
     """Enable cross-document chunk deduplication. Default: True. FR-3402, FR-3460."""
     enable_fuzzy_dedup: bool = False
     """Enable Tier 2 MinHash fuzzy dedup (requires enable_cross_document_dedup=True). Default: False. FR-3420."""
-    fuzzy_similarity_threshold: float = 0.95
+    fuzzy_similarity_threshold: float = RAG_INGEST_FUZZY_SIMILARITY_THRESHOLD
     """Jaccard similarity threshold for fuzzy match. Range: [0.0, 1.0]. Default: 0.95. FR-3422."""
-    fuzzy_shingle_size: int = 3
+    fuzzy_shingle_size: int = RAG_INGEST_FUZZY_SHINGLE_SIZE
     """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
-    fuzzy_num_hashes: int = 128
+    fuzzy_num_hashes: int = RAG_INGEST_FUZZY_NUM_HASHES
     """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
     dedup_override_sources: list[str] = field(default_factory=list)
     """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""
@@ -234,11 +318,41 @@ class IngestionConfig:
     """Parser selection: "auto" (extension-based routing), "document" (Docling),
     "code" (tree-sitter), "text" (PlainTextParser). Default: "auto". FR-3301.
     Env var: RAG_INGESTION_PARSER_STRATEGY"""
-    chunker: str = "native"
-    """Chunker selection: "native" (each parser's internal chunker) or
-    "markdown" (force heading-aware markdown splitting for all parsers).
-    Default: "native". FR-3320.
-    Env var: RAG_INGESTION_CHUNKER"""
+    chunker: str = RAG_INGESTION_CHUNKER
+    """Chunker selection: "native" (each parser's internal chunker), "markdown"
+    (force heading-aware markdown splitting for all parsers), or "legacy"
+    (pre-parser-abstraction MarkdownHeaderTextSplitter + semantic/char fallback
+    on cleaned_text — no table awareness or contextualize).
+    Default: from RAG_INGESTION_CHUNKER env (``"native"``). FR-3320."""
+
+    # -- Tree retrieval (TREE_RETRIEVAL_DESIGN.md §3, §5) --
+    enable_tree_retrieval_ingest: bool = False
+    """Emit section nodes (one per unique heading_path prefix) alongside leaf
+    chunks. When False (default), tree_node_synthesis is a no-op and only
+    `node_kind="chunk"` rows are produced. Mirrors RAG_TREE_RETRIEVAL_ENABLED."""
+    tree_section_text_max_chars: int = 1500
+    """Cap on assembled section-node text. Heading + truncated child snippets
+    are concatenated up to this size before embedding. Default: 1500."""
+    tree_section_child_snippet_chars: int = 200
+    """Per-child snippet size when assembling section text. Truncated head of
+    each direct child (or caption + first row for `chunk_type="table"`)."""
+
+    # -- Document cards (RAPTOR-lite routing, DOCUMENT_ROUTING_DESIGN.md §11) --
+    build_document_cards: bool = RAG_INGESTION_BUILD_DOCUMENT_CARDS
+    """When True, ingest emits one routing-only document card per document into
+    `card_collection`. When False (default), card emission is a no-op. Mirrors
+    RAG_INGESTION_BUILD_DOCUMENT_CARDS."""
+    card_llm_summary: bool = RAG_INGESTION_CARD_LLM_SUMMARY
+    """When True, the card text includes an LLM-generated summary. When False
+    (default), card text is title + section headings only (no LLM call).
+    Mirrors RAG_INGESTION_CARD_LLM_SUMMARY."""
+    card_max_headings: int = RAG_INGESTION_CARD_MAX_HEADINGS
+    """Cap on the number of section headings included in a card; guards against
+    xlsx-style documents with hundreds of header rows (§11). Default: 60.
+    Mirrors RAG_INGESTION_CARD_MAX_HEADINGS."""
+    card_collection: str = RAG_DOCUMENT_CARD_COLLECTION
+    """Vector collection for routing-only document cards (NEVER sent to the
+    LLM). Default: "RAGDocumentCards". Mirrors RAG_DOCUMENT_CARD_COLLECTION."""
 
     @property
     def generate_page_images(self) -> bool:
@@ -321,7 +435,6 @@ class Runtime:
         config: Effective ingestion configuration.
         embedder: Embedding model wrapper used by storage stages.
         weaviate_client: Client used for vector and (optionally) metadata storage.
-        kg_builder: Optional knowledge graph builder used by KG stages.
         db_client: Optional database client for metadata storage.
         parser_registry: Optional ParserRegistry instance. Typed as Any to avoid
             a circular import between types.py and parser_registry.py. Populated
@@ -330,7 +443,6 @@ class Runtime:
     config: IngestionConfig
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
-    kg_builder: Optional[KnowledgeGraphBuilder]
     db_client: Optional[Any] = None
     parser_registry: Optional[Any] = None  # ParserRegistry; typed Any to avoid circular import
 

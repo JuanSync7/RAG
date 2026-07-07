@@ -9,12 +9,111 @@ import pytest
 
 from src.ingest.support.markdown import (
     _build_section_metadata,
+    _embeddings_are_unusable,
     _semantic_split,
     _split_sentences,
     chunk_markdown,
     normalize_headings_to_markdown,
     process_document_markdown,
 )
+
+
+# ---------------------------------------------------------------------------
+# Defensive semantic-split guard against pathological embedder outputs.
+#
+# Regression for an ingest-blocking crash where TEI bge-m3 ONNX returned
+# embeddings whose components were all ``null`` in JSON, decoded back to a
+# Python list of ``None`` values. ``np.dot`` on those rows then raised
+# ``TypeError: unsupported operand type(s) for *: 'NoneType' and 'NoneType'``
+# inside ``_semantic_split``, which short-circuited the entire chunking
+# stage with ``errors=["chunking:unsupported operand type(s) ..."]`` and
+# zero stored chunks. The fix detects unusable rows at the chunker boundary
+# and falls back to plain sentences so the rest of the pipeline still runs.
+# ---------------------------------------------------------------------------
+
+
+class _AllNoneEmbedder:
+    """Embedder shim that returns rows of ``None`` — mirrors the TEI bge-m3
+    failure mode that surfaced the live e2e ingest crash."""
+
+    def encode_sentences(self, sentences):
+        return np.array([[None] * 8 for _ in sentences], dtype=object)
+
+
+class _AllNaNEmbedder:
+    """Embedder shim that returns rows of NaN — same defective shape as the
+    JSON-null case, but typed as float."""
+
+    def encode_sentences(self, sentences):
+        return np.array([[float("nan")] * 8 for _ in sentences])
+
+
+class _HealthyEmbedder:
+    """Tiny deterministic embedder used to confirm the happy path still cuts
+    on similarity drops."""
+
+    def encode_sentences(self, sentences):
+        # Two anti-parallel unit vectors and two parallel ones — any drop
+        # below the default threshold causes a split.
+        seeds = [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+        ]
+        return np.array(seeds[: len(sentences)])
+
+
+def test_embeddings_are_unusable_detects_none():
+    assert _embeddings_are_unusable(None) is True
+
+
+def test_embeddings_are_unusable_detects_empty():
+    assert _embeddings_are_unusable([]) is True
+    assert _embeddings_are_unusable(np.array([])) is True
+
+
+def test_embeddings_are_unusable_detects_all_none_row():
+    arr = np.array([[None] * 4, [None] * 4], dtype=object)
+    assert _embeddings_are_unusable(arr) is True
+
+
+def test_embeddings_are_unusable_detects_all_nan_row():
+    arr = np.array([[float("nan")] * 4])
+    assert _embeddings_are_unusable(arr) is True
+
+
+def test_embeddings_are_unusable_accepts_finite_rows():
+    arr = np.array([[1.0, 0.0], [0.0, 1.0]])
+    assert _embeddings_are_unusable(arr) is False
+
+
+def test_semantic_split_falls_back_when_embedder_returns_none_rows():
+    """Live-blocker regression: TEI bge-m3 ONNX null vectors must NOT crash
+    the chunker. Expected behaviour: graceful fallback to plain sentences."""
+    text = "Hello world. This is a test. Final sentence."
+    # min_chars=0 disables the small-segment coalescing pass so we test the raw
+    # fallback (coalescing is covered by tests/ingest/test_chunk_coalesce.py).
+    result = _semantic_split(text, _AllNoneEmbedder(), min_chars=0)
+    # Falls back to plain sentence list, not a TypeError.
+    assert isinstance(result, list)
+    assert len(result) >= 2
+    assert all(isinstance(s, str) for s in result)
+
+
+def test_semantic_split_falls_back_when_embedder_returns_nan_rows():
+    text = "Hello world. This is a test. Final sentence."
+    result = _semantic_split(text, _AllNaNEmbedder(), min_chars=0)
+    assert isinstance(result, list)
+    assert len(result) >= 2
+
+
+def test_semantic_split_still_splits_on_healthy_embedder():
+    text = "Alpha sentence. Beta sentence. Gamma sentence. Delta sentence."
+    result = _semantic_split(text, _HealthyEmbedder(), threshold=0.5, min_chars=0)
+    # Healthy path: anti-parallel rows force at least one split.
+    assert isinstance(result, list)
+    assert len(result) >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +297,7 @@ def test_mock_semantic_split_groups_similar_sentences():
     v3 = np.array([0.0, 0.0, 1.0])    # very different from v2
     mock_embedder.encode_sentences.return_value = np.array([v1, v2, v3])
 
-    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5)
+    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5, min_chars=0)
     # sim(v1, v2) ≈ 0.99 (above threshold) → group
     # sim(v2, v3) ≈ 0.0 (below threshold) → split
     assert len(result) == 2
@@ -214,7 +313,7 @@ def test_mock_semantic_split_splits_all_dissimilar():
     v3 = np.array([0.0, 0.0, 1.0])
     mock_embedder.encode_sentences.return_value = np.array([v1, v2, v3])
 
-    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5)
+    result = _semantic_split(text, embedder=mock_embedder, threshold=0.5, min_chars=0)
     assert len(result) == 3
 
 

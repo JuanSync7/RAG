@@ -1,8 +1,8 @@
 // src/dom.ts
 var byId = (id) => {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing required element #${id}`);
-  return el;
+  const el2 = document.getElementById(id);
+  if (!el2) throw new Error(`Missing required element #${id}`);
+  return el2;
 };
 function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/\//g, "&#x2F;");
@@ -98,6 +98,19 @@ function initToast() {
       showToast("Code copied");
     }
   });
+}
+
+// src/format.ts
+function pct(score) {
+  const v = typeof score === "number" && Number.isFinite(score) ? score : 0;
+  return Math.max(0, Math.min(100, Math.round(v * 100)));
+}
+function fmtSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 // src/markdown.ts
@@ -262,6 +275,8 @@ async function api(method, path, body) {
 // src/chatMode.ts
 var STORAGE_KEY = "rw_chat_mode";
 var SUBMODE_STORAGE_KEY = "rw_retrieval_submode";
+var DEEP_RESEARCH_STORAGE_KEY = "rw_deep_research";
+var TURN_LOOP_STORAGE_KEY = "rw_turn_loop";
 var RAIL_COLLAPSED_KEY = "rw_chat_rail_collapsed";
 var TOPK_STORAGE_KEY = "rw_sources_top_k";
 var DEFAULT_TOPK = 5;
@@ -296,6 +311,95 @@ function setRetrievalSubMode(sub) {
   _subMode = sub;
   localStorage.setItem(SUBMODE_STORAGE_KEY, sub);
   syncSubmodeUI();
+}
+var _deepResearch = localStorage.getItem(DEEP_RESEARCH_STORAGE_KEY) === "1";
+function getDeepResearch() {
+  return _deepResearch;
+}
+function setDeepResearch(enabled) {
+  _deepResearch = enabled;
+  localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY, enabled ? "1" : "0");
+  if (enabled && _turnLoop) setTurnLoop(false);
+  syncDeepResearchUI();
+}
+function syncDeepResearchUI() {
+  const btn = document.getElementById("chatDeepResearch");
+  if (btn) {
+    btn.setAttribute("aria-pressed", _deepResearch ? "true" : "false");
+    btn.classList.toggle("active", _deepResearch);
+  }
+}
+var _turnLoop = localStorage.getItem(TURN_LOOP_STORAGE_KEY) === "1";
+function getTurnLoop() {
+  return _turnLoop;
+}
+function setTurnLoop(enabled) {
+  _turnLoop = enabled;
+  localStorage.setItem(TURN_LOOP_STORAGE_KEY, enabled ? "1" : "0");
+  if (enabled && _deepResearch) setDeepResearch(false);
+  syncTurnLoopUI();
+}
+function syncTurnLoopUI() {
+  const btn = document.getElementById("chatTurnLoop");
+  if (btn) {
+    btn.setAttribute("aria-pressed", _turnLoop ? "true" : "false");
+    btn.classList.toggle("active", _turnLoop);
+  }
+}
+var _lastSuggestedQuery = "";
+var _resubmit = null;
+function registerQueryResubmit(fn) {
+  _resubmit = fn;
+}
+function resubmitQuery(text) {
+  const q = text.trim();
+  if (q && _resubmit) void _resubmit(q);
+}
+function showDrSuggestionChip(forQuery) {
+  if (_deepResearch) return;
+  const chip = document.getElementById("drSuggestChip");
+  if (!chip) return;
+  _lastSuggestedQuery = forQuery;
+  chip.removeAttribute("hidden");
+}
+function hideDrSuggestionChip() {
+  const chip = document.getElementById("drSuggestChip");
+  if (!chip) return;
+  chip.setAttribute("hidden", "");
+}
+function initDrSuggestionChip() {
+  const chip = document.getElementById("drSuggestChip");
+  if (!chip) return;
+  chip.addEventListener("click", () => {
+    const q = _lastSuggestedQuery.trim();
+    hideDrSuggestionChip();
+    setDeepResearch(true);
+    resubmitQuery(q);
+  });
+}
+function renderFollowUps(bubbleWrap, questions) {
+  if (!bubbleWrap) return;
+  bubbleWrap.querySelector(".followup-block")?.remove();
+  const qs = (questions || []).map((q) => (q || "").trim()).filter(Boolean).slice(0, 5);
+  if (!qs.length) return;
+  const block = document.createElement("div");
+  block.className = "followup-block";
+  const label = document.createElement("div");
+  label.className = "followup-label";
+  label.textContent = "You might also ask:";
+  block.appendChild(label);
+  for (const q of qs) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "followup-q";
+    item.textContent = q;
+    item.addEventListener("click", () => {
+      if (_resubmit) void _resubmit(q);
+    });
+    block.appendChild(item);
+  }
+  const bubble = bubbleWrap.querySelector(".bubble");
+  bubbleWrap.insertBefore(block, bubble ? bubble.nextSibling : null);
 }
 function syncSubmodeUI() {
   const hardBtn = document.getElementById("chatSubmodeHard");
@@ -360,10 +464,21 @@ function initChatMode() {
       });
     });
   }
+  const drBtn = document.getElementById("chatDeepResearch");
+  if (drBtn) {
+    drBtn.addEventListener("click", () => setDeepResearch(!_deepResearch));
+  }
+  const tlBtn = document.getElementById("chatTurnLoop");
+  if (tlBtn) {
+    tlBtn.addEventListener("click", () => setTurnLoop(!_turnLoop));
+  }
+  initDrSuggestionChip();
   initRailCollapse();
   initTopKInput();
   syncToggleUI();
   syncSubmodeUI();
+  syncDeepResearchUI();
+  syncTurnLoopUI();
   applyModeToView();
   renderRail();
   document.addEventListener("conversation-changed", () => {
@@ -457,7 +572,7 @@ function appendSourcesTurn(thread, sources) {
   return group;
 }
 function renderCardHtml(d) {
-  const score = Math.round(d.bestScore * 100);
+  const score = pct(d.bestScore);
   const chunkCount = d.refs.length;
   const synthetic = d.docKey.startsWith("__synth_");
   const viewBtn = !synthetic ? `<a href="#" class="sources-card-view" data-doc-key="${escHtml(d.docKey)}">[view]</a>` : "";
@@ -469,7 +584,7 @@ function renderCardHtml(d) {
   const hideLabel = isHidden ? "Hidden" : "Hide";
   const orderedRefs = [...d.refs].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const chunksHtml = orderedRefs.map((ref, idx) => {
-    const refScore = Math.round((ref.score ?? 0) * 100);
+    const refScore = pct(ref.score);
     const text = ref.text ?? "";
     const sectionLabel = ref.section ? escHtml(String(ref.section)) : "";
     const sectionHtml = sectionLabel ? `<span class="sources-chunk-section">${sectionLabel}</span>` : "";
@@ -774,11 +889,36 @@ function isSourcesTurn(turn) {
   return !turn.content.trim() && !!turn.sources && turn.sources.length > 0;
 }
 
-// src/citations.ts
-async function openSourceDocument(payload) {
-  const url = apiBase() + "/console/source-document/view";
+// src/docViewer.ts
+var _blobUrl = null;
+function _revoke() {
+  if (_blobUrl) {
+    URL.revokeObjectURL(_blobUrl);
+    _blobUrl = null;
+  }
+}
+function _panel() {
+  return byId("docViewer");
+}
+function _chatBody() {
+  return document.querySelector(".chat-body");
+}
+function _titleFor(p) {
+  const raw = String(p.source ?? p.source_uri ?? p.source_key ?? "").trim();
+  if (!raw) return "Source document";
+  return raw.split(/[\\/]/).pop() || raw;
+}
+async function openDocViewer(payload) {
+  const panel = _panel();
+  const frame = byId("docViewerFrame");
+  const status = byId("docViewerStatus");
+  byId("docViewerTitle").textContent = _titleFor(payload);
+  panel.classList.remove("is-loaded", "is-error");
+  status.textContent = "Loading\u2026";
+  panel.setAttribute("aria-hidden", "false");
+  _chatBody()?.classList.add("doc-open");
   try {
-    const res = await fetch(url, {
+    const res = await fetch(apiBase() + "/console/source-document/view", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify(payload)
@@ -787,29 +927,52 @@ async function openSourceDocument(payload) {
     const contentType = (res.headers.get("Content-Type") ?? "text/html").split(";")[0].trim();
     const buf = await res.arrayBuffer();
     const blob = new Blob([buf], { type: contentType });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank");
-    if (!win) {
-      showToast("Pop-up blocked. Allow pop-ups to view sources.");
-      URL.revokeObjectURL(blobUrl);
-      return;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 6e4);
+    _revoke();
+    _blobUrl = URL.createObjectURL(blob);
+    frame.src = _blobUrl;
+    byId("docViewerPopout").href = _blobUrl;
+    panel.classList.add("is-loaded");
   } catch (err) {
-    showToast("Could not open source: " + String(err));
+    panel.classList.add("is-error");
+    status.textContent = "Could not open source: " + String(err);
+    showToast("Could not open source document");
   }
+}
+function closeDocViewer() {
+  const panel = _panel();
+  _chatBody()?.classList.remove("doc-open");
+  panel.setAttribute("aria-hidden", "true");
+  byId("docViewerFrame").removeAttribute("src");
+  panel.classList.remove("is-loaded", "is-error");
+}
+function initDocViewer() {
+  byId("docViewerClose").addEventListener("click", closeDocViewer);
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape" && _panel().getAttribute("aria-hidden") === "false") {
+      closeDocViewer();
+    }
+  });
+}
+
+// src/citations.ts
+async function openSourceDocument(payload) {
+  await openDocViewer(payload);
 }
 var _viewPayloads = /* @__PURE__ */ new Map();
 var _viewCounter = 0;
-function buildCitationsHtml(results) {
+function clearViewPayloads() {
+  _viewPayloads.clear();
+}
+function buildCitationsHtml(results, answerText) {
   if (!results.length) return "";
-  let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
-  results.forEach((r, i) => {
+  const citedNums = parseCitedNums(results, answerText);
+  const renderCard = (r, n) => {
     const meta = r.metadata || {};
     const filenameRaw = String(meta.source ?? meta.filename ?? "Unknown source");
     const filename = escHtml(filenameRaw);
     const section = escHtml(String(meta.section ?? meta.heading ?? ""));
-    const score = Math.round(r.score * 100);
+    const score = pct(r.score);
     const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
     const chunkHtml = parseMarkdown(r.text || "");
     const sourceUri = String(meta.source_uri ?? "").trim();
@@ -818,24 +981,11 @@ function buildCitationsHtml(results) {
     const docKey = docKeyFromMeta(meta);
     const cardAttrs = docKey ? ` data-doc-key="${escHtml(docKey)}" data-doc-name="${escHtml(filenameRaw)}"` + (source ? ` data-source="${escHtml(source)}"` : "") + (sourceUri ? ` data-source-uri="${escHtml(sourceUri)}"` : "") + (sourceKey ? ` data-source-key="${escHtml(sourceKey)}"` : "") : "";
     const actionsHtml = docKey ? `<div class="citation-card-actions" onclick="event.stopPropagation()"><button class="citation-card-action" data-action="relevant">Mark relevant</button><button class="citation-card-action" data-action="hide">Hide</button><button class="citation-card-action" data-action="reset" disabled>Reset</button></div>` : "";
-    let viewKey = "";
-    if (sourceKey || sourceUri || source) {
-      viewKey = `view-${++_viewCounter}`;
-      _viewPayloads.set(viewKey, {
-        source: source || void 0,
-        source_uri: sourceUri || void 0,
-        source_key: sourceKey || void 0,
-        chunk_text: r.text || void 0,
-        original_start: numOrUndef(meta.original_char_start),
-        original_end: numOrUndef(meta.original_char_end),
-        refactored_start: numOrUndef(meta.refactored_char_start),
-        refactored_end: numOrUndef(meta.refactored_char_end),
-        provenance_confidence: numOrUndef(meta.provenance_confidence)
-      });
-    }
-    html += `
+    const viewKey = registerViewPayload(r);
+    return `
           <div class="citation-card"${cardAttrs} onclick="toggleCitation(this)">
             <div class="citation-header">
+              <span class="citation-num">[${n}]</span>
               <span class="citation-icon">&#128196;</span>
               <div class="citation-info">
                 <div class="citation-filename"><span class="citation-name">${filename}</span>${viewKey ? `<a href="#" class="citation-view" onclick="event.stopPropagation();openSourceView(event,'${viewKey}')">[view]</a>` : ""}</div>
@@ -852,12 +1002,92 @@ function buildCitationsHtml(results) {
               ${actionsHtml}
             </div>
           </div>`;
+  };
+  const cited = [];
+  const uncited = [];
+  results.forEach((r, i) => {
+    const n = i + 1;
+    (citedNums.has(n) ? cited : uncited).push(renderCard(r, n));
   });
+  if (!cited.length) {
+    const label = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} retrieved</div>`;
+    return label + uncited.join("");
+  }
+  let html = `<div class="citation-label">&#128206; ${cited.length} source${cited.length > 1 ? "s" : ""} cited</div>`;
+  html += cited.join("");
+  if (uncited.length) {
+    html += `
+          <details class="citations-more">
+            <summary class="citations-more-summary">Show ${uncited.length} more retrieved source${uncited.length > 1 ? "s" : ""} (not cited)</summary>
+            <div class="citations-more-body">${uncited.join("")}</div>
+          </details>`;
+  }
   return html;
 }
 function numOrUndef(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
+}
+function registerViewPayload(r) {
+  const meta = r.metadata || {};
+  const source = String(meta.source ?? "").trim();
+  const sourceUri = String(meta.source_uri ?? "").trim();
+  const sourceKey = String(meta.source_key ?? "").trim();
+  if (!(source || sourceUri || sourceKey)) return "";
+  const viewKey = `view-${++_viewCounter}`;
+  _viewPayloads.set(viewKey, {
+    source: source || void 0,
+    source_uri: sourceUri || void 0,
+    source_key: sourceKey || void 0,
+    chunk_text: r.text || void 0,
+    original_start: numOrUndef(meta.original_char_start),
+    original_end: numOrUndef(meta.original_char_end),
+    refactored_start: numOrUndef(meta.refactored_char_start),
+    refactored_end: numOrUndef(meta.refactored_char_end),
+    provenance_confidence: numOrUndef(meta.provenance_confidence)
+  });
+  return viewKey;
+}
+function parseCitedNums(results, answerText) {
+  const citedNums = /* @__PURE__ */ new Set();
+  if (answerText) {
+    const re = /\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(answerText)) !== null) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= results.length) citedNums.add(n);
+    }
+  }
+  return citedNums;
+}
+function buildSourcesLineHtml(results, answerText) {
+  if (!results.length) return "";
+  return sourcesUsedHtml(sourcesUsed(results, parseCitedNums(results, answerText)));
+}
+function sourcesUsed(results, citedNums) {
+  const pick = citedNums.size ? results.filter((_, i) => citedNums.has(i + 1)) : results;
+  const seen = /* @__PURE__ */ new Set();
+  const docs = [];
+  for (const r of pick) {
+    const meta = r.metadata || {};
+    const raw = String(meta.source ?? meta.filename ?? "").trim();
+    if (!raw) continue;
+    const name = raw.split("/").pop() || raw;
+    if (!seen.has(name)) {
+      seen.add(name);
+      docs.push({ name, result: r });
+    }
+  }
+  return docs;
+}
+function sourcesUsedHtml(docs) {
+  if (!docs.length) return "";
+  const list = docs.map((d) => {
+    const label = escHtml(d.name);
+    const viewKey = registerViewPayload(d.result);
+    return viewKey ? `<a href="#" class="sources-used-doc" onclick="event.preventDefault();openSourceView(event,'${viewKey}')">${label}</a>` : `<span class="sources-used-doc">${label}</span>`;
+  }).join(", ");
+  return `<div class="sources-used"><span class="sources-used-label">Sources:</span> ${list}</div>`;
 }
 async function openSourceView(e, viewKey) {
   e.preventDefault();
@@ -900,16 +1130,16 @@ function updateContextIndicator(tb, stats) {
   const total = Number(tb?.context_length ?? 0);
   const reserved = Number(tb?.output_reservation ?? 0);
   const pctRaw = Number(tb?.usage_percent ?? 0);
-  const pct = pctRaw > 1.5 ? pctRaw : pctRaw * 100;
-  byId("ctxBarFill").style.width = Math.min(pct, 100) + "%";
+  const pct2 = pctRaw > 1.5 ? pctRaw : pctRaw * 100;
+  byId("ctxBarFill").style.width = Math.min(pct2, 100) + "%";
   if (total > 0) {
     byId("ctxPct").textContent = `${fmtTokens(used)} / ${fmtTokens(total)}`;
   } else {
-    byId("ctxPct").textContent = pct > 0 ? "~" + Math.round(pct) + "%" : "\u2014";
+    byId("ctxPct").textContent = pct2 > 0 ? "~" + Math.round(pct2) + "%" : "\u2014";
   }
   chip.classList.remove("warn", "crit");
-  if (pct >= 85) chip.classList.add("crit");
-  else if (pct >= 60) chip.classList.add("warn");
+  if (pct2 >= 85) chip.classList.add("crit");
+  else if (pct2 >= 60) chip.classList.add("warn");
   byId("ttModel").textContent = String(tb?.model_name || "\u2014");
   byId("ttUsed").textContent = total > 0 ? `${fmtTokens(used)} / ${fmtTokens(total)} tok` : `${fmtTokens(used)} tok`;
   byId("ttReserved").textContent = reserved > 0 ? `${fmtTokens(reserved)} tok` : "\u2014";
@@ -925,7 +1155,7 @@ function updateContextIndicator(tb, stats) {
       costRow.style.display = "none";
     }
   }
-  byId("ctxCompactBtn").style.display = pct >= 60 ? "block" : "none";
+  byId("ctxCompactBtn").style.display = pct2 >= 60 ? "block" : "none";
 }
 function clearLastTurnStats() {
   byId("ttPrompt").textContent = "\u2014";
@@ -974,12 +1204,12 @@ function showPanel(panelId) {
   );
   if (panelId) document.getElementById(panelId)?.classList.add("active");
 }
-function setNavActive(el) {
+function setNavActive(el2) {
   document.querySelectorAll(".sidebar-nav-item").forEach(
     (n) => n.classList.remove("active")
   );
-  el.classList.add("active");
-  if (!refs.sidebar.classList.contains("collapsed")) showPanel(el.dataset.panel);
+  el2.classList.add("active");
+  if (!refs.sidebar.classList.contains("collapsed")) showPanel(el2.dataset.panel);
   if (!isDesktop()) closeSidebar();
 }
 function toggleSidebarCollapse() {
@@ -1055,8 +1285,8 @@ var mq = window.matchMedia("(prefers-color-scheme: light)");
 function applyThemeToDOM(val) {
   const resolved = val === "system" ? mq.matches ? "light" : "dark" : val;
   document.documentElement.dataset.theme = resolved;
-  document.querySelectorAll(".theme-opt").forEach((el) => {
-    el.classList.toggle("active", el.dataset.themeVal === val);
+  document.querySelectorAll(".theme-opt").forEach((el2) => {
+    el2.classList.toggle("active", el2.dataset.themeVal === val);
   });
 }
 function setTheme(val) {
@@ -1094,7 +1324,8 @@ function saveSettings() {
     rerankTopK: byId("rerankTopK").value,
     streaming: byId("streamingToggle").checked,
     memory_enabled: byId("memoryToggle").checked,
-    citations: byId("citationsToggle").checked
+    citations: byId("citationsToggle").checked,
+    tree_retrieval: byId("treeRetrievalToggle").checked
   };
   localStorage.setItem("nc_settings", JSON.stringify(s));
   closeSettings();
@@ -1116,6 +1347,7 @@ function loadSettings() {
   if (s.streaming !== void 0) byId("streamingToggle").checked = s.streaming;
   if (s.memory_enabled !== void 0) byId("memoryToggle").checked = s.memory_enabled;
   if (s.citations !== void 0) byId("citationsToggle").checked = s.citations;
+  if (s.tree_retrieval !== void 0) byId("treeRetrievalToggle").checked = s.tree_retrieval;
 }
 function resetSettings() {
   localStorage.removeItem("nc_settings");
@@ -1126,14 +1358,15 @@ function resetSettings() {
   byId("streamingToggle").checked = true;
   byId("memoryToggle").checked = true;
   byId("citationsToggle").checked = true;
+  byId("treeRetrievalToggle").checked = false;
   showToast("Settings reset to defaults");
 }
 function initSettings() {
   mq.addEventListener("change", () => {
     if (localStorage.getItem("nc_theme") === "system") applyThemeToDOM("system");
   });
-  document.querySelectorAll(".theme-opt").forEach((el) => {
-    el.addEventListener("click", () => setTheme(el.dataset.themeVal || "dark"));
+  document.querySelectorAll(".theme-opt").forEach((el2) => {
+    el2.addEventListener("click", () => setTheme(el2.dataset.themeVal || "dark"));
   });
   document.getElementById("presetSelect")?.addEventListener("change", (e) => {
     applyPreset(e.target.value);
@@ -1155,8 +1388,8 @@ function initSettings() {
 
 // src/thread.ts
 function setEmptyState(visible) {
-  const el = document.getElementById("threadEmpty");
-  if (el) el.style.display = visible ? "" : "none";
+  const el2 = document.getElementById("threadEmpty");
+  if (el2) el2.style.display = visible ? "" : "none";
 }
 function appendUserMsg(text) {
   setEmptyState(false);
@@ -1169,11 +1402,15 @@ function appendUserMsg(text) {
           <div class="bubble-wrap">
             <div class="bubble">${escHtml(text)}</div>
             <div class="msg-actions">
-              <button class="msg-action-btn" onclick="copyMsg(this,'${escHtml(text)}')" >&#128203; Copy</button>
+              <button class="msg-action-btn">&#128203; Copy</button>
             </div>
             <div class="msg-meta">${ts}</div>
           </div>
         </div>`;
+  const copyBtn = group.querySelector(".msg-action-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => copyMsg(copyBtn, text));
+  }
   refs.thread.appendChild(group);
   scrollToBottom();
   return group;
@@ -1219,17 +1456,17 @@ function appendPendingAssistant() {
   return { group, bubbleEl, typingEl, citationsEl, actionsEl, metaEl, fbUpBtn, fbDownBtn };
 }
 function appendSystemMsg(text) {
-  const div = document.createElement("div");
-  div.className = "msg-group";
-  div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${parseMarkdown(text)}</div></div></div>`;
-  refs.thread.appendChild(div);
+  const div2 = document.createElement("div");
+  div2.className = "msg-group";
+  div2.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${parseMarkdown(text)}</div></div></div>`;
+  refs.thread.appendChild(div2);
   scrollToBottom();
 }
 function appendErrorMsg(text) {
-  const div = document.createElement("div");
-  div.className = "msg-group";
-  div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">!</div><div class="bubble-wrap"><div class="bubble error-bubble">&#9888; ${escHtml(text)}</div></div></div>`;
-  refs.thread.appendChild(div);
+  const div2 = document.createElement("div");
+  div2.className = "msg-group";
+  div2.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">!</div><div class="bubble-wrap"><div class="bubble error-bubble">&#9888; ${escHtml(text)}</div></div></div>`;
+  refs.thread.appendChild(div2);
   scrollToBottom();
 }
 
@@ -1279,14 +1516,14 @@ function renderConversationList(convs) {
     });
   }
   container.innerHTML = html;
-  container.querySelectorAll(".conv-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      const id = el.dataset.convId;
+  container.querySelectorAll(".conv-item").forEach((el2) => {
+    el2.addEventListener("click", () => {
+      const id = el2.dataset.convId;
       if (id) void selectConversation(id);
     });
-    el.addEventListener("contextmenu", (e) => {
+    el2.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const id = el.dataset.convId;
+      const id = el2.dataset.convId;
       if (!id) return;
       const conv = convs.find((c) => c.conversation_id === id);
       showConvCtxMenu(e.clientX, e.clientY, id, conv?.title || "");
@@ -1316,8 +1553,8 @@ async function selectConversation(id) {
     state.isStreaming = false;
   }
   setActiveConversation(id);
-  byId("convList").querySelectorAll(".conv-item").forEach((el) => {
-    el.classList.toggle("active", el.dataset.convId === id);
+  byId("convList").querySelectorAll(".conv-item").forEach((el2) => {
+    el2.classList.toggle("active", el2.dataset.convId === id);
   });
   await loadConversationHistory(id);
 }
@@ -1326,6 +1563,7 @@ async function loadConversationHistory(id) {
   if (!convId) return;
   try {
     const data = await api("GET", `/console/conversations/${convId}/history?limit=100`);
+    clearViewPayloads();
     refs.thread.innerHTML = "";
     if (!data.turns || !data.turns.length) {
       refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">Empty conversation</div><div class="thread-empty-sub">Send a message to start the conversation.</div></div>`;
@@ -1344,12 +1582,12 @@ async function loadConversationHistory(id) {
         const ts = fmtTime(turn.timestamp_ms ?? Date.now());
         const sources = turn.sources ?? [];
         if (sources.length) cacheDocsFromSources(sources);
-        const citationsHtml = sources.length ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>` : "";
+        const citationsHtml = sources.length ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult), turn.content)}</div>` : "";
         group.innerHTML = `
                     <div class="msg-row assistant">
                       <div class="avatar ai-av">AI</div>
                       <div class="bubble-wrap">
-                        <div class="bubble">${parseMarkdown(turn.content)}</div>
+                        <div class="bubble">${parseMarkdown(turn.content)}${sources.length ? buildSourcesLineHtml(sources.map(sourceRefToChunkResult), turn.content) : ""}</div>
                         ${citationsHtml}
                         <div class="msg-actions">
                           <button class="msg-action-btn">&#128203; Copy</button>
@@ -1379,10 +1617,11 @@ async function loadConversationHistory(id) {
 }
 function createNewConversation() {
   setActiveConversation(null);
+  clearViewPayloads();
   refs.thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
   byId("convTitle").textContent = "New conversation";
-  byId("convList").querySelectorAll(".conv-item").forEach((el) => {
-    el.classList.remove("active");
+  byId("convList").querySelectorAll(".conv-item").forEach((el2) => {
+    el2.classList.remove("active");
   });
   const input = document.getElementById("msgInput");
   if (input) input.focus();
@@ -1609,6 +1848,349 @@ function attachFeedback(upBtn, downBtn, ctx) {
   downBtn.addEventListener("click", onClick("down"));
 }
 
+// src/activityLog.ts
+var TURN_LOOP_EVENT_NAMES = /* @__PURE__ */ new Set([
+  "turn_action",
+  "hyde_query",
+  "retrieve_result",
+  "judge_verdict",
+  "deep_study",
+  "llm_call",
+  "draft",
+  "gate",
+  "clarify"
+]);
+function isTurnLoopEvent(eventType) {
+  return TURN_LOOP_EVENT_NAMES.has(eventType);
+}
+var HYDE_OPEN_MAX_CHARS = 280;
+function asStr(value) {
+  if (value === null || value === void 0) return "";
+  return typeof value === "string" ? value : String(value);
+}
+function asNum(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function asStrList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(asStr).filter((s) => s.trim().length > 0);
+}
+function fmtScore(value) {
+  const n = asNum(value);
+  return n === null ? "?" : n.toFixed(2);
+}
+function div(className, text) {
+  const el2 = document.createElement("div");
+  el2.className = className;
+  if (text !== void 0) el2.textContent = text;
+  return el2;
+}
+function createActivityLog() {
+  const root = document.createElement("details");
+  root.className = "activity-log";
+  root.open = true;
+  const summary = document.createElement("summary");
+  summary.className = "activity-summary";
+  summary.textContent = "Activity\u2026";
+  root.appendChild(summary);
+  const body = div("activity-body");
+  root.appendChild(body);
+  const startedAt = performance.now();
+  let events = 0;
+  let draftAttempt = null;
+  let draftText = "";
+  let draftLabelEl = null;
+  let draftTextEl = null;
+  const addLine = (className, text) => {
+    const el2 = div(className, text);
+    body.appendChild(el2);
+    return el2;
+  };
+  const renderTurnAction = (data) => {
+    const index = asNum(data.index);
+    const action = asStr(data.action).trim() || "?";
+    const reason = asStr(data.reason).trim();
+    const conf = asNum(data.confidence);
+    let text = `${index === null ? "#?" : `#${index}`} ${action}`;
+    if (reason) text += ` \u2014 ${reason}`;
+    if (conf !== null) text += ` \xB7 conf ${fmtScore(conf)}`;
+    addLine("activity-line activity-action", text);
+  };
+  const renderHydeQuery = (data) => {
+    const hypothetical = asStr(data.hypothetical_answer);
+    const round = asNum(data.round);
+    const aspect = asStr(data.target_aspect).trim();
+    const block = document.createElement("details");
+    block.className = "activity-hyde";
+    block.open = hypothetical.length <= HYDE_OPEN_MAX_CHARS;
+    const label = document.createElement("summary");
+    label.className = "activity-hyde-summary";
+    label.textContent = `HyDE hypothetical${round === null ? "" : ` \u2014 round ${round}`}` + (aspect ? ` \xB7 aspect: ${aspect}` : "");
+    block.appendChild(label);
+    block.appendChild(div("activity-hyde-text", hypothetical));
+    const terms = asStrList(data.search_terms);
+    if (terms.length) {
+      block.appendChild(div("activity-line dim", `search terms: ${terms.join(", ")}`));
+    }
+    body.appendChild(block);
+  };
+  const renderRetrieveResult = (data) => {
+    const added = asNum(data.added) ?? 0;
+    const dup = asNum(data.dup);
+    const pool = asNum(data.pool_size);
+    let text = `+${added} new`;
+    if (pool !== null) text += ` (pool ${pool})`;
+    if (dup !== null && dup > 0) text += `, ${dup} dup`;
+    const top = Array.isArray(data.top) ? data.top[0] : void 0;
+    if (top && typeof top === "object") {
+      const doc = asStr(top.doc).trim();
+      const heading = asStr(top.heading).trim();
+      if (doc || heading) {
+        text += `: ${doc}${doc && heading ? " \u203A " : ""}${heading}`;
+      }
+    }
+    addLine("activity-line activity-retrieve", text);
+  };
+  const renderJudgeVerdict = (data) => {
+    const kept = asNum(data.kept);
+    const conf = asNum(data.confidence);
+    const sufficient = data.sufficient === true;
+    let text = `judge: kept ${kept === null ? "?" : kept}`;
+    if (conf !== null) text += ` \xB7 confidence ${fmtScore(conf)}`;
+    text += ` \xB7 ${sufficient ? "sufficient" : "insufficient"}`;
+    addLine("activity-line activity-judge", text);
+    const rawMissing = data.missing_information;
+    const missing = Array.isArray(rawMissing) ? asStrList(rawMissing).join("; ") : asStr(rawMissing).trim();
+    if (missing) {
+      addLine("activity-line dim", `missing: ${missing}`);
+    }
+  };
+  const renderDeepStudy = (data) => {
+    const title = asStr(data.title).trim() || asStr(data.document_id).trim() || "document";
+    const win = asNum(data.window);
+    const of = asNum(data.of_windows);
+    let text = `reading ${title}`;
+    if (win !== null) text += ` \u2014 window ${win}${of === null ? "" : `/${of}`}`;
+    addLine("activity-line activity-study", text);
+    const notes = asStr(data.notes_preview).trim();
+    if (notes) addLine("activity-line dim", notes);
+  };
+  const renderLlmCall = (data) => {
+    const alias = asStr(data.alias).trim() || "llm";
+    const purpose = asStr(data.purpose).trim();
+    const ms = asNum(data.ms);
+    const tokens = (asNum(data.prompt_tokens) ?? 0) + (asNum(data.completion_tokens) ?? 0);
+    let text = alias;
+    if (purpose && purpose !== alias) text += ` \xB7 ${purpose}`;
+    if (ms !== null) text += ` ${(ms / 1e3).toFixed(1)}s`;
+    if (tokens > 0) text += ` ${tokens}tok`;
+    addLine("activity-line activity-llm dim", text);
+  };
+  const renderDraft = (data) => {
+    const attempt = asNum(data.attempt);
+    if (!draftTextEl || attempt !== null && attempt !== draftAttempt) {
+      draftAttempt = attempt;
+      draftText = "";
+      if (!draftTextEl) {
+        const wrap = div("activity-draft");
+        draftLabelEl = div("activity-draft-label");
+        draftTextEl = div("activity-draft-text");
+        wrap.appendChild(draftLabelEl);
+        wrap.appendChild(draftTextEl);
+        body.appendChild(wrap);
+      }
+    }
+    if (draftLabelEl) {
+      draftLabelEl.textContent = draftAttempt === null ? "Draft" : `Draft \u2014 attempt ${draftAttempt}`;
+    }
+    draftText += asStr(data.text_delta);
+    draftTextEl.textContent = draftText;
+  };
+  const renderGate = (data) => {
+    const attempt = asNum(data.attempt);
+    const passed = data.passed === true;
+    const weakest = asStr(data.weakest).trim();
+    let text = `gate${attempt === null ? "" : ` \u2014 attempt ${attempt}`}: `;
+    text += passed ? "PASS" : "FAIL";
+    text += ` (${fmtScore(data.score)} vs threshold ${fmtScore(data.threshold)})`;
+    if (weakest) text += ` \xB7 weakest: ${weakest}`;
+    addLine(`activity-line activity-gate ${passed ? "pass" : "fail"}`, text);
+  };
+  const renderClarify = (data) => {
+    const question = asStr(data.question).trim();
+    addLine("activity-line activity-clarify", `clarify${question ? `: ${question}` : ""}`);
+  };
+  const handle = (type, data) => {
+    if (!isTurnLoopEvent(type)) return;
+    events += 1;
+    if (type === "turn_action") renderTurnAction(data);
+    else if (type === "hyde_query") renderHydeQuery(data);
+    else if (type === "retrieve_result") renderRetrieveResult(data);
+    else if (type === "judge_verdict") renderJudgeVerdict(data);
+    else if (type === "deep_study") renderDeepStudy(data);
+    else if (type === "llm_call") renderLlmCall(data);
+    else if (type === "draft") renderDraft(data);
+    else if (type === "gate") renderGate(data);
+    else renderClarify(data);
+  };
+  const finalize = (collapse) => {
+    const secs = (performance.now() - startedAt) / 1e3;
+    summary.textContent = `Activity \u2014 ${events} step${events === 1 ? "" : "s"}` + (secs > 0.05 ? ` (${secs.toFixed(1)}s)` : "");
+    if (collapse) root.open = false;
+  };
+  return { root, handle, finalize, eventCount: () => events };
+}
+function renderClarifyChips(data, onResubmit) {
+  const payload = data;
+  const question = asStr(payload.question).trim();
+  const hints = asStrList(payload.hints);
+  const scoping = asStrList(payload.scoping_questions);
+  if (!question && !hints.length && !scoping.length) return null;
+  const wrap = div("clarify-chips");
+  if (question) wrap.appendChild(div("clarify-question", question));
+  const addChip2 = (text, extraClass) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `clarify-chip ${extraClass}`.trim();
+    chip.textContent = text;
+    chip.title = "Send this as your reply";
+    chip.addEventListener("click", () => {
+      void onResubmit(text);
+    });
+    wrap.appendChild(chip);
+  };
+  hints.forEach((hint) => addChip2(hint, "clarify-chip-hint"));
+  scoping.forEach((q) => addChip2(q, "clarify-chip-scope"));
+  return wrap;
+}
+
+// src/queryProcessing.ts
+function num(v) {
+  return typeof v === "number" && isFinite(v) ? v : 0;
+}
+function plural(n) {
+  return n === 1 ? "" : "s";
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function hydeRoundEl(r, fallbackIndex) {
+  const box = el("div", "qp-round");
+  const head = el("div", "qp-round-head");
+  head.textContent = `Round ${r.round ?? fallbackIndex}` + (r.target_aspect ? ` \u2014 ${r.target_aspect}` : "");
+  if (r.fell_back) {
+    head.appendChild(document.createTextNode(" "));
+    head.appendChild(el("span", "qp-badge-warn", "literal fallback"));
+  }
+  box.appendChild(head);
+  if (r.hypothetical_answer) {
+    const hyp = el("div", "qp-hyp");
+    hyp.textContent = r.hypothetical_answer;
+    box.appendChild(hyp);
+  }
+  if (r.search_terms && r.search_terms.length) {
+    box.appendChild(el("div", "qp-terms", "Search terms: " + r.search_terms.join(", ")));
+  }
+  return box;
+}
+function hydeSection(a) {
+  const sec = el("div", "qp-section");
+  sec.appendChild(el("div", "qp-section-title", "HyDE retrieval"));
+  const stats = [];
+  if (num(a.rounds_run)) stats.push(`${a.rounds_run} round${plural(num(a.rounds_run))}`);
+  if (num(a.hyde_variants_tried)) stats.push(`${a.hyde_variants_tried} variant${plural(num(a.hyde_variants_tried))}`);
+  if (a.kept_count != null) stats.push(`${a.kept_count} chunk${plural(num(a.kept_count))} kept`);
+  if (num(a.backfilled)) stats.push(`${a.backfilled} backfilled`);
+  if (a.ranker) stats.push(`ranker: ${a.ranker}`);
+  if (a.stop_reason) stats.push(`stop: ${a.stop_reason}`);
+  if (num(a.elapsed_ms)) stats.push(`${(num(a.elapsed_ms) / 1e3).toFixed(1)}s`);
+  if (stats.length) sec.appendChild(el("div", "qp-stats", stats.join(" \xB7 ")));
+  if (num(a.hyde_failures) > 0) {
+    sec.appendChild(el(
+      "div",
+      "qp-warn",
+      `\u26A0 HyDE generation failed on ${a.hyde_failures} round${plural(num(a.hyde_failures))} \u2014 fell back to plain literal-query retrieval (the answer-space HyDE advantage was forfeited).`
+    ));
+  }
+  if (a.hyde_rounds && a.hyde_rounds.length) {
+    a.hyde_rounds.forEach((r, i) => sec.appendChild(hydeRoundEl(r, i + 1)));
+  } else if (a.tried_hyde && a.tried_hyde.length) {
+    a.tried_hyde.forEach((t, i) => sec.appendChild(hydeRoundEl({ hypothetical_answer: t }, i + 1)));
+  }
+  return sec;
+}
+function drSection(d) {
+  const sec = el("div", "qp-section");
+  sec.appendChild(el("div", "qp-section-title", "Deep research"));
+  const stats = [];
+  if (d.decomposed != null) stats.push(d.decomposed ? "decomposed" : "unified");
+  if (num(d.topic_count)) stats.push(`${d.topic_count} topic${plural(num(d.topic_count))}`);
+  if (num(d.iteration_count)) stats.push(`${d.iteration_count} iteration${plural(num(d.iteration_count))}`);
+  if (num(d.node_count)) stats.push(`${d.node_count} node${plural(num(d.node_count))}`);
+  if (num(d.llm_call_count)) stats.push(`${d.llm_call_count} LLM call${plural(num(d.llm_call_count))}`);
+  if (d.budget_exhausted) {
+    stats.push(`\u26A0 budget exhausted${d.budget_exhausted_reason ? ` (${d.budget_exhausted_reason})` : ""}`);
+  }
+  if (num(d.elapsed_ms)) stats.push(`${(num(d.elapsed_ms) / 1e3).toFixed(1)}s`);
+  if (stats.length) sec.appendChild(el("div", "qp-stats", stats.join(" \xB7 ")));
+  return sec;
+}
+function summarize(agentic, hasAgentic, dr, hasDr, showRewrite) {
+  const parts = [];
+  if (hasAgentic && agentic) {
+    const rounds = num(agentic.rounds_run) || (agentic.hyde_rounds?.length ?? 0);
+    if (rounds) parts.push(`HyDE \xB7 ${rounds} round${plural(rounds)}`);
+    else parts.push("HyDE");
+    if (num(agentic.hyde_failures) > 0) parts.push(`\u26A0 ${agentic.hyde_failures} fallback${plural(num(agentic.hyde_failures))}`);
+  }
+  if (hasDr && dr) parts.push(`Deep research \xB7 ${num(dr.topic_count)} topic${plural(num(dr.topic_count))}`);
+  if (showRewrite && !parts.length) parts.push("query rewritten");
+  return "\u{1F50E} Query processing" + (parts.length ? " \xB7 " + parts.join(" \xB7 ") : "");
+}
+function renderQueryProcessing(bubbleWrap, data, rawQuery) {
+  if (!bubbleWrap) return;
+  bubbleWrap.querySelector(".query-processing-block")?.remove();
+  const agentic = data.metadata?.agentic_retrieval;
+  const dr = data.metadata?.deep_research;
+  const processed = (data.processed_query || "").trim();
+  const raw = (rawQuery || "").trim();
+  const showRewrite = !!processed && processed.toLowerCase() !== raw.toLowerCase();
+  const kg = Array.isArray(data.kg_expanded_terms) ? data.kg_expanded_terms.map((t) => (t || "").trim()).filter(Boolean) : [];
+  const hasAgentic = !!agentic && (num(agentic.rounds_run) > 0 || (agentic.hyde_rounds?.length ?? 0) > 0 || (agentic.tried_hyde?.length ?? 0) > 0);
+  const hasDr = !!dr && (dr.decomposed === true || num(dr.topic_count) > 0);
+  if (!showRewrite && !hasAgentic && !hasDr && !kg.length) return;
+  const details = document.createElement("details");
+  details.className = "query-processing-block";
+  details.open = true;
+  const summary = el("summary", "qp-summary", summarize(agentic, hasAgentic, dr, hasDr, showRewrite));
+  details.appendChild(summary);
+  const body = el("div", "qp-body");
+  details.appendChild(body);
+  if (showRewrite) {
+    const sec = el("div", "qp-section");
+    sec.appendChild(el("div", "qp-section-title", "Query rewrite"));
+    sec.appendChild(el("div", "qp-hyp", processed));
+    if (num(data.query_confidence)) {
+      sec.appendChild(el("div", "qp-terms", `Confidence: ${num(data.query_confidence).toFixed(2)}`));
+    }
+    body.appendChild(sec);
+  }
+  if (hasAgentic && agentic) body.appendChild(hydeSection(agentic));
+  if (hasDr && dr) body.appendChild(drSection(dr));
+  if (kg.length) {
+    const sec = el("div", "qp-section");
+    sec.appendChild(el("div", "qp-section-title", "KG-expanded terms"));
+    sec.appendChild(el("div", "qp-terms", kg.join(", ")));
+    body.appendChild(sec);
+  }
+  const anchor = bubbleWrap.querySelector(".reasoning-block") ?? bubbleWrap.querySelector(".bubble");
+  bubbleWrap.insertBefore(details, anchor);
+}
+
 // src/streaming.ts
 function buildQueryBody(queryText) {
   const s = getSettings();
@@ -1619,12 +2201,22 @@ function buildQueryBody(queryText) {
     memory_enabled: s.memory_enabled !== false,
     conversation_id: state.activeConversationId ?? void 0
   };
+  const turnLoopActive = getTurnLoop() && getChatMode() !== "sources";
+  if (s.tree_retrieval !== void 0 && !turnLoopActive) {
+    body.tree_retrieval = Boolean(s.tree_retrieval);
+  }
   if (getChatMode() === "sources") {
     body.mode = "retrieval";
     body.retrieval_sub_mode = getRetrievalSubMode();
     const topK = getSourcesTopK();
     body.rerank_top_k = topK;
     body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+  }
+  if (getDeepResearch()) {
+    body.deep_research = true;
+  }
+  if (turnLoopActive) {
+    body.turn_loop = true;
   }
   return body;
 }
@@ -1646,6 +2238,7 @@ async function sourcesOnlyQuery(queryText) {
   appendUserMsg(queryText);
   try {
     const data = await api("POST", "/console/query", buildQueryBody(queryText));
+    maybeShowDrChip(data.dr_suggestion, queryText);
     const cid = String(data.conversation_id ?? "").trim();
     if (cid) setActiveConversation(cid);
     const sources = (data.results ?? []).map(chunkToSourceRef);
@@ -1738,6 +2331,11 @@ async function streamQuery(queryText) {
   let lastTokenAt = 0;
   let tokenEventCount = 0;
   let lastBudget = null;
+  let lastResults = [];
+  let reasoningText = "";
+  let reasoningStartAt = 0;
+  const activity = { current: null };
+  let clarifyQuestion = "";
   clearLastTurnStats();
   let renderRaf = 0;
   const flushRender = () => {
@@ -1753,6 +2351,38 @@ async function streamQuery(queryText) {
       cancelAnimationFrame(renderRaf);
       renderRaf = 0;
     }
+  };
+  const reasoningBody = () => {
+    const wrap = bubbleEl.parentElement;
+    let el2 = wrap?.querySelector(".reasoning-block") ?? null;
+    if (!el2) {
+      el2 = document.createElement("details");
+      el2.className = "reasoning-block";
+      el2.open = true;
+      el2.innerHTML = `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary><div class="reasoning-body"></div>`;
+      wrap?.insertBefore(el2, bubbleEl);
+      reasoningStartAt = performance.now();
+    }
+    return el2.querySelector(".reasoning-body");
+  };
+  const activityLog = () => {
+    if (!activity.current) {
+      activity.current = createActivityLog();
+      const wrap = bubbleEl.parentElement;
+      const anchor = wrap?.querySelector(".reasoning-block") ?? bubbleEl;
+      wrap?.insertBefore(activity.current.root, anchor);
+    }
+    return activity.current;
+  };
+  const finalizeReasoning = (collapse) => {
+    const el2 = bubbleEl.parentElement?.querySelector(".reasoning-block");
+    if (!el2) return;
+    const summaryEl = el2.querySelector(".reasoning-summary");
+    if (summaryEl) {
+      const secs = reasoningStartAt ? (performance.now() - reasoningStartAt) / 1e3 : 0;
+      summaryEl.innerHTML = secs > 0 ? `&#128173; Thought for ${secs.toFixed(1)}s` : "&#128173; Thought process";
+    }
+    if (collapse) el2.open = false;
   };
   try {
     while (true) {
@@ -1778,30 +2408,46 @@ async function streamQuery(queryText) {
             bubbleEl.classList.add("streaming");
             started = true;
             firstTokenAt = performance.now();
+            finalizeReasoning(true);
+            activity.current?.finalize(true);
           }
           lastTokenAt = performance.now();
           tokenEventCount++;
           answer += data.token || "";
           scheduleRender();
           scrollToBottom();
+        } else if (evtType === "reasoning") {
+          typingEl.style.display = "none";
+          reasoningText += String(data.text ?? "");
+          reasoningBody().textContent = reasoningText;
+          scrollToBottom();
         } else if (evtType === "retrieval") {
           const cid = String(data.conversation_id ?? "").trim();
           if (cid) setActiveConversation(cid);
+          const drSugg = data.dr_suggestion;
+          maybeShowDrChip(drSugg, queryText);
           const clar = String(data.clarification_message ?? "").trim();
-          if (clar) pendingClarification = clar;
+          if (clar) {
+            const reason = String(data.ask_user_reason ?? "").trim();
+            const reasonLabels = {
+              sanitizer_reject: "Empty or invalid query",
+              injection_blocked: "Query blocked by safety rails",
+              vague_query: "Query too vague to retrieve",
+              budget_exhausted: "Retrieval timeout",
+              no_results: "No matching documents"
+            };
+            const label = reasonLabels[reason];
+            pendingClarification = label ? `[${label}] ${clar}` : clar;
+          }
           if (data.token_budget) {
             lastBudget = data.token_budget;
             updateContextIndicator(lastBudget);
           }
           const results = data.results ?? [];
           if (results.length) {
+            lastResults = results;
             const sourceRefs = results.map(chunkToSourceRef);
             cacheDocsFromSources(sourceRefs);
-          }
-          const showCitations = byId("citationsToggle").checked;
-          if (showCitations && results.length) {
-            citationsEl.innerHTML = buildCitationsHtml(results);
-            wireCitationActions(citationsEl);
           }
           if (data.relevant_doc_ids || data.ignored_doc_ids) {
             applyDocState(
@@ -1809,9 +2455,20 @@ async function streamQuery(queryText) {
               data.ignored_doc_ids ?? []
             );
           }
+          renderQueryProcessing(bubbleEl.parentElement, data, queryText);
+        } else if (isTurnLoopEvent(evtType)) {
+          typingEl.style.display = "none";
+          activityLog().handle(evtType, data);
+          if (evtType === "clarify") {
+            clarifyQuestion = String(data.question ?? "").trim() || clarifyQuestion;
+            const chips = renderClarifyChips(data, resubmitQuery);
+            if (chips) bubbleEl.parentElement?.insertBefore(chips, citationsEl);
+          }
+          scrollToBottom();
         } else if (evtType === "error") {
           errorShown = true;
           cancelRender();
+          finalizeReasoning(false);
           bubbleEl.classList.remove("streaming");
           typingEl.style.display = "none";
           bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
@@ -1821,6 +2478,8 @@ async function streamQuery(queryText) {
         } else if (evtType === "done") {
           const cid = String(data.conversation_id ?? "").trim();
           if (cid) setActiveConversation(cid);
+          if (!started) finalizeReasoning(false);
+          if (!started) activity.current?.finalize(false);
           if (data.token_budget) lastBudget = data.token_budget;
           const completionTokens = Number(lastBudget?.actual_completion_tokens) || tokenEventCount;
           const promptTokens = Number(lastBudget?.actual_prompt_tokens) || Number(lastBudget?.input_tokens) || 0;
@@ -1837,21 +2496,29 @@ async function streamQuery(queryText) {
           typingEl.style.display = "none";
           if (!errorShown) {
             if (!started) {
-              const msg = pendingClarification || "I couldn't find relevant information for that query. Could you rephrase your question or provide more details?";
+              const msg = pendingClarification || clarifyQuestion || "I couldn't find relevant information for that query. Could you rephrase your question or provide more details?";
               bubbleEl.innerHTML = parseMarkdown(msg);
               bubbleEl.style.display = "block";
             } else {
-              bubbleEl.innerHTML = parseMarkdown(answer);
+              bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(lastResults, answer);
               bubbleEl.style.display = "block";
             }
           }
           const showCitations = byId("citationsToggle").checked;
+          if (showCitations && lastResults.length) {
+            citationsEl.innerHTML = buildCitationsHtml(lastResults, answer);
+            wireCitationActions(citationsEl);
+          }
           if (showCitations && citationsEl.innerHTML) {
             revealCitations(citationsEl);
           }
           actionsEl.style.display = "flex";
           metaEl.textContent = fmtTime(Date.now());
           metaEl.style.display = "block";
+          if (!errorShown && started) {
+            const sq = data.suggested_questions;
+            renderFollowUps(bubbleEl.parentElement, Array.isArray(sq) ? sq : []);
+          }
           scrollToBottom();
           await loadConversations();
           updateConvTitle();
@@ -1907,6 +2574,7 @@ async function nonStreamQuery(queryText) {
   const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = handles;
   try {
     const data = await api("POST", "/console/query", buildQueryBody(queryText));
+    maybeShowDrChip(data.dr_suggestion, queryText);
     const cid = String(data.conversation_id ?? "").trim();
     if (cid) setActiveConversation(cid);
     attachFeedback(handles.fbUpBtn, handles.fbDownBtn, {
@@ -1916,8 +2584,9 @@ async function nonStreamQuery(queryText) {
     });
     typingEl.style.display = "none";
     const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
-    bubbleEl.innerHTML = parseMarkdown(answer);
+    bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
     bubbleEl.style.display = "block";
+    renderQueryProcessing(bubbleEl.parentElement, data, queryText);
     const tb = data.token_budget;
     if (tb) {
       updateContextIndicator(tb, {
@@ -1933,13 +2602,19 @@ async function nonStreamQuery(queryText) {
       cacheDocsFromSources(results.map(chunkToSourceRef));
     }
     if (showCitations && results.length) {
-      citationsEl.innerHTML = buildCitationsHtml(results);
+      citationsEl.innerHTML = buildCitationsHtml(results, answer);
       wireCitationActions(citationsEl);
       revealCitations(citationsEl);
     }
     actionsEl.style.display = "flex";
     metaEl.textContent = fmtTime(Date.now());
     metaEl.style.display = "block";
+    if (data.generated_answer) {
+      renderFollowUps(
+        bubbleEl.parentElement,
+        Array.isArray(data.suggested_questions) ? data.suggested_questions : []
+      );
+    }
     scrollToBottom();
     await loadConversations();
     updateConvTitle();
@@ -1951,6 +2626,7 @@ async function nonStreamQuery(queryText) {
   }
 }
 async function sendQuery(text) {
+  hideDrSuggestionChip();
   if (getChatMode() === "sources") {
     await sourcesOnlyQuery(text);
     return;
@@ -1959,6 +2635,12 @@ async function sendQuery(text) {
   const useStreaming = s.streaming !== false;
   if (useStreaming) await streamQuery(text);
   else await nonStreamQuery(text);
+}
+registerQueryResubmit(sendQuery);
+function maybeShowDrChip(payload, query) {
+  if (!payload || !payload.suggest) return;
+  if (getDeepResearch()) return;
+  showDrSuggestionChip(query);
 }
 
 // src/slash.ts
@@ -2009,7 +2691,7 @@ function setSelected(i) {
   const vis = state.allSlashItems.filter((x) => x.style.display !== "none");
   if (!vis.length) return;
   state.slashSelIdx = (i + vis.length) % vis.length;
-  vis.forEach((el, j) => el.classList.toggle("selected", j === state.slashSelIdx));
+  vis.forEach((el2, j) => el2.classList.toggle("selected", j === state.slashSelIdx));
 }
 function executeCmd(cmd) {
   refs.ta.value = cmd + " ";
@@ -2043,7 +2725,7 @@ function handleSlashInput() {
 function setPickerSelected(idx) {
   if (!state.allPickerItems.length) return;
   state.pickerIdx = (idx + state.allPickerItems.length) % state.allPickerItems.length;
-  state.allPickerItems.forEach((el, i) => el.classList.toggle("selected", i === state.pickerIdx));
+  state.allPickerItems.forEach((el2, i) => el2.classList.toggle("selected", i === state.pickerIdx));
   state.allPickerItems[state.pickerIdx]?.scrollIntoView({ block: "nearest" });
 }
 function executePicker(item) {
@@ -2234,9 +2916,9 @@ function attachWebUrl() {
   showToast("Web page added to context");
 }
 function filterKB(q) {
-  document.querySelectorAll(".kb-item").forEach((el) => {
-    const name = el.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
-    el.style.display = name.includes(q.toLowerCase()) ? "" : "none";
+  document.querySelectorAll(".kb-item").forEach((el2) => {
+    const name = el2.querySelector(".kb-item-name")?.textContent?.toLowerCase() || "";
+    el2.style.display = name.includes(q.toLowerCase()) ? "" : "none";
   });
 }
 function attachKBDocs() {
@@ -2381,15 +3063,6 @@ function initInput() {
   });
 }
 
-// src/format.ts
-function fmtSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
 // src/ingest-stream.ts
 var _activeStreams = /* @__PURE__ */ new Map();
 function attachStream(jobId) {
@@ -2505,9 +3178,9 @@ function renderJob(job) {
   if (!card) {
     const wrap = document.createElement("div");
     wrap.innerHTML = jobCardHtml(job);
-    const el = wrap.firstElementChild;
-    list.prepend(el);
-    card = el;
+    const el2 = wrap.firstElementChild;
+    list.prepend(el2);
+    card = el2;
   } else {
     card.outerHTML = jobCardHtml(job);
   }
@@ -2821,6 +3494,7 @@ document.addEventListener("DOMContentLoaded", () => {
   populateRefs();
   initToast();
   initCitations();
+  initDocViewer();
   initContextIndicator();
   initScrollFab();
   initSidebar();

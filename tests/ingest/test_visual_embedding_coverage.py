@@ -109,7 +109,6 @@ def _make_runtime(config: IngestionConfig, db_client=None, weaviate_client=None)
         config=config,
         embedder=MagicMock(),
         weaviate_client=weaviate_client or MagicMock(),
-        kg_builder=None,
         db_client=db_client,
     )
 
@@ -315,7 +314,6 @@ class TestNoWeaviateClient:
             config=state["runtime"].config,
             embedder=MagicMock(),
             weaviate_client=None,
-            kg_builder=None,
             db_client=MagicMock(),
         )
 

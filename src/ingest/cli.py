@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # @summary
-# Developer CLI for ingesting documents into the RAG system.
+# Developer CLI for ingesting documents into the RAG system. The CLI exposes
+# a ``--collection``/``-c`` flag (P0 collection-selection slice) which is
+# threaded into IngestionConfig.target_collection so a single run can target
+# an arbitrary Weaviate collection without env-var manipulation.
 # Exports: ingest, main
 # Deps: config.settings, src.ingest, src.platform.validation
 # @end-summary
-"""Ingest documents into Weaviate and optionally build a knowledge graph."""
+"""Ingest documents into Weaviate via the two-phase pipeline."""
 
 import argparse
 import logging
@@ -34,10 +37,8 @@ logger = logging.getLogger("rag.ingest")
 
 def ingest(
     documents_dir: Path = DOCUMENTS_DIR,
-    fresh: bool = True,
-    update: bool = False,
-    build_kg: bool = True,
-    obsidian_export: bool = False,
+    fresh: bool = False,
+    update: bool = True,
     semantic_chunking: bool = True,
     export_processed: bool = False,
     selected_file: Optional[Path] = None,
@@ -56,14 +57,13 @@ def ingest(
     vision_max_figures: Optional[int] = None,
     vision_auto_pull: Optional[bool] = None,
     vision_strict: Optional[bool] = None,
+    collection_name: Optional[str] = None,
 ) -> None:
     """Ingest documents from a directory or a single selected file.
 
     Args:
         documents_dir: Path to the directory containing documents.
         fresh: If True, delete existing collection before ingesting.
-        build_kg: If True, build a knowledge graph from the chunks.
-        obsidian_export: If True, export KG as Obsidian-compatible markdown files.
         semantic_chunking: If True, use semantic similarity for chunk splitting.
         export_processed: If True, save cleaned docs and chunks to processed/ dir.
         selected_file: Optional single file to ingest instead of all files.
@@ -73,10 +73,7 @@ def ingest(
     documents_dir = validate_documents_dir(documents_dir, PROJECT_ROOT)
     cfg_kwargs = {
         "semantic_chunking": semantic_chunking,
-        "build_kg": build_kg,
         "export_processed": export_processed,
-        "enable_knowledge_graph_extraction": build_kg,
-        "enable_knowledge_graph_storage": build_kg,
     }
     if verbose_stages is not None:
         cfg_kwargs["verbose_stage_logs"] = verbose_stages
@@ -108,6 +105,8 @@ def ingest(
         cfg_kwargs["vision_auto_pull"] = vision_auto_pull
     if vision_strict is not None:
         cfg_kwargs["vision_strict"] = vision_strict
+    if collection_name:
+        cfg_kwargs["target_collection"] = collection_name
 
     cfg = IngestionConfig(
         **cfg_kwargs,
@@ -121,7 +120,6 @@ def ingest(
         config=cfg,
         fresh=fresh,
         update=update,
-        obsidian_export=obsidian_export,
         selected_sources=selected_sources,
     )
     logger.info(
@@ -152,18 +150,32 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Ingest all supported documents in a specific directory",
     )
-    parser.add_argument(
-        "--no-kg", action="store_true", help="Skip knowledge graph building"
-    )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--update",
         action="store_true",
-        help="Incremental update mode (changed docs only; idempotent writes)",
+        help="Incremental update mode (default; changed docs only, idempotent writes)",
+    )
+    mode_group.add_argument(
+        "--fresh",
+        action="store_true",
+        help="DESTRUCTIVE: delete the entire Weaviate collection before ingesting. "
+             "Requires confirmation unless --yes is passed.",
     )
     parser.add_argument(
-        "--export-obsidian",
+        "--yes",
+        "-y",
         action="store_true",
-        help="Export knowledge graph as Obsidian markdown files",
+        help="Skip confirmation prompt for --fresh (use with care, e.g. in CI).",
+    )
+    parser.add_argument(
+        "--collection",
+        "-c",
+        dest="collection",
+        type=str,
+        default=None,
+        help="Target Weaviate collection name. Overrides RAG_VECTOR_COLLECTION_DEFAULT "
+             "for this run; defaults to that env var (or 'RAGDocuments') when omitted.",
     )
     parser.add_argument(
         "--no-semantic",
@@ -278,6 +290,28 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _confirm_fresh(collection_name: str) -> bool:
+    """Prompt the user to confirm a destructive --fresh ingest.
+
+    Returns True if the user confirms, False otherwise. Non-interactive
+    callers (no TTY) must pass --yes to skip this; otherwise the run aborts.
+    """
+    if not sys.stdin.isatty():
+        return False
+    print(
+        f"\nWARNING: --fresh will DELETE the entire Weaviate collection "
+        f"'{collection_name}' and re-ingest from scratch.\n"
+        f"Type the collection name to confirm, or anything else to abort: ",
+        end="",
+        flush=True,
+    )
+    try:
+        response = input().strip()
+    except EOFError:
+        return False
+    return response == collection_name
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -292,12 +326,21 @@ def main() -> None:
     elif args.dir is not None:
         target_documents_dir = validate_documents_dir(args.dir, PROJECT_ROOT)
 
+    # Default is incremental update; --fresh is the explicit destructive opt-in.
+    fresh_mode = bool(args.fresh)
+    update_mode = not fresh_mode
+
+    if fresh_mode and not args.yes:
+        from config.settings import VECTOR_COLLECTION_DEFAULT
+        target = args.collection or VECTOR_COLLECTION_DEFAULT
+        if not _confirm_fresh(target):
+            print("Aborted: --fresh not confirmed.", file=sys.stderr)
+            sys.exit(2)
+
     ingest(
         documents_dir=target_documents_dir,
-        fresh=not args.update,
-        update=args.update,
-        build_kg=not args.no_kg,
-        obsidian_export=args.export_obsidian,
+        fresh=fresh_mode,
+        update=update_mode,
         semantic_chunking=not args.no_semantic,
         export_processed=args.export_processed,
         selected_file=selected_file,
@@ -316,6 +359,7 @@ def main() -> None:
         vision_max_figures=args.vision_max_figures,
         vision_auto_pull=not args.no_vision_auto_pull,
         vision_strict=args.vision_strict,
+        collection_name=args.collection,
     )
 
 

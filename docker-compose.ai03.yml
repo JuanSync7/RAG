@@ -1,0 +1,86 @@
+# =============================================================================
+# ai03 PLATFORM layer — shared by BOTH the prod and dev stacks on uk-ai03.
+#
+# Always inserted between the canonical base and an env overlay:
+#   podman compose -f docker-compose.yml -f docker-compose.ai03.yml \
+#                  -f docker-compose.<env>.yml ...
+# (the dev-up.sh / prod-up.sh wrappers do this for you.)
+#
+# Holds everything identical across ai03 environments so it is written ONCE:
+#   - the uk-ai01 vLLM SSH tunnel (gen 18000 / embed 18002 / rerank 18005)
+#   - the qwen3 "http" inference wiring + Langfuse on rag-api / rag-worker
+#   - rootless-podman entrypoint/user tweaks (redis su-exec skip, root for the
+#     bind-mounting observability containers)
+#
+# Per-environment names, host ports, volumes, and the API-front nginx live in
+# the env overlays (docker-compose.dev.yml / docker-compose.prod.yml).
+# =============================================================================
+services:
+
+  # Remote inference: SSH local-forwards to uk-ai01 vLLM. container_name + any
+  # host exposure are set per-env; the forwards are identical everywhere.
+  rag-vllm-tunnel:
+    image: alpine:3.20
+    command: >
+      sh -c "apk add --no-cache openssh-client >/dev/null 2>&1 &&
+             exec ssh -N -T -o BatchMode=yes -o StrictHostKeyChecking=no
+                  -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+                  -o ExitOnForwardFailure=yes -i /key -l Juan.Kok
+                  -L 0.0.0.0:18000:127.0.0.1:8000
+                  -L 0.0.0.0:18001:127.0.0.1:8001
+                  -L 0.0.0.0:18002:127.0.0.1:8002
+                  -L 0.0.0.0:18005:127.0.0.1:8005
+                  ai01.atlas.aionsilicon.local"
+    volumes:
+      - /home/Juan.Kok/.ssh/id_ed25519:/key:ro
+    restart: unless-stopped
+
+  rag-api:
+    image: rag-api:local
+    environment:
+      # qwen3 embed/rerank + qwopus gen, all via the vLLM tunnel (the http path).
+      - RAG_INFERENCE_BACKEND=http
+      - RAG_EMBED_URL=http://rag-vllm-tunnel:18002
+      - RAG_RERANK_URL=http://rag-vllm-tunnel:18005
+      - RAG_EMBED_MODEL=qwen3-embed-4b
+      - RAG_RERANK_MODEL=qwen3-reranker-4b
+      - RAG_LLM_API_BASE=http://rag-vllm-tunnel:18000/v1
+      - RAG_LLM_MODEL=hosted_vllm/qwopus-9b
+      - RAG_LLM_QUERY_MODEL=hosted_vllm/qwopus-9b
+      - RAG_OBSERVABILITY_PROVIDER=langfuse
+      - LANGFUSE_HOST=http://langfuse-web:3000
+    depends_on:
+      rag-vllm-tunnel:
+        condition: service_started
+
+  rag-worker:
+    image: rag-worker:local
+    environment:
+      - RAG_INFERENCE_BACKEND=http
+      - RAG_EMBED_URL=http://rag-vllm-tunnel:18002
+      - RAG_RERANK_URL=http://rag-vllm-tunnel:18005
+      - RAG_EMBED_MODEL=qwen3-embed-4b
+      - RAG_RERANK_MODEL=qwen3-reranker-4b
+      - RAG_LLM_API_BASE=http://rag-vllm-tunnel:18000/v1
+      - RAG_LLM_MODEL=hosted_vllm/qwopus-9b
+      - RAG_INGESTION_LLM_MODEL=hosted_vllm/qwopus-9b
+      - RAG_OBSERVABILITY_PROVIDER=langfuse
+      - LANGFUSE_HOST=http://langfuse-web:3000
+    depends_on:
+      rag-vllm-tunnel:
+        condition: service_started
+
+  # Rootless podman: skip the redis image entrypoint's su-exec drop to the redis user.
+  rag-redis:
+    entrypoint: redis-server
+    command: ["--appendonly", "yes", "--bind", "0.0.0.0"]
+
+  # Rootless podman: these mount host config dirs and need root to read them.
+  prometheus:
+    user: root
+  alertmanager:
+    user: root
+  grafana:
+    user: root
+  dozzle:
+    user: "0:0"

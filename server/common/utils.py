@@ -1,6 +1,6 @@
 # @summary
 # Shared server helper functions for request id extraction and error/console envelopes.
-# Exports: request_id_from_request, error_payload, console_ok, console_err
+# Exports: request_id_from_request, error_payload, console_ok
 # Deps: fastapi, server.common.schemas
 # @end-summary
 """Server-common utility helpers."""
@@ -74,19 +74,14 @@ def validate_optional_dependencies() -> list[str]:
     strings (useful for testing).
     """
     from config.settings import (
-        GLINER_ENABLED,
-        KG_ENABLED,
         RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
         RAG_NEMO_PII_GLINER_ENABLED,
     )
 
+    # KG/GLiNER feature flags moved to the KGWeave package, which runs in its
+    # own container and owns those optional-dep checks. RagWeave only validates
+    # deps it still owns directly (visual embedding, NeMo PII guardrails).
     checks: list[tuple[bool, str, str, str]] = [
-        (
-            GLINER_ENABLED,
-            "gliner",
-            "GLINER_ENABLED=true",
-            "Entity extraction will fall back to regex. Install with: pip install ragweave[gliner]",
-        ),
         (
             RAG_NEMO_PII_GLINER_ENABLED,
             "gliner",
@@ -99,18 +94,6 @@ def validate_optional_dependencies() -> list[str]:
             "RAG_INGESTION_ENABLE_VISUAL_EMBEDDING=true",
             "Visual embedding will fail at runtime. Install with: pip install ragweave[visual]",
         ),
-        (
-            KG_ENABLED,
-            "igraph",
-            "KG_ENABLED=true",
-            "Community detection will be disabled. Install with: pip install ragweave[kg]",
-        ),
-        (
-            KG_ENABLED,
-            "leidenalg",
-            "KG_ENABLED=true",
-            "Leiden community detection will be disabled. Install with: pip install ragweave[kg]",
-        ),
     ]
 
     warnings: list[str] = []
@@ -120,19 +103,3 @@ def validate_optional_dependencies() -> list[str]:
             _startup_logger.warning(msg)
             warnings.append(msg)
     return warnings
-
-
-def console_err(
-    request: Request,
-    *,
-    code: str,
-    message: str,
-    details: dict | None = None,
-) -> ConsoleEnvelope:
-    """Build error envelope payload for console endpoints."""
-
-    return ConsoleEnvelope(
-        ok=False,
-        request_id=request_id_from_request(request),
-        error=ApiErrorDetail(code=code, message=message, details=details),
-    )

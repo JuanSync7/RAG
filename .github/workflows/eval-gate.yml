@@ -1,0 +1,73 @@
+name: eval-gate
+
+# Manual-dispatch eval gate. There is no offline eval path (retrieval needs a
+# live Weaviate and the judge needs a cloud LLM), so this is workflow_dispatch
+# rather than a per-PR check. The eval CLI's exit code IS the gate result:
+# 0=pass, 1=gate fail, 2=pack error, 3=infra error. We do NOT add `|| true`;
+# a non-zero exit must fail the job.
+on:
+  workflow_dispatch:
+    inputs:
+      pack_path:
+        description: "Path to the eval_pack directory (containing pack.yaml)."
+        required: true
+        default: "evals/packs/opentitan_riscv"
+        type: string
+      k:
+        description: "Top-k retrieval cutoff per query."
+        required: true
+        default: "5"
+        type: string
+
+  # Opt-in scheduled run. Intentionally COMMENTED OUT: enabling a cron before
+  # the judge secret (RAG_LLM_API_KEY) is confirmed configured would produce
+  # recurring exit-3 noise. Uncomment once secrets are verified in the repo.
+  # schedule:
+  #   - cron: "0 6 * * 1"  # 06:00 UTC every Monday
+
+jobs:
+  eval-gate:
+    runs-on: ubuntu-latest
+    env:
+      # Judge LLM key. The OpenTitan pack judges with claude-haiku (Anthropic),
+      # plumbed via RAG_LLM_API_KEY (see src/platform/llm/provider.py). Add this
+      # repo secret before enabling the schedule above.
+      RAG_LLM_API_KEY: ${{ secrets.RAG_LLM_API_KEY }}
+      # Point the eval retrieval client at the compose Weaviate brought up below.
+      RAG_WEAVIATE_HOST: localhost
+      RAG_WEAVIATE_HTTP_HOST_PORT: "8090"
+      RAG_WEAVIATE_GRPC_HOST_PORT: "50051"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Bring up Weaviate
+        run: |
+          docker compose -f docker-compose.yml up -d rag-weaviate
+          # Wait for Weaviate readiness (compose healthcheck hits the same probe).
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:8090/v1/.well-known/ready" >/dev/null 2>&1; then
+              echo "Weaviate ready."
+              exit 0
+            fi
+            echo "waiting for Weaviate ($i/30)..."
+            sleep 5
+          done
+          echo "Weaviate did not become ready in time." >&2
+          exit 1
+
+      - name: Run eval gate
+        # The CLI auto-writes the markdown summary to $GITHUB_STEP_SUMMARY
+        # (GitHub sets that env var automatically). The step exit code is the
+        # gate result; a non-zero exit fails the job. No `|| true`.
+        run: >
+          uv run --no-sync python -m src.eval run
+          "${{ github.event.inputs.pack_path }}"
+          --k "${{ github.event.inputs.k }}"
+          --format json
+
+      - name: Tear down Weaviate
+        if: always()
+        run: docker compose -f docker-compose.yml down

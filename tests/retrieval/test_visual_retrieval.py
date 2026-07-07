@@ -31,6 +31,30 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+
+def _s3error(code: str):
+    """Build an S3Error with ``.code == code`` under BOTH stub and real minio.
+
+    The real ``minio.error.S3Error`` requires
+    ``(response, code, message, resource, request_id, host_id)`` — building it
+    with only two positional args (``S3Error("NetworkError", "timeout")``)
+    raises ``TypeError`` against the real package and only "works" because the
+    conftest stub takes ``code`` first with ``*args``. Construct via keywords so
+    these tests stay valid if run against real minio. Mirrors the helper in
+    tests/db/test_minio_store.py and tests/test_document_management_backend.py.
+    """
+    from minio.error import S3Error
+
+    return S3Error(
+        response=None,
+        code=code,
+        message="test-message",
+        resource="test-resource",
+        request_id="test-request-id",
+        host_id="test-host-id",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Weaviate exceptions — import real classes before conftest stub may replace
 # the module. We import src.vector_db.weaviate.visual_store first to force
@@ -676,9 +700,7 @@ class TestGetPageImageUrl:
         get_page_image_url = self._import()
         from minio.error import S3Error
         client = self._make_client()
-        client.presigned_get_object.side_effect = S3Error(
-            "NoSuchBucket", "Bucket does not exist"
-        )
+        client.presigned_get_object.side_effect = _s3error("NoSuchBucket")
         with pytest.raises(S3Error):
             get_page_image_url(
                 client, "pages/abc-123/0007.jpg",
@@ -1403,7 +1425,7 @@ def _make_heavy_init_patches():
     return [
         patch("src.retrieval.pipeline.rag_chain.get_embedding_provider"),
         patch("src.retrieval.pipeline.rag_chain.get_reranker_provider"),
-        patch("src.core.knowledge_graph.KnowledgeGraphBuilder"),
+        patch("kgweave.core.knowledge_graph.KnowledgeGraphBuilder"),
         patch("src.retrieval.pipeline.rag_chain.OllamaGenerator"),
         patch("src.retrieval.pipeline.rag_chain.get_tracer", return_value=MagicMock()),
         patch("src.retrieval.pipeline.rag_chain.get_retry_provider", return_value=MagicMock()),
@@ -1633,7 +1655,6 @@ class TestRAGChainVisualTrack:
 
     def test_per_page_url_failure_skips_page_includes_others(self, monkeypatch):
         """FR-615: S3Error on page 2 of 3 → pages 1 and 3 included; page 2 omitted."""
-        from minio.error import S3Error
         chain = self._make_chain(monkeypatch)
         chain._visual_model = MagicMock()
         chain._visual_processor = MagicMock()
@@ -1646,7 +1667,7 @@ class TestRAGChainVisualTrack:
         ]
         url_effects = [
             "https://url/page1.jpg",
-            S3Error("NetworkError", "timeout"),
+            _s3error("NetworkError"),
             "https://url/page3.jpg",
         ]
 

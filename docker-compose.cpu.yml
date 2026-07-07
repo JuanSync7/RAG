@@ -1,0 +1,52 @@
+# docker-compose.cpu.yml — CPU-only overlay for hosts without an NVIDIA GPU
+# (AMD, Intel, Apple Silicon, CI runners, WSL2 without CUDA passthrough).
+#
+# Auto-loaded by scripts/compose.sh when nvidia-smi is unavailable, OR can be
+# applied manually:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+#
+# What it does
+# ────────────
+# Replaces the NVIDIA-pinned services (rag-embed, rag-rerank, rag-ollama) with
+# CPU-compatible variants:
+#   - rag-embed:  GPU image -> ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+#   - rag-rerank: GPU image -> ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+#   - rag-ollama: unchanged image (ollama runs on CPU by default), GPU
+#                 reservation cleared.
+# The `deploy.resources.reservations.devices: []` empty-list override replaces
+# the GPU reservation cleanly — required, because Compose merges mappings but
+# replaces lists across overlay files.
+#
+# Performance note
+# ────────────────
+# CPU inference is ~10-50x slower than GPU for BGE-M3 / bge-reranker-v2-m3.
+# Acceptable for dev iteration and small corpora; do NOT use for prod traffic.
+# Tune throughput via:
+#   RAG_TEI_EMBED_MAX_BATCH_TOKENS   (default 2048; lower if RAM-constrained)
+#   RAG_TEI_EMBED_MAX_CONCURRENT     (default 8;   try 2-4 on small hosts)
+#   RAG_TEI_RERANK_MAX_BATCH_TOKENS  (default 2048)
+#   RAG_TEI_RERANK_MAX_CONCURRENT    (default 4)
+#
+# Memory: BGE-M3 needs ~2 GB RAM, reranker ~1.5 GB. Plan for 4-6 GB free.
+
+services:
+  rag-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    deploy:
+      resources:
+        reservations:
+          devices: []
+
+  rag-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+    deploy:
+      resources:
+        reservations:
+          devices: []
+
+  rag-ollama:
+    deploy:
+      resources:
+        reservations:
+          devices: []

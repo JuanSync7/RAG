@@ -30,6 +30,7 @@ from src.vector_db.weaviate.store import (
     create_persistent_client as _wv_create_persistent,
     get_weaviate_client as _wv_get_ephemeral,
     ensure_collection as _wv_ensure_collection,
+    collection_exists as _wv_collection_exists,
     add_documents as _wv_add_documents,
     hybrid_search as _wv_hybrid_search,
     delete_collection as _wv_delete_collection,
@@ -67,6 +68,11 @@ class WeaviateBackend(VectorBackend):
 
     def ensure_collection(self, client: Any, collection: Optional[str] = None) -> None:
         _wv_ensure_collection(client, collection=self._col(collection))
+
+    def collection_exists(
+        self, client: Any, collection: Optional[str] = None
+    ) -> bool:
+        return _wv_collection_exists(client, collection=self._col(collection))
 
     def add_documents(
         self,
@@ -260,6 +266,14 @@ class WeaviateBackend(VectorBackend):
             for v in values[1:]:
                 chain = chain & WeaviateFilter.by_property(f.property).not_equal(v)
             return chain
+        if op == "in":
+            values = list(f.value or [])
+            if not values:
+                return None
+            # `prop is any of [...]` — a single contains_any clause. Mirrors the
+            # empty-set handling of `not_in` (empty → no-op None). Used to
+            # restrict one hybrid search to a SET of document_ids in one query.
+            return WeaviateFilter.by_property(f.property).contains_any(values)
 
         prop = WeaviateFilter.by_property(f.property)
         ops = {
@@ -275,6 +289,6 @@ class WeaviateBackend(VectorBackend):
         if fn is None:
             raise ValueError(
                 f"Unsupported filter operator: {f.operator!r}. "
-                f"Valid operators: {sorted([*ops, 'not_in'])}"
+                f"Valid operators: {sorted([*ops, 'not_in', 'in'])}"
             )
         return fn(f.value)

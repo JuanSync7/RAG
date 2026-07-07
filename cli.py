@@ -35,6 +35,12 @@ from query import (
     logger,
 )
 from src.platform.cli_interactive import get_input_with_menu, setup_tab_completion
+from src.platform.tree_session import (
+    cycle_tree_state,
+    get_tree_state,
+    label_tree_state,
+    set_tree_state,
+)
 from src.platform.command_catalog import (
     MODE_INGEST_CLI,
     MODE_QUERY_CLI,
@@ -387,6 +393,21 @@ def _cmd_verbose():
     print()
 
 
+@_register_command("tree", _QUERY_SPECS["tree"].description)
+def _cmd_tree():
+    new_state = set_tree_state(cycle_tree_state(get_tree_state()))
+    label = label_tree_state(new_state)
+    color = B_GREEN if new_state is True else (DIM if new_state is False else B_YELLOW)
+    print(f"  {B_CYAN}⟡{RESET} Tree retrieval: {color}{label.upper()}{RESET}")
+    if new_state is None:
+        print(f"    {DIM}Using RAG_TREE_RETRIEVAL_ENABLED config default{RESET}")
+    elif new_state is True:
+        print(f"    {DIM}Hierarchical retrieval forced ON for this session{RESET}")
+    else:
+        print(f"    {DIM}Hierarchical retrieval forced OFF for this session{RESET}")
+    print()
+
+
 @_register_command("quit", _QUERY_SPECS["quit"].description)
 def _cmd_quit():
     print(f"\n  {DIM}Goodbye! 👋{RESET}\n")
@@ -498,6 +519,10 @@ def run_query_cli() -> None:
             _backend = _detect_vector_backend()
             print(f"  {B_CYAN}⟡{RESET} {DIM}Connecting to {_backend}...{RESET}", end="", flush=True)
             start = time.time()
+            # Per-session tree-retrieval override (None = config default).
+            tree_override = get_tree_state()
+            if tree_override is not None:
+                filters.setdefault("tree_retrieval", tree_override)
             if query._verbose_mode:
                 response = rag.run(query_text, **filters)
             else:
@@ -571,6 +596,24 @@ def _execute_ingest_run(state: dict) -> None:
     """Execute one ingestion run using the current interactive state."""
     from ingest import ingest as run_ingest
 
+    if not state["update"]:
+        # Destructive path: require typed confirmation.
+        from config.settings import WEAVIATE_COLLECTION_NAME
+        print(
+            f"\n  {B_RED}⚠ FRESH MODE{RESET}: this will DELETE the entire "
+            f"Weaviate collection '{WEAVIATE_COLLECTION_NAME}' before re-ingesting."
+        )
+        try:
+            answer = input(
+                f"  Type the collection name to confirm "
+                f"(or anything else to abort): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer != WEAVIATE_COLLECTION_NAME:
+            print(f"  {B_RED}✗ Aborted{RESET} (fresh-mode confirmation failed)\n")
+            return
+
     print(f"  {B_CYAN}⟡{RESET} {DIM}Running ingestion...{RESET}")
     start = time.time()
     try:
@@ -616,7 +659,7 @@ def run_ingest_cli() -> None:
     state = {
         "documents_dir": validate_documents_dir(DOCUMENTS_DIR, PROJECT_ROOT),
         "selected_file": None,
-        "update": False,
+        "update": True,
         "build_kg": True,
         "semantic_chunking": True,
         "export_processed": False,

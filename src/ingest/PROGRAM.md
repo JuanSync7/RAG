@@ -96,7 +96,6 @@ Only test files may be modified or created:
 
 - `src/ingest/PROGRAM.md` — this file
 - `src/ingest/scorer_v5.py` — the scoring script
-- `src/ingest/scorer_v3.py` — previous scoring script
 - `src/ingest/scorer_v2.py` — previous scoring script
 - `src/ingest/scorer.py` — v1 scoring script
 - All source files under `src/ingest/` — this run adds tests only, never changes production code

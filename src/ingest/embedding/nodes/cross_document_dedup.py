@@ -33,6 +33,7 @@ import logging
 import time
 from typing import Any
 
+from config.settings import VECTOR_COLLECTION_DEFAULT
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.common.dedup_utils import (
     compute_content_hash,
@@ -42,10 +43,12 @@ from src.ingest.embedding.common.dedup_utils import (
 )
 from src.ingest.embedding.common.types import MergeEvent, create_merge_event
 from src.ingest.embedding.state import EmbeddingPipelineState
+from src.ingest.common.observability import node_span
 
 logger = logging.getLogger("rag.ingest.embedding.dedup")
 
 
+@node_span("cross_document_dedup")
 def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Detect and eliminate cross-document duplicate chunks.
 
@@ -218,16 +221,22 @@ def _try_fuzzy_dedup(
         find_chunk_by_fuzzy_fingerprint,
     )
 
-    threshold: float = getattr(config, "fuzzy_similarity_threshold", 0.95)
-    shingle_size: int = getattr(config, "fuzzy_shingle_size", 3)
-    num_hashes: int = getattr(config, "fuzzy_num_hashes", 128)
+    threshold: float = config.fuzzy_similarity_threshold
+    shingle_size: int = config.fuzzy_shingle_size
+    num_hashes: int = config.fuzzy_num_hashes
 
     fingerprint = compute_fuzzy_fingerprint(
         chunk.text, shingle_size=shingle_size, num_hashes=num_hashes
     )
     chunk.metadata["fuzzy_fingerprint"] = fingerprint
 
-    match = find_chunk_by_fuzzy_fingerprint(client, fingerprint, threshold, num_hashes)
+    match = find_chunk_by_fuzzy_fingerprint(
+        client,
+        fingerprint,
+        threshold,
+        num_hashes,
+        collection_name=getattr(config, "target_collection", None) or VECTOR_COLLECTION_DEFAULT,
+    )
     if match is None:
         chunk.metadata.setdefault("source_documents", [source_key])
         return False

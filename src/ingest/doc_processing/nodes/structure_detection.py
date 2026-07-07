@@ -22,6 +22,8 @@ from typing import Any
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support import parse_with_docling
+from src.ingest.common.observability import node_span
+from config.settings import RAG_INGEST_STRUCTURE_MAX_FIGURES
 
 logger = logging.getLogger("rag.ingest.docproc.structure_detection")
 
@@ -29,9 +31,8 @@ _FIGURE_PATTERN = re.compile(r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", re.IGNORECA
 _HEADING_PATTERN = re.compile(
     r"^\s*(?:#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+[A-Z].+)$", re.MULTILINE
 )
-_MAX_FIGURES = 32
 
-
+@node_span("structure_detection")
 def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Extract structural signals via parser abstraction or legacy fallback.
 
@@ -85,11 +86,19 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
             )
             parsed_text = parse_result.markdown
             headings = list(parse_result.headings)
-            figures = (
-                [f"Figure {i + 1}" for i in range(10)]
-                if parse_result.has_figures
-                else []
-            )
+            # ParseResult exposes `has_figures: bool` only (no figure list).
+            # Derive concrete figure references from the parsed markdown so
+            # downstream multimodal_processing emits one note per real
+            # reference rather than a fixed-size synthetic list.
+            if parse_result.has_figures:
+                figures = _FIGURE_PATTERN.findall(parsed_text)
+                if not figures:
+                    # Parser asserts figures exist but no inline references
+                    # match — fall back to a single placeholder so the
+                    # multimodal stage still runs once.
+                    figures = ["Figure 1"]
+            else:
+                figures = []
             # Derive a short strategy label from the parser class name.
             parser_strategy = (
                 type(parser_instance).__name__
@@ -166,7 +175,7 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
 
         structure = {
             "has_figures": bool(figures),
-            "figures": figures[:_MAX_FIGURES],
+            "figures": figures[:RAG_INGEST_STRUCTURE_MAX_FIGURES],
             "heading_count": len(headings),
             "docling_enabled": bool(config.enable_docling_parser),
             "docling_model": str(config.docling_model),
@@ -188,15 +197,19 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
         headings = _HEADING_PATTERN.findall(raw_text)
         parser_strategy = "regex"
 
-    structure = {
+    structure: dict[str, Any] = {
         "has_figures": bool(figures),
-        "figures": figures[:_MAX_FIGURES],
+        "figures": figures[:RAG_INGEST_STRUCTURE_MAX_FIGURES],
         "heading_count": len(headings),
         "docling_enabled": bool(config.enable_docling_parser),
-        "docling_model": str(config.docling_model),
         "docling_document_available": False,
         "parser_strategy": parser_strategy,
     }
+    # docling_model is only meaningful when Docling was actually used. The
+    # parser-registry path may select non-Docling parsers (markdown, HTML,
+    # code), so do not surface a misleading model name there.
+    if parser_strategy in ("docling", "docling_legacy"):
+        structure["docling_model"] = str(config.docling_model)
 
     update = {
         "raw_text": parsed_text,
@@ -209,6 +222,6 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
     if parser_instance is not None:
         update["parser_instance"] = parser_instance
 
-    logger.info("structure_detection complete: source=%s strategy=%s", state["source_name"], structure.get("strategy", "unknown"))
+    logger.info("structure_detection complete: source=%s strategy=%s", state["source_name"], structure.get("parser_strategy", "unknown"))
     logger.debug("structure_detection_node completed in %.3fs", time.monotonic() - t0)
     return update

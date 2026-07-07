@@ -35,6 +35,7 @@ from config.settings import (
     AUTH_OIDC_ROLES_CLAIM,
     AUTH_OIDC_SUBJECT_CLAIM,
     AUTH_OIDC_TENANT_CLAIM,
+    DEFAULT_TENANT_ID,
 )
 from src.platform.security.api_key_store import lookup_api_key
 
@@ -168,7 +169,7 @@ def _principal_from_api_key(raw_key: str) -> Optional[Principal]:
         if candidate and hmac.compare_digest(candidate, raw_key):
             return Principal(
                 subject=str(cfg.get("subject", token_id)),
-                tenant_id=str(cfg.get("tenant_id", "default")),
+                tenant_id=str(cfg.get("tenant_id", DEFAULT_TENANT_ID)),
                 roles=[str(r) for r in cfg.get("roles", ["query"])],
                 auth_type="api_key",
                 raw_token_id=token_id,
@@ -177,7 +178,7 @@ def _principal_from_api_key(raw_key: str) -> Optional[Principal]:
     if managed:
         return Principal(
             subject=str(managed.get("subject", managed["key_id"])),
-            tenant_id=str(managed.get("tenant_id", "default")),
+            tenant_id=str(managed.get("tenant_id", DEFAULT_TENANT_ID)),
             roles=[str(r) for r in managed.get("roles", ["query"])],
             auth_type="api_key",
             raw_token_id=str(managed["key_id"]),
@@ -211,7 +212,7 @@ def _principal_from_jwt(raw_jwt: str) -> Principal:
             roles = [roles]
         return Principal(
             subject=str(payload.get(AUTH_OIDC_SUBJECT_CLAIM, "unknown")),
-            tenant_id=str(payload.get(AUTH_OIDC_TENANT_CLAIM, "default")),
+            tenant_id=str(payload.get(AUTH_OIDC_TENANT_CLAIM, DEFAULT_TENANT_ID)),
             roles=[str(r) for r in roles],
             auth_type="oidc",
             project_id=payload.get("project_id"),
@@ -235,7 +236,7 @@ def _principal_from_jwt(raw_jwt: str) -> Principal:
         roles = [roles]
     return Principal(
         subject=str(payload.get("sub", "unknown")),
-        tenant_id=str(payload.get("tenant_id", "default")),
+        tenant_id=str(payload.get("tenant_id", DEFAULT_TENANT_ID)),
         roles=[str(r) for r in roles],
         auth_type="jwt",
         project_id=payload.get("project_id"),
@@ -291,7 +292,7 @@ async def authenticate_request(
     # Backward-compatible dev mode.
     return Principal(
         subject="anonymous",
-        tenant_id="default",
+        tenant_id=DEFAULT_TENANT_ID,
         roles=["query"],
         auth_type="none",
     )

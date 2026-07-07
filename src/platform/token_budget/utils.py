@@ -1,7 +1,7 @@
 # @summary
 # Token counting utility backed by litellm.token_counter() with character
 # heuristic fallback for unknown models.
-# Exports: count_tokens, estimate_tokens
+# Exports: count_tokens
 # Deps: litellm, logging, config.settings
 # @end-summary
 """Token counting helper for budget calculations.
@@ -65,23 +65,6 @@ def count_tokens(
         return _heuristic_count(text)
 
 
-def estimate_tokens(text: str | None, chars_per_token: int | None = None) -> int:
-    """Legacy heuristic estimator — kept for backward compatibility.
-
-    Prefer :func:`count_tokens` for accurate counts.
-
-    Args:
-        text: Plain text to estimate.
-        chars_per_token: Optional heuristic override.
-
-    Returns:
-        Estimated token count (>= 0).
-    """
-    if not text:
-        return 0
-    return _heuristic_count(text, chars_per_token)
-
-
 def _heuristic_count(text: str, chars_per_token: int | None = None) -> int:
     """Count tokens using a character-length heuristic.
 
@@ -98,4 +81,4 @@ def _heuristic_count(text: str, chars_per_token: int | None = None) -> int:
     return max(1, len(text) // cpt)
 
 
-__all__ = ["count_tokens", "estimate_tokens"]
+__all__ = ["count_tokens"]

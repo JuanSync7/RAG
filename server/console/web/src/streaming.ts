@@ -1,7 +1,10 @@
 // @summary
 // Query execution: SSE streaming + non-stream fallback. Owns sendQuery as the
 // canonical entry point for any plain-text user message; slash-command flows
-// reuse streamQuery/nonStreamQuery directly.
+// reuse streamQuery/nonStreamQuery directly. Turn-loop responses additionally
+// render a lazy collapsible ACTIVITY LOG (shared `activityLog.ts` renderer)
+// above the reasoning block, plus clickable clarify chips that resubmit their
+// text as the next query (TURN_LOOP_DESIGN.md §8).
 // @end-summary
 
 import { byId, escHtml, fmtTime } from "./dom";
@@ -11,12 +14,15 @@ import { state, setActiveConversation } from "./state";
 import { refs } from "./refs";
 import { appendUserMsg, appendErrorMsg, appendPendingAssistant } from "./thread";
 import { scrollToBottom } from "./scrollFab";
-import { buildCitationsHtml, revealCitations } from "./citations";
+import { buildCitationsHtml, buildSourcesLineHtml, revealCitations } from "./citations";
 import { updateContextIndicator, clearLastTurnStats } from "./contextWindow";
 import { attachFeedback } from "./feedback";
 import { loadConversations, updateConvTitle } from "./conversations";
-import { getChatMode, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions } from "./chatMode";
-import type { ChunkResult, SourceRef, StreamEventData, TokenBudget } from "./user-types";
+import { getChatMode, getDeepResearch, getTurnLoop, getRetrievalSubMode, getSourcesTopK, appendSourcesTurn, applyDocState, cacheDocsFromSources, wireCitationActions, showDrSuggestionChip, hideDrSuggestionChip, registerQueryResubmit, resubmitQuery, registerDrSuggestionResubmit, renderFollowUps } from "./chatMode";
+import { createActivityLog, isTurnLoopEvent, renderClarifyChips } from "./activityLog";
+import type { ActivityLog } from "./activityLog";
+import { renderQueryProcessing } from "./queryProcessing";
+import type { ChunkResult, QueryMetadata, SourceRef, StreamEventData, TokenBudget } from "./user-types";
 
 function buildQueryBody(queryText: string): Record<string, unknown> {
     const s = getSettings();
@@ -27,12 +33,36 @@ function buildQueryBody(queryText: string): Record<string, unknown> {
         memory_enabled: s.memory_enabled !== false,
         conversation_id: state.activeConversationId ?? undefined,
     };
+    // Turn-level agentic loop per-request override (TURN_LOOP_DESIGN.md §8).
+    // Mirrors the deep_research pattern: only sent while the user toggle is
+    // on; absent ⇒ server config default (RAG_TURN_LOOP_ENABLED). Sources
+    // mode wins over the toggle (mode='retrieval' skips generation, which
+    // the loop cannot honor — the server validator rejects the combo).
+    const turnLoopActive = getTurnLoop() && getChatMode() !== "sources";
+    // Tree retrieval per-request override (TREE_RETRIEVAL_DESIGN.md §6).
+    // Only set on body when user has explicitly toggled it; absent ⇒ server
+    // uses config default. Omitted while the turn loop is active: the loop
+    // replaces the linear hybrid-search stage tree retrieval extends, and
+    // the server validator hard-422s the combination. Any future competing
+    // per-request override (e.g. an agentic toggle) must be suppressed here
+    // the same way — a single query body must never carry two orchestrators.
+    if (s.tree_retrieval !== undefined && !turnLoopActive) {
+        body.tree_retrieval = Boolean(s.tree_retrieval);
+    }
     if (getChatMode() === "sources") {
         body.mode = "retrieval";
         body.retrieval_sub_mode = getRetrievalSubMode();
         const topK = getSourcesTopK();
         body.rerank_top_k = topK;
         body.search_limit = Math.max(parseInt(String(s.searchLimit ?? "10"), 10), topK * 2);
+    }
+    // deep_research <-> turn_loop mutual exclusion is enforced in chatMode
+    // (the toggles reset each other), matching the request-schema validator.
+    if (getDeepResearch()) {
+        body.deep_research = true;
+    }
+    if (turnLoopActive) {
+        body.turn_loop = true;
     }
     return body;
 }
@@ -61,7 +91,9 @@ async function sourcesOnlyQuery(queryText: string): Promise<void> {
             relevant_doc_ids?: string[];
             ignored_doc_ids?: string[];
             token_budget?: TokenBudget;
+            dr_suggestion?: DrSuggestionPayload;
         }>("POST", "/console/query", buildQueryBody(queryText));
+        maybeShowDrChip(data.dr_suggestion, queryText);
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
         const sources = (data.results ?? []).map(chunkToSourceRef);
@@ -164,6 +196,27 @@ export async function streamQuery(queryText: string): Promise<void> {
     let lastTokenAt = 0;
     let tokenEventCount = 0;
     let lastBudget: import("./user-types").TokenBudget | null = null;
+    // Retrieved chunks arrive in the `retrieval` event (before any answer token);
+    // stashed here so the `done` handler can render citations with the COMPLETE
+    // answer and thus collapse them to the chunks actually cited ([N]).
+    let lastResults: ChunkResult[] = [];
+
+    // Live reasoning ("thinking") — a collapsible block rendered above the answer
+    // bubble, filled from `reasoning` SSE events emitted by reasoning models.
+    let reasoningText = "";
+    let reasoningStartAt = 0;
+
+    // Turn-loop ACTIVITY LOG — a collapsible block rendered above the
+    // reasoning block, filled from the nine typed turn-loop SSE events
+    // (TURN_LOOP_DESIGN.md §8). Created lazily on the first activity event so
+    // non-loop turns are entirely unaffected; auto-collapsed when the first
+    // answer token arrives (still expandable afterwards). Held in a ref
+    // object (not a bare closure-mutated `let`) to sidestep the TS narrowing
+    // pitfall where such vars get inferred as `never` at read sites.
+    const activity: { current: ActivityLog | null } = { current: null };
+    // Question from a terminal `clarify` event — fallback bubble text when the
+    // chain does not also surface `clarification_message`.
+    let clarifyQuestion = "";
 
     clearLastTurnStats();
 
@@ -181,6 +234,56 @@ export async function streamQuery(queryText: string): Promise<void> {
             cancelAnimationFrame(renderRaf);
             renderRaf = 0;
         }
+    };
+
+    // Returns this turn's reasoning-body element, lazily creating the collapsible
+    // block above the answer bubble on first use. Scoped to this bubble-wrap, so
+    // it never collides with reasoning blocks from earlier turns. (Querying the
+    // DOM rather than caching in a closure-mutated var sidesteps a TS narrowing
+    // pitfall where such vars get inferred as `never` at read sites.)
+    const reasoningBody = (): HTMLElement => {
+        const wrap = bubbleEl.parentElement;
+        let el = wrap?.querySelector<HTMLDetailsElement>(".reasoning-block") ?? null;
+        if (!el) {
+            el = document.createElement("details");
+            el.className = "reasoning-block";
+            el.open = true;
+            el.innerHTML =
+                `<summary class="reasoning-summary">&#128173; Thinking&hellip;</summary>` +
+                `<div class="reasoning-body"></div>`;
+            wrap?.insertBefore(el, bubbleEl);
+            reasoningStartAt = performance.now();
+        }
+        return el.querySelector<HTMLElement>(".reasoning-body")!;
+    };
+    // Returns this turn's activity log, lazily creating it on first use and
+    // inserting it into the bubble-wrap BEFORE the reasoning block (when the
+    // reasoning block does not exist yet, before the answer bubble — a later
+    // reasoning block inserts before the bubble too, i.e. below this log, so
+    // the order is always: activity log, thinking, answer).
+    const activityLog = (): ActivityLog => {
+        if (!activity.current) {
+            activity.current = createActivityLog();
+            const wrap = bubbleEl.parentElement;
+            const anchor = wrap?.querySelector<HTMLElement>(".reasoning-block") ?? bubbleEl;
+            wrap?.insertBefore(activity.current.root, anchor);
+        }
+        return activity.current;
+    };
+
+    // Relabel the summary with the elapsed thinking time; collapse once the
+    // answer begins (when there is no answer, leave it open so the user can read
+    // what the model worked through).
+    const finalizeReasoning = (collapse: boolean) => {
+        const el = bubbleEl.parentElement?.querySelector<HTMLDetailsElement>(".reasoning-block");
+        if (!el) return;
+        const summaryEl = el.querySelector(".reasoning-summary");
+        if (summaryEl) {
+            const secs = reasoningStartAt ? (performance.now() - reasoningStartAt) / 1000 : 0;
+            summaryEl.innerHTML =
+                secs > 0 ? `&#128173; Thought for ${secs.toFixed(1)}s` : "&#128173; Thought process";
+        }
+        if (collapse) el.open = false;
     };
 
     try {
@@ -209,18 +312,45 @@ export async function streamQuery(queryText: string): Promise<void> {
                         bubbleEl.classList.add("streaming");
                         started = true;
                         firstTokenAt = performance.now();
+                        finalizeReasoning(true);
+                        // The accepted answer replay has begun — collapse the
+                        // activity log (design §8; expandable afterwards).
+                        activity.current?.finalize(true);
                     }
                     lastTokenAt = performance.now();
                     tokenEventCount++;
                     answer += data.token || "";
                     scheduleRender();
                     scrollToBottom();
+                } else if (evtType === "reasoning") {
+                    // Live chain-of-thought: dimmed, collapsible, above the answer.
+                    // Raw model text → textContent (never innerHTML) so it can't inject markup.
+                    typingEl.style.display = "none";
+                    reasoningText += String(data.text ?? "");
+                    reasoningBody().textContent = reasoningText;
+                    scrollToBottom();
                 } else if (evtType === "retrieval") {
                     const cid = String(data.conversation_id ?? "").trim();
                     if (cid) setActiveConversation(cid);
+                    const drSugg = (data as { dr_suggestion?: DrSuggestionPayload }).dr_suggestion;
+                    maybeShowDrChip(drSugg, queryText);
 
                     const clar = String(data.clarification_message ?? "").trim();
-                    if (clar) pendingClarification = clar;
+                    if (clar) {
+                        // Prefix the clarification with a typed reason badge
+                        // when the chain surfaces ``ask_user_reason`` (parity
+                        // with the CLI). Reason -> short human label.
+                        const reason = String(data.ask_user_reason ?? "").trim();
+                        const reasonLabels: Record<string, string> = {
+                            sanitizer_reject: "Empty or invalid query",
+                            injection_blocked: "Query blocked by safety rails",
+                            vague_query: "Query too vague to retrieve",
+                            budget_exhausted: "Retrieval timeout",
+                            no_results: "No matching documents",
+                        };
+                        const label = reasonLabels[reason];
+                        pendingClarification = label ? `[${label}] ${clar}` : clar;
+                    }
 
                     if (data.token_budget) {
                         lastBudget = data.token_budget;
@@ -229,23 +359,46 @@ export async function streamQuery(queryText: string): Promise<void> {
 
                     const results = (data.results ?? []) as ChunkResult[];
                     if (results.length) {
+                        lastResults = results;
                         const sourceRefs = results.map(chunkToSourceRef);
                         cacheDocsFromSources(sourceRefs);
                     }
-                    const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
-                    if (showCitations && results.length) {
-                        citationsEl.innerHTML = buildCitationsHtml(results);
-                        wireCitationActions(citationsEl);
-                    }
+                    // Citations are NOT rendered here: this event fires before any
+                    // answer token, so no [N] markers exist yet and we could only
+                    // show "all retrieved". They are rendered in the `done` handler
+                    // below, once `answer` is complete, so the panel goes straight
+                    // to the cited-only view (no all-12 flash, no click needed).
                     if (data.relevant_doc_ids || data.ignored_doc_ids) {
                         applyDocState(
                             (data.relevant_doc_ids ?? []) as string[],
                             (data.ignored_doc_ids ?? []) as string[],
                         );
                     }
+                    // Query-processing panel (HyDE/rewrite/DR) — rendered ABOVE the
+                    // thinking block. The retrieval event carries the full metadata
+                    // and fires before any reasoning/token, so the panel lands first.
+                    renderQueryProcessing(bubbleEl.parentElement, data, queryText);
+                } else if (isTurnLoopEvent(evtType)) {
+                    // Typed turn-loop activity events (TURN_LOOP_DESIGN.md §8).
+                    // All event text is rendered via textContent inside the
+                    // shared activity-log module — never innerHTML — because
+                    // these strings carry LLM/document content.
+                    typingEl.style.display = "none";
+                    activityLog().handle(evtType, data);
+                    if (evtType === "clarify") {
+                        clarifyQuestion = String(data.question ?? "").trim() || clarifyQuestion;
+                        // Chips live OUTSIDE the collapsible log so they stay
+                        // clickable after it collapses; a click resubmits the
+                        // chip text as the next user query through the same
+                        // registered-resubmit mechanism as the DR chip.
+                        const chips = renderClarifyChips(data, resubmitQuery);
+                        if (chips) bubbleEl.parentElement?.insertBefore(chips, citationsEl);
+                    }
+                    scrollToBottom();
                 } else if (evtType === "error") {
                     errorShown = true;
                     cancelRender();
+                    finalizeReasoning(false);
                     bubbleEl.classList.remove("streaming");
                     typingEl.style.display = "none";
                     bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
@@ -255,6 +408,13 @@ export async function streamQuery(queryText: string): Promise<void> {
                 } else if (evtType === "done") {
                     const cid = String(data.conversation_id ?? "").trim();
                     if (cid) setActiveConversation(cid);
+                    // No answer followed the reasoning — leave it expanded so the
+                    // user can still see what the model worked through.
+                    if (!started) finalizeReasoning(false);
+                    // Same rule for the activity log: with no answer replay
+                    // (e.g. a terminal clarify) it stays open, relabeled with
+                    // its step count (already finalized+collapsed otherwise).
+                    if (!started) activity.current?.finalize(false);
 
                     if (data.token_budget) lastBudget = data.token_budget;
                     const completionTokens =
@@ -278,25 +438,42 @@ export async function streamQuery(queryText: string): Promise<void> {
                     typingEl.style.display = "none";
                     if (!errorShown) {
                         if (!started) {
+                            // Precedence: chain-level clarification_message,
+                            // then a turn-loop clarify question (the loop's
+                            // terminal CLARIFY may arrive only as its typed
+                            // event), then the generic fallback.
                             const msg =
                                 pendingClarification ||
+                                clarifyQuestion ||
                                 "I couldn't find relevant information for that query. " +
                                     "Could you rephrase your question or provide more details?";
                             bubbleEl.innerHTML = parseMarkdown(msg);
                             bubbleEl.style.display = "block";
                         } else {
-                            bubbleEl.innerHTML = parseMarkdown(answer);
+                            bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(lastResults, answer);
                             bubbleEl.style.display = "block";
                         }
                     }
 
                     const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
+                    if (showCitations && lastResults.length) {
+                        // Render now, with the COMPLETE answer, so the panel shows
+                        // the cited chunks first and collapses the uncited rest.
+                        citationsEl.innerHTML = buildCitationsHtml(lastResults, answer);
+                        wireCitationActions(citationsEl);
+                    }
                     if (showCitations && citationsEl.innerHTML) {
                         revealCitations(citationsEl);
                     }
                     actionsEl.style.display = "flex";
                     metaEl.textContent = fmtTime(Date.now());
                     metaEl.style.display = "block";
+                    // Suggested "you might also ask…" block at the tail of this
+                    // answer's bubble (arrives in the done event).
+                    if (!errorShown && started) {
+                        const sq = (data as { suggested_questions?: string[] }).suggested_questions;
+                        renderFollowUps(bubbleEl.parentElement, Array.isArray(sq) ? sq : []);
+                    }
                     scrollToBottom();
 
                     await loadConversations();
@@ -362,10 +539,19 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         const data = await api<{
             generated_answer?: string;
             clarification_message?: string;
+            ask_user_reason?: string;
+            degraded?: boolean;
             results?: ChunkResult[];
             conversation_id?: string;
             token_budget?: TokenBudget;
+            dr_suggestion?: DrSuggestionPayload;
+            suggested_questions?: string[];
+            processed_query?: string;
+            query_confidence?: number;
+            kg_expanded_terms?: string[] | null;
+            metadata?: QueryMetadata;
         }>("POST", "/console/query", buildQueryBody(queryText));
+        maybeShowDrChip(data.dr_suggestion, queryText);
 
         const cid = String(data.conversation_id ?? "").trim();
         if (cid) setActiveConversation(cid);
@@ -378,8 +564,11 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 
         typingEl.style.display = "none";
         const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
-        bubbleEl.innerHTML = parseMarkdown(answer);
+        bubbleEl.innerHTML = parseMarkdown(answer) + buildSourcesLineHtml(data.results ?? [], answer);
         bubbleEl.style.display = "block";
+        // Query-processing panel (HyDE/rewrite/DR) above the answer (no reasoning
+        // block on the non-stream path, so it anchors before the bubble).
+        renderQueryProcessing(bubbleEl.parentElement, data, queryText);
 
         const tb = data.token_budget;
         if (tb) {
@@ -397,7 +586,7 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
             cacheDocsFromSources(results.map(chunkToSourceRef));
         }
         if (showCitations && results.length) {
-            citationsEl.innerHTML = buildCitationsHtml(results);
+            citationsEl.innerHTML = buildCitationsHtml(results, answer);
             wireCitationActions(citationsEl);
             revealCitations(citationsEl);
         }
@@ -405,6 +594,15 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
         actionsEl.style.display = "flex";
         metaEl.textContent = fmtTime(Date.now());
         metaEl.style.display = "block";
+        // Suggested "you might also ask…" block at the tail of this answer's
+        // bubble — only for a real generated answer (parity with the streaming
+        // path, which guards on `started`); never on a clarification/no-answer turn.
+        if (data.generated_answer) {
+            renderFollowUps(
+                bubbleEl.parentElement,
+                Array.isArray(data.suggested_questions) ? data.suggested_questions : [],
+            );
+        }
         scrollToBottom();
         await loadConversations();
         updateConvTitle();
@@ -417,6 +615,10 @@ export async function nonStreamQuery(queryText: string): Promise<void> {
 }
 
 export async function sendQuery(text: string): Promise<void> {
+    // Hide any prior deep-research suggestion — a new query supersedes it. The
+    // follow-up block is per-turn (lives in its own answer bubble), so there is
+    // no global one to clear here.
+    hideDrSuggestionChip();
     if (getChatMode() === "sources") {
         await sourcesOnlyQuery(text);
         return;
@@ -425,4 +627,19 @@ export async function sendQuery(text: string): Promise<void> {
     const useStreaming = s.streaming !== false;
     if (useStreaming) await streamQuery(text);
     else await nonStreamQuery(text);
+}
+
+// One resubmit sink for every chip that re-sends text as a new user query
+// (DR suggestion chip + turn-loop clarify chips).
+registerQueryResubmit(sendQuery);
+
+interface DrSuggestionPayload {
+    suggest?: boolean;
+    reason?: string | null;
+}
+
+function maybeShowDrChip(payload: DrSuggestionPayload | undefined, query: string): void {
+    if (!payload || !payload.suggest) return;
+    if (getDeepResearch()) return;
+    showDrSuggestionChip(query);
 }

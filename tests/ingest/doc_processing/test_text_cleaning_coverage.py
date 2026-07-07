@@ -42,7 +42,6 @@ def _make_state(raw_text="Hello world.", multimodal_notes=None, **overrides) -> 
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     state = {
         "raw_text": raw_text,

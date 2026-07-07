@@ -23,6 +23,18 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from src.guardrails.common import RailVerdict
+from src.guardrails.models import (
+    GuardianModel,
+    GuardianRisk,
+    GuardianUnavailable,
+)
+from src.platform.llm import call_oneshot
+from config.settings import (
+    RAG_FAITHFULNESS_MODEL_ALIAS,
+    RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS,
+    RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
+    RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
+)
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
@@ -38,36 +50,6 @@ def _format_numbered_chunks(chunks: list[str]) -> str:
     """
     return "\n\n".join(f"[{i + 1}] {chunk}" for i, chunk in enumerate(chunks))
 
-# NeMo-style self-check-facts prompt (adapted from NeMo's built-in task)
-_SELF_CHECK_FACTS_PROMPT = """\
-You are given a task to identify if the hypothesis is grounded by / supported by the evidence.
-You will only use the contents of the evidence and not rely on external knowledge.
-
-Evidence:
-{evidence}
-
-Hypothesis:
-{hypothesis}
-
-Based on the evidence, is the hypothesis true? Respond with a score from 0.0 to 1.0.
-1.0 means fully supported by the evidence, 0.0 means completely unsupported.
-Output only a number."""
-
-# Full claim-scoring prompt for detailed breakdown
-_CLAIM_SCORING_PROMPT = """\
-You are a faithfulness evaluator. Given an answer and context chunks, score how well each claim in the answer is supported by the context.
-
-Context:
-{context}
-
-Answer:
-{answer}
-
-For each sentence in the answer, output a JSON array:
-[{{"claim": "sentence text", "score": 0.0, "supported": true}}]
-
-Score 1.0 = fully supported by the context, 0.0 = completely unsupported.
-Output ONLY the JSON array, no other text."""
 
 _FALLBACK_MESSAGE = (
     "I could not generate a reliable answer from the available documents. "
@@ -128,6 +110,10 @@ class FaithfulnessChecker:
         threshold: float = 0.5,
         action: str = "flag",
         use_self_check: bool = True,
+        guardian: Optional[GuardianModel] = None,
+        penalty_per_entity: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_PER_ENTITY,
+        penalty_cap: float = RAG_NEMO_FAITHFULNESS_HALLUCINATION_PENALTY_CAP,
+        model_alias: str = RAG_FAITHFULNESS_MODEL_ALIAS,
     ) -> None:
         """Initialize a faithfulness checker.
 
@@ -137,10 +123,25 @@ class FaithfulnessChecker:
             action: Behavior when below threshold ("reject" or "flag").
             use_self_check: Whether to run a quick self-check prompt in
                 addition to claim scoring.
+            guardian: Optional :class:`GuardianModel` to consult for
+                ``GROUNDEDNESS``. When supplied and supported, replaces the
+                ``call_oneshot`` self-check; on ``GuardianUnavailable`` the
+                rail falls through to the legacy LLM scorer.
+            penalty_per_entity: Score penalty applied per hallucinated entity.
+            penalty_cap: Maximum total hallucination penalty applied to the
+                overall score.
+            model_alias: Router alias for the LLM self-check/claim scorer
+                (defaults to the instruct model via
+                ``RAG_FAITHFULNESS_MODEL_ALIAS``). The rail's system prompt is
+                unchanged — this only selects which model runs it.
         """
         self._threshold = threshold
         self._action = action  # "reject" or "flag"
         self._use_self_check = use_self_check
+        self._guardian = guardian
+        self._penalty_per_entity = penalty_per_entity
+        self._penalty_cap = penalty_cap
+        self._model_alias = model_alias
 
     def check(
         self,
@@ -176,8 +177,13 @@ class FaithfulnessChecker:
         if self._use_self_check:
             from concurrent.futures import ThreadPoolExecutor
 
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="faith") as pool:
-                fut_self = pool.submit(self._self_check_facts, answer, formatted_context)
+            with ThreadPoolExecutor(max_workers=RAG_GUARDRAILS_FAITHFULNESS_POOL_MAX_WORKERS, thread_name_prefix="faith") as pool:
+                fut_self = pool.submit(
+                    self._compute_overall_score,
+                    answer,
+                    context_chunks,
+                    formatted_context,
+                )
                 fut_claims = pool.submit(self._score_claims, answer, formatted_context)
                 self_check_score = fut_self.result()
                 claim_scores = fut_claims.result()
@@ -194,7 +200,7 @@ class FaithfulnessChecker:
 
         # Penalize for hallucinated entities
         if hallucinated:
-            penalty = min(0.3, len(hallucinated) * 0.1)
+            penalty = min(self._penalty_cap, len(hallucinated) * self._penalty_per_entity)
             overall = max(0.0, overall - penalty)
 
         # Determine verdict based on threshold and action
@@ -223,6 +229,43 @@ class FaithfulnessChecker:
             hallucinated_entities=hallucinated,
         )
 
+    def _compute_overall_score(
+        self,
+        answer: str,
+        context_chunks: list[str],
+        formatted_context: str,
+    ) -> Optional[float]:
+        """Return overall faithfulness in [0, 1]. Guardian first, LLM second.
+
+        Granite Guardian's ``GROUNDEDNESS`` returns the probability the
+        answer is *ungrounded*; we invert that for the overall score so a
+        perfectly grounded answer scores 1.0. On ``GuardianUnavailable``
+        we fall through to the legacy ``call_oneshot`` self-check so the
+        rail still produces a number even when the guardian is offline.
+        """
+        if self._guardian is not None and self._guardian.supports(
+            GuardianRisk.GROUNDEDNESS
+        ):
+            try:
+                verdict = self._guardian.classify(
+                    answer,
+                    risk=GuardianRisk.GROUNDEDNESS,
+                    context=context_chunks,
+                    direction="output",
+                )
+                score = max(0.0, min(1.0, 1.0 - verdict.score))
+                logger.info(
+                    "Faithfulness via guardian(%s): score=%.2f",
+                    self._guardian.name, score,
+                )
+                return score
+            except GuardianUnavailable as e:
+                logger.warning(
+                    "Guardian %s unavailable (%s) — using call_oneshot self-check",
+                    self._guardian.name, e,
+                )
+        return self._self_check_facts(answer, formatted_context)
+
     def _self_check_facts(
         self, answer: str, formatted_context: str
     ) -> Optional[float]:
@@ -250,14 +293,13 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.platform.llm import call_oneshot
-
             response = call_oneshot(
                 prompt,
                 system=(
                     "You are a faithfulness evaluator. Output only a number "
                     "between 0.0 and 1.0."
                 ),
+                model_alias=self._model_alias,
             )
             if response:
                 # Try to extract a float from the response
@@ -298,12 +340,12 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.platform.llm import call_oneshot
             from src.common import parse_json_object
 
             response = call_oneshot(
                 prompt,
                 system="You are a faithfulness evaluator. Output only JSON.",
+                model_alias=self._model_alias,
             )
             if not response:
                 logger.warning("Faithfulness LLM returned empty response")

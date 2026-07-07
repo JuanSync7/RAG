@@ -30,7 +30,6 @@ def _make_state(source_path: str = "/tmp/test.txt", **overrides):
         config=config,
         embedder=MagicMock(),
         weaviate_client=MagicMock(),
-        kg_builder=None,
     )
     state = {
         "source_path": source_path,

@@ -16,7 +16,14 @@ dependencies = [
   "langgraph",
   "numpy",
   "temporalio>=1.23,<2",
-  "langfuse",
+  # OpenTelemetry SDK for the OTel-native observability backend
+  # (src/platform/observability/otel/backend.py). Targets OTLP/HTTP so any
+  # OTel-compatible collector (Langfuse v3 /api/public/otel/v1/traces,
+  # Phoenix, Braintrust, Honeycomb, Datadog, etc.) is reachable via
+  # OTEL_EXPORTER_OTLP_ENDPOINT.
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
   "fastapi",
   "uvicorn[standard]",
   "pydantic>=2.0",
@@ -35,6 +42,9 @@ dependencies = [
   "markdownify>=0.13.0",
   "pypandoc>=1.13",
   "tree-sitter-python>=0.23.0",
+  # Knowledge graph subsystem — extracted to its own repo and pinned by
+  # git SHA in [tool.uv.sources]. See docs/kgweave_deployment.md.
+  "kgweave",
 ]
 
 [project.optional-dependencies]
@@ -173,11 +183,18 @@ asyncio_mode = "auto"
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
     "smoke: end-to-end stack smoke tests requiring docker compose up (run with '-m smoke')",
+    "eval_deep_research: A/B retrieval eval for deep_research mode (run with '-m eval_deep_research')",
+    "eval_conversation: multi-turn conversation eval for the turn loop (run with '-m eval_conversation')",
+    "slow: slow tests (real models, network, or heavy compute; deselect with '-m \"not slow\"')",
+    "integration: integration tests exercising real external libraries/models end-to-end",
 ]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.152.8",
     "libcst>=1.8.6",
+    "pypdf>=6.11.0",
+    "reportlab>=4.5.1",
 ]
 
 [[tool.uv.index]]
@@ -188,4 +205,10 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
+# KGWeave is pinned by git SHA. To pick up upstream changes, bump `rev` to
+# a newer KGWeave commit and re-run `uv lock`. For active KGWeave
+# co-development, temporarily switch this entry to
+# `{ path = "../KGWeave", editable = true }` locally — but do not commit
+# that change.
+kgweave = { git = "https://github.com/JuanSync7/KGWeave.git", rev = "d4c474b4d6ff9da0053eadcb55343eab057b1739" }
 triton = { index = "pytorch-cu124" }

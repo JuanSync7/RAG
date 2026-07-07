@@ -68,6 +68,21 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         intent="toggle_verbose",
     ),
     CommandSpec(
+        name="tree",
+        description="Cycle hierarchical (tree) retrieval: default → on → off",
+        modes=(MODE_QUERY_CLI, MODE_SERVER_CLI, MODE_CONSOLE_QUERY),
+        intent="cycle_tree_retrieval",
+    ),
+    CommandSpec(
+        name="turn-loop",
+        description="Cycle turn-loop agentic conversation: default → on → off",
+        # Server-CLI only: the user console's parity surface is its toolbar
+        # toggle (chatMode.ts), not a slash command.
+        modes=(MODE_SERVER_CLI,),
+        args_hint="[on|off|auto]",
+        intent="cycle_turn_loop",
+    ),
+    CommandSpec(
         name="quit",
         description="Exit current interactive session",
         modes=(MODE_QUERY_CLI, MODE_INGEST_CLI, MODE_SERVER_CLI),
@@ -162,12 +177,6 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         description="Toggle incremental update mode",
         modes=(MODE_INGEST_CLI,),
         intent="toggle_update_mode",
-    ),
-    CommandSpec(
-        name="toggle-kg",
-        description="Toggle KG extraction/storage",
-        modes=(MODE_INGEST_CLI,),
-        intent="toggle_build_kg",
     ),
     CommandSpec(
         name="toggle-semantic",

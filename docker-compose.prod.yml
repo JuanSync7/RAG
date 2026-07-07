@@ -1,0 +1,68 @@
+# =============================================================================
+# PROD overlay — uk-ai03 full production stack on the canonical base + ai03 layer.
+#
+# THIN env overlay. Layered: base + docker-compose.ai03.yml + this. Inherits the
+# base canonical container names (rag-api, rag-weaviate, ...), so existing
+# `podman ... rag-api` ops keep working. Carries only: the API-front nginx, the
+# tunnel's prod container_name, prod weaviate volume, and prod auth posture.
+# Host-port values + COMPOSE_PROJECT_NAME=ragweave-prod live in .env.prod.
+#
+# Run:  ./scripts/prod-up.sh up -d
+#
+# ---------------------------------------------------------------------------
+# CUTOVER NOTES (this REPLACES the current lean prod; do it in a window):
+#  1. Temporal: prod historically ran as a HOST process on :7233. This stack runs
+#     it CONTAINERIZED. STOP the host Temporal first (frees :7233), and migrate
+#     its workflow history into temporal-db (or accept losing it).
+#  2. Embed/rerank → qwen3 (2560-dim) is a dimension change from the legacy
+#     bge-m3 (1024-dim) corpus: requires a FULL re-embed into the fresh
+#     weaviate-prod-data volume (collection recreate). The old .weaviate_data is
+#     left untouched as a rollback.
+#  3. Postgres + Langfuse are now containerized (were SQLite / off). The IT
+#     subuid/subgid fix (see docker-compose.uk-ai03.yml header) must be in place.
+# =============================================================================
+services:
+  rag-vllm-tunnel:
+    container_name: rag-vllm-tunnel
+
+  rag-weaviate:
+    # Fresh prod vector store for the qwen3 re-embed (project-scoped named volume).
+    volumes:
+      - weaviate-prod-data:/var/lib/weaviate
+
+  rag-api:
+    volumes:
+      - ./.runtime:/app/.runtime
+    environment:
+      # Internal network; API auth disabled (matches the current prod posture).
+      - RAG_AUTH_API_KEYS_REQUIRED=false
+      - RAG_AUTH_JWT_ENABLED=false
+      - RAG_AUTH_OIDC_ENABLED=false
+
+  # API-front nginx (TLS → rag-api). Prod-only; dev reaches the API directly.
+  # Rootless podman: bind ports >1024 and run as root (see docker-compose.uk-ai03.yml).
+  rag-nginx:
+    image: nginx:alpine
+    container_name: rag-nginx
+    user: root
+    command: >
+      sh -c "sed -i 's/^user[[:space:]][^;]*;//' /etc/nginx/nginx.conf &&
+             nginx -g 'user root; daemon off;'"
+    ports:
+      - "${RAG_NGINX_HTTP_PORT:-8080}:80"
+      - "${RAG_NGINX_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./ops/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1/health 2>/dev/null | grep -q '\"status\"'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  weaviate-prod-data:

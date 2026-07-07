@@ -28,6 +28,9 @@ processed/
 # Clean document store (regenerable via ingestion)
 data/clean_store/
 
+# Soak-test datasheet inputs (download on demand; not redistributed in-repo)
+data/datasheets/
+
 # Models (downloaded via huggingface_hub)
 models/baai/
 
@@ -53,9 +56,10 @@ logs/*.log
 # User documents (keep sample docs, ignore user-added files)
 # documents/
 
-# Model cache (incl. host symlink at repo root pointing to ~/models)
-models
-models/
+# Model cache (incl. host symlink at repo root pointing to ~/models).
+# Anchored to root so it does not match source packages like src/guardrails/models/.
+/models
+/models/
 
 # TLS certs (generated locally via mkcert)
 certs/*
@@ -87,6 +91,10 @@ htmlcov/
 
 # Ad-hoc ingest corpora (cloned beside the repo, not source)
 opentitan_data/
+# Staged OpenTitan corpus is a symlink mirror — rebuild via
+# scripts/stage_opentitan_corpus.py
+documents/opentitan/
+documents/opentitan_subset/
 
 # Per-iteration bench result JSONs — ignore everything new; the tracked
 # baselines (cpu-1777015485.json, gpu-1777015578.json, baseline_report.md)
@@ -94,3 +102,14 @@ opentitan_data/
 scripts/.bench_results/*.json
 !scripts/.bench_results/cpu-1777015485.json
 !scripts/.bench_results/gpu-1777015578.json
+
+# Local-only compose overrides — machine-specific tuning (timeouts, model
+# choices, host paths) that should not bleed into source. Per-clone state.
+docker-compose.override.yml
+docker-compose.cpu-embed-off.yml
+.gitignore.local
+.tei_cache
+
+# Persisted nightly eval reports (P8a orchestrator) — generated, not source.
+eval_reports/
+evals/*/reports/

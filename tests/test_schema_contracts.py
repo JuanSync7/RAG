@@ -52,14 +52,20 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "vision_api_key",
     "vision_api_path",
     # Pipeline feature toggles (server-side defaults)
-    "enable_document_refactoring",
     "enable_cross_reference_extraction",
-    "enable_knowledge_graph_extraction",
     "enable_quality_validation",
-    "enable_knowledge_graph_storage",
-    # Quality thresholds
-    "min_chunk_chars",
-    "min_quality_score",
+    "verify_lossless",
+    "lossless_min_coverage",
+    "lossless_strict",
+    "enable_kg_phase2b",
+    # Chunk floors
+    "native_min_chunk_chars",
+    "table_embed_prepend_section_path",
+    "enable_adaptive_table_chunking",
+    "drop_navigational",
+    "nav_max_chars",
+    "nav_classify",
+    "nav_role_default",
     # Storage / infra paths
     "clean_store_dir",
     "store_documents",
@@ -96,7 +102,6 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
 INGESTION_REQUEST_ONLY_FIELDS = frozenset({
     "mode",
     "target_path",
-    "export_obsidian",
 })
 
 
@@ -190,7 +195,7 @@ class TestIngestionSchemaContract:
         assert config.hybrid_chunker_max_tokens == default_config.hybrid_chunker_max_tokens
 
     def test_request_only_fields_not_in_field_map(self):
-        """Fields like mode/target_path/export_obsidian should not be in _FIELD_MAP."""
+        """Fields like mode/target_path should not be in _FIELD_MAP."""
         mapped_req_fields = set(self._field_map().keys())
         leaked = INGESTION_REQUEST_ONLY_FIELDS & mapped_req_fields
         assert not leaked, (
@@ -209,6 +214,9 @@ QUERY_REQUEST_ONLY_FIELDS = frozenset({
     "memory_enabled",       # controls whether route handler injects memory
     "memory_turn_window",   # controls how many turns route handler fetches
     "compact_now",          # triggers compaction after response
+    "turn_loop",            # API-process turn loop path; never reaches RAGQueryWorkflow
+    "retrieval_strategy",   # API-only orchestrator selector; maps to the legacy
+                            # booleans (which ARE in RAGRequest) — dispatch reads those
 })
 
 # RAGRequest fields that are NOT exposed via QueryRequest
@@ -225,6 +233,7 @@ RAG_RESPONSE_INTERNAL_FIELDS = frozenset({
     "guardrails",
     "composite_confidence",
     "confidence_breakdown",
+    "first_composite",  # initial composite confidence before internal re-retrieval loop
     "post_guardrail_action",
     "version_conflicts",
     "retry_count",

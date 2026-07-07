@@ -1,0 +1,92 @@
+# =============================================================================
+# DEV overlay — uk-ai03, full mirror of prod, isolated alongside it.
+#
+# THIN env overlay. Layered: base (docker-compose.yml) + ai03 platform layer
+# (docker-compose.ai03.yml) + this. Carries ONLY dev-specific deltas:
+#   - container_name (-dev) so nothing collides with prod
+#   - dev bind-mount paths / a project-scoped weaviate volume
+# Host-port remaps + COMPOSE_PROJECT_NAME=ragweave-dev live in .env.dev.
+# The shared ai03 config (vLLM tunnel, qwen3 env, rootless tweaks) is in the
+# ai03 layer. No API-front nginx in dev — the API is reached directly on :8102.
+#
+# Run:  ./scripts/dev-up.sh up -d
+#
+# Dev corpus: re-ingested fresh into the project-scoped weaviate-dev-data volume.
+# =============================================================================
+services:
+  rag-vllm-tunnel:
+    container_name: rag-vllm-tunnel-dev
+
+  rag-postgres:
+    container_name: rag-postgres-dev
+  pg-maintenance:
+    container_name: rag-pg-maintenance-dev
+  temporal-db:
+    container_name: rag-temporal-db-dev
+  temporal:
+    container_name: rag-temporal-dev
+  temporal-ui:
+    container_name: rag-temporal-ui-dev
+  rag-minio:
+    container_name: rag-minio-dev
+  rag-redis:
+    container_name: rag-redis-dev
+
+  rag-weaviate:
+    container_name: rag-weaviate-dev
+    # Project-scoped named volume (auto-isolated from prod); base's memwrap mount
+    # is preserved by the merge.
+    volumes:
+      - weaviate-dev-data:/var/lib/weaviate
+
+  rag-api:
+    container_name: rag-api-dev
+    # Agentic retrieval is a DEV-ONLY feature (prod stays linear, so these live
+    # in the dev overlay, never the shared ai03 layer). HyDE + judge both run on
+    # the fast instruct model on the :18005 tunnel: the controller alias points
+    # at the `judge` deployment because the controller MUST be an instruct model
+    # — a reasoning model emits empty HyDE under the token budget and the loop
+    # silently degrades to literal-query retrieval (watch `hyde_failures` in the
+    # agentic telemetry). See the RAG_AGENTIC_CONTROLLER_MODEL_ALIAS docstring.
+    environment: &agentic-dev-env
+      - RAG_AGENTIC_RETRIEVAL_ENABLED=true
+      - RAG_LLM_JUDGE_MODEL=hosted_vllm/qwen2.5-7b-judge
+      - RAG_LLM_JUDGE_API_BASE=http://rag-vllm-tunnel:18005/v1
+      - RAG_AGENTIC_CONTROLLER_MODEL_ALIAS=judge
+      - RAG_AGENTIC_LLM_JSON_MODE=true
+      # Final context width for the agentic path: match the linear reranker's
+      # RAG_RERANK_TOP_K (12) so both paths hand the same number of chunks to
+      # generation; keep the per-round judge-keep width equal so the extra slots
+      # are judge-vetted, not just hybrid backfill.
+      - RAG_AGENTIC_FINAL_MAX_CHUNKS=12
+      - RAG_AGENTIC_KEEP_TOP_K_PER_ROUND=12
+    volumes:
+      - ./.runtime-dev:/app/.runtime
+  rag-worker:
+    container_name: rag-worker-dev
+    environment: *agentic-dev-env
+
+  langfuse-postgres:
+    container_name: rag-langfuse-postgres-dev
+  langfuse-redis:
+    container_name: rag-langfuse-redis-dev
+  langfuse-clickhouse:
+    container_name: rag-langfuse-clickhouse-dev
+  langfuse-minio:
+    container_name: rag-langfuse-minio-dev
+  langfuse-worker:
+    container_name: rag-langfuse-worker-dev
+  langfuse-web:
+    container_name: rag-langfuse-web-dev
+
+  prometheus:
+    container_name: rag-prometheus-dev
+  alertmanager:
+    container_name: rag-alertmanager-dev
+  grafana:
+    container_name: rag-grafana-dev
+  dozzle:
+    container_name: rag-monitor-dev
+
+volumes:
+  weaviate-dev-data:
