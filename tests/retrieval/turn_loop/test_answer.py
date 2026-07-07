@@ -33,6 +33,45 @@ from tests.retrieval.turn_loop.conftest import (
 )
 
 
+class TestGroundingContract:
+    """B1/B2 (generation grounding contract): the shared system prompt and the
+    turn_loop self-score rubric must carry the GENERIC faithfulness principles
+    (not query-specific patches) that the 20Q generation failures surfaced:
+    - prefer documented specifics over generic background; flag [background];
+    - surface documented gaps/TBDs instead of smoothing them;
+    - state when a documented value contradicts the question's premise;
+    - include documented breakdowns/splits (completeness).
+    Guards against silent prompt drift (behaviour itself is eval-validated)."""
+
+    def test_system_prompt_carries_grounding_calibration(self):
+        from src.retrieval.pipeline.turn_loop.answer import _build_messages
+
+        msgs = _build_messages("q", TurnContext(conversation_id="c"), TurnState())
+        system = msgs[0]["content"].lower()
+        # [background] flag + generic-over-specific
+        assert "[background]" in system
+        assert "background knowledge" in system
+        # documented uncertainty / TBD surfacing
+        assert "tbd" in system
+        # premise contradicted by a documented value
+        assert "contradict" in system
+        # completeness of documented breakdowns
+        assert "breakdown" in system or "distinction" in system
+        # specificity matches the retrieved context (generic->generic,
+        # documented-specific->specific) — the derivation guardrail, not forcing
+        assert "match the answer's specificity" in system
+
+    def test_selfscore_prompt_credits_mandated_behaviours(self):
+        from src.common.prompts import load_prompt
+
+        rubric = load_prompt("turn_answer_selfscore.md").lower()
+        # signalled inferences whose premises are in the digest are supported
+        assert "inference" in rubric
+        # gap/conflict flagging and [background] disclosure are not "unsupported"
+        assert "[background]" in rubric
+        assert "credit" in rubric
+
+
 def _setup(provider, *, pool=None, budget=None):
     deps, emitted = make_deps(provider)
     state = TurnState()
