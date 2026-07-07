@@ -134,6 +134,41 @@ async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
     assert len(ids) == len(set(ids))  # kept1 not re-appended
 
 
+async def test_fill_prefers_source_diversity_over_more_of_one_doc():
+    """Cross-document fix: a thin judged pool (one doc) filled toward N must pull
+    in the OTHER retrieved documents (source diversity), not 6 more chunks of the
+    same doc — the 'answered from one document' failure. Diversity-first fill: the
+    best chunk of each NEW source before topping up by score."""
+    provider = FakeProvider(
+        responses=[selfscore_json(0.9)],
+        streams=[[("content", "answer [1]")]],
+    )
+    kept = make_chunk("a1", document_id="A", source="DocA", score=0.95)
+    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept])
+    # Floor: many high-scored DocA chunks + two lower-scored OTHER docs (which a
+    # score-only fill would never reach before the pool is full).
+    state.fallback_chunks = [kept] + [
+        make_chunk(f"a{i}", document_id="A", source="DocA", score=0.9 - i * 0.01)
+        for i in range(2, 8)
+    ] + [
+        make_chunk("b1", document_id="B", source="DocB", score=0.50),
+        make_chunk("c1", document_id="C", source="DocC", score=0.40),
+    ]
+
+    await run_answer(
+        query="q",
+        context=TurnContext(conversation_id="c"),
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+
+    sources = {chunk.source for chunk in state.pool}
+    assert {"DocA", "DocB", "DocC"} <= sources  # other docs pulled in for coverage
+    assert state.pool[0].chunk_id == "a1"  # judge-kept chunk still first
+
+
 async def test_fill_disabled_when_fallback_size_zero():
     """fallback_pool_size=0 disables the fill — generation sees judge-kept only."""
     provider = FakeProvider(

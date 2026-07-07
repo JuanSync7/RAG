@@ -27,7 +27,7 @@ from src.common.utils import parse_json_object
 from src.retrieval.pipeline.turn_loop.common import TOP_PREVIEW_COUNT
 from src.retrieval.pipeline.turn_loop.controller import controller_model_alias
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
-from src.retrieval.pipeline.turn_loop.retrieve import _judge_round
+from src.retrieval.pipeline.turn_loop.retrieve import _judge_round, _retain_fallback
 from src.retrieval.pipeline.turn_loop.schemas import (
     DecomposeArgs,
     EvidenceChunk,
@@ -204,6 +204,17 @@ async def run_decompose(
     # Sub-query legs (for per-facet attribution) are the fan-out minus the
     # anchor leg — the raw-query anchor is additive retrieval, not a facet.
     sub_legs = all_legs[1:] if anchor_raw else all_legs
+
+    # Grounding floor: retain the RAW fan-out candidates (judge-INDEPENDENT),
+    # symmetric with RETRIEVE (run_retrieve) — DECOMPOSE previously left the floor
+    # empty, so a DECOMPOSE-driven turn whose judge kept a thin pool had nothing
+    # to fill generation from (answered from one doc) and an empty-pool ANSWER had
+    # no floor to ground on. Reuses the shared helper (CLAUDE.md §2).
+    _retain_fallback(
+        state,
+        [chunk for leg in all_legs for chunk in leg],
+        cap=budget.fallback_pool_size,
+    )
 
     # 3. Merge + dedup — done AFTER the gather (single-threaded) so the shared
     #    seen-set is never mutated concurrently.

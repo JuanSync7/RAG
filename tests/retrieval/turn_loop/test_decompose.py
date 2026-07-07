@@ -132,6 +132,26 @@ async def test_split_failopen_falls_back_to_single_subquery():
     assert hyde["search_terms"] == ["the whole question"]  # single fallback leg
 
 
+# ── grounding floor (DECOMPOSE feeds fallback_chunks, symmetric with RETRIEVE) ─
+
+async def test_decompose_retains_raw_candidates_in_grounding_floor():
+    """DECOMPOSE must retain its RAW candidates in the judge-independent floor
+    (``fallback_chunks``) — symmetric with RETRIEVE — so a thin judged pool or an
+    empty-pool ANSWER can still ground on / fill from what DECOMPOSE retrieved.
+    Both legs' candidates are retained even though the judge kept only one."""
+    provider = FakeProvider(responses=[_split_json("a", "b"), judge_json([0], 2)])
+    deps, ev, state, budget, emitter = _setup(
+        provider, [[make_chunk("c1", score=0.9)], [make_chunk("c2", score=0.7)]]
+    )
+
+    await run_decompose(DecomposeArgs(question="q"), query="q", state=state,
+                        budget=budget, deps=deps, emitter=emitter)
+
+    assert [c.chunk_id for c in state.pool] == ["c1"]  # judge kept only c1
+    floor_ids = {c.chunk_id for c in state.fallback_chunks}
+    assert {"c1", "c2"} <= floor_ids  # BOTH raw candidates retained in the floor
+
+
 # ── additive raw-query anchor leg (RRF/union — mode-D fix) ───────────────────
 
 async def test_raw_query_anchor_recovers_a_doc_the_subqueries_drift_off():

@@ -325,13 +325,35 @@ async def run_answer(
     # (judged-pool-thin), never a query/content match (CLAUDE.md §0).
     if budget.fallback_pool_size > 0 and len(state.pool) < budget.fallback_pool_size:
         have = {chunk.chunk_id for chunk in state.pool}
+        have_sources = {chunk.source for chunk in state.pool if chunk.source}
         before = len(state.pool)
-        for chunk in state.fallback_chunks:  # retained best-first by score
+        candidates = [
+            chunk for chunk in state.fallback_chunks if chunk.chunk_id not in have
+        ]
+
+        def _take(chunk) -> None:
+            state.pool.append(chunk)
+            have.add(chunk.chunk_id)
+            if chunk.source:
+                have_sources.add(chunk.source)
+
+        # Pass 1 — source DIVERSITY first: the best-scored chunk of each source
+        # NOT yet in the pool. A thin judged pool (often one document) is then
+        # topped up with the OTHER retrieved documents rather than more chunks of
+        # the same doc — the cross-document coverage the "answered from one doc"
+        # failure lacked. Generic (distinct-source property), never a
+        # query/content match (CLAUDE.md §0).
+        for chunk in candidates:  # fallback_chunks is best-first by score
+            if len(state.pool) >= budget.fallback_pool_size:
+                break
+            if chunk.source and chunk.source not in have_sources:
+                _take(chunk)
+        # Pass 2 — top up any remaining slots by score (sources may repeat).
+        for chunk in candidates:
             if len(state.pool) >= budget.fallback_pool_size:
                 break
             if chunk.chunk_id not in have:
-                state.pool.append(chunk)
-                have.add(chunk.chunk_id)
+                _take(chunk)
         if len(state.pool) > before:
             logger.info(
                 "turn loop filled generation pool %d -> %d from best-effort "
