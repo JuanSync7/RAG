@@ -125,9 +125,13 @@ def validate_basket(basket: dict) -> list[str]:
 def _stream_query(target: str, body: dict, timeout: float = 200.0) -> dict:
     """POST one query to <target>/query/stream and collect the outcome.
 
-    Returns {ttfr, ttd, route, metadata, answer, results_n, error}. ``route`` is
-    inferred from the retrieval-event metadata (turn_loop / deep_research /
-    agentic / linear).
+    Returns {ttfr, ttd, route, metadata, answer, results_n, error,
+    conversation_id}. ``route`` is inferred from the retrieval-event metadata
+    (turn_loop / deep_research / agentic / linear). ``conversation_id`` is the
+    server-assigned id used to thread the NEXT turn of a multi-turn entry — the
+    linear/agentic paths carry it at the top level of the retrieval frame, the
+    turn_loop path only in the terminal ``done`` frame, so both frames are
+    consulted (missing it would silently run every follow-up context-free).
     """
     import urllib.request
 
@@ -138,8 +142,21 @@ def _stream_query(target: str, body: dict, timeout: float = 200.0) -> dict:
     )
     t0 = time.monotonic()
     out: dict[str, Any] = {"ttfr": None, "ttd": None, "route": None,
-                           "metadata": {}, "answer": "", "results_n": 0, "error": None}
+                           "metadata": {}, "answer": "", "results_n": 0,
+                           "error": None, "conversation_id": None}
     ev, dl, answer_parts = None, [], []
+
+    def _capture_conv_id(frame: dict) -> None:
+        # Server surfaces conversation_id at the frame's top level (both the
+        # retrieval and done frames); keep the first non-empty value seen.
+        if out["conversation_id"]:
+            return
+        conv = frame.get("conversation_id") or (frame.get("metadata") or {}).get(
+            "conversation_id"
+        )
+        if conv:
+            out["conversation_id"] = conv
+
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             for raw in resp:
@@ -156,12 +173,15 @@ def _stream_query(target: str, body: dict, timeout: float = 200.0) -> dict:
                         out["metadata"] = d.get("metadata") or {}
                         out["results_n"] = len(d.get("results") or [])
                         out["route"] = _infer_route(out["metadata"], d)
+                        _capture_conv_id(d)
                     elif ev == "token" and payload:
                         answer_parts.append(json.loads(payload).get("token", ""))
                     elif ev == "error" and payload:
                         out["error"] = json.loads(payload).get("message", "error")
                     elif ev == "done":
                         out["ttd"] = round(time.monotonic() - t0, 2)
+                        if payload:
+                            _capture_conv_id(json.loads(payload))
                     ev, dl = None, []
     except Exception as exc:  # noqa: BLE001 — a live probe failure is data, not fatal
         out["error"] = repr(exc)
@@ -203,7 +223,7 @@ def run_live(target: str, qids: Optional[set[str]] = None,
                 if conv_id:
                     body["conversation_id"] = conv_id
                 res = _stream_query(target, body)
-                conv_id = (res["metadata"] or {}).get("conversation_id") or conv_id
+                conv_id = res.get("conversation_id") or conv_id
                 rows.append({"qid": f"{q['qid']}.t{j+1}", "qtype": q["qtype"],
                              "query": t["query"], **_row(res, t)})
         else:
@@ -294,7 +314,7 @@ def collect(target: str, modes: Optional[list[str]] = None,
                     if conv_id:
                         body["conversation_id"] = conv_id
                     res = _stream_query(target, body)
-                    conv_id = (res["metadata"] or {}).get("conversation_id") or conv_id
+                    conv_id = res.get("conversation_id") or conv_id
                     rows.append(_collect_row(f"{q['qid']}.t{j+1}", q["qtype"],
                                              mode, t["query"], res, t))
             else:
