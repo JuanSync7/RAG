@@ -49,7 +49,17 @@ Pre-flight router hint (advisory only — a cheap classifier's suggestion for ho
 
 ## Output
 
-Return a single JSON object, no prose outside it. `args` depends on `action`:
+Return a single JSON object, no prose outside it.
+
+Also classify the **intrinsic shape of the user's question** in a top-level `query_shape` field — a property of the question itself, independent of which action you choose:
+
+- `single_facet` — asks about one thing; a single retrieval can cover it.
+- `compound` — names several distinct facets at once: a comparison ("X vs Y", "how do X and Y differ"), a multi-part "X, Y and Z" question, or a broad "summarise the whole flow". These need the parallel DECOMPOSE fan-out, not one shallow retrieval.
+- `vague` — too underspecified to retrieve well as written.
+
+Judge `query_shape` from the question's meaning, not from any specific keyword — a comparison phrased without the word "versus" is still `compound`, and an "and" joining two words of a single concept is not.
+
+`args` depends on `action`:
 
 - `RETRIEVE` → `{"query_text": "<search query>", "hypothetical_answer": "<short hypothetical answer passage or null>", "target_aspect": "<aspect this round targets or null>"}`
 - `DECOMPOSE` → `{"question": "<the compound question to split, usually the user's question>", "missing_information": "<a named gap to target, or null>"}`
@@ -64,6 +74,7 @@ inputs above):
 ```json
 {
   "action": "RETRIEVE",
+  "query_shape": "single_facet",
   "reason": "<which specific gap/ref/gate-feedback drives this choice>",
   "confidence": 0.7,
   "args": {

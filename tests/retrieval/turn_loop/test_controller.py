@@ -17,9 +17,12 @@ from src.retrieval.pipeline.turn_loop.controller import (
 from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
 from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
+    DecomposeArgs,
     DeepStudyArgs,
+    QueryShape,
     RetrieveArgs,
     TurnAction,
+    TurnDecision,
     TurnEvent,
     TurnEventType,
     TurnState,
@@ -240,3 +243,211 @@ def test_evidence_digest_is_deterministic_and_handles_empty_pool():
     state = TurnState()
     assert build_evidence_digest(state) == build_evidence_digest(state)
     assert "no evidence" in build_evidence_digest(state)
+
+
+# ── query_shape parsing (LLM-driven compound classification) ──────────────────
+# The controller emits an intrinsic-shape label alongside its action; the loop
+# reads it structurally instead of re-deriving compound-ness from a keyword
+# regex (COMPOUND_MARKERS). Parsing must be tolerant (case/separator) and reject
+# anything outside the closed vocabulary (CLAUDE.md §0 — no literal matching).
+
+def test_from_llm_json_parses_query_shape():
+    decision = TurnDecision.from_llm_json(
+        {
+            "action": "RETRIEVE",
+            "reason": "r",
+            "confidence": 0.5,
+            "query_shape": "compound",
+            "args": {"query_text": "x"},
+        }
+    )
+    assert decision is not None
+    assert decision.query_shape == QueryShape.COMPOUND
+
+
+def test_from_llm_json_query_shape_is_case_and_separator_insensitive():
+    decision = TurnDecision.from_llm_json(
+        {"action": "ANSWER", "query_shape": "Single-Facet"}
+    )
+    assert decision is not None
+    assert decision.query_shape == QueryShape.SINGLE_FACET
+
+
+def test_from_llm_json_unknown_query_shape_is_none():
+    decision = TurnDecision.from_llm_json({"action": "ANSWER", "query_shape": "banana"})
+    assert decision is not None
+    assert decision.query_shape is None
+
+
+def test_from_llm_json_missing_query_shape_is_none():
+    decision = TurnDecision.from_llm_json({"action": "ANSWER"})
+    assert decision is not None
+    assert decision.query_shape is None
+
+
+# ── shape-driven DECOMPOSE coercion (replaces the router's compound regex) ────
+# When the controller labels the OPENING query compound but still chose a single
+# RETRIEVE (the c002 pathology — it recognised the comparison in its own reason
+# yet retrieved), the opening move is coerced to DECOMPOSE so the facets fan out
+# in parallel. Safe only because DECOMPOSE is now additive (the raw-query anchor
+# leg makes the fan-out a superset of the RETRIEVE it replaces).
+
+async def test_shape_compound_coerces_opening_retrieve_to_decompose(empty_context):
+    provider = FakeProvider(
+        responses=[
+            decision_json("RETRIEVE", query_text="just one facet", query_shape="compound")
+        ]
+    )
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.DECOMPOSE
+    assert isinstance(decision.args, DecomposeArgs)
+    # The whole user question is what gets split, not the controller's narrow query.
+    assert decision.args.question == "compare A and B"
+
+
+async def test_shape_compound_does_not_coerce_deep_study(empty_context):
+    """A deliberate DEEP_STUDY is a considered deep move — never overridden."""
+    provider = FakeProvider(
+        responses=[
+            decision_json(
+                "DEEP_STUDY",
+                question="q",
+                document_id="d1",
+                query_shape="compound",
+            )
+        ]
+    )
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.DEEP_STUDY
+
+
+async def test_shape_compound_decompose_action_passes_through_unchanged(empty_context):
+    """When the controller ALREADY chose DECOMPOSE, coercion is a no-op — its own
+    question is preserved (the coercion only rewrites an opening RETRIEVE)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json(
+                "DECOMPOSE", question="the controller's own split", query_shape="compound"
+            )
+        ]
+    )
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.DECOMPOSE
+    assert isinstance(decision.args, DecomposeArgs)
+    assert decision.args.question == "the controller's own split"
+
+
+async def test_shape_single_facet_retrieve_is_not_coerced(empty_context):
+    provider = FakeProvider(
+        responses=[decision_json("RETRIEVE", query_text="x", query_shape="single_facet")]
+    )
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="what is X?",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.RETRIEVE
+
+
+async def test_shape_compound_only_coerces_the_opening_iteration(empty_context):
+    """Mid-loop the controller reasons from evidence/gate state — coercing there
+    could re-trigger the DECOMPOSE spiral, so only iteration 0 is coerced."""
+    provider = FakeProvider(
+        responses=[decision_json("RETRIEVE", query_text="x", query_shape="compound")]
+    )
+    state, budget = TurnState(), make_budget()
+    state.iteration = 2
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.RETRIEVE
+
+
+async def test_shape_decompose_disabled_suppresses_coercion(empty_context):
+    provider = FakeProvider(
+        responses=[decision_json("RETRIEVE", query_text="x", query_shape="compound")]
+    )
+    state, budget = TurnState(), make_budget(shape_decompose_enabled=False)
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.RETRIEVE
+
+
+async def test_shape_coercion_requires_additive_decompose(empty_context):
+    """Invariant guard (CLAUDE.md §3, adversarial-review finding): coercing
+    RETRIEVE->DECOMPOSE is justified ONLY because DECOMPOSE is additive (the
+    raw-query anchor leg makes the fan-out a superset of the RETRIEVE it
+    replaces). With decompose_anchor_raw=False the fan-out is substitutive —
+    the sub-query rewrite can steer retrieval OFF a doc the raw RETRIEVE matched
+    (mode-D variance). So the coercion must NOT fire when the anchor is off,
+    even if shape_decompose_enabled is True (the two flags are independent env
+    booleans). Enforced at the decision point, not left to a prose 'safe
+    because' claim."""
+    provider = FakeProvider(
+        responses=[decision_json("RETRIEVE", query_text="x", query_shape="compound")]
+    )
+    state, budget = TurnState(), make_budget(
+        shape_decompose_enabled=True, decompose_anchor_raw=False
+    )
+    emitter, _ = _emitter(provider, state, budget)
+
+    decision = await decide(
+        query="compare A and B",
+        context=empty_context,
+        state=state,
+        budget=budget,
+        emitter=emitter,
+    )
+
+    assert decision.action == TurnAction.RETRIEVE

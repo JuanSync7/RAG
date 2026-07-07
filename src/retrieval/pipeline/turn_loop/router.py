@@ -2,10 +2,11 @@
 # Pre-flight confidence router for the turn loop (design §"route itself"): a
 # pure decision over cheap, already-computed query signals that seeds the
 # turn's first action and effort as an ADVISORY hint — never a hard override.
-# Compound queries seed DECOMPOSE; a short, high-confidence, self-contained
-# factoid takes the fast lane (skip the first controller LLM call, go straight
-# RETRIEVE->ANSWER); everything else gets no seed and the controller decides as
-# today. Fail-open by construction: a disabled router (or neutral signals)
+# A short, high-confidence, self-contained factoid takes the fast lane (skip the
+# first controller LLM call, go straight RETRIEVE->ANSWER); everything else gets
+# no seed and the controller decides as today (a compound query included — its
+# DECOMPOSE is now the controller's query_shape coercion, not a router regex
+# seed). Fail-open by construction: a disabled router (or neutral signals)
 # returns an empty hint that degrades the loop to its exact pre-router baseline.
 # Zero heavy imports (stdlib + config.settings lazily) so the pure loop package
 # stays infrastructure-free; the runner gathers the signals and calls route().
@@ -69,7 +70,9 @@ class RouteSignals:
 
     is_compound: bool
     """The query names several facets at once (``query_shape.has_compound_marker``:
-    an "and"/"vs"/"compare" marker or 2+ question marks)."""
+    an "and"/"vs"/"compare" marker or 2+ question marks). Used ONLY as a
+    conservative fast-lane exclusion now — the positive compound→DECOMPOSE
+    routing moved to the controller's ``query_shape`` classification."""
 
     has_backward_reference: bool
     """The query leans on conversation memory to resolve (pronoun density or an
@@ -106,9 +109,6 @@ class RouteConfig:
     (>5-word) questions and exclude ultra-short ambiguous ones (<=2 words →
     0.4)."""
 
-    decompose_on_compound: bool = True
-    """Whether a compound query seeds the DECOMPOSE action (advisory)."""
-
     @classmethod
     def from_settings(cls) -> "RouteConfig":
         """Build the router config from the ``RAG_TURN_LOOP_*`` settings block.
@@ -130,11 +130,6 @@ class RouteConfig:
             ),
             fast_lane_min_confidence=float(
                 getattr(settings, "RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE", 0.8)
-            ),
-            decompose_on_compound=bool(
-                getattr(
-                    settings, "RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND", True
-                )
             ),
         )
 
@@ -183,15 +178,19 @@ def route(signals: RouteSignals, config: RouteConfig) -> RouteHint:
     Precedence (most specific first):
 
     1. **Router off** → the neutral hint (pre-router baseline).
-    2. **Compound query** (and ``decompose_on_compound``) → seed ``DECOMPOSE``,
-       balanced effort. A multi-facet question is never fast-laned — its
-       facets need the parallel fan-out, not a single verbatim retrieval.
-    3. **Fast lane** (enabled; single-facet; self-contained — no backward
+    2. **Fast lane** (enabled; NOT compound; self-contained — no backward
        reference; within ``fast_lane_max_words``; confidence at/above
        ``fast_lane_min_confidence``) → seed ``RETRIEVE`` with ``fast_lane`` and
        fast effort. This is the only hint that skips the controller.
-    4. **Otherwise** → no seed, balanced effort (the controller decides, as
+    3. **Otherwise** → no seed, balanced effort (the controller decides, as
        today), but the loop still runs under the router (metadata records it).
+
+    The router no longer seeds DECOMPOSE for a compound query: that decision is
+    now the controller's (it classifies ``query_shape`` and coerces the opening
+    move — the LLM-driven replacement for the compound-marker regex, CLAUDE.md
+    §0). ``is_compound`` survives here only as a conservative fast-lane
+    EXCLUSION — the fast lane skips the controller, so it must never short-circuit
+    a possibly-multi-facet question past that shape check.
 
     Pure function: no I/O, no settings read, no mutation of the inputs.
 
@@ -206,18 +205,10 @@ def route(signals: RouteSignals, config: RouteConfig) -> RouteHint:
     if not config.router_enabled:
         return RouteHint.neutral()
 
-    # (2) Compound → DECOMPOSE seed (advisory). Takes priority over the fast
-    # lane: a genuinely multi-facet question must not be short-circuited.
-    if signals.is_compound and config.decompose_on_compound:
-        return RouteHint(
-            initial_action=TurnAction.DECOMPOSE,
-            effort=RouteEffort.BALANCED,
-            fast_lane=False,
-            reason="compound query (multiple facets) — seed DECOMPOSE fan-out",
-        )
-
-    # (3) Fast lane: a short, self-contained, high-confidence single-facet
-    # question where RETRIEVE->ANSWER is near-certainly the whole turn.
+    # (2) Fast lane: a short, self-contained, high-confidence single-facet
+    # question where RETRIEVE->ANSWER is near-certainly the whole turn. A
+    # possibly-compound query is excluded — it must reach the controller so the
+    # query_shape coercion can fan it out (never skip the controller for it).
     if (
         config.fast_lane_enabled
         and not signals.is_compound
@@ -235,7 +226,9 @@ def route(signals: RouteSignals, config: RouteConfig) -> RouteHint:
             ),
         )
 
-    # (4) Default: no seed; the controller opens the turn as it does today.
+    # (3) Default: no seed; the controller opens the turn as it does today
+    # (a compound query lands here now — the controller's query_shape coercion
+    # turns its opening RETRIEVE into DECOMPOSE).
     return RouteHint(
         initial_action=None,
         effort=RouteEffort.BALANCED,

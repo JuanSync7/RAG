@@ -37,7 +37,6 @@ def _config(**overrides) -> RouteConfig:
         fast_lane_enabled=True,
         fast_lane_max_words=24,
         fast_lane_min_confidence=0.8,
-        decompose_on_compound=True,
     )
     values.update(overrides)
     return RouteConfig(**values)
@@ -60,29 +59,30 @@ def test_neutral_classmethod_is_fail_open_shape():
     assert hint.fast_lane is False
 
 
-# ── compound -> DECOMPOSE seed ────────────────────────────────────────────────
+# ── compound handling (LLM-driven, not a router regex seed) ───────────────────
+# The router no longer seeds DECOMPOSE from a keyword-regex compound marker —
+# the controller now classifies query_shape and coerces the opening move
+# (test_controller). is_compound survives ONLY as a conservative fast-lane
+# exclusion (never skip the controller for a possibly-multi-facet query).
 
-def test_compound_seeds_decompose_not_fast_lane():
+def test_compound_no_longer_seeds_decompose():
+    """A compound signal produces no router seed — the controller's query_shape
+    classification owns the DECOMPOSE decision now (regex→LLM, CLAUDE.md §0)."""
     hint = route(_signals(is_compound=True), _config())
-    assert hint.initial_action == TurnAction.DECOMPOSE
+    assert hint.initial_action is None
     assert hint.fast_lane is False
     assert hint.effort == RouteEffort.BALANCED
 
 
-def test_compound_takes_priority_over_fast_lane_conditions():
-    # Short + high-confidence would otherwise fast-lane, but compound wins.
+def test_compound_still_blocks_the_fast_lane():
+    """A short, high-confidence query that WOULD fast-lane is held back when it
+    looks compound — the fast lane skips the controller, so it must never
+    short-circuit a possibly-multi-facet question past the query_shape check."""
     hint = route(
         _signals(is_compound=True, word_count=6, query_confidence=0.95), _config()
     )
-    assert hint.initial_action == TurnAction.DECOMPOSE
     assert hint.fast_lane is False
-
-
-def test_compound_seed_disabled_falls_through_to_default():
-    hint = route(_signals(is_compound=True), _config(decompose_on_compound=False))
-    # No DECOMPOSE seed; compound also blocks the fast lane -> plain default.
     assert hint.initial_action is None
-    assert hint.fast_lane is False
 
 
 # ── fast lane ─────────────────────────────────────────────────────────────────
@@ -146,7 +146,6 @@ def test_config_from_settings_reads_defaults(monkeypatch):
         ("RAG_TURN_LOOP_FAST_LANE_ENABLED", True),
         ("RAG_TURN_LOOP_FAST_LANE_MAX_WORDS", 30),
         ("RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE", 0.75),
-        ("RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND", False),
     ]:
         monkeypatch.setattr(settings, key, val, raising=False)
 
@@ -155,4 +154,3 @@ def test_config_from_settings_reads_defaults(monkeypatch):
     assert cfg.fast_lane_enabled is True
     assert cfg.fast_lane_max_words == 30
     assert cfg.fast_lane_min_confidence == 0.75
-    assert cfg.decompose_on_compound is False

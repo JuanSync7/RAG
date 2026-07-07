@@ -5,6 +5,9 @@
 # the controller LLM through the charged-call wrapper; salvage-parses the JSON
 # into a TurnDecision. Fail-open per design §6: an unusable decision becomes
 # RETRIEVE-with-the-verbatim-user-query on iteration 1, else an ANSWER attempt.
+# Post-parse it coerces an opening single-RETRIEVE to DECOMPOSE when the
+# controller labelled the query query_shape=compound (the LLM-driven replacement
+# for the router's compound-marker regex; the c002 fix).
 # Also the canonical home of the model-alias getters and the evidence digest
 # (shared with answer.py's self-score).
 # Exports: decide, build_evidence_digest, controller_model_alias,
@@ -37,6 +40,8 @@ from src.retrieval.pipeline.turn_loop.events import (
 from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.schemas import (
     AnswerArgs,
+    DecomposeArgs,
+    QueryShape,
     RetrieveArgs,
     TurnAction,
     TurnBudget,
@@ -275,6 +280,7 @@ async def decide(
             )
     if decision is None:
         return _fail_open_decision(query, state)
+    decision = _coerce_shape_decompose(decision, query, state, budget)
     # Normalize a RETRIEVE with an empty query to the verbatim user query so a
     # sloppy controller output still produces a valid retrieval round.
     if decision.action == TurnAction.RETRIEVE and isinstance(
@@ -282,6 +288,62 @@ async def decide(
     ):
         if not decision.args.query_text:
             decision.args.query_text = query
+    return decision
+
+
+def _coerce_shape_decompose(
+    decision: TurnDecision, query: str, state: TurnState, budget: TurnBudget
+) -> TurnDecision:
+    """Rewrite an opening single-RETRIEVE to DECOMPOSE when the query is compound.
+
+    The LLM-driven replacement for the router's compound-marker regex seed: the
+    controller labels every decision with an intrinsic ``query_shape``; when it
+    calls the OPENING query ``compound`` yet still chose a single RETRIEVE (the
+    c002 pathology — it recognised the comparison in its own reason but retrieved
+    anyway, then burned iterations before a guard rescued it), coerce that first
+    move to DECOMPOSE so the facets fan out in one parallel wave.
+
+    Deliberately narrow (mirrors the a3dffdd lesson that a prompt nudge alone
+    won't make a small controller stop/redirect):
+
+    - **Opening iteration only** (``state.iteration == 0``): later the controller
+      reasons from evidence/gate state, and forcing DECOMPOSE there could
+      re-trigger the DECOMPOSE spiral the facet guard exists to close.
+    - **RETRIEVE only**: a deliberate DEEP_STUDY / CLARIFY / ANSWER is a
+      considered move, never overridden; an already-DECOMPOSE decision is left
+      untouched (its own ``question`` is preserved).
+
+    Safe to fire DECOMPOSE *more* here ONLY because DECOMPOSE is additive
+    (``decompose_anchor_raw`` retrieves the raw query as an anchor leg), so the
+    coerced fan-out is a superset of the RETRIEVE it replaces — it can only ADD
+    candidates. That invariant is ENFORCED, not merely asserted in prose: the
+    coercion also requires ``budget.decompose_anchor_raw`` (the two are
+    independent env booleans, both default true). With the anchor OFF the fan-out
+    would be substitutive — a sub-query rewrite could steer retrieval off a doc
+    the raw RETRIEVE matched (the mode-D variance the anchor exists to prevent) —
+    so shape-coercion self-disables rather than force a non-superset DECOMPOSE.
+    Gated by ``shape_decompose_enabled``. Class solved (CLAUDE.md §0): "a
+    multi-facet question needs the parallel fan-out", decided by the LLM shape
+    label — never a vendor/phrase/corpus match.
+    """
+    if (
+        budget.shape_decompose_enabled
+        and budget.decompose_anchor_raw
+        and state.iteration == 0
+        and decision.query_shape == QueryShape.COMPOUND
+        and decision.action == TurnAction.RETRIEVE
+    ):
+        return TurnDecision(
+            action=TurnAction.DECOMPOSE,
+            reason=(
+                "query_shape=compound -> DECOMPOSE (deterministic): the controller "
+                "labelled the opening query compound but chose a single retrieval; "
+                "a multi-facet question needs the parallel fan-out"
+            ),
+            confidence=decision.confidence,
+            args=DecomposeArgs(question=query),
+            query_shape=decision.query_shape,
+        )
     return decision
 
 

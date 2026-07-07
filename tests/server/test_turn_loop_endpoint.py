@@ -758,17 +758,18 @@ def test_resolve_route_hint_none_when_router_disabled(monkeypatch):
     assert runner_mod.resolve_route_hint("q") is None
 
 
-def test_resolve_route_hint_seeds_decompose_for_compound(monkeypatch):
+def test_resolve_route_hint_does_not_seed_decompose_for_compound(monkeypatch):
+    """Contract change (regex→LLM): the pre-flight router no longer seeds
+    DECOMPOSE from a keyword compound marker — the controller's query_shape
+    classification owns that decision now. A compound query still resolves to a
+    (non-None) hint with no opening seed; compound only holds back the fast lane."""
     import config.settings as settings_mod
-    from src.retrieval.pipeline.turn_loop import TurnAction
 
     monkeypatch.setattr(settings_mod, "RAG_TURN_LOOP_ROUTER_ENABLED", True, raising=False)
-    monkeypatch.setattr(
-        settings_mod, "RAG_TURN_LOOP_ROUTER_DECOMPOSE_ON_COMPOUND", True, raising=False
-    )
     hint = runner_mod.resolve_route_hint("compare A and B")
     assert hint is not None
-    assert hint.initial_action == TurnAction.DECOMPOSE
+    assert hint.initial_action is None
+    assert hint.fast_lane is False
 
 
 def test_resolve_route_hint_fail_open_on_signal_error(monkeypatch):

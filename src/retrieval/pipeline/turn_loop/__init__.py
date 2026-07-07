@@ -5,8 +5,8 @@
 # build_turn_context from .context. Callers import from this package only —
 # never from submodules.
 # Exports: run_turn_loop, build_turn_context, route, RouteConfig, RouteEffort,
-#          RouteHint, RouteSignals, TurnAction, RetrieveArgs, DecomposeArgs,
-#          DeepStudyArgs, ClarifyArgs, AnswerArgs, TurnActionArgs,
+#          RouteHint, RouteSignals, TurnAction, QueryShape, RetrieveArgs,
+#          DecomposeArgs, DeepStudyArgs, ClarifyArgs, AnswerArgs, TurnActionArgs,
 #          TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
 #          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
 #          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
@@ -40,6 +40,7 @@ from src.retrieval.pipeline.turn_loop.schemas import (
     EvidenceChunk,
     FacetCoverage,
     GateFeedback,
+    QueryShape,
     RetrieveArgs,
     StudiedDoc,
     TurnAction,
@@ -63,6 +64,7 @@ __all__ = [
     "RouteHint",
     "RouteSignals",
     "TurnAction",
+    "QueryShape",
     "RetrieveArgs",
     "DecomposeArgs",
     "DeepStudyArgs",
@@ -76,6 +78,7 @@ __all__ = [
     "TurnEventType",
     "TurnEvent",
     "StudiedDoc",
+    "FacetCoverage",
     "TurnState",
     "ClarificationOut",
     "TurnLoopResult",

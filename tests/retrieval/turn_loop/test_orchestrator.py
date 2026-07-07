@@ -575,6 +575,53 @@ async def test_facet_commit_guard_forces_answer_when_all_facets_covered(empty_co
     assert purposes == ["controller", "decompose", "judge", "draft", "self_score"]
 
 
+async def test_shape_compound_opening_retrieve_becomes_decompose_then_commits(
+    empty_context,
+):
+    """The c002 fix, end to end (a DIFFERENT instance of the class than c001's
+    facet-guard test above): the controller labels the OPENING query compound
+    (query_shape) yet still chooses a single RETRIEVE — the exact c002 pathology
+    where it recognised the comparison in its own reason but retrieved anyway,
+    burning 8 LLM calls before a guard rescued it. The shape coercion rewrites
+    that opening move to DECOMPOSE, so the facets fan out at once and the
+    facet-commit guard answers on the very next iteration — collapsing to c001's
+    minimal DECOMPOSE→facet_guard→ANSWER path (one controller call, not eight)."""
+    provider = FakeProvider(
+        responses=[
+            # Controller opens with a single RETRIEVE but self-labels the query
+            # compound — the coercion (not a second controller round) fixes it.
+            decision_json(
+                "RETRIEVE", query_text="AXI4 features", query_shape="compound"
+            ),
+            json.dumps({"sub_questions": ["AXI4 features", "AXI4-Lite features"]}),
+            judge_json([0, 1, 2], 3, confidence=0.9),
+            selfscore_json(0.95),  # forced-answer self-score
+        ],
+        streams=[[("content", "AXI4 is X [1]; AXI4-Lite is Y [2].")]],
+    )
+    # Anchor ON (the default, and the coercion's precondition): the DECOMPOSE
+    # fan-out is [raw-query anchor] + [subq1, subq2] = 3 legs, so 3 batches.
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[[make_chunk("c0")], [make_chunk("c1")], [make_chunk("c2")]],
+    )
+    budget = make_budget(max_actions=10)
+
+    result = await run_turn_loop(
+        "compare AXI4 and AXI4-Lite", empty_context, deps, budget
+    )
+
+    assert result.stop_reason == STOP_GATE_PASSED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    # The dispatched first action is DECOMPOSE even though the controller SAID
+    # RETRIEVE — proof the query_shape coercion fired.
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "ANSWER"]
+    assert [a["source"] for a in action_events] == ["controller", "facet_guard"]
+    # ONE controller call total — the 8-call c002 spiral is gone.
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes == ["controller", "decompose", "judge", "draft", "self_score"]
+
+
 async def test_facet_commit_guard_disabled_hands_iteration_to_controller(empty_context):
     """facet_commit_enabled=False disarms the guard: after DECOMPOSE the
     controller decides the next action as before (here it chooses ANSWER)."""

@@ -6,8 +6,8 @@
 # mutable per-turn state accumulator, the clarification/final results, the
 # injected-dependency seam (DI for testability), and the cross-turn TurnContext
 # digest.
-# Exports: TurnAction, RouteEffort, RetrieveArgs, DecomposeArgs, DeepStudyArgs,
-#          ClarifyArgs, AnswerArgs,
+# Exports: TurnAction, RouteEffort, QueryShape, RetrieveArgs, DecomposeArgs,
+#          DeepStudyArgs, ClarifyArgs, AnswerArgs,
 #          TurnActionArgs, TurnDecision, TurnBudget, EvidenceChunk, GateFeedback,
 #          TurnEventType, TurnEvent, StudiedDoc, FacetCoverage, TurnState,
 #          ClarificationOut, TurnLoopResult, TurnLoopDeps, TurnContext
@@ -69,6 +69,35 @@ class RouteEffort:
     FAST: str = "fast"
     BALANCED: str = "balanced"
     THOROUGH: str = "thorough"
+
+
+class QueryShape:
+    """Str-valued intrinsic-shape labels the controller assigns to a query.
+
+    The LLM-driven replacement for the ``query_shape.COMPOUND_MARKERS`` keyword
+    regex (CLAUDE.md §0 — classify by the model that is already reasoning about
+    the query, not by literal ``" and "`` / ``" vs "`` matching): the controller
+    emits one of these on every decision, and the loop coerces the OPENING move
+    to DECOMPOSE when the shape is ``COMPOUND`` (see ``controller.decide``). A
+    property of the question itself, independent of the chosen action. Plain
+    ``str`` constants so a decision serializes to JSON without adapters; ``ALL``
+    is the closed set :meth:`TurnDecision.from_llm_json` validates against
+    (anything else coerces to ``None`` — an absent/unusable shape simply skips
+    the coercion, never mis-fires it).
+    """
+
+    SINGLE_FACET: str = "single_facet"
+    """One thing is asked about — a plain RETRIEVE covers it."""
+
+    COMPOUND: str = "compound"
+    """Several distinct facets at once (a comparison, a multi-part "X, Y and Z",
+    a broad "summarise the whole flow") — needs the DECOMPOSE parallel fan-out."""
+
+    VAGUE: str = "vague"
+    """Too underspecified to retrieve well as written (informational for now —
+    no coercion; a future rung could route it to CLARIFY)."""
+
+    ALL: frozenset[str] = frozenset({SINGLE_FACET, COMPOUND, VAGUE})
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +199,18 @@ def _coerce_confidence(value: Any, default: float = 0.0) -> float:
     return min(1.0, max(0.0, num))
 
 
+def _coerce_query_shape(value: Any) -> Optional[str]:
+    """Coerce a raw ``query_shape`` token to the closed :class:`QueryShape` set.
+
+    Case- and separator-insensitive (``"Single-Facet"`` / ``"single facet"`` ->
+    ``SINGLE_FACET``), mirroring the action-token normalization. Anything outside
+    the vocabulary — including a blank/missing value — returns ``None`` so a
+    sloppy or absent shape simply skips the shape coercion rather than mis-firing
+    it. Pure dict/str ops, no regex (CLAUDE.md §0)."""
+    shape = _coerce_str(value).lower().replace(" ", "_").replace("-", "_")
+    return shape if shape in QueryShape.ALL else None
+
+
 @dataclass
 class TurnDecision:
     """One controller verdict: the chosen action plus its typed arguments.
@@ -182,6 +223,11 @@ class TurnDecision:
     reason: str
     confidence: float
     args: Optional[TurnActionArgs] = None
+    query_shape: Optional[str] = None
+    """The controller's intrinsic-shape label for the query (:class:`QueryShape`
+    value, or ``None`` when absent/unrecognized). Drives the shape-based
+    DECOMPOSE coercion in ``controller.decide`` — a top-level property of the
+    query, not of ``args``."""
 
     @classmethod
     def from_llm_json(cls, payload: dict) -> Optional["TurnDecision"]:
@@ -248,6 +294,9 @@ class TurnDecision:
             reason=_coerce_str(payload.get("reason")),
             confidence=_coerce_confidence(payload.get("confidence")),
             args=args,
+            # query_shape is a TOP-LEVEL property of the query (never inside args,
+            # even when the model flattened everything else there).
+            query_shape=_coerce_query_shape(payload.get("query_shape")),
         )
 
 
@@ -358,6 +407,17 @@ class TurnBudget:
     variance fix; mirrors the agentic HyDE asymmetry). False reverts to
     sub-queries-only (substitutive)."""
 
+    shape_decompose_enabled: bool = True
+    """Whether the controller's ``query_shape=compound`` label coerces the
+    OPENING move to DECOMPOSE (``controller.decide``). The LLM-driven replacement
+    for the router's compound-marker regex seed: when True, a query the controller
+    itself calls compound but opens with a single RETRIEVE is rewritten to the
+    DECOMPOSE parallel fan-out (the c002 fix). Safe only because DECOMPOSE is
+    additive (``decompose_anchor_raw``) — the fan-out is a superset of the
+    RETRIEVE it replaces — so the coercion self-disables when ``decompose_anchor_raw``
+    is off (it would otherwise force a substitutive fan-out). False leaves the
+    controller's opening action as-is."""
+
     @staticmethod
     def _effort_scale(effort: str, settings: Any) -> float:
         """Multiplier the router's ``effort`` applies to the work budgets.
@@ -419,6 +479,7 @@ class TurnBudget:
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
             facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
             decompose_anchor_raw=settings.RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW,
+            shape_decompose_enabled=settings.RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED,
         )
 
 
@@ -927,7 +988,9 @@ class TurnContext:
 __all__ = [
     "TurnAction",
     "RouteEffort",
+    "QueryShape",
     "RetrieveArgs",
+    "DecomposeArgs",
     "DeepStudyArgs",
     "ClarifyArgs",
     "AnswerArgs",
