@@ -622,6 +622,79 @@ async def test_shape_compound_opening_retrieve_becomes_decompose_then_commits(
     assert purposes == ["controller", "decompose", "judge", "draft", "self_score"]
 
 
+async def test_facet_guard_commits_on_sufficient_pool_when_coverage_incomplete(
+    empty_context,
+):
+    """c002 class (a DIFFERENT instance than the fully-covered facet test): a
+    DECOMPOSE whose per-facet coverage never completes — because a thin first
+    round covers only some facets and later rounds rephrase the sub-queries, so
+    the cumulative facet set never fully covers — would otherwise spiral
+    (re-DECOMPOSE forever). But the round judge has explicitly marked the pool
+    SUFFICIENT, so the decomposed question IS answerable: the facet-commit guard
+    commits on that holistic signal even though not every tracked facet has its
+    own kept chunk. Here the judge keeps only facet 'a' yet reports sufficient."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="a and b"),
+            json.dumps({"sub_questions": ["a", "b"]}),
+            judge_json([0], 2, sufficient=True, confidence=0.9),  # keeps a, not b
+            selfscore_json(0.95),
+        ],
+        streams=[[("content", "a is X [1]; b is inferred.")]],
+    )
+    deps, emitted = make_deps(
+        provider, retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]]
+    )
+    budget = make_budget(max_actions=10, decompose_anchor_raw=False)
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    assert result.stop_reason == STOP_GATE_PASSED
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    # No second gather round — the sufficient verdict committed the turn.
+    assert [a["action"] for a in action_events] == ["DECOMPOSE", "ANSWER"]
+    assert action_events[-1]["source"] == "facet_guard"
+    purposes = [p["purpose"] for p in events_of(emitted, TurnEventType.LLM_CALL)]
+    assert purposes == ["controller", "decompose", "judge", "draft", "self_score"]
+
+
+async def test_facet_guard_holds_when_pool_insufficient_and_coverage_incomplete(
+    empty_context,
+):
+    """The complement: after a DECOMPOSE, if the judge marks the pool NOT
+    sufficient AND not every facet is covered, the guard must NOT commit — the
+    decomposed question genuinely needs more gathering, so the controller keeps
+    control (never a forced facet_guard ANSWER on an insufficient pool)."""
+    provider = FakeProvider(
+        responses=[
+            decision_json("DECOMPOSE", question="a and b"),
+            json.dumps({"sub_questions": ["a", "b"]}),
+            judge_json([0], 2, sufficient=False, confidence=0.4),  # a only, insufficient
+            decision_json("RETRIEVE", query_text="more about b"),  # controller gathers on
+        ]
+        # (the run may continue past here; we only assert the guard stayed out
+        # for the decision immediately after the DECOMPOSE)
+        + [judge_json([], 0, sufficient=False, confidence=0.1)] * 6
+        + [decision_json("ANSWER")] * 3
+        + [selfscore_json(0.2)] * 3,
+        streams=[[("content", "partial [1].")]] * 4,
+    )
+    deps, emitted = make_deps(
+        provider,
+        retrieve_batches=[[make_chunk("c1")], [make_chunk("c2")]],
+    )
+    budget = make_budget(max_actions=10, decompose_anchor_raw=False)
+
+    result = await run_turn_loop("a and b?", empty_context, deps, budget)
+
+    action_events = events_of(emitted, TurnEventType.TURN_ACTION)
+    assert action_events[0]["action"] == "DECOMPOSE"
+    # The decision right after the DECOMPOSE was the controller's — the guard did
+    # NOT force an ANSWER on the insufficient, incompletely-covered pool.
+    assert action_events[1]["source"] == "controller"
+    assert not any(a["source"] == "facet_guard" for a in action_events)
+
+
 async def test_facet_commit_guard_disabled_hands_iteration_to_controller(empty_context):
     """facet_commit_enabled=False disarms the guard: after DECOMPOSE the
     controller decides the next action as before (here it chooses ANSWER)."""

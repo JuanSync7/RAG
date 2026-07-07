@@ -43,7 +43,10 @@ from src.retrieval.pipeline.turn_loop.controller import (
 )
 from src.retrieval.pipeline.turn_loop.decompose import run_decompose
 from src.retrieval.pipeline.turn_loop.deep_study import run_deep_study
-from src.retrieval.pipeline.turn_loop.events import TurnEventEmitter
+from src.retrieval.pipeline.turn_loop.events import (
+    TurnEventEmitter,
+    latest_event_payload,
+)
 from src.retrieval.pipeline.turn_loop.retrieve import run_retrieve
 from src.retrieval.pipeline.turn_loop.router import RouteHint
 from src.retrieval.pipeline.turn_loop.standalone import resolve_standalone_query
@@ -296,34 +299,82 @@ def _no_progress_decision(
     return None
 
 
+def _pool_judged_sufficient(state: TurnState) -> bool:
+    """True when the latest GENUINELY-emitted judge verdict marks the pool
+    sufficient.
+
+    Reads the most recent ``judge_verdict`` event from the trace. That event is
+    only emitted when the round judge actually validated the pool
+    (``pool_verdict is not None``): a fail-open keep-all round (exhausted ledger,
+    judge error, unparseable output) emits NO verdict, so this stays False and
+    the guard never commits on a broken judge — the same
+    ``pool_verdict is not None`` discipline the per-facet coverage attribution
+    uses (decompose.py). Pure trace read, no content matching (CLAUDE.md §0)."""
+    verdict = latest_event_payload(state, TurnEventType.JUDGE_VERDICT)
+    return bool(verdict and verdict.get("sufficient"))
+
+
+def _decomposed_pool_answerable(state: TurnState) -> bool:
+    """True when a DECOMPOSE-driven turn's pool is ready to synthesize.
+
+    The commit signal for the facet guard, satisfied two ways once a multi-way
+    DECOMPOSE has run (``state.facets`` non-empty):
+
+    - **every facet covered** (``facets_fully_covered``) — each decomposed
+      sub-question has its own judge-kept chunk; or
+    - **the pool is judged sufficient** (``_pool_judged_sufficient``) — the round
+      judge's holistic verdict says the gathered evidence answers the question.
+
+    The second arm closes a real spiral: when a thin first round covers only some
+    facets and later rounds REPHRASE the sub-queries, the cumulative facet set
+    never fully covers (each rephrasing is a new, distinct facet), so per-facet
+    coverage alone would never commit — the controller re-DECOMPOSEs forever
+    (observed live on the AXI4/AXI4-Lite comparison: 3 DECOMPOSE rounds, the last
+    all-duplicate, before a stall guard fired). The judge's sufficient verdict is
+    the phrasing-independent signal that the decomposed question is answerable.
+    Requires ``state.facets`` so it stays scoped to DECOMPOSE turns — a plain
+    RETRIEVE turn's commit stays with the controller + no-progress guard."""
+    if not state.facets:
+        return False
+    return state.facets_fully_covered() or _pool_judged_sufficient(state)
+
+
 def _facet_commit_decision(
     state: TurnState, budget: TurnBudget
 ) -> Optional[TurnDecision]:
-    """Force an ANSWER once every decomposed facet has evidence, else ``None``.
+    """Force an ANSWER once a decomposed turn's pool is answerable, else ``None``.
 
     The DECOMPOSE-spiral guard, complementary to :func:`_no_progress_decision`.
     After a compound question is split into facets (``state.facets``, populated
-    by a multi-way DECOMPOSE) and each has >=1 judge-kept chunk, the pool can
-    already synthesize the comparison — so the loop must commit instead of
-    letting the controller gather more (or the round judge keep naming a fresh
-    per-facet gap) forever. Deterministic on purpose: a prompt nudge alone will
-    not make a small controller stop while the judge still reports something
-    "missing" (the a3dffdd lesson). Only fires while answer attempts remain —
-    once spent, the ANSWER branch's own cap takes the turn to best-effort.
-    Disabled via ``facet_commit_enabled``; inert until a DECOMPOSE runs
-    (``facets_fully_covered`` is False with no facets).
+    by a multi-way DECOMPOSE), the pool can synthesize once it is answerable —
+    every facet has a judge-kept chunk OR the round judge marked the pool
+    sufficient (see :func:`_decomposed_pool_answerable`) — so the loop must commit
+    instead of letting the controller gather more (or the round judge keep naming
+    a fresh per-facet gap, or re-DECOMPOSE with rephrased sub-queries) forever.
+    Deterministic on purpose: a prompt nudge alone will not make a small
+    controller stop while it can still gather (the a3dffdd lesson). Only fires
+    while answer attempts remain — once spent, the ANSWER branch's own cap takes
+    the turn to best-effort. Disabled via ``facet_commit_enabled``; inert until a
+    DECOMPOSE runs (no facets).
     """
     if (
         budget.facet_commit_enabled
-        and state.facets_fully_covered()
+        and _decomposed_pool_answerable(state)
         and state.answer_attempts < budget.max_answer_attempts
     ):
-        return TurnDecision(
-            action=TurnAction.ANSWER,
-            reason=(
+        if state.facets_fully_covered():
+            reason = (
                 f"facet-commit guard: all {len(state.facets)} decomposed facets "
                 "have supporting evidence — synthesizing from the pool"
-            ),
+            )
+        else:
+            reason = (
+                "facet-commit guard: the round judge marked the decomposed pool "
+                "sufficient — synthesizing instead of re-decomposing"
+            )
+        return TurnDecision(
+            action=TurnAction.ANSWER,
+            reason=reason,
             confidence=0.0,
             args=AnswerArgs(),
         )
@@ -348,7 +399,7 @@ def _commit_stop_reason(
     Returns the reason (facets checked first — the more specific signal) or
     ``None`` while the loop should keep gathering.
     """
-    if budget.facet_commit_enabled and state.facets_fully_covered():
+    if budget.facet_commit_enabled and _decomposed_pool_answerable(state):
         return STOP_FACETS_COVERED
     if (
         budget.max_no_progress_rounds > 0
