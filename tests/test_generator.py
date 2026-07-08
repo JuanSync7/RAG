@@ -42,6 +42,31 @@ def test_generate_recovers_from_empty_after_think(monkeypatch):
     assert "42" in out.answer
 
 
+def test_empty_after_think_retry_nudge_restates_the_question(monkeypatch):
+    """B3: the empty-after-think recovery nudge must restate the ACTUAL user
+    question so the reasoning model re-answers THIS query on the retry, not a
+    generic 'provide your final answer now' that lost the intent."""
+    mock_provider = MagicMock()
+    mock_provider.generate.side_effect = [
+        LLMResponse(content="", model="test"),               # over-reasoned: empty
+        LLMResponse(content="grounded answer [1]", model="test"),
+    ]
+    mock_provider.config = MagicMock(model="test-model")
+    monkeypatch.setattr(
+        "src.retrieval.generation.nodes.generator.get_llm_provider", lambda: mock_provider
+    )
+    q = "What is the ARLEN reset value for the DWC AXI bridge on cRoCodile?"
+    out = OllamaGenerator().generate(q, ["ctx"])
+
+    assert out.error is None
+    assert mock_provider.generate.call_count == 2
+    retry_messages = mock_provider.generate.call_args_list[1].args[0]
+    # The NUDGE itself (the appended last message, the most salient one) must
+    # restate the question — not rely on it being buried in the prior context.
+    nudge = retry_messages[-1].get("content", "")
+    assert q in nudge
+
+
 def test_generate_errors_when_empty_after_think_retry_also_empty(monkeypatch):
     """If the retry is ALSO empty, fail gracefully (typed error, empty answer) —
     no infinite retry, no silent blank masquerading as success."""

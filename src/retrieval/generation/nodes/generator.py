@@ -492,9 +492,10 @@ class OllamaGenerator:
                     retry_messages = list(messages) + [{
                         "role": "user",
                         "content": (
-                            "Provide your final answer now: direct, concise, and "
-                            "grounded in the context above with [n] citations. Do "
-                            "not include extended step-by-step reasoning."
+                            "Provide your final answer now to this question: "
+                            f"\"{query}\" — direct, concise, and grounded in the "
+                            "context above with [n] citations. Do not include "
+                            "extended step-by-step reasoning."
                         ),
                     }]
                     response = self._provider.generate(
