@@ -332,6 +332,59 @@ def test_generate_hyde_fail_open_returns_none():
         assert v is None, bad
 
 
+# A3 — HyDE fail-open OBSERVABILITY: distinguish WHY HyDE fell back so a silent
+# HyDE-death (e.g. a reasoning model spending its budget in <think> → empty
+# content) is diagnosable, not just a bare counter.
+
+def test_generate_hyde_classifies_failure_reasons():
+    from src.retrieval.pipeline.agentic.hyde import HydeFailure
+
+    cases = [
+        ("", HydeFailure.EMPTY_CONTENT),                 # reasoning-model <think> burn
+        ("not valid json at all", HydeFailure.PARSE_INVALID),
+        ({"hypothetical_answer": ""}, HydeFailure.NO_HYPOTHESIS),
+    ]
+    for bad, expected in cases:
+        provider = RoutingProvider(hyde=bad)
+        seen: list[str] = []
+        v = asyncio.run(generate_hyde(
+            provider, model_alias="controller", original_question="q",
+            max_tokens=256, temperature=0.4, timeout_s=30,
+            on_failure=seen.append,
+        ))
+        assert v is None, bad
+        assert seen == [expected], (bad, seen)
+
+
+def test_generate_hyde_classifies_provider_error():
+    from src.retrieval.pipeline.agentic.hyde import HydeFailure
+
+    class Boom:
+        async def agenerate(self, messages, **kwargs):
+            raise RuntimeError("endpoint down")
+
+    seen: list[str] = []
+    v = asyncio.run(generate_hyde(
+        Boom(), model_alias="c", original_question="q",
+        max_tokens=256, temperature=0.4, timeout_s=30, on_failure=seen.append,
+    ))
+    assert v is None
+    assert seen == [HydeFailure.PROVIDER_ERROR]
+
+
+def test_generate_hyde_success_reports_no_failure():
+    provider = RoutingProvider(hyde={
+        "hypothetical_answer": "a real hypothetical", "search_terms": ["x"], "target_aspect": "t",
+    })
+    seen: list[str] = []
+    v = asyncio.run(generate_hyde(
+        provider, model_alias="c", original_question="q",
+        max_tokens=256, temperature=0.4, timeout_s=30, on_failure=seen.append,
+    ))
+    assert v is not None
+    assert seen == []
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator — single round
 # ---------------------------------------------------------------------------
@@ -478,6 +531,10 @@ def test_hyde_failure_is_counted_in_telemetry():
 
     assert result.hyde_failures == 1
     assert result.telemetry()["hyde_failures"] == 1
+    # A3: the WHY is recorded, not just the count — an empty {} payload parses to
+    # an empty object, classified parse_invalid. The breakdown sums to the count.
+    reasons = result.telemetry()["hyde_failure_reasons"]
+    assert sum(reasons.values()) == 1 and "parse_invalid" in reasons
     # The fallback still retrieved + kept (degraded, never worse than baseline).
     assert result.kept_count == 3
 

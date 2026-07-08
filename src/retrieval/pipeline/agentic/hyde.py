@@ -4,16 +4,17 @@
 # anchor) for the current question, conditioned on prior variants + the named
 # gap. Fail-open: returns None on any error so the caller degrades to a plain
 # hybrid search on the processed query (never worse than baseline).
-# Exports: generate_hyde
+# Exports: generate_hyde, HydeFailure
 # Deps: src.retrieval.pipeline.agentic.state, src.retrieval.pipeline.deep_research (_parse_json_object)
 # @end-summary
 """Controller-driven HyDE (Hypothetical Document Embedding) generation."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from src.retrieval.pipeline.agentic.state import HydeVariant
 # Reuse the deep-research JSON salvage parser (tolerates code-fenced / noisy
@@ -26,6 +27,25 @@ logger = logging.getLogger(__name__)
 # repo root (one deeper than deep_research.py, which uses parents[3]).
 _PROMPT_DIR = Path(__file__).resolve().parents[4] / "prompts"
 _HYDE_PROMPT_FILE = _PROMPT_DIR / "agentic_hyde_generate.md"
+
+
+class HydeFailure:
+    """Typed reasons a HyDE generation fell open to literal-query retrieval.
+
+    A bare ``hyde_failures`` counter says the loop is silently running plain
+    literal-query retrieval but not WHY — and the cause changes the fix:
+    ``EMPTY_CONTENT`` (a reasoning model spending its whole budget in ``<think>``)
+    means re-point ``RAG_AGENTIC_CONTROLLER_MODEL_ALIAS`` at an instruct model;
+    ``TIMEOUT`` means raise the budget; ``PROVIDER_ERROR`` means the endpoint is
+    flaky; ``PARSE_INVALID`` / ``NO_HYPOTHESIS`` mean the prompt/JSON contract
+    drifted. Plain ``str`` constants so they serialize into telemetry directly.
+    """
+
+    PROVIDER_ERROR: str = "provider_error"
+    TIMEOUT: str = "timeout"
+    EMPTY_CONTENT: str = "empty_content"
+    PARSE_INVALID: str = "parse_invalid"
+    NO_HYPOTHESIS: str = "no_hypothesis"
 
 
 def _load_prompt() -> str:
@@ -84,6 +104,7 @@ async def generate_hyde(
     timeout_s: int,
     json_mode: bool = True,
     domain: str = "",
+    on_failure: Optional[Callable[[str], None]] = None,
 ) -> Optional[HydeVariant]:
     """Generate one HyDE variant for ``original_question``.
 
@@ -103,7 +124,18 @@ async def generate_hyde(
         A :class:`HydeVariant`, or ``None`` on any failure / empty output. The
         caller treats ``None`` as "fall back to a plain search on the processed
         query" — so a controller failure is never worse than baseline retrieval.
+        On failure, ``on_failure`` (when given) is invoked once with the typed
+        :class:`HydeFailure` reason for observability (the return contract is
+        unchanged — callers that ignore the reason still just see ``None``).
     """
+    def _fail(reason: str) -> None:
+        """Report the typed failure reason (fail-open: return value stays None)."""
+        if on_failure is not None:
+            try:
+                on_failure(reason)
+            except Exception:  # noqa: BLE001 — telemetry must never break retrieval
+                logger.debug("hyde on_failure callback raised", exc_info=True)
+
     tried = tried_hyde or []
     aspects = coverage_aspects or []
     prior_block = (
@@ -135,12 +167,30 @@ async def generate_hyde(
             [{"role": "user", "content": prompt}],
             **kwargs,
         )
+    except asyncio.TimeoutError as exc:
+        logger.warning("agentic HyDE generation timed out: %s", exc)
+        _fail(HydeFailure.TIMEOUT)
+        return None
     except Exception as exc:  # noqa: BLE001 — fail open to baseline retrieval
         logger.warning("agentic HyDE generation failed: %s", exc)
+        _fail(HydeFailure.PROVIDER_ERROR)
         return None
 
-    obj = _parse_json_object(_strip_reasoning(getattr(resp, "content", "") or ""))
-    if not obj:
-        logger.warning("agentic HyDE returned unparseable/empty JSON; falling back")
+    content = _strip_reasoning(getattr(resp, "content", "") or "")
+    if not content.strip():
+        # Empty final content — the classic reasoning-model-<think>-burn: the
+        # model spent its whole budget reasoning and emitted no answer.
+        logger.warning("agentic HyDE returned empty content (reasoning burn?); falling back")
+        _fail(HydeFailure.EMPTY_CONTENT)
         return None
-    return _coerce_variant(obj, max_tokens)
+    obj = _parse_json_object(content)
+    if not obj:
+        logger.warning("agentic HyDE returned unparseable JSON; falling back")
+        _fail(HydeFailure.PARSE_INVALID)
+        return None
+    variant = _coerce_variant(obj, max_tokens)
+    if variant is None:
+        logger.warning("agentic HyDE JSON carried no hypothetical_answer; falling back")
+        _fail(HydeFailure.NO_HYPOTHESIS)
+        return None
+    return variant

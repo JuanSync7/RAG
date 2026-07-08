@@ -170,6 +170,7 @@ class AgenticRetrieval:
             ranker_calls=s.ranker_calls,
             backfilled=s.backfilled,
             hyde_failures=s.hyde_failures,
+            hyde_failure_reasons=dict(s.hyde_failure_reasons),
             stop_reason=s.stop_reason or "single_round",
             elapsed_ms=elapsed_ms,
         )
@@ -442,22 +443,49 @@ class AgenticRetrieval:
             timeout_s=self._llm_timeout_s,
             json_mode=self._json_mode,
             domain=self._hyde_domain,
+            # A3: capture WHY a fall-back happened (not just that it did). The
+            # callback already incremented hyde_failures + the per-reason
+            # breakdown, so the `variant is None` branch below must NOT re-count.
+            on_failure=s.record_hyde_failure,
         )
         s.llm_calls += 1
         if variant is None:
             # Fail-open: embed the processed query itself → one standard hybrid
             # search. Never worse than the baseline linear path — BUT it forfeits
-            # the answer-space HyDE advantage, so count it: a persistently nonzero
-            # hyde_failures means the controller is mis-provisioned (e.g. a
-            # reasoning model returning empty content under the token budget) and
-            # the loop is silently running plain literal-query retrieval.
-            s.hyde_failures += 1
+            # the answer-space HyDE advantage. Already counted (with its typed
+            # reason) via record_hyde_failure. A persistently nonzero hyde_failures
+            # means the controller is mis-provisioned; escalate to a loud
+            # "HyDE-dead" warning once the loop is running mostly literal-query
+            # retrieval, so the silent degradation surfaces in logs.
+            self._warn_if_hyde_dead()
             return HydeVariant(
                 hypothetical_answer=s.processed_query,
                 search_terms=[],
                 target_aspect="",
             )
         return variant
+
+    def _warn_if_hyde_dead(self) -> None:
+        """Loud alarm when HyDE keeps falling back this request.
+
+        A single fall-back is normal (a flaky call); repeated fall-backs mean the
+        answer-space advantage is gone and the loop is silently doing plain
+        literal-query retrieval — almost always a mis-provisioned controller (a
+        reasoning model emitting empty content under the token budget). Surface it
+        with the typed-reason breakdown so the fix is obvious. The ``== 2`` guard
+        fires exactly once per request (``s`` is per-request), at the 2nd
+        fall-back — not on the first (which may just be flaky)."""
+        s = self._state
+        if s.hyde_failures == 2:
+            logger.warning(
+                "HyDE has fallen back %d times this request (reasons=%s) — the "
+                "loop is running literal-query retrieval for those rounds with no "
+                "answer-space advantage; a run where HyDE keeps failing usually "
+                "means a mis-provisioned RAG_AGENTIC_CONTROLLER_MODEL_ALIAS (a "
+                "reasoning model emitting empty content under the token budget).",
+                s.hyde_failures,
+                dict(s.hyde_failure_reasons),
+            )
 
     # ------------------------------------------------------------------
     # Reservoir
