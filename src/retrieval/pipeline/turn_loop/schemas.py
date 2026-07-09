@@ -394,12 +394,12 @@ class TurnBudget:
     multi-part / cross-document question needs. Matches RAG_AGENTIC_JUDGE_POOL_MAX
     so turn_loop's breadth equals the agentic default's. 0 disables retention."""
 
-    retrieve_judge_pool: int = 40
-    """Candidate count the single-query RETRIEVE action fetches + judges per round
-    (= RAG_AGENTIC_JUDGE_POOL_MAX). Wider than ``retrieve_top_k`` (which is the
-    per-DECOMPOSE-leg count) so RETRIEVE judges as broad a raw-hybrid pool as the
-    agentic default — a specific chunk at raw-hybrid rank 13-40 then enters the
-    judge's view instead of being invisible. Kept chunks are still capped at
+    retrieve_judge_pool: int = 24
+    """Candidate count the single-query RETRIEVE action fetches + judges per round.
+    Wider than ``retrieve_top_k`` (the per-DECOMPOSE-leg count) so a specific chunk
+    at raw-hybrid rank 13-24 enters the judge's view instead of being invisible;
+    kept moderate (not the full agentic 40) to limit judge noise/latency — see the
+    RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL docstring. Kept chunks are capped at
     ``fallback_pool_size`` so a wider judge input never bloats the context."""
 
     baseline_floor_k: int = 4

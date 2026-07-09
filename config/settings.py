@@ -1671,18 +1671,22 @@ uses the wider ``RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL`` instead. Consumed via
 ``TurnBudget.from_settings()`` by turn_loop/decompose.py."""
 
 RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL: int = max(1, int(
-    os.environ.get("RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL", "40")
+    os.environ.get("RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL", "24")
 ))
 """Candidate count the single-query RETRIEVE action fetches and JUDGES per round.
-Matches RAG_AGENTIC_JUDGE_POOL_MAX (40) so turn_loop's RETRIEVE judges as wide a
-raw-hybrid pool as the agentic default — the measured deficit was that RETRIEVE
-judged only ~12 candidates, so a SPECIFIC chunk at raw-hybrid rank 13-40 (an exact
-register table, a spec-precise clause, a missing pipeline step) never entered the
-judge's view and the draft came out generic/incomplete, while the agentic default
-(judging 40) surfaced it. DECOMPOSE is unaffected (its multi-leg fan-out is already
-wide); this widens only the single-query path where single-doc/analysis questions
-land. Kept chunks are still capped at the generation-pool size, so a wider judge
-input does not bloat the context. Consumed via ``TurnBudget.from_settings()`` by
+The measured deficit was that RETRIEVE judged only ~12 candidates, so a SPECIFIC
+chunk at raw-hybrid rank 13-40 (an exact register table, a spec-precise clause, a
+missing pipeline step) never entered the judge's view and the draft came out
+generic/incomplete, while the agentic default (judging 40) surfaced it. Widening
+to 40 deterministically fixed those (ANL-3/4 0.5->1.0) but the extra distractors
+added judge noise/latency (net-neutral on the total). 24 is the compromise: wide
+enough to catch the rank-13-24 specific chunks, narrow enough to limit the noise
+and the bigger judge call. (Inherent tradeoff — the only universally-better option
+is ADAPTIVE width: widen only when the narrow pool is judged insufficient; deferred
+as extra machinery.) DECOMPOSE is unaffected (its multi-leg fan-out is already
+wide); this tunes only the single-query path where single-doc/analysis questions
+land. Kept chunks are capped at the generation-pool size, so a wider judge input
+does not bloat the context. Consumed via ``TurnBudget.from_settings()`` by
 turn_loop/retrieve.py (run_retrieve)."""
 
 RAG_TURN_LOOP_LLM_MAX_TOKENS: int = max(1, int(
