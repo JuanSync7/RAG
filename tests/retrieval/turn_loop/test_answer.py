@@ -215,7 +215,7 @@ async def test_fill_disabled_when_fallback_size_zero():
         streams=[[("content", "just [1]")]],
     )
     kept = make_chunk("kept1")
-    budget = make_budget(fallback_pool_size=0)
+    budget = make_budget(fallback_pool_size=0, baseline_floor_k=0)
     deps, emitted, state, budget, emitter = _setup(provider, pool=[kept], budget=budget)
     state.fallback_chunks = [kept, make_chunk("raw2"), make_chunk("raw3")]
 
@@ -229,6 +229,101 @@ async def test_fill_disabled_when_fallback_size_zero():
     )
 
     assert len(state.pool) == 1  # no fill
+
+
+class TestPermanentBaselineFloor:
+    """Fix (union-not-replace): the raw-query retrieval's top-k is a PERMANENT
+    floor in the generation pool — always present even when the judged pool is
+    already FULL — so a DECOMPOSE rewrite / query drift / an over-strict judge
+    can never DROP a document the plain query found.
+
+    The regression this guards (measured on SMP-2): the single-shot path
+    retrieved RTL_Coding.pdf at rank 1 and answered correctly; turn_loop's
+    decomposed rewrite pulled other docs, the judge kept a full pool WITHOUT
+    RTL_Coding, and because the existing fill only fires when the pool is THIN,
+    RTL_Coding (present in fallback_chunks) never reached generation → the loop
+    answered "not in the context" (0). A permanent floor forces the baseline
+    doc into context regardless of pool fullness.
+    """
+
+    def test_floor_forces_baseline_doc_into_a_full_judged_pool(self):
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        # A FULL judged pool (== fallback_pool_size) entirely from the wrong doc
+        # — the existing thin-fill would NOT fire (pool not < target).
+        budget = make_budget(fallback_pool_size=8, baseline_floor_k=4)
+        state = TurnState()
+        for i in range(8):
+            c = make_chunk(f"wrong{i}", document_id="W", source="WrongDoc", score=0.6)
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        # The raw-query baseline floor: the winning baseline doc the loop lost.
+        state.baseline_floor = [
+            make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95),
+            make_chunk("rtl2", document_id="RTL", source="RTL_Coding.pdf", score=0.88),
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        sources = {c.source for c in state.pool}
+        assert "RTL_Coding.pdf" in sources  # baseline doc forced in despite full pool
+        # the judged pool is retained (nothing dropped) and still leads for citations
+        assert [c.chunk_id for c in state.pool[:8]] == [f"wrong{i}" for i in range(8)]
+        ids = [c.chunk_id for c in state.pool]
+        assert len(ids) == len(set(ids))  # no duplicates
+
+    def test_floor_disabled_when_k_zero(self):
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        budget = make_budget(fallback_pool_size=8, baseline_floor_k=0)
+        state = TurnState()
+        for i in range(8):
+            c = make_chunk(f"wrong{i}", document_id="W", source="WrongDoc", score=0.6)
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        state.baseline_floor = [
+            make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95),
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        # No permanent floor and pool already full → unchanged (pre-fix behavior).
+        assert len(state.pool) == 8
+        assert "RTL_Coding.pdf" not in {c.source for c in state.pool}
+
+    async def test_baseline_floor_seeded_once_from_raw_query(self):
+        """run_answer seeds the permanent floor from a RAW-query retrieve_ranked
+        (hyde_text=None), once per turn, and the seeded baseline doc reaches the
+        generation pool even though the judged pool never contained it."""
+        provider = FakeProvider(
+            responses=[selfscore_json(0.9)],
+            streams=[[("content", "answer [1]")]],
+        )
+        # The judged pool drifted entirely onto the wrong doc.
+        pool = [make_chunk("w1", document_id="W", source="WrongDoc", score=0.7)]
+        baseline = [make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95)]
+        # retrieve_ranked FIFO: the seed call returns the raw-query baseline.
+        deps, emitted = make_deps(provider, retrieve_batches=[baseline])
+        state = TurnState()
+        for c in pool:
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        budget = make_budget(baseline_floor_k=4)
+        emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+        await run_answer(
+            query="q",
+            context=TurnContext(conversation_id="c"),
+            state=state,
+            budget=budget,
+            deps=deps,
+            emitter=emitter,
+        )
+
+        assert state.baseline_seeded is True
+        assert [c.chunk_id for c in state.baseline_floor] == ["rtl1"]
+        assert "RTL_Coding.pdf" in {c.source for c in state.pool}  # baseline reached generation
+        assert state.pool[0].chunk_id == "w1"  # judged chunk still leads (citations)
 
 
 async def test_draft_events_stream_live_and_precede_gate(empty_context):

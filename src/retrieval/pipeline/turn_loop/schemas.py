@@ -385,6 +385,15 @@ class TurnBudget:
     size with the best raw chunks when the judged pool is empty OR thin (kept
     chunks stay first); 0 disables both the floor and the fill (judge-kept only)."""
 
+    baseline_floor_k: int = 4
+    """How many raw-query retrieval chunks are carried as a PERMANENT grounding
+    floor into the ANSWER pool — present even when the judged pool is already
+    FULL (unlike ``fallback_pool_size``'s fill, which only tops up a THIN pool).
+    Makes the turn genuinely ADDITIVE: a DECOMPOSE rewrite / query drift / an
+    over-strict judge can never DROP a document the plain query found. Source-
+    diverse (each floor chunk adds a NEW document not already pooled). 0 disables
+    (fill-only, pre-fix behavior)."""
+
     citation_target: int = 5
     """Distinct-source count at which the answer gate's citation-coverage
     component saturates to 1.0 (denominator = min(pool_size, target)). Keeps a
@@ -476,6 +485,7 @@ class TurnBudget:
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
+            baseline_floor_k=settings.RAG_TURN_LOOP_BASELINE_FLOOR_K,
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
             facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
             decompose_anchor_raw=settings.RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW,
@@ -696,6 +706,20 @@ class TurnState:
     then grounds on these instead of "(no evidence retrieved)". Guards the class
     where a judge rejecting an entire fresh batch strands the turn with nothing
     to cite (never a query/content match — CLAUDE.md §0)."""
+
+    baseline_floor: list[EvidenceChunk] = field(default_factory=list)
+    """The RAW user-query retrieval's top-k (no HyDE, no decomposition), seeded
+    ONCE per turn and carried as a PERMANENT grounding floor into the ANSWER pool
+    — present even when the judged pool is full. This is the union-not-replace
+    guarantee: a HyDE-drifted RETRIEVE round, a DECOMPOSE rewrite, or an
+    over-strict judge can never DROP a document the plain query found. Distinct
+    from ``fallback_chunks`` (which on a RETRIEVE turn holds only the HyDE-driven
+    candidates — never the raw baseline). Empty when ``baseline_floor_k`` is 0."""
+
+    baseline_seeded: bool = False
+    """Whether the raw-query ``baseline_floor`` retrieval has been attempted this
+    turn (guards the once-per-turn seed against answer-attempt retries; set True
+    even on a failed/empty retrieval so it is never retried)."""
 
     seen_chunk_ids: set[str] = field(default_factory=set)
     """Stable chunk ids ever pooled — cross-action dedup."""
