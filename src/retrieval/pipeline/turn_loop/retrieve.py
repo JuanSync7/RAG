@@ -239,7 +239,7 @@ async def run_retrieve(
 
     # Grounding floor: retain the best RAW candidates (before dedup/judge) so an
     # empty judged pool can still ground a draft/refusal (see _retain_fallback).
-    _retain_fallback(state, retrieved, cap=budget.fallback_pool_size)
+    _retain_fallback(state, retrieved, cap=budget.reservoir_size)
 
     fresh: list[EvidenceChunk] = []
     dup_count = 0

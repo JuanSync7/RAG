@@ -213,7 +213,7 @@ async def run_decompose(
     _retain_fallback(
         state,
         [chunk for leg in all_legs for chunk in leg],
-        cap=budget.fallback_pool_size,
+        cap=budget.reservoir_size,
     )
 
     # 3. Merge + dedup — done AFTER the gather (single-threaded) so the shared

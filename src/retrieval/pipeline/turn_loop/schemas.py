@@ -378,12 +378,20 @@ class TurnBudget:
     max_actions best-effort exit instead of a clean gated answer. 0 disables
     the guard."""
 
-    fallback_pool_size: int = 8
-    """Target generation-pool size AND how many best-scored RAW retrieved chunks
-    to retain per turn as the judge-independent grounding floor
-    (``TurnState.fallback_chunks``). The ANSWER stage fills the pool toward this
-    size with the best raw chunks when the judged pool is empty OR thin (kept
-    chunks stay first); 0 disables both the floor and the fill (judge-kept only)."""
+    fallback_pool_size: int = 12
+    """Target GENERATION-pool size: how many chunks the ANSWER stage feeds the
+    generator. The ANSWER fills the pool toward this size from the reservoir when
+    the judged pool is empty OR thin (kept chunks stay first). Matches
+    RAG_AGENTIC_FINAL_MAX_CHUNKS so turn_loop feeds generation as much
+    cross-document context as the agentic default. 0 disables floor + fill."""
+
+    reservoir_size: int = 40
+    """Cross-round retention cap for the raw ``TurnState.fallback_chunks``
+    reservoir the ANSWER fill draws from — SEPARATE from and much wider than
+    ``fallback_pool_size`` (the generation target). The fill is source-diversity-
+    first, so a WIDE reservoir is what lets it reach the OTHER documents a
+    multi-part / cross-document question needs. Matches RAG_AGENTIC_JUDGE_POOL_MAX
+    so turn_loop's breadth equals the agentic default's. 0 disables retention."""
 
     baseline_floor_k: int = 4
     """How many raw-query retrieval chunks are carried as a PERMANENT grounding
@@ -485,6 +493,7 @@ class TurnBudget:
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
+            reservoir_size=settings.RAG_TURN_LOOP_RESERVOIR_SIZE,
             baseline_floor_k=settings.RAG_TURN_LOOP_BASELINE_FLOOR_K,
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
             facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,

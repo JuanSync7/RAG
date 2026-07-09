@@ -152,7 +152,9 @@ async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
         streams=[[("content", "grounded [1]")]],
     )
     kept = make_chunk("kept1", score=0.9)
-    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept])
+    # Pin the generation target to 8 for this fixture (11 raw chunks available).
+    budget = make_budget(fallback_pool_size=8)
+    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept], budget=budget)
     # The judge-independent floor retained more raw candidates than the judge kept.
     state.fallback_chunks = [kept] + [
         make_chunk(f"raw{i}", score=0.8 - i * 0.01) for i in range(2, 12)
@@ -167,7 +169,7 @@ async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
         emitter=emitter,
     )
 
-    assert len(state.pool) == budget.fallback_pool_size  # topped up (default 8)
+    assert len(state.pool) == budget.fallback_pool_size  # topped up toward target (8)
     assert state.pool[0].chunk_id == "kept1"  # kept chunk stays first
     ids = [chunk.chunk_id for chunk in state.pool]
     assert len(ids) == len(set(ids))  # kept1 not re-appended
@@ -290,6 +292,31 @@ class TestPermanentBaselineFloor:
         # No permanent floor and pool already full → unchanged (pre-fix behavior).
         assert len(state.pool) == 8
         assert "RTL_Coding.pdf" not in {c.source for c in state.pool}
+
+    def test_fill_spans_many_docs_from_wide_reservoir(self):
+        """Breadth fix: a thin judged pool (one doc) + a WIDE reservoir (many
+        docs, > generation target) → the source-diverse fill reaches
+        fallback_pool_size DISTINCT documents. This is the v4 gap — turn_loop's
+        answers hedged answerable sub-parts because its pool spanned too few docs;
+        a wide reservoir + a 12-slot generation target restores the breadth."""
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        budget = make_budget(fallback_pool_size=12, baseline_floor_k=0)
+        state = TurnState()
+        kept = make_chunk("k1", document_id="A", source="DocA", score=0.9)
+        state.pool.append(kept)
+        state.seen_chunk_ids.add("k1")
+        # Reservoir holds 20 chunks across 20 distinct docs (a wide retention).
+        state.fallback_chunks = [
+            make_chunk(f"r{i}", document_id=f"D{i}", source=f"Doc{i}", score=0.8 - i * 0.01)
+            for i in range(20)
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        assert len(state.pool) == 12  # filled toward the generation target
+        assert len({c.source for c in state.pool}) == 12  # 12 distinct docs (breadth)
+        assert state.pool[0].chunk_id == "k1"  # judged chunk still leads
 
     async def test_baseline_floor_seeded_once_from_raw_query(self):
         """run_answer seeds the permanent floor from a RAW-query retrieve_ranked
