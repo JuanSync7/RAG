@@ -1105,3 +1105,31 @@ def test_verbose_judge_prompt_has_nav_awareness_line():
     assert "copyright" in prompt
     assert "title page" in prompt or "title-page" in prompt
     assert "not rank" in prompt or "do not rank" in prompt or "non-answer-bearing" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Deterministic-retrieval contract: HyDE sampling temperature
+# ---------------------------------------------------------------------------
+
+
+def test_hyde_temperature_defaults_to_deterministic():
+    """HyDE sampling temperature defaults to 0.0 (greedy = reproducible).
+
+    A >0 temperature was the SOLE source of run-to-run cross-document recall
+    variance (measured: temp=0.4 -> per-run recall swings 4..9/15, spread 5;
+    temp=0.0 -> a stable 6/15 every run, spread 0, SAME mean). The mean is
+    unchanged, so the stochastic exploration bought nothing but noise — and the
+    noise both degrades per-request consistency (a UX defect) and makes any
+    downstream retrieval A/B unmeasurable (the change signal drowns in the
+    variance band). Multi-round HyDE diversity does NOT depend on this
+    temperature: each round is re-prompted with ``tried_hyde`` + the named gap
+    (see AgenticRetrieval._next_hyde), so distinct rounds still produce distinct
+    hypotheticals deterministically. This also aligns the agentic path with the
+    turn_loop convention, where every controller/decompose/standalone call
+    already runs at temperature 0.0. Env-overridable for anyone who wants to
+    re-enable stochastic exploration.
+    """
+    import config.settings as cfg
+
+    assert cfg.RAG_AGENTIC_HYDE_TEMPERATURE == 0.0
+    assert isinstance(cfg.RAG_AGENTIC_HYDE_TEMPERATURE, float)

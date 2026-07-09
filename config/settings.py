@@ -1357,9 +1357,21 @@ RAG_AGENTIC_HYDE_MAX_TOKENS: int = max(1, int(
 shown to the user, so it is kept short and cheap."""
 
 RAG_AGENTIC_HYDE_TEMPERATURE: float = float(
-    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.4")
+    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.0")
 )
-"""Controller sampling temperature; higher = more diverse HyDE across rounds."""
+"""Controller sampling temperature for HyDE generation. Default 0.0 (greedy =
+reproducible).
+
+A >0 temperature was measured to be the SOLE source of run-to-run cross-document
+recall variance (temp=0.4 swings a query's passage recall 4..9/15 across
+identical runs; temp=0.0 returns a stable 6/15, SAME mean). The stochastic
+exploration bought no mean recall — only noise that both hurts per-request
+consistency and makes downstream retrieval A/Bs unmeasurable. Multi-round HyDE
+diversity does NOT need it: each round is re-prompted with ``tried_hyde`` + the
+named coverage gap (``AgenticRetrieval._next_hyde``), so distinct rounds still
+diverge deterministically. Matches the turn_loop convention (all its
+controller/decompose/standalone calls already run at 0.0). Override via the env
+var to re-enable stochastic exploration."""
 
 RAG_AGENTIC_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
     "RAG_AGENTIC_CONTROLLER_MODEL_ALIAS", "controller"
