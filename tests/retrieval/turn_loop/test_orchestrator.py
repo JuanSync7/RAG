@@ -275,10 +275,11 @@ async def test_controller_fail_open_drives_first_action_to_retrieve(empty_contex
 
     result = await run_turn_loop("verbatim user query", empty_context, deps, budget)
 
-    # The RETRIEVE round runs with the verbatim query (fail-open); the ANSWER
-    # stage then also seeds the permanent baseline floor from the raw query
+    # The RETRIEVE round runs with the verbatim query (fail-open) at the WIDE
+    # judge-pool width (retrieve_judge_pool, agentic-parity); the ANSWER stage
+    # then also seeds the permanent baseline floor from the raw query
     # (hyde_text=None, baseline_floor_k) — the union-not-replace guarantee.
-    assert captured[0] == ("verbatim user query", None, budget.retrieve_top_k)
+    assert captured[0] == ("verbatim user query", None, budget.retrieve_judge_pool)
     assert ("verbatim user query", None, budget.baseline_floor_k) in captured
     assert result.stop_reason == STOP_GATE_PASSED
 

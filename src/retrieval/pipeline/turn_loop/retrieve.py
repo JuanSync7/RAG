@@ -139,6 +139,11 @@ async def _judge_round(
             timeout_s=emitter.remaining_timeout_s(),
             json_mode=_judge_json_mode(),
             concise=_judge_concise(),
+            # Cap kept chunks at the generation-pool size: a wide RETRIEVE judge
+            # input (retrieve_judge_pool) must not translate into a bloated pool —
+            # the judge ranks the wide candidate set but keeps only the top ones
+            # the answer will actually use (agentic-parity: keep <= final width).
+            max_keep=budget.fallback_pool_size,
         )
     except Exception as exc:  # noqa: BLE001 — fail open to keep-all
         logger.warning("turn loop round judge failed: %s — keeping all", exc)
@@ -230,8 +235,11 @@ async def run_retrieve(
         )
 
     try:
+        # RETRIEVE judges a WIDE raw-hybrid pool (= agentic's judge_pool_max) so a
+        # specific chunk at rank 13-40 enters the judge's view; the keep is capped
+        # at fallback_pool_size in _judge_round so the context never bloats.
         retrieved = await deps.retrieve_ranked(
-            query_text, hyde_text, budget.retrieve_top_k
+            query_text, hyde_text, budget.retrieve_judge_pool
         )
     except Exception as exc:  # noqa: BLE001 — a failed round must not kill the turn
         logger.warning("turn loop retrieve_ranked failed: %s", exc)

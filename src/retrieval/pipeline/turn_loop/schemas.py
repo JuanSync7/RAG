@@ -345,7 +345,8 @@ class TurnBudget:
     """Max clickable hint chips a CLARIFY response may carry."""
 
     retrieve_top_k: int
-    """Ranked-chunk count requested from each retrieve_ranked call."""
+    """Ranked-chunk count per DECOMPOSE sub-query leg (the single-query RETRIEVE
+    action uses the wider ``retrieve_judge_pool`` instead)."""
 
     answer_confidence_threshold: float
     """Answer-gate pass threshold in (0, 1]."""
@@ -392,6 +393,14 @@ class TurnBudget:
     first, so a WIDE reservoir is what lets it reach the OTHER documents a
     multi-part / cross-document question needs. Matches RAG_AGENTIC_JUDGE_POOL_MAX
     so turn_loop's breadth equals the agentic default's. 0 disables retention."""
+
+    retrieve_judge_pool: int = 40
+    """Candidate count the single-query RETRIEVE action fetches + judges per round
+    (= RAG_AGENTIC_JUDGE_POOL_MAX). Wider than ``retrieve_top_k`` (which is the
+    per-DECOMPOSE-leg count) so RETRIEVE judges as broad a raw-hybrid pool as the
+    agentic default — a specific chunk at raw-hybrid rank 13-40 then enters the
+    judge's view instead of being invisible. Kept chunks are still capped at
+    ``fallback_pool_size`` so a wider judge input never bloats the context."""
 
     baseline_floor_k: int = 4
     """How many raw-query retrieval chunks are carried as a PERMANENT grounding
@@ -483,6 +492,7 @@ class TurnBudget:
             deep_study_max_windows=settings.RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS,
             clarify_max_hints=settings.RAG_TURN_LOOP_CLARIFY_MAX_HINTS,
             retrieve_top_k=settings.RAG_TURN_LOOP_RETRIEVE_TOP_K,
+            retrieve_judge_pool=settings.RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL,
             answer_confidence_threshold=(
                 settings.RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD
             ),
