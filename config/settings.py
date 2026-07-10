@@ -438,6 +438,17 @@ RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS = max(1, int(
 """Max characters of the document used as the shared context window in each
 contextual-enrichment call (bounds prompt size for long documents)."""
 
+RAG_INGESTION_CONTEXTUAL_MODEL_ALIAS = os.environ.get(
+    "RAG_INGESTION_CONTEXTUAL_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the contextual-enrichment call. MUST resolve to
+an INSTRUCT model: the ingestion DEFAULT alias routes to a REASONING model
+(qwopus) which burns its whole token budget in <think> on a substantive prompt
+and returns EMPTY final content (verified live — this also silently degrades
+metadata_generation), so contextual chunking would no-op. 'controller'/'judge'
+resolve to the qwen2.5-7b instruct model that returns clean JSON. Same fix class
+as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS (HyDE/judge/mbist)."""
+
 RAG_INGESTION_DOCLING_ENABLED = os.environ.get(
     "RAG_INGESTION_DOCLING_ENABLED", "true"
 ).lower() in ("true", "1", "yes")

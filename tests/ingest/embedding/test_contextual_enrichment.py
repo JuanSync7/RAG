@@ -25,6 +25,7 @@ def _make_state(chunks, *, enabled=True, batch_size=8, cleaned="The document bod
         enable_contextual_chunking=enabled,
         contextual_batch_size=batch_size,
         contextual_doc_max_chars=8000,
+        contextual_model_alias="controller",
         llm_temperature=0.0,
         llm_timeout_seconds=10,
     )
@@ -64,9 +65,10 @@ def test_disabled_is_noop():
 def test_enabled_sets_embed_text_prefix_and_leaves_stored_text():
     chunks = [_make_chunk("body one"), _make_chunk("body two")]
     state = _make_state(chunks)
-    with patch(_PROVIDER, return_value=_fake_provider(
+    prov = _fake_provider(
         ['{"contexts": ["From section A about one.", "From section B about two."]}']
-    )):
+    )
+    with patch(_PROVIDER, return_value=prov):
         _run(state)
     # EMBED text = context + "\n\n" + body
     assert chunks[0].metadata["embed_text"] == "From section A about one.\n\nbody one"
@@ -74,6 +76,9 @@ def test_enabled_sets_embed_text_prefix_and_leaves_stored_text():
     # STORED text (chunk.text / enriched_content) is UNCHANGED
     assert chunks[0].text == "body one"
     assert chunks[0].metadata["enriched_content"] == "body one"
+    # Routes to the configured INSTRUCT alias (NOT the default reasoning model
+    # that returns empty content) — guards the empty-context regression.
+    assert prov.json_completion.call_args.kwargs["model_alias"] == "controller"
 
 
 def test_count_mismatch_fails_open():

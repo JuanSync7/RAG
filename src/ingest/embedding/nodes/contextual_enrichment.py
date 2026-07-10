@@ -92,6 +92,12 @@ def contextual_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                     {"role": "system", "content": "Return JSON only."},
                     {"role": "user", "content": _build_prompt(doc_window, bodies)},
                 ],
+                # Route to an INSTRUCT model, not the default reasoning model: a
+                # reasoning model (e.g. qwopus) burns its whole token budget in
+                # <think> on a substantive prompt and returns EMPTY final content
+                # (the HyDE/judge/mbist finding), which would silently no-op
+                # contextual chunking. The instruct alias returns clean JSON.
+                model_alias=config.contextual_model_alias,
                 temperature=config.llm_temperature,
                 max_tokens=_CTX_MAX_TOKENS,
                 timeout=config.llm_timeout_seconds,
