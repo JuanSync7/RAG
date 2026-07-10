@@ -200,6 +200,38 @@ def test_vector_store_raises_propagated_as_error():
 # Tests: partial state resilience (optional upstream fields absent/None)
 # ---------------------------------------------------------------------------
 
+def test_contextual_embed_text_embeds_prefix_but_stores_raw():
+    """Contextual chunking: when ``embed_text`` metadata is present, the EMBEDDED
+    text is the contextual-prefix + body, but the STORED DocumentRecord.text stays
+    the raw (enriched_content) body — so contextual retrieval improves the vector
+    without polluting the text shown to generation."""
+    chunk = _make_chunk("body text")
+    chunk.metadata["enriched_content"] = "body text"
+    chunk.metadata["embed_text"] = "This section covers X. body text"
+    state = _make_state(chunks=[chunk])
+    state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+    result = embedding_storage_node(state)
+    records = result.get("staged_weaviate_records", [])
+    assert len(records) == 1
+    # STORED text is the raw body (NOT the contextual prefix).
+    assert records[0].text == "body text"
+    # EMBEDDED text is the contextual prefix + body.
+    texts_passed = state["runtime"].embedder.embed_documents.call_args[0][0]
+    assert texts_passed == ["This section covers X. body text"]
+
+
+def test_no_embed_text_embeds_equals_stored():
+    """Backward-compat: with no embed_text, the embedded text == the stored text
+    (enriched_content) — today's behavior, unchanged."""
+    chunk = _make_chunk("plain body")
+    chunk.metadata["enriched_content"] = "plain body"
+    state = _make_state(chunks=[chunk])
+    state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+    result = embedding_storage_node(state)
+    assert result["staged_weaviate_records"][0].text == "plain body"
+    assert state["runtime"].embedder.embed_documents.call_args[0][0] == ["plain body"]
+
+
 def test_enriched_content_fallback_to_chunk_text():
     """When enriched_content metadata is absent, node falls back to chunk.text."""
     chunk = _make_chunk("raw chunk text")

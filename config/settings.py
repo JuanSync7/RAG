@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_CONCISE, RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_LOOP_LLM_MAX_TOKENS, RAG_TURN_LOOP_MIN_CALL_BUDGET_MS, RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS, RAG_TURN_LOOP_FALLBACK_POOL_SIZE, RAG_TURN_LOOP_CITATION_TARGET, RAG_TURN_LOOP_FACET_COMMIT_ENABLED, RAG_TURN_LOOP_ROUTER_ENABLED, RAG_TURN_LOOP_FAST_LANE_ENABLED, RAG_TURN_LOOP_FAST_LANE_MAX_WORDS, RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE, RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED, RAG_TURN_LOOP_EFFORT_FAST_SCALE, RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, RAG_WEAVIATE_MODE, RAG_WEAVIATE_HOST, RAG_WEAVIATE_HTTP_PORT, RAG_WEAVIATE_GRPC_PORT, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, SEMANTIC_CHUNKING_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION, RAG_DOCUMENT_ROUTING_ENABLED, RAG_DOCUMENT_ROUTING_TOP_N, RAG_DOCUMENT_ROUTING_MIN_SCORE, RAG_DOCUMENT_ROUTING_PER_DOC_LEAVES, RAG_DOCUMENT_ROUTING_MAX_CANDIDATES, RAG_DOCUMENT_ROUTING_BOOST, RAG_DOCUMENT_CARD_COLLECTION, RAG_DECOMPOSITION_ENABLED, RAG_DECOMPOSITION_LLM_PRIMARY, RAG_DECOMPOSITION_LLM_TIMEOUT_SECONDS, RAG_DECOMPOSITION_MIN_SUBQUERIES, RAG_DECOMPOSITION_MAX_SUBQUERIES, RAG_INGESTION_BUILD_DOCUMENT_CARDS, RAG_INGESTION_CARD_LLM_SUMMARY, RAG_INGESTION_CARD_MAX_HEADINGS, validate_document_routing_config, RAG_AGENTIC_RETRIEVAL_ENABLED, RAG_AGENTIC_MAX_ROUNDS, RAG_AGENTIC_MAX_LLM_CALLS, RAG_AGENTIC_WALL_CLOCK_MS, RAG_AGENTIC_KEEP_TOP_K_PER_ROUND, RAG_AGENTIC_FINAL_MAX_CHUNKS, RAG_AGENTIC_MIN_KEPT_CHUNKS, RAG_AGENTIC_MIN_SOURCES, RAG_AGENTIC_RELEVANCE_THRESHOLD, RAG_AGENTIC_FAITHFULNESS_THRESHOLD, RAG_AGENTIC_SUFFICIENCY_TARGET, RAG_AGENTIC_HYDE_DIVERSITY_MAX_COSINE, RAG_AGENTIC_HYDE_MAX_TOKENS, RAG_AGENTIC_HYDE_TEMPERATURE, RAG_AGENTIC_CONTROLLER_MODEL_ALIAS, RAG_AGENTIC_JUDGE_MODEL_ALIAS, RAG_AGENTIC_QFS_AUTO, RAG_AGENTIC_RANKER, RAG_AGENTIC_JUDGE_POOL_MAX, RAG_AGENTIC_FILL_MODE, RAG_AGENTIC_JUDGE_VERBOSE, RAG_AGENTIC_LLM_JSON_MODE, RAG_AGENTIC_ROLE_BACKSTOP, RAG_STAGE_BUDGET_AGENTIC_RETRIEVAL_MS, validate_agentic_retrieval_config, RAG_TURN_LOOP_ENABLED, RAG_TURN_LOOP_MAX_ACTIONS, RAG_TURN_LOOP_MAX_LLM_CALLS, RAG_TURN_LOOP_WALL_CLOCK_MS, RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD, RAG_TURN_LOOP_ANSWER_GATE_WEIGHTS, RAG_TURN_LOOP_MAX_ANSWER_ATTEMPTS, RAG_TURN_LOOP_CONTROLLER_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_MODEL_ALIAS, RAG_TURN_LOOP_JUDGE_CONCISE, RAG_TURN_LOOP_STANDALONE_QUERY_ENABLED, RAG_TURN_LOOP_DEEP_STUDY_MAX_DOCS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_CHARS, RAG_TURN_LOOP_DEEP_STUDY_WINDOW_OVERLAP_CHARS, RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS, RAG_TURN_LOOP_DECOMPOSE_MAX_SUBQUERIES, RAG_TURN_LOOP_CLARIFY_MAX_HINTS, RAG_TURN_LOOP_STREAM_EVENTS, RAG_TURN_LOOP_RETRIEVE_TOP_K, RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL, RAG_TURN_LOOP_LLM_MAX_TOKENS, RAG_TURN_LOOP_MIN_CALL_BUDGET_MS, RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS, RAG_TURN_LOOP_BASELINE_FLOOR_K, RAG_TURN_LOOP_FALLBACK_POOL_SIZE, RAG_TURN_LOOP_RESERVOIR_SIZE, RAG_TURN_LOOP_CITATION_TARGET, RAG_TURN_LOOP_FACET_COMMIT_ENABLED, RAG_TURN_LOOP_ROUTER_ENABLED, RAG_TURN_LOOP_FAST_LANE_ENABLED, RAG_TURN_LOOP_FAST_LANE_MAX_WORDS, RAG_TURN_LOOP_FAST_LANE_MIN_CONFIDENCE, RAG_TURN_LOOP_SHAPE_DECOMPOSE_ENABLED, RAG_TURN_LOOP_EFFORT_FAST_SCALE, RAG_TURN_LOOP_EFFORT_THOROUGH_SCALE, RAG_TURN_CONTEXT_MAX_CHUNK_REFS, RAG_TURN_CONTEXT_PREVIEW_CHARS, RAG_TURN_CONTEXT_STORE_FULL_TEXT, validate_turn_loop_config, RAG_INGESTION_NAV_CLASSIFY, RAG_NAV_CLASSIFY_MODEL_ALIAS, RAG_NAV_CLASSIFY_BATCH_SIZE, RAG_NAV_CLASSIFY_PREFIX_CHARS, RAG_NAV_CLASSIFY_TIMEOUT_SECONDS, RAG_NAV_CLASSIFY_MAX_OUTPUT_TOKENS, RAG_NAV_CLASSIFY_JSON_MODE, RAG_CHUNK_ROLES, RAG_NAV_ROLE_DEFAULT, RAG_RETRIEVAL_ROLE_FILTER, RAG_RETRIEVAL_ROLE_SCHEMA_PRESENT, RAG_RETRIEVAL_EXCLUDED_ROLES, validate_nav_role_config
 # Deps: os, pathlib, logging, dotenv, json
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -412,6 +412,52 @@ RAG_INGESTION_LLM_TIMEOUT_SECONDS = int(
     os.environ.get("RAG_INGESTION_LLM_TIMEOUT_SECONDS", "45")
 )
 RAG_INGESTION_LLM_MAX_KEYWORDS = int(os.environ.get("RAG_INGESTION_LLM_MAX_KEYWORDS", "12"))
+RAG_INGESTION_LLM_MODEL_ALIAS = os.environ.get(
+    "RAG_INGESTION_LLM_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for ingestion LLM calls (metadata_generation
+summaries/keywords via _llm_json). MUST resolve to an INSTRUCT model: the
+default alias routes to a reasoning model (qwopus) that returns EMPTY content on
+substantive prompts (verified live — doc summaries were falling back to
+deterministic extraction on the box). 'controller' resolves to qwen2.5-7b
+instruct. Same fix class as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS."""
+
+# ── Contextual chunking (Anthropic-style contextual retrieval) ──────────────
+RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED = os.environ.get(
+    "RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the ingestion pipeline generates a per-chunk situating context (one
+short LLM sentence) and prepends it to each chunk's EMBED text only — the stored
+text (returned to generation) stays the raw chunk. Improves retrieval recall for
+chunks whose own words don't match the query (the passages no query surfaced in
+the cross-doc eval). Off by default: it adds an LLM call per chunk-batch at
+ingest and requires a re-ingest to take effect. Consumed by
+``IngestionConfig`` → contextual_enrichment_node."""
+
+RAG_INGESTION_CONTEXTUAL_BATCH_SIZE = max(1, int(
+    os.environ.get("RAG_INGESTION_CONTEXTUAL_BATCH_SIZE", "8")
+))
+"""Chunks per contextual-enrichment LLM call. Larger = fewer calls (cheaper) but
+a bigger prompt/output; 8 balances cost against the JSON-array size the model
+must return reliably."""
+
+RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS = max(1, int(
+    os.environ.get("RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS", "8000")
+))
+"""Max characters of the document used as the shared context window in each
+contextual-enrichment call (bounds prompt size for long documents)."""
+
+RAG_INGESTION_CONTEXTUAL_MODEL_ALIAS = os.environ.get(
+    "RAG_INGESTION_CONTEXTUAL_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for the contextual-enrichment call. MUST resolve to
+an INSTRUCT model: the ingestion DEFAULT alias routes to a REASONING model
+(qwopus) which burns its whole token budget in <think> on a substantive prompt
+and returns EMPTY final content (verified live — this also silently degrades
+metadata_generation), so contextual chunking would no-op. 'controller'/'judge'
+resolve to the qwen2.5-7b instruct model that returns clean JSON. Same fix class
+as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS (HyDE/judge/mbist)."""
+
 RAG_INGESTION_DOCLING_ENABLED = os.environ.get(
     "RAG_INGESTION_DOCLING_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
@@ -1357,9 +1403,21 @@ RAG_AGENTIC_HYDE_MAX_TOKENS: int = max(1, int(
 shown to the user, so it is kept short and cheap."""
 
 RAG_AGENTIC_HYDE_TEMPERATURE: float = float(
-    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.4")
+    os.environ.get("RAG_AGENTIC_HYDE_TEMPERATURE", "0.0")
 )
-"""Controller sampling temperature; higher = more diverse HyDE across rounds."""
+"""Controller sampling temperature for HyDE generation. Default 0.0 (greedy =
+reproducible).
+
+A >0 temperature was measured to be the SOLE source of run-to-run cross-document
+recall variance (temp=0.4 swings a query's passage recall 4..9/15 across
+identical runs; temp=0.0 returns a stable 6/15, SAME mean). The stochastic
+exploration bought no mean recall — only noise that both hurts per-request
+consistency and makes downstream retrieval A/Bs unmeasurable. Multi-round HyDE
+diversity does NOT need it: each round is re-prompted with ``tried_hyde`` + the
+named coverage gap (``AgenticRetrieval._next_hyde``), so distinct rounds still
+diverge deterministically. Matches the turn_loop convention (all its
+controller/decompose/standalone calls already run at 0.0). Override via the env
+var to re-enable stochastic exploration."""
 
 RAG_AGENTIC_CONTROLLER_MODEL_ALIAS: str = os.environ.get(
     "RAG_AGENTIC_CONTROLLER_MODEL_ALIAS", "controller"
@@ -1652,9 +1710,30 @@ result trace (metadata.turn_loop.trace). Consumed by the event emitter bridge
 RAG_TURN_LOOP_RETRIEVE_TOP_K: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_RETRIEVE_TOP_K", "12")
 ))
-"""Ranked-chunk count requested from each ``retrieve_ranked`` activity call
-(per RETRIEVE action, before pool dedup/judge). Consumed via
-``TurnBudget.from_settings()`` by turn_loop/retrieve.py."""
+"""Ranked-chunk count requested per DECOMPOSE sub-query leg (before merge/judge).
+A DECOMPOSE fans out several legs so the merged judge pool is already wide
+(~legs × this); kept intentionally moderate. The single-query RETRIEVE action
+uses the wider ``RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL`` instead. Consumed via
+``TurnBudget.from_settings()`` by turn_loop/decompose.py."""
+
+RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL: int = max(1, int(
+    os.environ.get("RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL", "24")
+))
+"""Candidate count the single-query RETRIEVE action fetches and JUDGES per round.
+The measured deficit was that RETRIEVE judged only ~12 candidates, so a SPECIFIC
+chunk at raw-hybrid rank 13-40 (an exact register table, a spec-precise clause, a
+missing pipeline step) never entered the judge's view and the draft came out
+generic/incomplete, while the agentic default (judging 40) surfaced it. Widening
+to 40 deterministically fixed those (ANL-3/4 0.5->1.0) but the extra distractors
+added judge noise/latency (net-neutral on the total). 24 is the compromise: wide
+enough to catch the rank-13-24 specific chunks, narrow enough to limit the noise
+and the bigger judge call. (Inherent tradeoff — the only universally-better option
+is ADAPTIVE width: widen only when the narrow pool is judged insufficient; deferred
+as extra machinery.) DECOMPOSE is unaffected (its multi-leg fan-out is already
+wide); this tunes only the single-query path where single-doc/analysis questions
+land. Kept chunks are capped at the generation-pool size, so a wider judge input
+does not bloat the context. Consumed via ``TurnBudget.from_settings()`` by
+turn_loop/retrieve.py (run_retrieve)."""
 
 RAG_TURN_LOOP_LLM_MAX_TOKENS: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_LLM_MAX_TOKENS", "512")
@@ -1685,23 +1764,50 @@ the pool sufficient — wasting actions/latency and risking a max_actions
 best-effort exit instead of a clean gated answer. 0 disables the guard. Consumed
 via ``TurnBudget.from_settings()`` by turn_loop/orchestrator.py."""
 
-RAG_TURN_LOOP_FALLBACK_POOL_SIZE: int = max(0, int(
-    os.environ.get("RAG_TURN_LOOP_FALLBACK_POOL_SIZE", "8")
+RAG_TURN_LOOP_BASELINE_FLOOR_K: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_BASELINE_FLOOR_K", "4")
 ))
-"""Target generation-pool size AND how many best-scored RAW retrieved chunks the
-turn loop retains per turn as a judge-INDEPENDENT grounding floor. Two uses of the
-same set: (1) when the round judge rejects an entire fresh batch the judged pool
-is empty — the ANSWER stage grounds on these top chunks so a refusal is evidenced;
-(2) when the judged pool is merely THIN (judge kept only 1-2 chunks on a low-yield
-query), the ANSWER stage FILLS the generation pool toward this size with the best
-raw chunks (kept chunks stay first, so citation indices are stable). The fill is
-agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS): a generator handed only the
-strictly-judged chunk(s) lacks the surrounding context needed to disambiguate a
-near-miss (e.g. "that's the Cortex-M7, not the M4 you asked about") or to cover
-both sides of a comparison — the judge over-prunes for precision and starves
-generation. Generic property (judged-pool-thin), never a query/content match
-(CLAUDE.md §0). 0 disables both the floor and the fill (judge-kept-only). Consumed
-via ``TurnBudget.from_settings()`` by turn_loop/{retrieve,answer,orchestrator}.py."""
+"""How many of the raw-query retrieval's best chunks are carried as a PERMANENT
+grounding floor into the ANSWER generation pool — present even when the judged
+pool is already full. Makes turn_loop genuinely ADDITIVE (union, not replace):
+a DECOMPOSE rewrite, multi-round query drift, or an over-strict judge can never
+DROP a document the plain query found (measured regression: SMP-2 — single-shot
+retrieved RTL_Coding.pdf@1 and answered; turn_loop's rewrite lost it and the
+grounding fill, which only fires on a THIN pool, never restored it). The floor
+is source-diverse (each floor chunk adds a NEW document not already pooled), so
+it guarantees baseline DOCUMENT coverage without crowding the judged pool with
+more chunks of one source. 0 disables (reverts to fill-only). Consumed via
+``TurnBudget.from_settings()`` by turn_loop/answer.py."""
+
+RAG_TURN_LOOP_FALLBACK_POOL_SIZE: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_FALLBACK_POOL_SIZE", "12")
+))
+"""Target GENERATION-pool size: how many chunks the ANSWER stage feeds the
+generator. When the judged pool is empty (judge rejected the batch) the ANSWER
+grounds on the reservoir floor; when it is merely THIN the ANSWER FILLS toward
+this size from the reservoir (kept chunks stay first, so citation indices are
+stable). Matches RAG_AGENTIC_FINAL_MAX_CHUNKS (12) so turn_loop feeds generation
+as much cross-document context as the agentic default — a generator handed only
+the strictly-judged chunk(s) lacks the surrounding context to disambiguate a
+near-miss or cover both sides of a multi-part question (the judge over-prunes for
+precision and starves generation; measured v4 deficit — turn_loop's pool missed
+the sub-part docs single-round included). Generic property (judged-pool-thin),
+never a query/content match (CLAUDE.md §0). 0 disables the floor + fill
+(judge-kept-only). Consumed via ``TurnBudget.from_settings()``."""
+
+RAG_TURN_LOOP_RESERVOIR_SIZE: int = max(0, int(
+    os.environ.get("RAG_TURN_LOOP_RESERVOIR_SIZE", "40")
+))
+"""How many best-scored RAW retrieved chunks (judge-INDEPENDENT) the turn retains
+across ALL rounds as the ``TurnState.fallback_chunks`` reservoir the ANSWER fill
+draws from. Kept SEPARATE from — and much wider than — the generation target
+(``fallback_pool_size``): the fill is source-diversity-first, so a WIDE reservoir
+is what lets it reach the OTHER documents a multi-part / cross-document question
+needs (the v4 breadth deficit — an 8-chunk reservoir cap left the fill only ~6
+docs to choose from, missing the sub-part docs single-round covered). Matches
+RAG_AGENTIC_JUDGE_POOL_MAX (40) so turn_loop's cross-round breadth equals the
+agentic default's. 0 disables retention. Consumed via ``TurnBudget.from_settings()``
+by turn_loop/{retrieve,decompose}.py (the ``_retain_fallback`` cap)."""
 
 RAG_TURN_LOOP_CITATION_TARGET: int = max(1, int(
     os.environ.get("RAG_TURN_LOOP_CITATION_TARGET", "5")

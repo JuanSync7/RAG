@@ -33,6 +33,45 @@ from tests.retrieval.turn_loop.conftest import (
 )
 
 
+class TestGroundingContract:
+    """B1/B2 (generation grounding contract): the shared system prompt and the
+    turn_loop self-score rubric must carry the GENERIC faithfulness principles
+    (not query-specific patches) that the 20Q generation failures surfaced:
+    - prefer documented specifics over generic background; flag [background];
+    - surface documented gaps/TBDs instead of smoothing them;
+    - state when a documented value contradicts the question's premise;
+    - include documented breakdowns/splits (completeness).
+    Guards against silent prompt drift (behaviour itself is eval-validated)."""
+
+    def test_system_prompt_carries_grounding_calibration(self):
+        from src.retrieval.pipeline.turn_loop.answer import _build_messages
+
+        msgs = _build_messages("q", TurnContext(conversation_id="c"), TurnState())
+        system = msgs[0]["content"].lower()
+        # [background] flag + generic-over-specific
+        assert "[background]" in system
+        assert "background knowledge" in system
+        # documented uncertainty / TBD surfacing
+        assert "tbd" in system
+        # premise contradicted by a documented value
+        assert "contradict" in system
+        # completeness of documented breakdowns
+        assert "breakdown" in system or "distinction" in system
+        # specificity matches the retrieved context (generic->generic,
+        # documented-specific->specific) — the derivation guardrail, not forcing
+        assert "match the answer's specificity" in system
+
+    def test_selfscore_prompt_credits_mandated_behaviours(self):
+        from src.common.prompts import load_prompt
+
+        rubric = load_prompt("turn_answer_selfscore.md").lower()
+        # signalled inferences whose premises are in the digest are supported
+        assert "inference" in rubric
+        # gap/conflict flagging and [background] disclosure are not "unsupported"
+        assert "[background]" in rubric
+        assert "credit" in rubric
+
+
 def _setup(provider, *, pool=None, budget=None):
     deps, emitted = make_deps(provider)
     state = TurnState()
@@ -113,7 +152,9 @@ async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
         streams=[[("content", "grounded [1]")]],
     )
     kept = make_chunk("kept1", score=0.9)
-    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept])
+    # Pin the generation target to 8 for this fixture (11 raw chunks available).
+    budget = make_budget(fallback_pool_size=8)
+    deps, emitted, state, budget, emitter = _setup(provider, pool=[kept], budget=budget)
     # The judge-independent floor retained more raw candidates than the judge kept.
     state.fallback_chunks = [kept] + [
         make_chunk(f"raw{i}", score=0.8 - i * 0.01) for i in range(2, 12)
@@ -128,7 +169,7 @@ async def test_thin_judged_pool_is_filled_from_fallback_for_generation():
         emitter=emitter,
     )
 
-    assert len(state.pool) == budget.fallback_pool_size  # topped up (default 8)
+    assert len(state.pool) == budget.fallback_pool_size  # topped up toward target (8)
     assert state.pool[0].chunk_id == "kept1"  # kept chunk stays first
     ids = [chunk.chunk_id for chunk in state.pool]
     assert len(ids) == len(set(ids))  # kept1 not re-appended
@@ -176,7 +217,7 @@ async def test_fill_disabled_when_fallback_size_zero():
         streams=[[("content", "just [1]")]],
     )
     kept = make_chunk("kept1")
-    budget = make_budget(fallback_pool_size=0)
+    budget = make_budget(fallback_pool_size=0, baseline_floor_k=0)
     deps, emitted, state, budget, emitter = _setup(provider, pool=[kept], budget=budget)
     state.fallback_chunks = [kept, make_chunk("raw2"), make_chunk("raw3")]
 
@@ -190,6 +231,126 @@ async def test_fill_disabled_when_fallback_size_zero():
     )
 
     assert len(state.pool) == 1  # no fill
+
+
+class TestPermanentBaselineFloor:
+    """Fix (union-not-replace): the raw-query retrieval's top-k is a PERMANENT
+    floor in the generation pool — always present even when the judged pool is
+    already FULL — so a DECOMPOSE rewrite / query drift / an over-strict judge
+    can never DROP a document the plain query found.
+
+    The regression this guards (measured on SMP-2): the single-shot path
+    retrieved RTL_Coding.pdf at rank 1 and answered correctly; turn_loop's
+    decomposed rewrite pulled other docs, the judge kept a full pool WITHOUT
+    RTL_Coding, and because the existing fill only fires when the pool is THIN,
+    RTL_Coding (present in fallback_chunks) never reached generation → the loop
+    answered "not in the context" (0). A permanent floor forces the baseline
+    doc into context regardless of pool fullness.
+    """
+
+    def test_floor_forces_baseline_doc_into_a_full_judged_pool(self):
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        # A FULL judged pool (== fallback_pool_size) entirely from the wrong doc
+        # — the existing thin-fill would NOT fire (pool not < target).
+        budget = make_budget(fallback_pool_size=8, baseline_floor_k=4)
+        state = TurnState()
+        for i in range(8):
+            c = make_chunk(f"wrong{i}", document_id="W", source="WrongDoc", score=0.6)
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        # The raw-query baseline floor: the winning baseline doc the loop lost.
+        state.baseline_floor = [
+            make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95),
+            make_chunk("rtl2", document_id="RTL", source="RTL_Coding.pdf", score=0.88),
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        sources = {c.source for c in state.pool}
+        assert "RTL_Coding.pdf" in sources  # baseline doc forced in despite full pool
+        # the judged pool is retained (nothing dropped) and still leads for citations
+        assert [c.chunk_id for c in state.pool[:8]] == [f"wrong{i}" for i in range(8)]
+        ids = [c.chunk_id for c in state.pool]
+        assert len(ids) == len(set(ids))  # no duplicates
+
+    def test_floor_disabled_when_k_zero(self):
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        budget = make_budget(fallback_pool_size=8, baseline_floor_k=0)
+        state = TurnState()
+        for i in range(8):
+            c = make_chunk(f"wrong{i}", document_id="W", source="WrongDoc", score=0.6)
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        state.baseline_floor = [
+            make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95),
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        # No permanent floor and pool already full → unchanged (pre-fix behavior).
+        assert len(state.pool) == 8
+        assert "RTL_Coding.pdf" not in {c.source for c in state.pool}
+
+    def test_fill_spans_many_docs_from_wide_reservoir(self):
+        """Breadth fix: a thin judged pool (one doc) + a WIDE reservoir (many
+        docs, > generation target) → the source-diverse fill reaches
+        fallback_pool_size DISTINCT documents. This is the v4 gap — turn_loop's
+        answers hedged answerable sub-parts because its pool spanned too few docs;
+        a wide reservoir + a 12-slot generation target restores the breadth."""
+        from src.retrieval.pipeline.turn_loop.answer import _fill_generation_pool
+
+        budget = make_budget(fallback_pool_size=12, baseline_floor_k=0)
+        state = TurnState()
+        kept = make_chunk("k1", document_id="A", source="DocA", score=0.9)
+        state.pool.append(kept)
+        state.seen_chunk_ids.add("k1")
+        # Reservoir holds 20 chunks across 20 distinct docs (a wide retention).
+        state.fallback_chunks = [
+            make_chunk(f"r{i}", document_id=f"D{i}", source=f"Doc{i}", score=0.8 - i * 0.01)
+            for i in range(20)
+        ]
+
+        _fill_generation_pool(state, budget)
+
+        assert len(state.pool) == 12  # filled toward the generation target
+        assert len({c.source for c in state.pool}) == 12  # 12 distinct docs (breadth)
+        assert state.pool[0].chunk_id == "k1"  # judged chunk still leads
+
+    async def test_baseline_floor_seeded_once_from_raw_query(self):
+        """run_answer seeds the permanent floor from a RAW-query retrieve_ranked
+        (hyde_text=None), once per turn, and the seeded baseline doc reaches the
+        generation pool even though the judged pool never contained it."""
+        provider = FakeProvider(
+            responses=[selfscore_json(0.9)],
+            streams=[[("content", "answer [1]")]],
+        )
+        # The judged pool drifted entirely onto the wrong doc.
+        pool = [make_chunk("w1", document_id="W", source="WrongDoc", score=0.7)]
+        baseline = [make_chunk("rtl1", document_id="RTL", source="RTL_Coding.pdf", score=0.95)]
+        # retrieve_ranked FIFO: the seed call returns the raw-query baseline.
+        deps, emitted = make_deps(provider, retrieve_batches=[baseline])
+        state = TurnState()
+        for c in pool:
+            state.pool.append(c)
+            state.seen_chunk_ids.add(c.chunk_id)
+        budget = make_budget(baseline_floor_k=4)
+        emitter = TurnEventEmitter(deps=deps, state=state, budget=budget, stream_events=True)
+
+        await run_answer(
+            query="q",
+            context=TurnContext(conversation_id="c"),
+            state=state,
+            budget=budget,
+            deps=deps,
+            emitter=emitter,
+        )
+
+        assert state.baseline_seeded is True
+        assert [c.chunk_id for c in state.baseline_floor] == ["rtl1"]
+        assert "RTL_Coding.pdf" in {c.source for c in state.pool}  # baseline reached generation
+        assert state.pool[0].chunk_id == "w1"  # judged chunk still leads (citations)
 
 
 async def test_draft_events_stream_live_and_precede_gate(empty_context):

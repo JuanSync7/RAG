@@ -136,7 +136,17 @@ class AgenticState:
     # Rounds where HyDE failed and fell back to literal-query retrieval — a
     # silent-degradation alarm (full rationale at _next_hyde, where it's counted).
     hyde_failures: int = 0
+    # Breakdown of WHY HyDE fell back, keyed by HydeFailure reason — a bare count
+    # can't distinguish a mis-provisioned reasoning model (empty_content) from a
+    # flaky endpoint (provider_error), and the fix differs (A3 observability).
+    hyde_failure_reasons: dict = field(default_factory=dict)
     stop_reason: Optional[str] = None
+
+    def record_hyde_failure(self, reason: str) -> None:
+        """Count one HyDE fall-back plus its typed :class:`HydeFailure` reason."""
+        self.hyde_failures += 1
+        key = str(reason or "unknown")
+        self.hyde_failure_reasons[key] = self.hyde_failure_reasons.get(key, 0) + 1
 
 
 @dataclass
@@ -165,6 +175,11 @@ class AgenticResult:
     backfilled: int = 0
     # Per-request count of HyDE failures (silent literal-query fallback); telemetry.
     hyde_failures: int = 0
+    # Per-request breakdown of WHY HyDE fell back, keyed by HydeFailure reason
+    # (empty_content / timeout / provider_error / parse_invalid / no_hypothesis).
+    # A bare hyde_failures count can't tell a mis-provisioned reasoning model
+    # (empty_content) from a flaky endpoint (provider_error) — the fix differs.
+    hyde_failure_reasons: dict = field(default_factory=dict)
     stop_reason: str = ""
     elapsed_ms: float = 0.0
 
@@ -181,6 +196,7 @@ class AgenticResult:
             "ranker_calls": int(self.ranker_calls),
             "backfilled": int(self.backfilled),
             "hyde_failures": int(self.hyde_failures),
+            "hyde_failure_reasons": dict(self.hyde_failure_reasons),
             "tried_hyde": list(self.tried_hyde),
             "hyde_rounds": list(self.hyde_rounds),
             "stop_reason": self.stop_reason,

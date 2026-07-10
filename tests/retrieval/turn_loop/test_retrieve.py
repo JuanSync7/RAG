@@ -346,13 +346,15 @@ async def test_round_judge_uses_concise_mode_by_default():
 
 
 async def test_fallback_floor_disabled_with_zero_size():
-    """``fallback_pool_size=0`` disables the grounding floor (pre-fix behavior)."""
+    """``reservoir_size=0`` disables the grounding-floor retention (pre-fix
+    behavior). The reservoir cap is now SEPARATE from the generation target
+    (``fallback_pool_size``) — retention is governed by ``reservoir_size``."""
     provider = FakeProvider(
         responses=[judge_json([], 1, sufficient=False, confidence=0.2)]
     )
     deps, emitted = make_deps(provider, retrieve_batches=[[make_chunk("c1")]])
     state = TurnState()
-    budget = make_budget(fallback_pool_size=0)
+    budget = make_budget(reservoir_size=0)
     emitter = TurnEventEmitter(
         deps=deps, state=state, budget=budget, stream_events=True
     )
@@ -368,3 +370,54 @@ async def test_fallback_floor_disabled_with_zero_size():
 
     assert state.pool == []
     assert state.fallback_chunks == []
+
+
+async def test_retrieve_judges_wide_pool_not_leg_top_k():
+    """The single-query RETRIEVE action fetches + judges ``retrieve_judge_pool``
+    candidates (agentic-parity width, default 40), NOT the narrower per-leg
+    ``retrieve_top_k`` — so a specific chunk at raw-hybrid rank 13-40 enters the
+    judge's view instead of being invisible (the measured single-doc/analysis
+    deficit: turn_loop judged ~12 and came out generic where agentic judged 40
+    and surfaced the exact chunk)."""
+    provider = FakeProvider(responses=[judge_json([0], 1)])
+    deps, emitted, state, budget, emitter = _setup(provider, [[make_chunk("c1")]])
+    captured = {}
+
+    async def capture_retrieve(query_text, hyde_text, top_k):
+        captured["top_k"] = top_k
+        return [make_chunk("c1")]
+
+    deps.retrieve_ranked = capture_retrieve
+
+    await run_retrieve(
+        RetrieveArgs(query_text="q"),
+        query="q",
+        state=state,
+        budget=budget,
+        deps=deps,
+        emitter=emitter,
+    )
+
+    assert captured["top_k"] == budget.retrieve_judge_pool  # wide (40), not retrieve_top_k (5)
+    assert budget.retrieve_judge_pool > budget.retrieve_top_k
+
+
+def test_retain_fallback_uses_wide_reservoir_cap():
+    """The reservoir retention cap (``reservoir_size``, wide) is SEPARATE from the
+    generation target (``fallback_pool_size``). A wide reservoir is what lets the
+    source-diverse ANSWER fill reach the OTHER documents a multi-part / cross-doc
+    question needs — the v4 breadth deficit was an 8-chunk cap that starved the
+    fill of distinct docs (measured: turn_loop's pool missed the sub-part docs
+    single-round covered). Retention keeps ALL distinct docs up to the wide cap."""
+    from src.retrieval.pipeline.turn_loop.retrieve import _retain_fallback
+
+    state = TurnState()
+    chunks = [
+        make_chunk(f"c{i}", document_id=f"D{i}", source=f"Doc{i}", score=1.0 - i * 0.01)
+        for i in range(20)
+    ]
+    _retain_fallback(state, chunks, cap=40)  # reservoir_size default
+
+    # All 20 retained (below the 40 cap); the pre-split 8-cap would have dropped 12.
+    assert len(state.fallback_chunks) == 20
+    assert len({c.source for c in state.fallback_chunks}) == 20  # breadth preserved

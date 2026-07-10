@@ -345,7 +345,8 @@ class TurnBudget:
     """Max clickable hint chips a CLARIFY response may carry."""
 
     retrieve_top_k: int
-    """Ranked-chunk count requested from each retrieve_ranked call."""
+    """Ranked-chunk count per DECOMPOSE sub-query leg (the single-query RETRIEVE
+    action uses the wider ``retrieve_judge_pool`` instead)."""
 
     answer_confidence_threshold: float
     """Answer-gate pass threshold in (0, 1]."""
@@ -378,12 +379,37 @@ class TurnBudget:
     max_actions best-effort exit instead of a clean gated answer. 0 disables
     the guard."""
 
-    fallback_pool_size: int = 8
-    """Target generation-pool size AND how many best-scored RAW retrieved chunks
-    to retain per turn as the judge-independent grounding floor
-    (``TurnState.fallback_chunks``). The ANSWER stage fills the pool toward this
-    size with the best raw chunks when the judged pool is empty OR thin (kept
-    chunks stay first); 0 disables both the floor and the fill (judge-kept only)."""
+    fallback_pool_size: int = 12
+    """Target GENERATION-pool size: how many chunks the ANSWER stage feeds the
+    generator. The ANSWER fills the pool toward this size from the reservoir when
+    the judged pool is empty OR thin (kept chunks stay first). Matches
+    RAG_AGENTIC_FINAL_MAX_CHUNKS so turn_loop feeds generation as much
+    cross-document context as the agentic default. 0 disables floor + fill."""
+
+    reservoir_size: int = 40
+    """Cross-round retention cap for the raw ``TurnState.fallback_chunks``
+    reservoir the ANSWER fill draws from — SEPARATE from and much wider than
+    ``fallback_pool_size`` (the generation target). The fill is source-diversity-
+    first, so a WIDE reservoir is what lets it reach the OTHER documents a
+    multi-part / cross-document question needs. Matches RAG_AGENTIC_JUDGE_POOL_MAX
+    so turn_loop's breadth equals the agentic default's. 0 disables retention."""
+
+    retrieve_judge_pool: int = 24
+    """Candidate count the single-query RETRIEVE action fetches + judges per round.
+    Wider than ``retrieve_top_k`` (the per-DECOMPOSE-leg count) so a specific chunk
+    at raw-hybrid rank 13-24 enters the judge's view instead of being invisible;
+    kept moderate (not the full agentic 40) to limit judge noise/latency — see the
+    RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL docstring. Kept chunks are capped at
+    ``fallback_pool_size`` so a wider judge input never bloats the context."""
+
+    baseline_floor_k: int = 4
+    """How many raw-query retrieval chunks are carried as a PERMANENT grounding
+    floor into the ANSWER pool — present even when the judged pool is already
+    FULL (unlike ``fallback_pool_size``'s fill, which only tops up a THIN pool).
+    Makes the turn genuinely ADDITIVE: a DECOMPOSE rewrite / query drift / an
+    over-strict judge can never DROP a document the plain query found. Source-
+    diverse (each floor chunk adds a NEW document not already pooled). 0 disables
+    (fill-only, pre-fix behavior)."""
 
     citation_target: int = 5
     """Distinct-source count at which the answer gate's citation-coverage
@@ -466,6 +492,7 @@ class TurnBudget:
             deep_study_max_windows=settings.RAG_TURN_LOOP_DEEP_STUDY_MAX_WINDOWS,
             clarify_max_hints=settings.RAG_TURN_LOOP_CLARIFY_MAX_HINTS,
             retrieve_top_k=settings.RAG_TURN_LOOP_RETRIEVE_TOP_K,
+            retrieve_judge_pool=settings.RAG_TURN_LOOP_RETRIEVE_JUDGE_POOL,
             answer_confidence_threshold=(
                 settings.RAG_TURN_LOOP_ANSWER_CONFIDENCE_THRESHOLD
             ),
@@ -476,6 +503,8 @@ class TurnBudget:
             min_call_budget_ms=settings.RAG_TURN_LOOP_MIN_CALL_BUDGET_MS,
             max_no_progress_rounds=settings.RAG_TURN_LOOP_MAX_NO_PROGRESS_ROUNDS,
             fallback_pool_size=settings.RAG_TURN_LOOP_FALLBACK_POOL_SIZE,
+            reservoir_size=settings.RAG_TURN_LOOP_RESERVOIR_SIZE,
+            baseline_floor_k=settings.RAG_TURN_LOOP_BASELINE_FLOOR_K,
             citation_target=settings.RAG_TURN_LOOP_CITATION_TARGET,
             facet_commit_enabled=settings.RAG_TURN_LOOP_FACET_COMMIT_ENABLED,
             decompose_anchor_raw=settings.RAG_TURN_LOOP_DECOMPOSE_ANCHOR_RAW,
@@ -696,6 +725,20 @@ class TurnState:
     then grounds on these instead of "(no evidence retrieved)". Guards the class
     where a judge rejecting an entire fresh batch strands the turn with nothing
     to cite (never a query/content match — CLAUDE.md §0)."""
+
+    baseline_floor: list[EvidenceChunk] = field(default_factory=list)
+    """The RAW user-query retrieval's top-k (no HyDE, no decomposition), seeded
+    ONCE per turn and carried as a PERMANENT grounding floor into the ANSWER pool
+    — present even when the judged pool is full. This is the union-not-replace
+    guarantee: a HyDE-drifted RETRIEVE round, a DECOMPOSE rewrite, or an
+    over-strict judge can never DROP a document the plain query found. Distinct
+    from ``fallback_chunks`` (which on a RETRIEVE turn holds only the HyDE-driven
+    candidates — never the raw baseline). Empty when ``baseline_floor_k`` is 0."""
+
+    baseline_seeded: bool = False
+    """Whether the raw-query ``baseline_floor`` retrieval has been attempted this
+    turn (guards the once-per-turn seed against answer-attempt retries; set True
+    even on a failed/empty retrieval so it is never retried)."""
 
     seen_chunk_ids: set[str] = field(default_factory=set)
     """Stable chunk ids ever pooled — cross-action dedup."""

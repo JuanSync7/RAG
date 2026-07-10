@@ -164,6 +164,49 @@ async def test_prompt_substitutes_every_template_variable(empty_context):
     assert "q" in prompt
 
 
+async def test_prompt_injects_corpus_domain(empty_context, monkeypatch):
+    """A1 (HyDE hardening — domain grounding): the controller authors the query
+    AND the inline HyDE hypothetical, so it must resolve domain-ambiguous acronyms
+    within the corpus domain (agentic HyDE already does via DOMAIN_DESCRIPTION; the
+    turn controller was domain-blind). The configured domain must render into the
+    prompt. §0-safe: it's the configurable domain string, not corpus term-matching."""
+    import config.settings as settings
+
+    monkeypatch.setattr(
+        settings, "DOMAIN_DESCRIPTION", "SENTINEL_DOMAIN silicon design verification",
+        raising=False,
+    )
+    provider = FakeProvider(responses=[decision_json("ANSWER")])
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    await decide(
+        query="what is ACE?", context=empty_context, state=state, budget=budget,
+        emitter=emitter,
+    )
+
+    prompt = provider.calls[0][1][0]["content"]
+    assert "SENTINEL_DOMAIN silicon design verification" in prompt
+
+
+async def test_prompt_domain_falls_open_when_unset(empty_context, monkeypatch):
+    """Fail-open: an unset/blank domain renders a neutral placeholder, never a
+    crash or a literal '{{ domain }}'."""
+    import config.settings as settings
+
+    monkeypatch.setattr(settings, "DOMAIN_DESCRIPTION", "", raising=False)
+    provider = FakeProvider(responses=[decision_json("ANSWER")])
+    state, budget = TurnState(), make_budget()
+    emitter, _ = _emitter(provider, state, budget)
+
+    await decide(
+        query="q", context=empty_context, state=state, budget=budget, emitter=emitter
+    )
+
+    prompt = provider.calls[0][1][0]["content"]
+    assert "{{" not in prompt  # domain slot rendered even when blank
+
+
 async def test_prompt_asks_for_query_shape_classification(empty_context):
     """Contract guard: the controller prompt must instruct the model to emit
     query_shape with the compound/comparison guidance the coercion depends on

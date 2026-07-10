@@ -280,6 +280,123 @@ async def _self_score(
     return score, claims
 
 
+async def _seed_baseline_floor(
+    query: str, state: TurnState, budget: TurnBudget, deps: TurnLoopDeps
+) -> None:
+    """Seed the PERMANENT raw-query grounding floor ONCE per turn.
+
+    Retrieves the RAW user query (``hyde_text=None`` — no HyDE, no decomposition)
+    via the shared ``retrieve_ranked`` seam and stores its top-k in
+    ``state.baseline_floor``: the plain single-shot baseline the ANSWER pool
+    always includes, so the loop can never end up with LESS than the plain query
+    would have found (union, not replace). This is deliberately NOT
+    ``fallback_chunks`` — on a RETRIEVE turn that holds only the HyDE-driven
+    candidates, so it can (and on SMP-2 did) drift off the doc the plain query
+    nailed. Fail-open: any error leaves the floor empty (never worse than the
+    pre-fix behavior). Runs at most once per turn (``baseline_seeded`` guard),
+    including across answer-attempt retries; ``baseline_floor_k`` 0 disables it.
+    """
+    if budget.baseline_floor_k <= 0 or state.baseline_seeded:
+        return
+    state.baseline_seeded = True
+    try:
+        chunks = await deps.retrieve_ranked(query, None, budget.baseline_floor_k)
+        state.baseline_floor = list(chunks or [])
+    except Exception as exc:  # noqa: BLE001 — fail open; the floor stays empty
+        logger.warning("turn loop baseline-floor seed retrieval failed: %s", exc)
+        state.baseline_floor = []
+
+
+def _fill_generation_pool(state: TurnState, budget: TurnBudget) -> None:
+    """Top the ANSWER generation pool up from the judge-independent raw floor
+    (``state.fallback_chunks``, best-scored raw retrieved candidates). Kept
+    chunks always stay FIRST so citation indices are stable and the judge's
+    ranking is preserved; appended context chunks the answer need not all cite
+    (citation_coverage saturates). Two mechanisms, both generic (pool-shape
+    properties), never a query/content match (CLAUDE.md §0):
+
+    1. PERMANENT baseline floor (``baseline_floor_k``): ensure up to K
+       source-diverse chunks from the RAW-QUERY retrieval (``state.baseline_floor``)
+       are present EVEN WHEN the judged pool is already FULL. This is the
+       union-not-replace guarantee — a HyDE-drifted RETRIEVE round, a DECOMPOSE
+       rewrite, or an over-strict judge can never DROP a document the plain query
+       found (measured regression SMP-2: single-shot retrieved RTL_Coding.pdf@1
+       and answered; the loop's HyDE rounds drifted to AMBA/protocol specs, the
+       raw baseline never entered ``fallback_chunks`` — which on a RETRIEVE turn
+       holds only the HyDE-driven candidates — so the loop answered "not in the
+       context"). The floor is sourced from a dedicated raw-query retrieval
+       (``_seed_baseline_floor``), NOT ``fallback_chunks``, precisely because the
+       latter is not the plain-query baseline on a RETRIEVE turn. Each floor
+       chunk must add a NEW source: a doc-level additivity guarantee.
+    2. THIN fill (``fallback_pool_size``): when the judged pool is under target,
+       top it up from ``fallback_chunks`` — source-diversity first (cross-document
+       coverage), then by score — so a generator handed one strictly-judged chunk
+       still has the surrounding context to disambiguate a near-miss or cover both
+       sides of a comparison. Agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS).
+
+    Mutates ``state.pool`` in place.
+    """
+    if budget.fallback_pool_size <= 0 and budget.baseline_floor_k <= 0:
+        return
+    if not state.fallback_chunks and not state.baseline_floor:
+        return
+
+    have = {chunk.chunk_id for chunk in state.pool}
+    have_sources = {chunk.source for chunk in state.pool if chunk.source}
+    before = len(state.pool)
+
+    def _take(chunk) -> None:
+        state.pool.append(chunk)
+        have.add(chunk.chunk_id)
+        if chunk.source:
+            have_sources.add(chunk.source)
+
+    # 1. Permanent baseline floor — additivity guarantee; runs even on a FULL
+    #    pool. Source-diverse so it adds baseline DOCUMENTS the judged pool lacks.
+    #    Sourced from the RAW-QUERY retrieval, not the (HyDE-drifted) fallback.
+    floor_added = 0
+    if budget.baseline_floor_k > 0:
+        for chunk in state.baseline_floor:  # best-first by score
+            if floor_added >= budget.baseline_floor_k:
+                break
+            if (
+                chunk.source
+                and chunk.source not in have_sources
+                and chunk.chunk_id not in have
+            ):
+                _take(chunk)
+                floor_added += 1
+
+    # 2. Thin fill toward the target (only when still under it).
+    candidates = [c for c in state.fallback_chunks if c.chunk_id not in have]
+    if budget.fallback_pool_size > 0 and len(state.pool) < budget.fallback_pool_size:
+        # Pass 1 — source DIVERSITY first: the best-scored chunk of each source
+        # not yet pooled (cross-document coverage the "answered from one doc"
+        # failure lacked).
+        for chunk in candidates:
+            if len(state.pool) >= budget.fallback_pool_size:
+                break
+            if (
+                chunk.source
+                and chunk.source not in have_sources
+                and chunk.chunk_id not in have
+            ):
+                _take(chunk)
+        # Pass 2 — top up any remaining slots by score (sources may repeat).
+        for chunk in candidates:
+            if len(state.pool) >= budget.fallback_pool_size:
+                break
+            if chunk.chunk_id not in have:
+                _take(chunk)
+
+    if len(state.pool) > before:
+        logger.info(
+            "turn loop filled generation pool %d -> %d (permanent baseline "
+            "floor=%d, then thin-fill toward %d)",
+            before, len(state.pool), floor_added, budget.fallback_pool_size,
+        )
+
+
 async def run_answer(
     *,
     query: str,
@@ -313,53 +430,8 @@ async def run_answer(
     attempt = state.answer_attempts + 1
     state.answer_attempts = attempt
 
-    # Grounding fill (class: the judge over-prunes for precision — it can leave
-    # the pool EMPTY (rejected every fresh batch) or merely THIN (kept 1-2 on a
-    # low-yield query), starving generation of the surrounding context needed to
-    # disambiguate a near-miss ("that's the Cortex-M7, not the M4 you asked
-    # about") or to cover both sides of a comparison. Top the pool up toward
-    # ``fallback_pool_size`` with the best raw retrieved chunks — kept chunks stay
-    # FIRST so citation indices are stable and the judge's ranking is preserved;
-    # the appended context chunks the answer need not all cite (citation_coverage
-    # saturates). Agentic-style (cf. RAG_AGENTIC_FINAL_MAX_CHUNKS); generic
-    # (judged-pool-thin), never a query/content match (CLAUDE.md §0).
-    if budget.fallback_pool_size > 0 and len(state.pool) < budget.fallback_pool_size:
-        have = {chunk.chunk_id for chunk in state.pool}
-        have_sources = {chunk.source for chunk in state.pool if chunk.source}
-        before = len(state.pool)
-        candidates = [
-            chunk for chunk in state.fallback_chunks if chunk.chunk_id not in have
-        ]
-
-        def _take(chunk) -> None:
-            state.pool.append(chunk)
-            have.add(chunk.chunk_id)
-            if chunk.source:
-                have_sources.add(chunk.source)
-
-        # Pass 1 — source DIVERSITY first: the best-scored chunk of each source
-        # NOT yet in the pool. A thin judged pool (often one document) is then
-        # topped up with the OTHER retrieved documents rather than more chunks of
-        # the same doc — the cross-document coverage the "answered from one doc"
-        # failure lacked. Generic (distinct-source property), never a
-        # query/content match (CLAUDE.md §0).
-        for chunk in candidates:  # fallback_chunks is best-first by score
-            if len(state.pool) >= budget.fallback_pool_size:
-                break
-            if chunk.source and chunk.source not in have_sources:
-                _take(chunk)
-        # Pass 2 — top up any remaining slots by score (sources may repeat).
-        for chunk in candidates:
-            if len(state.pool) >= budget.fallback_pool_size:
-                break
-            if chunk.chunk_id not in have:
-                _take(chunk)
-        if len(state.pool) > before:
-            logger.info(
-                "turn loop filled generation pool %d -> %d from best-effort "
-                "chunks (judged pool was thin)",
-                before, len(state.pool),
-            )
+    await _seed_baseline_floor(query, state, budget, deps)
+    _fill_generation_pool(state, budget)
 
     messages = _build_messages(query, context, state)
     draft = await _stream_draft(
