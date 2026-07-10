@@ -90,6 +90,25 @@ class TestLlmEnabled:
         assert result == {"key": "val"}
 
     @patch("src.ingest.support.llm.get_llm_provider")
+    def test_routes_to_instruct_alias(self, mock_get_provider):
+        """_llm_json must call json_completion with the config's INSTRUCT alias,
+        not the default (reasoning) alias — a reasoning model returns empty
+        content on substantive prompts and silently degrades every ingest LLM
+        call. Guards that regression."""
+        mock_provider = MagicMock()
+        mock_provider.json_completion.return_value = _make_mock_response('{"k": 1}')
+        mock_get_provider.return_value = mock_provider
+
+        cfg = _make_config()
+        _llm_json("prompt", cfg)
+        assert (
+            mock_provider.json_completion.call_args.kwargs["model_alias"]
+            == cfg.ingest_llm_model_alias
+        )
+        # default resolves to an instruct alias, not "default"
+        assert cfg.ingest_llm_model_alias != "default"
+
+    @patch("src.ingest.support.llm.get_llm_provider")
     def test_strips_markdown_fences(self, mock_get_provider):
         """A response wrapped in ```json...``` fences must be parsed correctly."""
         mock_provider = MagicMock()

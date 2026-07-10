@@ -42,6 +42,14 @@ def _llm_json(
         provider = get_llm_provider()
         response = provider.json_completion(
             messages,
+            # Route to an INSTRUCT model, not the default alias: on deployments
+            # whose default routes to a REASONING model (e.g. qwopus), any
+            # substantive prompt burns the whole token budget in <think> and
+            # returns EMPTY content — silently degrading every ingestion LLM call
+            # (doc summaries/keywords fell back to deterministic extraction on the
+            # box). ``ingest_llm_model_alias`` resolves to a JSON-reliable instruct
+            # model. Same fix class as the HyDE/judge/contextual changes.
+            model_alias=getattr(config, "ingest_llm_model_alias", "controller"),
             temperature=config.llm_temperature,
             max_tokens=max_tokens,
             timeout=config.llm_timeout_seconds,

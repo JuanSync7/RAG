@@ -412,6 +412,15 @@ RAG_INGESTION_LLM_TIMEOUT_SECONDS = int(
     os.environ.get("RAG_INGESTION_LLM_TIMEOUT_SECONDS", "45")
 )
 RAG_INGESTION_LLM_MAX_KEYWORDS = int(os.environ.get("RAG_INGESTION_LLM_MAX_KEYWORDS", "12"))
+RAG_INGESTION_LLM_MODEL_ALIAS = os.environ.get(
+    "RAG_INGESTION_LLM_MODEL_ALIAS", "controller"
+)
+"""LLMProvider router alias for ingestion LLM calls (metadata_generation
+summaries/keywords via _llm_json). MUST resolve to an INSTRUCT model: the
+default alias routes to a reasoning model (qwopus) that returns EMPTY content on
+substantive prompts (verified live — doc summaries were falling back to
+deterministic extraction on the box). 'controller' resolves to qwen2.5-7b
+instruct. Same fix class as RAG_AGENTIC_CONTROLLER_MODEL_ALIAS."""
 
 # ── Contextual chunking (Anthropic-style contextual retrieval) ──────────────
 RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED = os.environ.get(
