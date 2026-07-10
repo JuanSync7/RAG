@@ -412,6 +412,32 @@ RAG_INGESTION_LLM_TIMEOUT_SECONDS = int(
     os.environ.get("RAG_INGESTION_LLM_TIMEOUT_SECONDS", "45")
 )
 RAG_INGESTION_LLM_MAX_KEYWORDS = int(os.environ.get("RAG_INGESTION_LLM_MAX_KEYWORDS", "12"))
+
+# ── Contextual chunking (Anthropic-style contextual retrieval) ──────────────
+RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED = os.environ.get(
+    "RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+"""Whether the ingestion pipeline generates a per-chunk situating context (one
+short LLM sentence) and prepends it to each chunk's EMBED text only — the stored
+text (returned to generation) stays the raw chunk. Improves retrieval recall for
+chunks whose own words don't match the query (the passages no query surfaced in
+the cross-doc eval). Off by default: it adds an LLM call per chunk-batch at
+ingest and requires a re-ingest to take effect. Consumed by
+``IngestionConfig`` → contextual_enrichment_node."""
+
+RAG_INGESTION_CONTEXTUAL_BATCH_SIZE = max(1, int(
+    os.environ.get("RAG_INGESTION_CONTEXTUAL_BATCH_SIZE", "8")
+))
+"""Chunks per contextual-enrichment LLM call. Larger = fewer calls (cheaper) but
+a bigger prompt/output; 8 balances cost against the JSON-array size the model
+must return reliably."""
+
+RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS = max(1, int(
+    os.environ.get("RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS", "8000")
+))
+"""Max characters of the document used as the shared context window in each
+contextual-enrichment call (bounds prompt size for long documents)."""
+
 RAG_INGESTION_DOCLING_ENABLED = os.environ.get(
     "RAG_INGESTION_DOCLING_ENABLED", "true"
 ).lower() in ("true", "1", "yes")

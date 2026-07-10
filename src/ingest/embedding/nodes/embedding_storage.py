@@ -230,9 +230,21 @@ def _embedding_storage_node_impl(state: EmbeddingPipelineState) -> dict[str, Any
         }
 
         chunks = state["chunks"]
-        texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in chunks]
+        # Decouple STORED text from EMBEDDED text. The stored text (returned to
+        # generation + citation) is the heading-enriched chunk body. The embedded
+        # text is the contextual-chunking ``embed_text`` (a per-chunk situating
+        # prefix + the body) WHEN a contextual-enrichment stage attached it, so
+        # contextual retrieval improves the vector without polluting the text the
+        # model reads (Anthropic-style contextual retrieval). Backward-compatible:
+        # no ``embed_text`` -> embedded == stored (today's behavior).
+        store_texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in chunks]
+        embed_texts = [
+            chunk.metadata.get("embed_text")
+            or chunk.metadata.get("enriched_content", chunk.text)
+            for chunk in chunks
+        ]
         batch_size = runtime.config.embedding_batch_size
-        text_batches = _form_batches(texts, batch_size)
+        text_batches = _form_batches(embed_texts, batch_size)
 
         all_vectors, batch_errors, success_mask = _embed_batches(runtime.embedder, text_batches)
 
@@ -247,7 +259,7 @@ def _embedding_storage_node_impl(state: EmbeddingPipelineState) -> dict[str, Any
 
         records = [
             DocumentRecord(
-                text=texts[idx],
+                text=store_texts[idx],
                 embedding=all_vectors[pos],
                 metadata={**chunks[idx].metadata, **lifecycle_meta},
             )

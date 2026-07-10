@@ -19,6 +19,7 @@ from langgraph.graph import END, StateGraph
 
 from src.ingest.embedding.nodes import chunk_enrichment_node
 from src.ingest.embedding.nodes import chunking_node
+from src.ingest.embedding.nodes import contextual_enrichment_node
 from src.ingest.embedding.nodes import commit_node
 from src.ingest.embedding.nodes import vlm_enrichment_node
 from src.ingest.embedding.nodes import document_storage_node
@@ -66,6 +67,7 @@ def build_embedding_graph(config=None):
     graph.add_node("chunking", chunking_node)
     graph.add_node("vlm_enrichment", vlm_enrichment_node)
     graph.add_node("chunk_enrichment", chunk_enrichment_node)
+    graph.add_node("contextual_enrichment", contextual_enrichment_node)
     graph.add_node("tree_node_synthesis", tree_node_synthesis_node)
     graph.add_node("document_card_emission", document_card_emission_node)
     graph.add_node("metadata_generation", metadata_generation_node)
@@ -84,7 +86,11 @@ def build_embedding_graph(config=None):
     # tree_node_synthesis is unconditional in the graph; the node itself
     # short-circuits when config.enable_tree_retrieval_ingest is False, so
     # the disabled-path produces byte-identical chunks to pre-1.2.0 behaviour.
-    graph.add_edge("chunk_enrichment", "tree_node_synthesis")
+    # contextual_enrichment is unconditional in the graph; the node itself
+    # short-circuits (strict no-op) when config.enable_contextual_chunking is
+    # False, so the disabled-path is byte-identical to pre-feature behaviour.
+    graph.add_edge("chunk_enrichment", "contextual_enrichment")
+    graph.add_edge("contextual_enrichment", "tree_node_synthesis")
     # document_card_emission is unconditional in the graph; the node itself
     # short-circuits (strict no-op) when config.build_document_cards is False,
     # so the disabled-path is byte-identical to pre-feature behaviour.

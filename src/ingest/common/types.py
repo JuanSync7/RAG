@@ -66,6 +66,9 @@ from config.settings import (
     RAG_INGESTION_LLM_MODEL,
     RAG_INGESTION_LLM_TEMPERATURE,
     RAG_INGESTION_LLM_TIMEOUT_SECONDS,
+    RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED,
+    RAG_INGESTION_CONTEXTUAL_BATCH_SIZE,
+    RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS,
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_PERSIST_REFACTOR_MIRROR,
     RAG_INGESTION_VERBOSE_STAGE_LOGS,
@@ -137,6 +140,11 @@ class IngestionConfig:
     llm_timeout_seconds: int = RAG_INGESTION_LLM_TIMEOUT_SECONDS
     max_keywords: int = RAG_INGESTION_LLM_MAX_KEYWORDS
     enable_llm_metadata: bool = RAG_INGESTION_LLM_ENABLED
+    # Contextual chunking: prepend a per-chunk situating context to the EMBED text
+    # only (contextual_enrichment_node). Off by default; requires a re-ingest.
+    enable_contextual_chunking: bool = RAG_INGESTION_CONTEXTUAL_CHUNK_ENABLED
+    contextual_batch_size: int = RAG_INGESTION_CONTEXTUAL_BATCH_SIZE
+    contextual_doc_max_chars: int = RAG_INGESTION_CONTEXTUAL_DOC_MAX_CHARS
     # Retained for metadata logging; routing handled by LiteLLM Router.
     llm_model: str = RAG_INGESTION_LLM_MODEL
     enable_docling_parser: bool = RAG_INGESTION_DOCLING_ENABLED
