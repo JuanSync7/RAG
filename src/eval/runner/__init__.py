@@ -86,7 +86,11 @@ from .metrics import (
     recall_at_k,
     reciprocal_rank,
 )
-from .persistence import persist_eval_report, persist_ralph_report
+from .persistence import (
+    persist_actuation_report,
+    persist_eval_report,
+    persist_ralph_report,
+)
 from .plan import IngestPlan, plan_pack_ingest
 from .ralph import (
     InvestigationProposal,
@@ -97,6 +101,12 @@ from .ralph import (
     rank_regressions,
     run_ralph_a,
     select_worst_regression,
+)
+from .ralph_apply import (
+    ActuationOutcome,
+    ActuationReport,
+    ApplyResult,
+    run_ralph_b,
 )
 from .report import EvalReport, IngestReport, build_eval_report
 from .reporting import (
@@ -110,7 +120,10 @@ from .sustained_regression import (
 )
 
 __all__ = [
+    "ActuationOutcome",
+    "ActuationReport",
     "AlertPayload",
+    "ApplyResult",
     "BaselineDiff",
     "CALIBRATION_FIXTURE_SHA",
     "CalibrationAlert",
@@ -154,6 +167,7 @@ __all__ = [
     "execute_plan",
     "load_calibration_fixture",
     "load_judge_prompt",
+    "persist_actuation_report",
     "persist_calibration_record",
     "persist_eval_report",
     "persist_ralph_report",
@@ -170,6 +184,7 @@ __all__ = [
     "retrieve_for_goldens",
     "run_calibration",
     "run_ralph_a",
+    "run_ralph_b",
     "score_goldens",
     "select_worst_regression",
     "send_alert",
